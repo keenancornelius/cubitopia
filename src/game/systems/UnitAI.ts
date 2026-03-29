@@ -519,8 +519,8 @@ export class UnitAI {
           if (enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
 
-            // Archer kiting: flee from melee enemies that are too close
-            if (unit.type === UnitType.ARCHER && dist <= 2 && enemy.stats.range <= 1) {
+            // Ranged kiting: flee from melee enemies that are too close
+            if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
               // Save post before kiting
               if (!(unit as any)._postPosition) {
                 (unit as any)._postPosition = { ...unit.position };
@@ -544,9 +544,9 @@ export class UnitAI {
                 unit.state = UnitState.ATTACKING;
                 unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
               } else {
-                // Chase into range (archers won't chase — they only fire at weapon range)
-                if (unit.type === UnitType.ARCHER) {
-                  // Archers hold and wait for targets to enter weapon range
+                // Chase into range (ranged kiters hold position in defensive — they only fire at weapon range)
+                if (UnitAI.isRangedKiter(unit.type)) {
+                  // Ranged units hold and wait for targets to enter weapon range
                 } else {
                   UnitAI.commandAttack(unit, enemy.position, enemy.id, map);
                 }
@@ -582,9 +582,9 @@ export class UnitAI {
         if (unit.stance === UnitStance.AGGRESSIVE && !UnitAI.debugFlags.disableCombat) {
           const enemy = UnitAI.findBestTarget(unit, allUnits, player.id, detectionRange);
 
-          if (unit.type === UnitType.ARCHER && enemy) {
+          if (UnitAI.isRangedKiter(unit.type) && enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
-            // Archers in AGGRESSIVE: engage but still kite melee threats
+            // Ranged kiters in AGGRESSIVE: engage but still kite melee threats
             if (dist <= 2 && enemy.stats.range <= 1) {
               const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
               if (fleeTile) {
@@ -598,7 +598,7 @@ export class UnitAI {
               unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
               return;
             }
-            // In aggressive mode archers WILL chase into detection range
+            // In aggressive mode ranged kiters WILL chase into detection range
             if (dist <= detectionRange) {
               UnitAI.commandAttack(unit, enemy.position, enemy.id, map);
               return;
@@ -653,8 +653,8 @@ export class UnitAI {
       if (enemy) {
         const dist = Pathfinder.heuristic(unit.position, enemy.position);
 
-        // AI archers kite melee threats
-        if (unit.type === UnitType.ARCHER && dist <= 2 && enemy.stats.range <= 1) {
+        // AI ranged kiters flee melee threats
+        if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
           const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
           if (fleeTile) {
             UnitAI.commandMove(unit, fleeTile, map);
@@ -1710,8 +1710,8 @@ export class UnitAI {
 
     const dist = Pathfinder.heuristic(unit.position, target.position);
 
-    // Archer kiting: if a melee enemy is too close, fire then reposition
-    if (unit.type === UnitType.ARCHER && dist <= 2 && target.stats.range <= 1 && map) {
+    // Ranged kiting: if a melee enemy is too close, fire then reposition
+    if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && target.stats.range <= 1 && map) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
         const result = CombatSystem.resolve(unit, target, allUnits);
@@ -1729,6 +1729,9 @@ export class UnitAI {
         };
         const cleaveResults = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked);
         for (const cr of cleaveResults) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
+        // Shieldbearer shield bash knockback
+        const bashResult = CombatSystem.applyShieldBash(unit, target, isTileBlocked);
+        if (bashResult) events.push({ type: 'combat:cleave', unitId: bashResult.unitId, knockQ: bashResult.knockQ, knockR: bashResult.knockR } as any);
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
           events.push({ type: 'unit:killed', unit: target, killer: unit });
@@ -1770,6 +1773,9 @@ export class UnitAI {
         };
         const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
         for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
+        // Shieldbearer shield bash knockback
+        const bashResult2 = CombatSystem.applyShieldBash(unit, target, isTileBlocked2);
+        if (bashResult2) events.push({ type: 'combat:cleave', unitId: bashResult2.unitId, knockQ: bashResult2.knockQ, knockR: bashResult2.knockR } as any);
 
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
@@ -1848,18 +1854,28 @@ export class UnitAI {
     return nearest;
   }
 
-  /** Is this unit a combat unit (not a worker/healer)? */
+  /** Is this unit a combat unit? Exclusion-based — new combat types auto-included */
   private static isCombatUnit(unit: Unit): boolean {
-    switch (unit.type) {
-      case UnitType.WARRIOR: case UnitType.ARCHER: case UnitType.RIDER:
-      case UnitType.CATAPULT: case UnitType.PALADIN: case UnitType.TREBUCHET:
-      case UnitType.ASSASSIN: case UnitType.SHIELDBEARER: case UnitType.BERSERKER:
-      case UnitType.BATTLEMAGE: case UnitType.SCOUT: case UnitType.MAGE:
-        return true;
-      default:
-        return false;
-    }
+    return unit.type !== UnitType.BUILDER
+      && unit.type !== UnitType.LUMBERJACK
+      && unit.type !== UnitType.VILLAGER;
   }
+
+  /**
+   * Combat roles — data-driven classification for behavior.
+   * 'ranged' units kite melee threats to max weapon range.
+   * 'tank' units peel for nearby squishies (prioritize enemies attacking allies).
+   * 'melee' units standard chase-and-attack.
+   * 'support' units follow allies, avoid combat.
+   */
+  private static readonly RANGED_KITERS: Set<UnitType> = new Set([
+    UnitType.ARCHER, UnitType.MAGE, UnitType.BATTLEMAGE,
+  ]);
+  private static readonly TANK_PEELERS: Set<UnitType> = new Set([
+    UnitType.SHIELDBEARER, UnitType.PALADIN,
+  ]);
+  static isRangedKiter(t: UnitType): boolean { return UnitAI.RANGED_KITERS.has(t); }
+  static isTankPeeler(t: UnitType): boolean { return UnitAI.TANK_PEELERS.has(t); }
 
   /** Get detection range for a unit type — how far it can "see" threats */
   private static getDetectionRange(unit: Unit): number {
@@ -1895,6 +1911,25 @@ export class UnitAI {
       }
     }
 
+    // Tank peeling: find enemies that are threatening nearby squishies
+    // Build set of enemy IDs currently attacking our ranged/support allies within 4 hex
+    const peelTargets: Set<string> = new Set();
+    if (UnitAI.isTankPeeler(unit.type)) {
+      for (const ally of allUnits) {
+        if (ally.owner !== playerId || ally.state === UnitState.DEAD || ally === unit) continue;
+        if (!UnitAI.isRangedKiter(ally.type) && ally.type !== UnitType.HEALER) continue;
+        const allyDist = Pathfinder.heuristic(unit.position, ally.position);
+        if (allyDist > 4) continue; // only peel for nearby squishies
+        // Find enemies targeting this squishy
+        for (const enemy of allUnits) {
+          if (enemy.owner === playerId || enemy.state === UnitState.DEAD) continue;
+          if (enemy.command?.targetUnitId === ally.id) {
+            peelTargets.add(enemy.id);
+          }
+        }
+      }
+    }
+
     let bestEnemy: Unit | null = null;
     let bestScore = Infinity;
 
@@ -1904,14 +1939,14 @@ export class UnitAI {
       if (dist > maxRange) continue;
 
       // Score = distance + penalty for each ally already targeting this enemy
-      // This naturally spreads targets: a close enemy with 3 allies on it scores
-      // worse than a slightly farther enemy with 0 allies on it
       const alreadyTargeting = focusCount.get(other.id) ?? 0;
       const focusPenalty = alreadyTargeting * 2.5;
       // Slight bonus for low-health enemies (finish them off)
       const hpRatio = other.currentHealth / other.stats.maxHealth;
       const hpBonus = (1 - hpRatio) * 1.5;
-      const score = dist + focusPenalty - hpBonus;
+      // Tank peeling bonus: strong priority for enemies attacking our squishies
+      const peelBonus = peelTargets.has(other.id) ? 6.0 : 0;
+      const score = dist + focusPenalty - hpBonus - peelBonus;
 
       if (score < bestScore) {
         bestScore = score;

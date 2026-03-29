@@ -200,6 +200,33 @@ export class CombatSystem {
   }
 
   /**
+   * Shieldbearer Shield Bash — knocks the primary target 1 hex away from attacker.
+   * No extra damage, pure displacement. Returns knockback info or null.
+   */
+  static applyShieldBash(
+    attacker: Unit, target: Unit,
+    isTileBlocked: (q: number, r: number) => boolean
+  ): { unitId: string; knockQ: number; knockR: number } | null {
+    if (attacker.type !== UnitType.SHIELDBEARER) return null;
+    if (target.currentHealth <= 0) return null;
+    const dq = target.position.q - attacker.position.q;
+    const dr = target.position.r - attacker.position.r;
+    let kq = 0, kr = 0;
+    if (Math.abs(dq) >= Math.abs(dr)) {
+      kq = dq > 0 ? 1 : (dq < 0 ? -1 : 0);
+    } else {
+      kr = dr > 0 ? 1 : (dr < 0 ? -1 : 0);
+    }
+    if (kq === 0 && kr === 0) kq = 1;
+    const newQ = target.position.q + kq;
+    const newR = target.position.r + kr;
+    if (!isTileBlocked(newQ, newR)) {
+      return { unitId: target.id, knockQ: newQ, knockR: newR };
+    }
+    return null;
+  }
+
+  /**
    * Calculate if a unit can attack another (range check)
    */
   static canAttack(attacker: Unit, defender: Unit): boolean {

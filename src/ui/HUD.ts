@@ -1505,7 +1505,7 @@ export class HUD {
               <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. +2 defense aura to allies within 2 hex. Massive shield. Shield bash + stab combo.</div>
+                <div class="unit-desc">Tank. +2 defense aura to allies within 2 hex. Heater shield bash knocks enemies back 1 hex. Peels for nearby squishies.</div>
               </div>
             </div>
             <div class="unit-row">

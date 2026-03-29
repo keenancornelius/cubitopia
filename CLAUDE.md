@@ -126,9 +126,13 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 
 ### Combat & Stances
 - **Stances:** PASSIVE (never attack), DEFENSIVE (zone-defend + return to post), AGGRESSIVE (chase + patrol)
-- **DEFENSIVE stance** applies to ALL combat units: they chase enemies within detection range, then return to their command position when threats leave. Archers in defensive still kite but don't chase.
+- **DEFENSIVE stance** applies to ALL combat units: they chase enemies within detection range, then return to their command position when threats leave. Ranged kiters in defensive still kite but don't chase.
 - **Target spread:** `findBestTarget()` scores enemies by distance + focus penalty (2.5 per ally already targeting) to prevent overkill dogpiling
-- **Archer kiting:** Archers flee from melee enemies within 2 tiles, fire-then-reposition. Works in both idle and attacking states.
+- **Combat Roles (data-driven, in UnitAI.ts):**
+  - `RANGED_KITERS` (Archer, Mage, Battlemage) — flee from melee enemies within 2 tiles, fire-then-reposition. Works in both idle and attacking states.
+  - `TANK_PEELERS` (Shieldbearer, Paladin) — `findBestTarget()` gives -6 score bonus to enemies attacking nearby squishies within 4 hex, causing tanks to peel for ranged/support allies.
+  - All others: standard chase-and-attack melee behavior.
+- **Knockback:** Greatsword cleave + Shieldbearer shield bash push targets 1 hex away. Uses `combat:cleave` event in main.ts to update hex positions + world positions.
 - **Re-aggro:** Combat units check for threats while moving (attack-move or aggressive stance units redirect to new targets entering detection range)
 
 ### Unit Types (17 total)
@@ -147,7 +151,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 | Villager | VILLAGER | Worker | Farms, harvests grass |
 | Healer | HEALER | Support | Auto-heals allies in range 2 (2 HP/1.5s) |
 | Assassin | ASSASSIN | Burst DPS | +3 attack from full HP, oversized poison daggers |
-| Shieldbearer | SHIELDBEARER | Tank | Massive tower shield + gladius, +2 defense aura |
+| Shieldbearer | SHIELDBEARER | Tank/Peeler | Heater shield bash + knockback, +2 defense aura, peels for squishies |
 | Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP |
 | Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
 | Greatsword | GREATSWORD | Cleave melee | Massive claymore, 360° spin hits all adjacent, knockback |
@@ -402,6 +406,9 @@ UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" s
 - `[DONE]` Arena spawns one of each combat unit type (13 per side)
 - `[DONE]` **Oversized weapons** — all melee units have visually impressive, enlarged weapons: Warrior (broadsword + buckler), Rider (jousting lance + kite shield), Paladin (tower shield + flanged mace), Assassin (poison daggers), Berserker (war axes), Shieldbearer (massive tower shield + gladius), Scout (scimitar)
 - `[DONE]` **Greatsword** — new heavy melee unit with massive two-handed claymore. 360° spin slash animation, cleave hits all adjacent enemies, knockback pushes victims 1 hex away. Stats: 14HP, 6ATK, 2DEF, 1MOV, slow but devastating.
+- `[DONE]` **Shieldbearer heater shield** — redesigned model: 3-point top + pointed bottom heater shape, no torso clipping. Shield bash attack animation (draw back + explosive forward slam) with knockback. No gladius — shield IS the weapon.
+- `[DONE]` **Combat role system** — data-driven RANGED_KITERS (Archer/Mage/Battlemage kite melee threats) and TANK_PEELERS (Shieldbearer/Paladin prioritize enemies attacking nearby squishies). Replaced all hardcoded `UnitType.ARCHER` kiting checks with role-based `isRangedKiter()`. Future roles can be added by extending the sets.
+- `[DONE]` **isCombatUnit exclusion pattern** — converted from inclusion list (which missed GREATSWORD) to exclusion-based (not worker = combat). Matches the pattern used in main.ts and HUD.ts.
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.

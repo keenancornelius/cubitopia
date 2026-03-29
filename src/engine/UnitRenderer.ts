@@ -979,7 +979,7 @@ export class UnitRenderer {
         break;
       }
       case UnitType.SHIELDBEARER: {
-        // === SHIELDBEARER — Massive armor, huge shield, bulky ===
+        // === SHIELDBEARER — Massive armor, heater shield (3-point top, pointed bottom) ===
         const sbArmor = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.55), new THREE.MeshLambertMaterial({ color: 0x78909c }));
         sbArmor.position.y = 0.35;
         sbArmor.castShadow = true;
@@ -990,42 +990,67 @@ export class UnitRenderer {
           plate.position.set(sx, 0.65, 0);
           group.add(plate);
         }
-        // Helmet
-        const helmet = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.38, 0.4), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
-        helmet.position.y = 0.9;
-        group.add(helmet);
-        // Visor slit
-        const visor = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.42), new THREE.MeshLambertMaterial({ color: 0x263238 }));
-        visor.position.y = 0.9;
-        group.add(visor);
-        // Massive tower shield — nearly body-sized
+        // Helmet with nose guard
+        const sbHelm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.4, 0.42), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
+        sbHelm.position.y = 0.9;
+        group.add(sbHelm);
+        const sbVisor = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.44), new THREE.MeshLambertMaterial({ color: 0x263238 }));
+        sbVisor.position.y = 0.9;
+        group.add(sbVisor);
+        // Nose guard
+        const noseGuard = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.04), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
+        noseGuard.position.set(0, 0.85, 0.22);
+        group.add(noseGuard);
+
+        // Left arm with HEATER SHIELD — flat top with 3 corners, pointed bottom
+        // Built as arm-child so it moves with the arm for bash animation
         const sbArmLeft = makeArmGroup('arm-left', 0x78909c, -0.35, 0.35);
-        const towerShield = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.9, 0.1), new THREE.MeshLambertMaterial({ color: playerColor }));
-        towerShield.position.set(0.18, -0.15, 0.18);
-        sbArmLeft.add(towerShield);
-        // Reinforced steel bands
-        for (const by of [-0.4, 0, 0.25]) {
-          const band = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.04, 0.12), new THREE.MeshLambertMaterial({ color: 0x666666 }));
-          band.position.set(0.18, by - 0.15, 0.18);
-          sbArmLeft.add(band);
+        // Shield is a group for composite shape
+        const shieldGroup = new THREE.Group();
+        shieldGroup.name = 'shield-group';
+        // Main body — wide rectangle for the top 2/3
+        const shMain = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
+        shMain.position.set(0, 0.05, 0);
+        shieldGroup.add(shMain);
+        // Bottom point — narrowing wedge (2 angled blocks)
+        const shPointL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
+        shPointL.position.set(-0.07, -0.3, 0);
+        shPointL.rotation.z = -0.25;
+        shieldGroup.add(shPointL);
+        const shPointR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
+        shPointR.position.set(0.07, -0.3, 0);
+        shPointR.rotation.z = 0.25;
+        shieldGroup.add(shPointR);
+        // Flat top edge (the 3 points at top — left, center-top, right)
+        const shTopEdge = new THREE.Mesh(new THREE.BoxGeometry(0.57, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x666666 }));
+        shTopEdge.position.set(0, 0.32, 0);
+        shieldGroup.add(shTopEdge);
+        // Steel rim left/right
+        for (const rx of [-0.28, 0.28]) {
+          const shRim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.55, 0.1), new THREE.MeshLambertMaterial({ color: 0x666666 }));
+          shRim.position.set(rx, 0.05, 0);
+          shieldGroup.add(shRim);
         }
-        // Large boss with spike
-        const sbBoss = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
-        sbBoss.position.set(0.18, -0.1, 0.25);
-        sbArmLeft.add(sbBoss);
-        const sbSpike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.12), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
-        sbSpike.position.set(0.18, -0.1, 0.34);
-        sbArmLeft.add(sbSpike);
+        // Center boss with spike
+        const shBoss = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.18, 0.12), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
+        shBoss.position.set(0, 0.05, 0.05);
+        shieldGroup.add(shBoss);
+        const shSpike = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.14), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
+        shSpike.position.set(0, 0.05, 0.14);
+        shieldGroup.add(shSpike);
+        // Team emblem — chevron pattern
+        const chevron1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
+        chevron1.position.set(0, 0.18, 0.01);
+        shieldGroup.add(chevron1);
+        const chevron2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
+        chevron2.position.set(0, -0.08, 0.01);
+        shieldGroup.add(chevron2);
+        // Position shield in front of arm, offset outward to avoid torso clipping
+        shieldGroup.position.set(0.25, -0.15, 0.3);
+        sbArmLeft.add(shieldGroup);
         group.add(sbArmLeft);
-        // Right arm with short gladius
-        const sbArmRight = makeArmGroup('arm-right', 0x78909c, 0.35, 0.35);
-        const gladius = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.4), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
-        gladius.position.set(0, -0.12, 0.2);
-        sbArmRight.add(gladius);
-        const gladGuard = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.06, 0.04), new THREE.MeshLambertMaterial({ color: 0xB8860B }));
-        gladGuard.position.set(0, -0.12, 0.02);
-        sbArmRight.add(gladGuard);
-        group.add(sbArmRight);
+        // Right arm — empty fist (shield bash is the weapon)
+        group.add(makeArmGroup('arm-right', 0x78909c, 0.35, 0.35));
         group.add(makeLegGroup('leg-left', 0x546e7a, -0.15, 0));
         group.add(makeLegGroup('leg-right', 0x546e7a, 0.15, 0));
         break;
@@ -2237,32 +2262,48 @@ export class UnitRenderer {
         break;
       }
       case UnitType.SHIELDBEARER: {
-        // Shield bash + short sword combo
-        const speed = 2.0;
+        // Shield bash: draw back, then explosive forward slam
+        const speed = 1.6; // deliberate, heavy
         const cycle = (time * speed) % 1;
-        if (cycle < 0.3) {
-          // Shield push: left arm (shield) shoves forward
-          const p = cycle / 0.3;
-          if (armLeft) armLeft.rotation.x = 0.9 * p;
-          if (armRight) armRight.rotation.x = -0.3 * p; // pull sword back
-          entry.group.rotation.x = 0.06 * p;
-        } else if (cycle < 0.5) {
-          // Shield hold, sword stab
-          const p = (cycle - 0.3) / 0.2;
-          if (armLeft) armLeft.rotation.x = 0.9;
-          if (armRight) armRight.rotation.x = -0.3 + 1.3 * p; // stab to +1.0
-        } else if (cycle < 0.65) {
-          // Hold both extended
-          if (armLeft) armLeft.rotation.x = 0.9;
-          if (armRight) armRight.rotation.x = 1.0;
-          entry.group.rotation.x = 0.06;
-          // Slash trail at shield bash + stab
-          if (cycle >= 0.5 && cycle < 0.57) this.trySpawnTrail(unitId, 'slash', time, 0.45);
+        if (cycle < 0.35) {
+          // Draw back: pull shield arm back, lean away, coil for bash
+          const p = cycle / 0.35;
+          if (armLeft) {
+            armLeft.rotation.x = -0.8 * p; // pull shield arm back
+            armLeft.rotation.z = 0.3 * p; // arm out wide
+          }
+          if (armRight) armRight.rotation.x = -0.2 * p; // brace
+          entry.group.rotation.x = -0.1 * p; // lean back
+        } else if (cycle < 0.55) {
+          // BASH: explosive forward slam — whole body lunges
+          const p = (cycle - 0.35) / 0.2;
+          if (armLeft) {
+            armLeft.rotation.x = -0.8 + 2.4 * p; // slam forward to +1.6
+            armLeft.rotation.z = 0.3 - 0.5 * p; // sweep inward
+          }
+          if (armRight) armRight.rotation.x = -0.2 + 0.5 * p; // follow-through
+          entry.group.rotation.x = -0.1 + 0.25 * p; // lunge forward
+          entry.group.position.z += 0.008; // micro-lunge each frame
+          // Smash trail at impact moment
+          if (cycle >= 0.45 && cycle < 0.52) this.trySpawnTrail(unitId, 'smash', time, 0.4);
+        } else if (cycle < 0.7) {
+          // Impact hold: shield extended, body forward
+          if (armLeft) { armLeft.rotation.x = 1.6; armLeft.rotation.z = -0.2; }
+          if (armRight) armRight.rotation.x = 0.3;
+          entry.group.rotation.x = 0.15;
         } else {
-          const p = (cycle - 0.65) / 0.35;
-          if (armLeft) armLeft.rotation.x = 0.9 * (1 - p);
-          if (armRight) armRight.rotation.x = 1.0 * (1 - p);
+          // Recovery: return to stance
+          const p = (cycle - 0.7) / 0.3;
+          if (armLeft) {
+            armLeft.rotation.x = 1.6 * (1 - p);
+            armLeft.rotation.z = -0.2 * (1 - p);
+          }
+          if (armRight) armRight.rotation.x = 0.3 * (1 - p);
+          entry.group.rotation.x = 0.15 * (1 - p);
         }
+        // Power stance
+        if (legLeft) legLeft.rotation.x = cycle >= 0.35 && cycle < 0.6 ? 0.25 : 0;
+        if (legRight) legRight.rotation.x = cycle >= 0.35 && cycle < 0.6 ? -0.1 : 0;
         break;
       }
       case UnitType.BATTLEMAGE: {
