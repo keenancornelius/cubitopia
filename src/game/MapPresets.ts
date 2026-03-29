@@ -7,6 +7,7 @@ import {
   GameMap, Tile, HexCoord, TerrainType, BlockType, VoxelBlock,
   ResourceType, MapType, MapPreset,
 } from '../types';
+import { MapGenerator } from './MapGenerator';
 
 // --- Map Preset Definitions ---
 export const MAP_PRESETS: MapPreset[] = [
@@ -156,11 +157,16 @@ export function generateArenaMap(size: number, seed?: number): ArenaMap {
     }
   }
 
-  return {
+  // Compute shell blocks (3x3 voxel columns per hex) so the floor is solid
+  const arenaMap: ArenaMap = {
     width: size, height: size, tiles, seed: actualSeed, mapType: MapType.ARENA,
     wallPositions: wallRing,
     gatePositions: gateRing,
   };
+  const shellGen = new MapGenerator();
+  shellGen.computeShellBlocks(arenaMap, size, size);
+
+  return arenaMap;
 }
 
 // --- Map Generator Parameter Overrides ---

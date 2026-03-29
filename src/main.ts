@@ -1854,9 +1854,15 @@ class Cubitopia {
 
     // --- Spawn Home Bases ---
     const BASE_MAX_HEALTH = 500;
+    const arenaCenter = Math.floor(MAP_SIZE / 2);
 
-    // Player 1 base: bottom-left corner
-    const p1BaseCoord = this.findSpawnTile(map, P1_Q, P1_R);
+    // Arena: bases at edges of arena floor; Standard: bases at map corners
+    const b1Q = isArena ? arenaCenter - 8 : P1_Q;
+    const b1R = isArena ? arenaCenter : P1_R;
+    const b2Q = isArena ? arenaCenter + 8 : P2_Q;
+    const b2R = isArena ? arenaCenter : P2_R;
+
+    const p1BaseCoord = this.findSpawnTile(map, b1Q, b1R);
     const p1BaseWP = this.hexToWorld(p1BaseCoord);
     const p1Base: Base = {
       id: 'base_0', owner: 0, position: p1BaseCoord,
@@ -1864,8 +1870,7 @@ class Cubitopia {
       health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
     };
 
-    // Player 2 base: top-right corner
-    const p2BaseCoord = this.findSpawnTile(map, P2_Q, P2_R);
+    const p2BaseCoord = this.findSpawnTile(map, b2Q, b2R);
     const p2BaseWP = this.hexToWorld(p2BaseCoord);
     const p2Base: Base = {
       id: 'base_1', owner: 1, position: p2BaseCoord,
@@ -1877,15 +1882,11 @@ class Cubitopia {
     this.baseRenderer.addBase(p1Base, this.getElevation(p1BaseCoord));
     this.baseRenderer.addBase(p2Base, this.getElevation(p2BaseCoord));
 
-    // Register bases as wall-connectable structures
     this.buildingSystem.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
     this.buildingSystem.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
 
-    // Tell UnitAI where the bases are (for lumberjack return trips)
     UnitAI.basePositions.set(0, p1BaseCoord);
     UnitAI.basePositions.set(1, p2BaseCoord);
-
-    // Base acts as default food storage — villagers deposit here until a silo is built
     UnitAI.siloPositions.set(0, p1BaseCoord);
     UnitAI.siloPositions.set(1, p2BaseCoord);
 
@@ -1893,23 +1894,22 @@ class Cubitopia {
     Pathfinder.blockedTiles = this.getBaseTiles();
     Pathfinder.gateTiles.clear();
 
-    // Generate coordinated keep wall plans for both players' builders
-    UnitAI.generateKeepWallPlan(0, p1BaseCoord, map);
-    UnitAI.generateKeepWallPlan(1, p2BaseCoord, map);
-
-    // Arena: place colosseum wall ring + gate entries
+    // Arena: place colosseum wall ring + gate entries AFTER pathfinder init
     if (isArena && (map as ArenaMap).wallPositions) {
       const arenaMap = map as ArenaMap;
-      // Place walls around entire perimeter
       for (const pos of arenaMap.wallPositions) {
-        this.wallSystem.placeWallDirect(pos, 0); // Neutral walls (player 0 owns)
+        this.wallSystem.placeWallDirect(pos, 0);
       }
-      // Place gates at 4 cardinal entries
       for (const pos of arenaMap.gatePositions) {
         this.wallSystem.placeGateDirect(pos, 0);
       }
-      // Rebuild all connections so wall meshes adapt to neighbors
       this.wallSystem.rebuildAllConnections();
+    }
+
+    // Standard mode only: generate builder wall plans
+    if (!isArena) {
+      UnitAI.generateKeepWallPlan(0, p1BaseCoord, map);
+      UnitAI.generateKeepWallPlan(1, p2BaseCoord, map);
     }
 
     // Set camera bounds to prevent panning off the map
