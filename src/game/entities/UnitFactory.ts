@@ -98,6 +98,11 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 1.0, attackSpeed: 0.5, color: 0x7c4dff,
     carryCapacity: 0, isSiege: false,
   },
+  [UnitType.GREATSWORD]: {
+    stats: { maxHealth: 14, attack: 6, defense: 2, movement: 1, range: 1 },
+    moveSpeed: 0.9, attackSpeed: 0.7, color: 0x546e7a,
+    carryCapacity: 0, isSiege: false,
+  },
 };
 
 // Backward-compat export — UnitRenderer imports this

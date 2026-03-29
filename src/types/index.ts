@@ -185,6 +185,7 @@ export enum UnitType {
   SHIELDBEARER = 'shieldbearer',
   BERSERKER = 'berserker',
   BATTLEMAGE = 'battlemage',
+  GREATSWORD = 'greatsword',
 }
 
 export interface ResourceNode {

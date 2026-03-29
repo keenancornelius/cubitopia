@@ -425,7 +425,7 @@ export class HUD {
     UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.PALADIN,
     UnitType.CATAPULT, UnitType.TREBUCHET, UnitType.SCOUT, UnitType.MAGE,
     UnitType.HEALER, UnitType.ASSASSIN, UnitType.SHIELDBEARER,
-    UnitType.BERSERKER, UnitType.BATTLEMAGE,
+    UnitType.BERSERKER, UnitType.BATTLEMAGE, UnitType.GREATSWORD,
   ];
   private static readonly WORKER_TYPES = [UnitType.BUILDER, UnitType.LUMBERJACK, UnitType.VILLAGER];
 
@@ -1522,6 +1522,13 @@ export class HUD {
                 <div class="unit-desc">AoE caster. Range 3. Splash damage to enemies within 1 hex of target. Firework explosions on impact.</div>
               </div>
             </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#546e7a;">⚔</div>
+              <div>
+                <div class="unit-name" style="color:#546e7a;">Greatsword</div>
+                <div class="unit-desc">Heavy two-handed claymore. Slow but devastating 360° spin slash hits all adjacent enemies. Knockback pushes victims 1 hex away.</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -2128,6 +2135,7 @@ export class HUD {
       { type: UnitType.SHIELDBEARER, label: 'Shield', color: '#7f8c8d' },
       { type: UnitType.BERSERKER, label: 'Berserker', color: '#e74c3c' },
       { type: UnitType.BATTLEMAGE, label: 'Battlemage', color: '#8e44ad' },
+      { type: UnitType.GREATSWORD, label: 'Greatsword', color: '#546e7a' },
       { type: UnitType.LUMBERJACK, label: 'Lumberjack', color: '#6d4c41' },
       { type: UnitType.BUILDER, label: 'Builder', color: '#b8860b' },
       { type: UnitType.VILLAGER, label: 'Villager', color: '#daa520' },

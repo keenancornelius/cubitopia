@@ -1838,6 +1838,7 @@ class Cubitopia {
         { type: UnitType.SHIELDBEARER, count: 1 },
         { type: UnitType.BERSERKER, count: 1 },
         { type: UnitType.BATTLEMAGE, count: 1 },
+        { type: UnitType.GREATSWORD, count: 1 },
       ];
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
         let idx = 0;
@@ -2188,8 +2189,9 @@ class Cubitopia {
           this.sound.play('hit_pierce');
         } else if (event.attacker.type === UnitType.RIDER || event.attacker.type === UnitType.SCOUT) {
           this.sound.play('hit_pierce'); // lance thrust / dagger
-        } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK) {
-          this.sound.play('hit_cleave'); // axe / heavy weapon
+        } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK
+                || event.attacker.type === UnitType.GREATSWORD) {
+          this.sound.play('hit_cleave'); // axe / heavy weapon / claymore
         } else if (event.attacker.type === UnitType.SHIELDBEARER || event.attacker.type === UnitType.PALADIN
                 || event.attacker.type === UnitType.BATTLEMAGE) {
           this.sound.play('hit_blunt'); // shield bash / staff slam
@@ -2208,6 +2210,20 @@ class Cubitopia {
           this.sound.play('splash_aoe');
         } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
           this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition);
+        }
+      }
+      // Greatsword cleave knockback — move units to new hex positions
+      if ((event as any).type === 'combat:cleave') {
+        const ce = event as any;
+        const victim = this.allUnits.find(u => u.id === ce.unitId);
+        if (victim && victim.state !== UnitState.DEAD) {
+          victim.position = { q: ce.knockQ, r: ce.knockR };
+          const wp = this.hexToWorld(victim.position);
+          victim.worldPosition = { x: wp.x, y: wp.y, z: wp.z };
+          this.unitRenderer.updateHealthBar(victim);
+          this.unitRenderer.showDamageEffect(victim.worldPosition);
+          this.unitRenderer.flashUnit(victim.id, 0.12);
+          this.sound.play('hit_cleave');
         }
       }
       // Heal events

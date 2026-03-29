@@ -1721,6 +1721,14 @@ export class UnitAI {
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
         for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
+        // Greatsword cleave + knockback
+        const isTileBlocked = (q: number, r: number) => {
+          const k = `${q},${r}`;
+          if (Pathfinder.blockedTiles.has(k)) return true;
+          return allUnits.some(u => u.position.q === q && u.position.r === r && u.state !== UnitState.DEAD && u !== target);
+        };
+        const cleaveResults = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked);
+        for (const cr of cleaveResults) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
           events.push({ type: 'unit:killed', unit: target, killer: unit });
@@ -1754,6 +1762,14 @@ export class UnitAI {
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
         for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
+        // Greatsword cleave + knockback
+        const isTileBlocked2 = (q: number, r: number) => {
+          const k = `${q},${r}`;
+          if (Pathfinder.blockedTiles.has(k)) return true;
+          return allUnits.some(u => u.position.q === q && u.position.r === r && u.state !== UnitState.DEAD && u !== target);
+        };
+        const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
+        for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
 
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
@@ -1859,6 +1875,7 @@ export class UnitAI {
       case UnitType.SHIELDBEARER: return 3;  // Short range tank
       case UnitType.BERSERKER:    return 5;  // Sees red
       case UnitType.BATTLEMAGE:   return 6;  // Ranged caster
+      case UnitType.GREATSWORD:   return 4;  // Heavy melee — standard sight
       default:                    return 4;
     }
   }

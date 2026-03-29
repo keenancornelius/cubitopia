@@ -143,6 +143,63 @@ export class CombatSystem {
   }
 
   /**
+   * Greatsword Cleave — hits all enemies within 1 hex of the primary target.
+   * Deals 60% of base attack as cleave damage and knocks victims back 1 hex away from attacker.
+   * Returns array of { unitId, knockbackQ, knockbackR } for knocked-back units.
+   */
+  static applyGreatswordCleave(
+    attacker: Unit, target: Unit, allUnits: Unit[],
+    isTileBlocked: (q: number, r: number) => boolean
+  ): { unitId: string; knockQ: number; knockR: number }[] {
+    if (attacker.type !== UnitType.GREATSWORD) return [];
+    const results: { unitId: string; knockQ: number; knockR: number }[] = [];
+    const cleaveDamage = Math.max(1, Math.round(attacker.stats.attack * 0.6));
+
+    // Collect all enemies within 1 hex of attacker (cleave radius)
+    const victims: Unit[] = [];
+    for (const unit of allUnits) {
+      if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
+      const dist = Math.abs(unit.position.q - attacker.position.q) +
+                   Math.abs(unit.position.r - attacker.position.r);
+      if (dist <= 1 && unit !== target) {
+        victims.push(unit);
+      }
+    }
+
+    // Apply cleave damage to secondary targets
+    for (const victim of victims) {
+      victim.currentHealth = Math.max(0, victim.currentHealth - cleaveDamage);
+    }
+
+    // Apply knockback to ALL hit enemies (primary target + cleave victims)
+    const allHit = [target, ...victims];
+    for (const victim of allHit) {
+      if (victim.currentHealth <= 0) continue;
+      // Calculate knockback direction: away from attacker
+      const dq = victim.position.q - attacker.position.q;
+      const dr = victim.position.r - attacker.position.r;
+      // Normalize to 1 hex step in the dominant direction
+      let kq = 0, kr = 0;
+      if (Math.abs(dq) >= Math.abs(dr)) {
+        kq = dq > 0 ? 1 : (dq < 0 ? -1 : 0);
+      } else {
+        kr = dr > 0 ? 1 : (dr < 0 ? -1 : 0);
+      }
+      // If dq == 0 and dr == 0, push in a default direction
+      if (kq === 0 && kr === 0) kq = 1;
+
+      const newQ = victim.position.q + kq;
+      const newR = victim.position.r + kr;
+
+      // Only knockback if destination is not blocked
+      if (!isTileBlocked(newQ, newR)) {
+        results.push({ unitId: victim.id, knockQ: newQ, knockR: newR });
+      }
+    }
+    return results;
+  }
+
+  /**
    * Calculate if a unit can attack another (range check)
    */
   static canAttack(attacker: Unit, defender: Unit): boolean {

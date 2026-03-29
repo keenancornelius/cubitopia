@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3147 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew past 3000-line target during combat visual overhaul — next extraction (CombatEventHandler or InputManager) should bring it back under.
+- `src/main.ts` — **Central orchestrator (~3163 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew past 3000-line target during combat visual overhaul — next extraction (CombatEventHandler or InputManager) should bring it back under.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -90,12 +90,12 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/ui/MenuController.ts` — **Main menu with map selector (~220 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
-- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~145 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, healer tick.
-- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~155 lines)**. Single `UNIT_CONFIG` table per UnitType (16 types). Adding a unit = adding one config entry.
+- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~210 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
+- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~593 lines)**. Web Audio API synthesized SFX (20 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
-- `src/ui/HUD.ts` — **All UI (~2157 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
-- `src/engine/UnitRenderer.ts` — **3D unit rendering (~3202 lines)**. Unit mesh generation (16 elaborate models), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
+- `src/ui/HUD.ts` — **All UI (~2165 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
+- `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
 - `src/engine/Renderer.ts` — Three.js scene setup, lighting
@@ -131,25 +131,26 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - **Archer kiting:** Archers flee from melee enemies within 2 tiles, fire-then-reposition. Works in both idle and attacking states.
 - **Re-aggro:** Combat units check for threats while moving (attack-move or aggressive stance units redirect to new targets entering detection range)
 
-### Unit Types (16 total)
+### Unit Types (17 total)
 | Type | Enum | Role | Special |
 |------|------|------|---------|
-| Warrior | WARRIOR | Melee DPS | — |
+| Warrior | WARRIOR | Melee DPS | Oversized broadsword + buckler shield |
 | Archer | ARCHER | Ranged (range 4) | Kites melee enemies |
-| Rider | RIDER | Fast cavalry | — |
-| Paladin | PALADIN | Tanky melee | — |
+| Rider | RIDER | Fast cavalry | Jousting lance + kite shield |
+| Paladin | PALADIN | Tanky melee | Tower shield + flanged mace |
 | Catapult | CATAPULT | Siege, medium range | Damages walls |
 | Trebuchet | TREBUCHET | Siege, long range | Damages walls |
-| Scout | SCOUT | Fast recon | — |
+| Scout | SCOUT | Fast recon | Curved scimitar |
 | Mage | MAGE | Ranged magic | Blue projectiles |
 | Builder | BUILDER | Worker | Mines stone/clay, builds walls |
 | Lumberjack | LUMBERJACK | Worker | Chops trees, carries wood |
 | Villager | VILLAGER | Worker | Farms, harvests grass |
 | Healer | HEALER | Support | Auto-heals allies in range 2 (2 HP/1.5s) |
-| Assassin | ASSASSIN | Burst DPS | +3 attack from full HP (ambush) |
-| Shieldbearer | SHIELDBEARER | Tank | +2 defense aura to allies within 2 hex |
-| Berserker | BERSERKER | Melee DPS | Up to +4 attack at low HP (rage) |
+| Assassin | ASSASSIN | Burst DPS | +3 attack from full HP, oversized poison daggers |
+| Shieldbearer | SHIELDBEARER | Tank | Massive tower shield + gladius, +2 defense aura |
+| Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP |
 | Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
+| Greatsword | GREATSWORD | Cleave melee | Massive claymore, 360° spin hits all adjacent, knockback |
 
 ---
 
@@ -274,7 +275,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3147 after combat visual overhaul additions — next extraction should bring it back under.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3163 after combat visual overhaul + greatsword — next extraction should bring it back under.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -379,7 +380,7 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
 
 ### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [WIP]
-UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" separation. 5 of 7 new units implemented with unique abilities:
+UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" separation. 6 of 7 new units implemented with unique abilities:
 - `[DONE]` **Healer** — auto-heals allies in range 2, seeks injured, follows combat units
 - `[DONE]` **Assassin** — ambush bonus (+3 attack from full HP), fast, dual daggers
 - `[DONE]` **Shieldbearer** — armor aura (+2 defense to allies within 2 hex), massive shield
@@ -398,7 +399,9 @@ UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" s
 - `[DONE]` Swing streak VFX — slash/stab/smash trail arcs spawn on weapon strikes, fade + scale over 350ms
 - `[DONE]` Weapon-specific impact sounds — hit_pierce (sharp stab), hit_cleave (whoosh+chop), hit_blunt (bass thud) in SoundManager
 - `[DONE]` Normalized all combat units — eliminated "Phase 1" separation in isCombatType, HUD hasCombat, stance UI, COMBAT_TYPES array. All non-worker units are combat units.
-- `[DONE]` Arena spawns one of each combat unit type (12 per side)
+- `[DONE]` Arena spawns one of each combat unit type (13 per side)
+- `[DONE]` **Oversized weapons** — all melee units have visually impressive, enlarged weapons: Warrior (broadsword + buckler), Rider (jousting lance + kite shield), Paladin (tower shield + flanged mace), Assassin (poison daggers), Berserker (war axes), Shieldbearer (massive tower shield + gladius), Scout (scimitar)
+- `[DONE]` **Greatsword** — new heavy melee unit with massive two-handed claymore. 360° spin slash animation, cleave hits all adjacent enemies, knockback pushes victims 1 hex away. Stats: 14HP, 6ATK, 2DEF, 1MOV, slow but devastating.
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.
