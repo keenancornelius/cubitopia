@@ -19,12 +19,10 @@ import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
 import ResourceManager from './game/systems/ResourceManager';
 import BuildingSystem from './game/systems/BuildingSystem';
+import WallSystem from './game/systems/WallSystem';
+import type { WallSystemOps } from './game/systems/WallSystem';
 import AIController from './game/systems/AIController';
 import type { AIBuildingOps } from './game/systems/AIController';
-import {
-  buildAdaptiveWallMesh as createWallMesh,
-  buildGateMesh as createGateMesh,
-} from './game/systems/DefenseMeshFactory';
 import {
   EngineConfig,
   CameraConfig,
@@ -102,6 +100,7 @@ class Cubitopia {
   private debugOverlayLabels: Map<string, HTMLElement> = new Map();
   private resourceManager!: ResourceManager;
   private buildingSystem!: BuildingSystem;
+  private wallSystem!: WallSystem;
   private aiController!: AIController;
 
   constructor() {
@@ -322,7 +321,7 @@ class Cubitopia {
         const neighbors = Pathfinder.getHexNeighbors(hexCoord);
         for (const n of neighbors) {
           const nKey = `${n.q},${n.r}`;
-          if (!this.wallsBuilt.has(nKey) && !this.blueprintGhosts.has(nKey)) continue;
+          if (!this.wallSystem.wallsBuilt.has(nKey) && !this.blueprintGhosts.has(nKey)) continue;
           const nWorldX = n.q * 1.5;
           const nWorldZ = n.r * 1.5 + (n.q % 2 === 1 ? 0.75 : 0);
           const dx = nWorldX - worldX;
@@ -517,7 +516,7 @@ class Cubitopia {
         else if (this.wallBuildMode) {
           // First click determines drag mode: if tile already has blueprint, drag = erase
           const key = `${hex.q},${hex.r}`;
-          mineEraseMode = UnitAI.playerWallBlueprint.has(key) || this.wallsBuilt.has(key);
+          mineEraseMode = UnitAI.playerWallBlueprint.has(key) || this.wallSystem.wallsBuilt.has(key);
           if (e.shiftKey) {
             // Shift+click: place gate instead
             if (mineEraseMode) {
@@ -822,7 +821,7 @@ class Cubitopia {
     if (this.isTileOccupied(key)) return;
     if (UnitAI.playerWallBlueprint.has(key)) return; // Already blueprinted
     if (UnitAI.playerGateBlueprint.has(key)) return; // Don't overlap with gate blueprints
-    if (this.wallsBuilt.has(key)) return; // Already built
+    if (this.wallSystem.wallsBuilt.has(key)) return; // Already built
 
     UnitAI.addBlueprint(coord);
     this.addBlueprintGhost(coord);
@@ -850,8 +849,8 @@ class Cubitopia {
     if (this.isTileOccupied(key)) return;
     if (UnitAI.playerGateBlueprint.has(key)) return; // Already blueprinted
     if (UnitAI.playerWallBlueprint.has(key)) return; // Don't overlap with walls
-    if (this.gatesBuilt.has(key)) return; // Already built
-    if (this.wallsBuilt.has(key)) return; // Don't overlap with walls
+    if (this.wallSystem.gatesBuilt.has(key)) return; // Already built
+    if (this.wallSystem.wallsBuilt.has(key)) return; // Don't overlap with walls
 
     UnitAI.addGateBlueprint(coord);
     this.addBlueprintGhost(coord);
@@ -1410,8 +1409,8 @@ class Cubitopia {
   /** Check if a tile is occupied by any structure */
   private isTileOccupied(key: string): boolean {
     if (Pathfinder.blockedTiles.has(key)) return true;
-    if (this.wallsBuilt.has(key)) return true;
-    if (this.gatesBuilt.has(key)) return true;
+    if (this.wallSystem.wallsBuilt.has(key)) return true;
+    if (this.wallSystem.gatesBuilt.has(key)) return true;
     // Check all placed buildings (player + AI)
     for (const pb of this.buildingSystem.placedBuildings) {
       if (`${pb.position.q},${pb.position.r}` === key) return true;
@@ -1526,9 +1525,39 @@ class Cubitopia {
 
     // BuildingSystem owns registry, mesh builders, and queries
     this.buildingSystem = new BuildingSystem(ctx);
+    // WallSystem owns wall/gate state, mesh management, and damage
+    const wallOps: WallSystemOps = {
+      isTileOccupied: (key) => this.isTileOccupied(key),
+      isStockpileLocation: (pos) => {
+        for (const [sKey] of this.resourceManager.stockpileMeshes) {
+          const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
+          if (base) {
+            const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
+            const stockR = base.position.r;
+            if (pos.q === stockQ && Math.abs(pos.r - stockR) <= 1) return true;
+          }
+        }
+        return false;
+      },
+      removeBlueprintGhost: (coord) => this.removeBlueprintGhost(coord),
+      rebuildTileShell: (coord) => this.rebuildTileShell(coord),
+      rebuildVoxels: () => { if (this.currentMap) this.voxelBuilder.rebuildFromMap(this.currentMap); },
+      updateResourceDisplay: (owner) => {
+        if (owner === 0) {
+          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        }
+      },
+      updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
+      getWallConnectable: () => this.buildingSystem.wallConnectable,
+      getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
+      unregisterBuilding: (pb) => this.buildingSystem.unregisterBuilding(pb),
+    };
+    this.wallSystem = new WallSystem(ctx, wallOps);
+
+    // Wire BuildingSystem wall refs to WallSystem
     this.buildingSystem.setWallRefs(
-      this.wallsBuilt, this.wallOwners,
-      (pos, owner) => this.buildAdaptiveWallMesh(pos, owner),
+      this.wallSystem.wallsBuilt, this.wallSystem.wallOwners,
+      (pos, owner) => this.wallSystem.buildAdaptiveWallMesh(pos, owner),
     );
 
     // AI building operations delegate to BuildingSystem
@@ -1737,37 +1766,9 @@ class Cubitopia {
     this.gameOver = false;
     this.woodStockpile = [30, 30]; // Start with some wood so players can build immediately
     this.stoneStockpile = [0, 0];
-    this.wallsBuilt.clear();
-    this.wallOwners.clear();
-    this.wallHealth.clear();
-    this.wallMeshMap.clear();
-    this.gatesBuilt.clear();
-    this.gateOwners.clear();
-    this.gateHealth.clear();
-    this.gateMeshMap.clear();
+    this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
-    for (const wg of this.wallMeshes) {
-      this.renderer.scene.remove(wg);
-      wg.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-    }
-    this.wallMeshes = [];
-    // Clear gate meshes from scene
-    for (const gg of this.gateMeshes) {
-      this.renderer.scene.remove(gg);
-      gg.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-    }
-    this.gateMeshes = [];
     // Clear rally point flags
     for (const [, flagGroup] of this.rallyFlagMeshes) {
       this.renderer.scene.remove(flagGroup);
@@ -2440,13 +2441,13 @@ class Cubitopia {
         // Check if this is a gate or wall blueprint
         const key = `${event.result.position.q},${event.result.position.r}`;
         if (UnitAI.playerGateBlueprint.has(key)) {
-          this.handleBuildGate(event.unit!, event.result.position);
+          this.wallSystem.handleBuildGate(event.unit!, event.result.position);
         } else {
-          this.handleBuildWall(event.unit!, event.result.position);
+          this.wallSystem.handleBuildWall(event.unit!, event.result.position);
         }
       }
       if (event.type === 'builder:place_gate' && event.result && !this.hud.debugFlags.disableBuild) {
-        this.handleBuildGate(event.unit!, event.result.position);
+        this.wallSystem.handleBuildGate(event.unit!, event.result.position);
       }
       if (event.type === 'lumberjack:chop' && event.result && !this.hud.debugFlags.disableChop) {
         this.handleChopWood(event.unit!, event.result.position);
@@ -2482,11 +2483,11 @@ class Cubitopia {
         // ALL structures (walls, gates, buildings) require siege weapons to destroy
         if (!isSiege) continue; // Non-siege units cannot damage structures
         if (this.buildingSystem.barracksHealth.has(key)) {
-          this.damageBarracks(event.result.position, event.unit.stats.attack);
-        } else if (this.gatesBuilt.has(key)) {
-          this.damageGate(event.result.position, event.unit.stats.attack);
+          this.wallSystem.damageBarracks(event.result.position, event.unit.stats.attack);
+        } else if (this.wallSystem.gatesBuilt.has(key)) {
+          this.wallSystem.damageGate(event.result.position, event.unit.stats.attack);
         } else {
-          this.damageWall(event.result.position, event.unit.stats.attack);
+          this.wallSystem.damageWall(event.result.position, event.unit.stats.attack);
         }
       }
     }
@@ -2605,9 +2606,9 @@ class Cubitopia {
           const baseNeighbors = Pathfinder.getHexNeighbors(base.position);
           for (const n of baseNeighbors) {
             const nKey = `${n.q},${n.r}`;
-            if (this.wallsBuilt.has(nKey)) {
-              const nOwner = this.wallOwners.get(nKey) ?? 0;
-              this.buildAdaptiveWallMesh(n, nOwner);
+            if (this.wallSystem.wallsBuilt.has(nKey)) {
+              const nOwner = this.wallSystem.wallOwners.get(nKey) ?? 0;
+              this.wallSystem.buildAdaptiveWallMesh(n, nOwner);
             }
           }
         }
@@ -2686,24 +2687,7 @@ class Cubitopia {
 
   // --- Wood stockpile per player: each tree = 4 wall blocks ---
   private woodStockpile: number[] = [0, 0]; // [player0, player1]
-  private wallsBuilt = new Set<string>(); // Track built wall tiles
-  private wallOwners = new Map<string, number>(); // "q,r" → owner
-  // wallConnectable is managed by BuildingSystem (this.buildingSystem.wallConnectable)
-
-  private wallMeshMap: Map<string, THREE.Group> = new Map(); // "q,r" → mesh group
-  private wallMeshes: THREE.Group[] = []; // Track wall mesh groups for cleanup
-  private wallHealth: Map<string, number> = new Map(); // "q,r" → current health
-  private static readonly WALL_MAX_HP = 20;
-
-  // --- Gates (similar to walls but allow friendly units to pass) ---
-  private gatesBuilt = new Set<string>(); // Track built gate tiles
-  private gateOwners = new Map<string, number>(); // "q,r" → owner
-  private gateHealth: Map<string, number> = new Map(); // "q,r" → current health
-  private static readonly GATE_MAX_HP = 20; // Same as walls
-  private static readonly BARRACKS_MAX_HP = 40; // Buildings are tougher, siege-only
-  // barracksHealth is managed by BuildingSystem (this.buildingSystem.barracksHealth)
-  private gateMeshMap: Map<string, THREE.Group> = new Map(); // "q,r" → mesh group
-  private gateMeshes: THREE.Group[] = []; // Track gate mesh groups for cleanup
+  // Wall/gate state is managed by WallSystem (this.wallSystem)
 
   // --- Wall Build Mode ---
   private wallBuildMode = false;
@@ -3329,366 +3313,6 @@ class Cubitopia {
 
   // ===================== END GRASS SYSTEM =====================
 
-  private handleBuildWall(unit: Unit, wallPos: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${wallPos.q},${wallPos.r}`;
-    if (this.wallsBuilt.has(key)) return;
-
-    if (this.stoneStockpile[unit.owner] < 1) return;
-
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    // Allow on any terrain except forest (trees) and mountain — water allowed for damming
-    if (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.MOUNTAIN) return;
-    if (this.isTileOccupied(key)) return;
-
-    // Don't build on stockpile locations
-    for (const [sKey] of this.resourceManager.stockpileMeshes) {
-      const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
-      if (base) {
-        const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
-        const stockR = base.position.r;
-        if (wallPos.q === stockQ && Math.abs(wallPos.r - stockR) <= 1) return;
-      }
-    }
-
-    // Consume stone
-    this.stoneStockpile[unit.owner] -= 1;
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-
-    this.wallsBuilt.add(key);
-    this.wallOwners.set(key, unit.owner);
-    this.wallHealth.set(key, Cubitopia.WALL_MAX_HP);
-    this.buildingSystem.wallConnectable.add(key);
-
-    // If built on water, convert tile to plains (dam) and remove water visuals
-    if (this.isWaterTerrain(tile.terrain)) {
-      tile.terrain = TerrainType.PLAINS;
-      // Remove water mesh for this tile
-      this.terrainDecorator.removeWater(key);
-      // Rebuild voxel shell so the wall has solid ground under it
-      this.rebuildTileShell(wallPos);
-      this.voxelBuilder.rebuildFromMap(this.currentMap);
-    }
-
-    // Sync with UnitAI for wall attacks
-    UnitAI.wallsBuilt.add(key);
-    UnitAI.wallOwners.set(key, unit.owner);
-
-    // Remove blueprint ghost
-    this.removeBlueprintGhost(wallPos);
-
-    // Block pathfinding
-    Pathfinder.blockedTiles.add(key);
-
-    // Build adaptive wall mesh and rebuild neighbors to connect
-    this.buildAdaptiveWallMesh(wallPos, unit.owner);
-
-    // Rebuild all neighbor wall meshes so they grow connectors toward this new wall
-    const neighbors = Pathfinder.getHexNeighbors(wallPos);
-    for (const n of neighbors) {
-      const nKey = `${n.q},${n.r}`;
-      if (this.wallsBuilt.has(nKey)) {
-        const nOwner = this.wallOwners.get(nKey) ?? 0;
-        this.buildAdaptiveWallMesh(n, nOwner);
-      }
-    }
-
-    this.resourceManager.updateStockpileVisual(unit.owner);
-  }
-
-  private handleBuildGate(unit: Unit, gatePos: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${gatePos.q},${gatePos.r}`;
-    if (this.gatesBuilt.has(key)) return;
-
-    if (this.stoneStockpile[unit.owner] < 2) return; // Gates cost 2 stone
-
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    // Allow on any terrain except forest (trees) and mountain — water allowed for damming
-    if (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.MOUNTAIN) return;
-    if (this.isTileOccupied(key)) return;
-
-    // Don't build on stockpile locations
-    for (const [sKey] of this.resourceManager.stockpileMeshes) {
-      const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
-      if (base) {
-        const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
-        const stockR = base.position.r;
-        if (gatePos.q === stockQ && Math.abs(gatePos.r - stockR) <= 1) return;
-      }
-    }
-
-    // Consume 2 stone for gate
-    this.stoneStockpile[unit.owner] -= 2;
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-
-    this.gatesBuilt.add(key);
-    this.gateOwners.set(key, unit.owner);
-    this.gateHealth.set(key, Cubitopia.GATE_MAX_HP);
-    this.buildingSystem.wallConnectable.add(key);
-
-    // If built on water, convert tile to plains (dam) and remove water visuals
-    if (this.isWaterTerrain(tile.terrain)) {
-      tile.terrain = TerrainType.PLAINS;
-      this.terrainDecorator.removeWater(key);
-      this.rebuildTileShell(gatePos);
-      this.voxelBuilder.rebuildFromMap(this.currentMap);
-    }
-
-    // Remove blueprint ghost
-    this.removeBlueprintGhost(gatePos);
-
-    // Gates are added to blockedTiles but will be overridden by Pathfinder for friendly units
-    Pathfinder.blockedTiles.add(key);
-    // Also add to gateTiles so pathfinder knows it's a gate
-    Pathfinder.gateTiles.set(key, unit.owner);
-
-    // Build gate mesh with archway
-    this.buildGateMesh(gatePos, unit.owner);
-
-    // Rebuild all neighbor wall/gate meshes so they connect to this gate
-    const neighbors = Pathfinder.getHexNeighbors(gatePos);
-    for (const n of neighbors) {
-      const nKey = `${n.q},${n.r}`;
-      if (this.wallsBuilt.has(nKey)) {
-        const nOwner = this.wallOwners.get(nKey) ?? 0;
-        this.buildAdaptiveWallMesh(n, nOwner);
-      }
-      // Rebuild adjacent gates so they detect this new neighbor and form wide gate
-      if (this.gatesBuilt.has(nKey)) {
-        const nOwner = this.gateOwners.get(nKey) ?? 0;
-        this.buildGateMesh(n, nOwner);
-      }
-    }
-
-    this.resourceManager.updateStockpileVisual(unit.owner);
-  }
-
-  /** Damage a wall and return true if destroyed */
-  private damageWall(coord: HexCoord, damage: number): boolean {
-    if (!this.currentMap) return false;
-    const key = `${coord.q},${coord.r}`;
-
-    // Get current health
-    const currentHealth = this.wallHealth.get(key) ?? Cubitopia.WALL_MAX_HP;
-    const newHealth = Math.max(0, currentHealth - damage);
-
-    if (newHealth <= 0) {
-      // Wall is destroyed — remove it completely
-      this.wallsBuilt.delete(key);
-      this.wallOwners.delete(key);
-      this.wallHealth.delete(key);
-
-      // Sync with UnitAI
-      UnitAI.wallsBuilt.delete(key);
-      UnitAI.wallOwners.delete(key);
-
-      // Remove wall mesh from scene
-      const mesh = this.wallMeshMap.get(key);
-      if (mesh) {
-        this.renderer.scene.remove(mesh);
-        mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            (child.material as THREE.Material).dispose();
-          }
-        });
-        const idx = this.wallMeshes.indexOf(mesh);
-        if (idx >= 0) this.wallMeshes.splice(idx, 1);
-        this.wallMeshMap.delete(key);
-      }
-
-      // Unblock pathfinding
-      Pathfinder.blockedTiles.delete(key);
-
-      // Remove from connectable registry
-      this.buildingSystem.wallConnectable.delete(key);
-
-      // Rebuild adjacent wall meshes to remove connections
-      const neighbors = Pathfinder.getHexNeighbors(coord);
-      for (const n of neighbors) {
-        const nKey = `${n.q},${n.r}`;
-        if (this.wallsBuilt.has(nKey)) {
-          const nOwner = this.wallOwners.get(nKey) ?? 0;
-          this.buildAdaptiveWallMesh(n, nOwner);
-        }
-      }
-
-      return true;
-    } else {
-      // Wall still has health remaining
-      this.wallHealth.set(key, newHealth);
-      return false;
-    }
-  }
-
-  /** Damage a gate and return true if destroyed */
-  private damageGate(coord: HexCoord, damage: number): boolean {
-    if (!this.currentMap) return false;
-    const key = `${coord.q},${coord.r}`;
-
-    // Get current health
-    const currentHealth = this.gateHealth.get(key) ?? Cubitopia.GATE_MAX_HP;
-    const newHealth = Math.max(0, currentHealth - damage);
-
-    if (newHealth <= 0) {
-      // Gate is destroyed — remove it completely
-      this.gatesBuilt.delete(key);
-      this.gateOwners.delete(key);
-      this.gateHealth.delete(key);
-
-      // Remove gate mesh from scene
-      const mesh = this.gateMeshMap.get(key);
-      if (mesh) {
-        this.renderer.scene.remove(mesh);
-        mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            (child.material as THREE.Material).dispose();
-          }
-        });
-        const idx = this.gateMeshes.indexOf(mesh);
-        if (idx >= 0) this.gateMeshes.splice(idx, 1);
-        this.gateMeshMap.delete(key);
-      }
-
-      // Unblock pathfinding
-      Pathfinder.blockedTiles.delete(key);
-      Pathfinder.gateTiles.delete(key);
-
-      // Remove from connectable registry
-      this.buildingSystem.wallConnectable.delete(key);
-
-      // Rebuild adjacent wall meshes to remove connections
-      const gateNeighbors = Pathfinder.getHexNeighbors(coord);
-      for (const n of gateNeighbors) {
-        const nKey = `${n.q},${n.r}`;
-        if (this.wallsBuilt.has(nKey)) {
-          const nOwner = this.wallOwners.get(nKey) ?? 0;
-          this.buildAdaptiveWallMesh(n, nOwner);
-        }
-      }
-
-      return true;
-    } else {
-      // Gate still has health remaining
-      this.gateHealth.set(key, newHealth);
-      return false;
-    }
-  }
-
-  /** Damage a barracks and return true if destroyed (siege weapons only) */
-  private damageBarracks(coord: HexCoord, damage: number): boolean {
-    const key = `${coord.q},${coord.r}`;
-    const pb = this.buildingSystem.getBuildingAt(coord);
-    if (!pb || pb.kind !== 'barracks') return false;
-
-    pb.health = Math.max(0, pb.health - damage);
-
-    if (pb.health <= 0) {
-      // Barracks destroyed
-      this.buildingSystem.barracksHealth.delete(key);
-      this.buildingSystem.wallConnectable.delete(key);
-      Pathfinder.blockedTiles.delete(key);
-      UnitAI.barracksPositions.delete(pb.owner);
-
-      // Remove mesh & unregister
-      this.buildingSystem.unregisterBuilding(pb);
-
-      // Rebuild adjacent walls
-      const bNeighbors = Pathfinder.getHexNeighbors(coord);
-      for (const n of bNeighbors) {
-        const nKey = `${n.q},${n.r}`;
-        if (this.wallsBuilt.has(nKey)) {
-          this.buildAdaptiveWallMesh(n, this.wallOwners.get(nKey) ?? 0);
-        }
-      }
-      return true;
-    } else {
-      this.buildingSystem.barracksHealth.set(key, pb.health);
-      // Visual damage feedback — darken the mesh slightly
-      const pct = pb.health / pb.maxHealth;
-      if (pct < 0.5) {
-        pb.mesh.traverse((child) => {
-          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-            child.material.color.multiplyScalar(0.98);
-          }
-        });
-      }
-      return false;
-    }
-  }
-
-  /** Build (or rebuild) the wall mesh at a tile — delegates to DefenseMeshFactory */
-  private buildAdaptiveWallMesh(pos: HexCoord, owner: number): void {
-    if (!this.currentMap) return;
-    const key = `${pos.q},${pos.r}`;
-
-    // Remove old mesh if rebuilding
-    const oldMesh = this.wallMeshMap.get(key);
-    if (oldMesh) {
-      this.renderer.scene.remove(oldMesh);
-      oldMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          (child.material as THREE.Material).dispose();
-        }
-      });
-      const idx = this.wallMeshes.indexOf(oldMesh);
-      if (idx >= 0) this.wallMeshes.splice(idx, 1);
-    }
-
-    const wallGroup = createWallMesh({
-      pos, owner,
-      tiles: this.currentMap.tiles,
-      wallConnectable: this.buildingSystem.wallConnectable,
-    });
-    if (!wallGroup) return;
-
-    this.renderer.scene.add(wallGroup);
-    this.wallMeshes.push(wallGroup);
-    this.wallMeshMap.set(key, wallGroup);
-  }
-
-  /** Build gate mesh at a tile — delegates to DefenseMeshFactory */
-  private buildGateMesh(pos: HexCoord, owner: number): void {
-    if (!this.currentMap) return;
-    const key = `${pos.q},${pos.r}`;
-
-    // Remove old mesh if rebuilding
-    const oldMesh = this.gateMeshMap.get(key);
-    if (oldMesh) {
-      this.renderer.scene.remove(oldMesh);
-      oldMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          (child.material as THREE.Material).dispose();
-        }
-      });
-      const idx = this.gateMeshes.indexOf(oldMesh);
-      if (idx >= 0) this.gateMeshes.splice(idx, 1);
-    }
-
-    const gateGroup = createGateMesh({
-      pos, owner,
-      tiles: this.currentMap.tiles,
-      wallConnectable: this.buildingSystem.wallConnectable,
-      gatesBuilt: this.gatesBuilt,
-    });
-    if (!gateGroup) return;
-
-    this.renderer.scene.add(gateGroup);
-    this.gateMeshes.push(gateGroup);
-    this.gateMeshMap.set(key, gateGroup);
-  }
 
   private placeBarracks(coord: HexCoord): void {
     if (!this.currentMap) return;
@@ -3713,7 +3337,7 @@ class Cubitopia {
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
     const mesh = this.buildingSystem.buildBarracksMesh(coord, 0);
-    this.buildingSystem.registerBuilding('barracks', 0, coord, mesh, Cubitopia.BARRACKS_MAX_HP);
+    this.buildingSystem.registerBuilding('barracks', 0, coord, mesh, WallSystem.BARRACKS_MAX_HP);
     UnitAI.barracksPositions.set(0, coord);
 
     this.barracksPlaceMode = false;

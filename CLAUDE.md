@@ -158,7 +158,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently ~4748 lines, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules.
+Shrink `src/main.ts` (currently ~4372 lines, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -183,13 +183,18 @@ We use two patterns depending on the code being extracted:
 | Spawn queue dedup | ~67 | Data-driven config array |
 | `AIController.ts` wiring | ~649 | Stateful subsystem (AIBuildingOps interface) |
 | `BuildingSystem.ts` wiring | ~231 | Stateful subsystem (wall rebuild callback) |
+| `WallSystem.ts` wiring | ~376 | Stateful subsystem (WallSystemOps interface) |
 
-### Next Extraction Targets (priority order)
-1. **WallSystem wiring** (~743 lines)
-   - Already extracted to `WallSystem.ts` but not wired in
+### All Pre-Extracted Modules Now Wired
+No remaining files to wire. Future extractions will target new code regions.
 
-### Files Already Extracted (not yet wired)
-- `src/game/systems/WallSystem.ts` (743 lines)
+### WallSystem Integration Notes
+- Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
+- Uses `WallSystemOps` interface for callbacks to main.ts (stockpile checks, blueprint removal, voxel rebuild, resource display)
+- Delegates mesh creation to DefenseMeshFactory pure functions
+- Gets `wallConnectable` from BuildingSystem via `ops.getWallConnectable()`
+- `wallSystem.cleanup()` handles full state + mesh reset
+- Constants: `WallSystem.WALL_MAX_HP`, `WallSystem.GATE_MAX_HP`, `WallSystem.BARRACKS_MAX_HP`
 
 ### BuildingSystem Integration Notes
 - Owns building registry (`placedBuildings`), `wallConnectable`, `barracksHealth`, `buildingSpawnIndex`
