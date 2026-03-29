@@ -25,6 +25,8 @@ import AIController from './game/systems/AIController';
 import type { AIBuildingOps } from './game/systems/AIController';
 import BuildingTooltipController from './game/systems/BuildingTooltipController';
 import type { TooltipOps } from './game/systems/BuildingTooltipController';
+import BlueprintSystem from './game/systems/BlueprintSystem';
+import type { BlueprintOps } from './game/systems/BlueprintSystem';
 import {
   EngineConfig,
   CameraConfig,
@@ -105,6 +107,7 @@ class Cubitopia {
   private wallSystem!: WallSystem;
   private aiController!: AIController;
   private tooltipController!: BuildingTooltipController;
+  private blueprintSystem!: BlueprintSystem;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -218,22 +221,22 @@ class Cubitopia {
           // Walls connect automatically — no manual rotation
         } else if (this.barracksPlaceMode) {
           this.barracksRotation = this.barracksRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.barracksRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.barracksRotation;
         } else if (this.forestryPlaceMode) {
           this.forestryRotation = this.forestryRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.forestryRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.forestryRotation;
         } else if (this.masonryPlaceMode) {
           this.masonryRotation = this.masonryRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.masonryRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.masonryRotation;
         } else if (this.farmhousePlaceMode) {
           this.farmhouseRotation = this.farmhouseRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.farmhouseRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.farmhouseRotation;
         } else if (this.siloPlaceMode) {
           this.siloRotation = this.siloRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.siloRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.siloRotation;
         } else if (this.workshopPlaceMode) {
           this.workshopRotation = this.workshopRotation === 0 ? Math.PI / 2 : 0;
-          if (this.hoverGhost) this.hoverGhost.rotation.y = this.workshopRotation;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.workshopRotation;
         }
       }
       if (e.key === 'g' || e.key === 'G') this.resourceManager.doSellWood();
@@ -261,7 +264,7 @@ class Cubitopia {
                              this.forestryPlaceMode || this.masonryPlaceMode ||
                              this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode;
       if (!inPlacementMode || !this.currentMap) {
-        this.clearHoverGhost();
+        this.blueprintSystem.clearHoverGhost();
         return;
       }
 
@@ -277,7 +280,7 @@ class Cubitopia {
       // Try multiple elevation planes to handle elevated terrain (forests, mountains)
       const hexCoord = this.raycastToHex(raycaster);
       if (!hexCoord) {
-        this.clearHoverGhost();
+        this.blueprintSystem.clearHoverGhost();
         return;
       }
 
@@ -290,13 +293,13 @@ class Cubitopia {
         ? (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.MOUNTAIN)
         : (tile && (tile.terrain === TerrainType.PLAINS || tile.terrain === TerrainType.DESERT));
       if (!tile || !terrainOk || Pathfinder.blockedTiles.has(key)) {
-        this.clearHoverGhost();
+        this.blueprintSystem.clearHoverGhost();
         return;
       }
 
       // Skip redundant updates
-      if (this.lastHoverKey === key) return;
-      this.lastHoverKey = key;
+      if (this.blueprintSystem.lastHoverKey === key) return;
+      this.blueprintSystem.lastHoverKey = key;
 
       // Create or move the hover ghost
       const worldX = hexCoord.q * 1.5;
@@ -304,11 +307,11 @@ class Cubitopia {
       const baseY = this.getElevation(hexCoord);
 
       // Remove old ghost and rebuild (geometry may differ per mode)
-      if (this.hoverGhost) {
-        this.clearHoverGhost();
+      if (this.blueprintSystem.hoverGhost) {
+        this.blueprintSystem.clearHoverGhost();
       }
 
-      this.hoverGhost = new THREE.Group();
+      this.blueprintSystem.hoverGhost = new THREE.Group();
       const ghostMat = new THREE.MeshBasicMaterial({
         color: 0x3498db, transparent: true, opacity: 0.25, depthWrite: false,
       });
@@ -318,13 +321,13 @@ class Cubitopia {
         const pillarGeo = new THREE.BoxGeometry(0.55, 2.0, 0.55);
         const pillar = new THREE.Mesh(pillarGeo, ghostMat);
         pillar.position.y = 1.0;
-        this.hoverGhost.add(pillar);
+        this.blueprintSystem.hoverGhost.add(pillar);
 
         // Show connector previews to adjacent walls/blueprints
         const neighbors = Pathfinder.getHexNeighbors(hexCoord);
         for (const n of neighbors) {
           const nKey = `${n.q},${n.r}`;
-          if (!this.wallSystem.wallsBuilt.has(nKey) && !this.blueprintGhosts.has(nKey)) continue;
+          if (!this.wallSystem.wallsBuilt.has(nKey) && !this.blueprintSystem.blueprintGhosts.has(nKey)) continue;
           const nWorldX = n.q * 1.5;
           const nWorldZ = n.r * 1.5 + (n.q % 2 === 1 ? 0.75 : 0);
           const dx = nWorldX - worldX;
@@ -335,18 +338,18 @@ class Cubitopia {
           const seg = new THREE.Mesh(segGeo, ghostMat);
           seg.position.set(dx / 4, 0.7, dz / 4);
           seg.rotation.y = -angle;
-          this.hoverGhost.add(seg);
+          this.blueprintSystem.hoverGhost.add(seg);
         }
       } else {
         // Standard box ghost for other placement modes
         const ghostGeo = new THREE.BoxGeometry(1.45, 1.6, 0.5);
         const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
         ghostMesh.position.y = 0.8;
-        this.hoverGhost.add(ghostMesh);
+        this.blueprintSystem.hoverGhost.add(ghostMesh);
       }
 
-      this.renderer.scene.add(this.hoverGhost);
-      this.hoverGhost.position.set(worldX, baseY, worldZ);
+      this.renderer.scene.add(this.blueprintSystem.hoverGhost);
+      this.blueprintSystem.hoverGhost.position.set(worldX, baseY, worldZ);
 
       // Get the current rotation based on placement mode (walls don't rotate)
       let rotation = 0;
@@ -357,7 +360,7 @@ class Cubitopia {
       else if (this.siloPlaceMode) rotation = this.siloRotation;
       else if (this.workshopPlaceMode) rotation = this.workshopRotation;
 
-      this.hoverGhost.rotation.y = rotation;
+      this.blueprintSystem.hoverGhost.rotation.y = rotation;
     });
 
     // Build/Harvest/Barracks/Forestry/Masonry/Farm mode: click on tiles to place
@@ -396,7 +399,7 @@ class Cubitopia {
       const hexCoord = this.raycastToHex(raycaster);
       if (hexCoord) {
         if (this.wallBuildMode) {
-          this.toggleWallBlueprint(hexCoord);
+          this.blueprintSystem.toggleWallBlueprint(hexCoord);
         } else if (this.barracksPlaceMode) {
           this.placeGenericBuilding('barracks', hexCoord);
         } else if (this.forestryPlaceMode) {
@@ -513,8 +516,8 @@ class Cubitopia {
       // Use mine-specific raycast for side-face detection in mine mode
       const hex = this.mineMode ? this.mouseToMineHex(e, canvasEl) : this.mouseToHex(e, canvasEl);
       if (hex) {
-        if (this.harvestMode) this.paintHarvestTile(hex);
-        else if (this.farmPatchMode) this.paintFarmPatch(hex);
+        if (this.harvestMode) this.blueprintSystem.paintHarvestTile(hex);
+        else if (this.farmPatchMode) this.blueprintSystem.paintFarmPatch(hex);
         else if (this.plantTreeMode) this.paintPlantTree(hex);
         else if (this.wallBuildMode) {
           // First click determines drag mode: if tile already has blueprint, drag = erase
@@ -523,17 +526,17 @@ class Cubitopia {
           if (e.shiftKey) {
             // Shift+click: place gate instead
             if (mineEraseMode) {
-              this.removeWallBlueprint(hex);
+              this.blueprintSystem.removeWallBlueprint(hex);
             } else {
-              this.paintGateBlueprint(hex);
+              this.blueprintSystem.paintGateBlueprint(hex);
               lastDragHex = hex;
             }
           } else {
             // Normal click: place wall
             if (mineEraseMode) {
-              this.removeWallBlueprint(hex);
+              this.blueprintSystem.removeWallBlueprint(hex);
             } else {
-              this.paintWallBlueprint(hex);
+              this.blueprintSystem.paintWallBlueprint(hex);
               lastDragHex = hex;
             }
           }
@@ -543,9 +546,9 @@ class Cubitopia {
           const key = `${hex.q},${hex.r}`;
           mineEraseMode = UnitAI.playerMineBlueprint.has(key);
           if (mineEraseMode) {
-            this.unpaintMineTile(hex);
+            this.blueprintSystem.unpaintMineTile(hex);
           } else {
-            this.paintMineTile(hex);
+            this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
           }
         }
       }
@@ -554,22 +557,22 @@ class Cubitopia {
       if (!paintDragging) return;
       const hex = this.mineMode ? this.mouseToMineHex(e, canvasEl) : this.mouseToHex(e, canvasEl);
       if (hex) {
-        if (this.harvestMode) this.paintHarvestTile(hex);
-        else if (this.farmPatchMode) this.paintFarmPatch(hex);
+        if (this.harvestMode) this.blueprintSystem.paintHarvestTile(hex);
+        else if (this.farmPatchMode) this.blueprintSystem.paintFarmPatch(hex);
         else if (this.plantTreeMode) this.paintPlantTree(hex);
         else if (this.wallBuildMode) {
           if (mineEraseMode) {
-            this.removeWallBlueprint(hex);
+            this.blueprintSystem.removeWallBlueprint(hex);
           } else if (e.shiftKey) {
             // Gate drag: trace hex-neighbor path from last gate to target
             if (lastDragHex) {
               const path = traceHexPath(lastDragHex, hex);
               for (const step of path) {
-                this.paintGateBlueprint(step);
+                this.blueprintSystem.paintGateBlueprint(step);
               }
               if (path.length > 0) lastDragHex = path[path.length - 1];
             } else {
-              this.paintGateBlueprint(hex);
+              this.blueprintSystem.paintGateBlueprint(hex);
               lastDragHex = hex;
             }
           } else {
@@ -577,20 +580,20 @@ class Cubitopia {
             if (lastDragHex) {
               const path = traceHexPath(lastDragHex, hex);
               for (const step of path) {
-                this.paintWallBlueprint(step);
+                this.blueprintSystem.paintWallBlueprint(step);
               }
               if (path.length > 0) lastDragHex = path[path.length - 1];
             } else {
-              this.paintWallBlueprint(hex);
+              this.blueprintSystem.paintWallBlueprint(hex);
               lastDragHex = hex;
             }
           }
         }
         else if (this.mineMode) {
           if (mineEraseMode) {
-            this.unpaintMineTile(hex);
+            this.blueprintSystem.unpaintMineTile(hex);
           } else {
-            this.paintMineTile(hex);
+            this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
           }
         }
       }
@@ -757,312 +760,16 @@ class Cubitopia {
     return clickedCoord;
   }
 
-  /** Paint a single harvest tile (additive only during drag — no toggle) */
-  private paintHarvestTile(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile || tile.terrain !== TerrainType.FOREST) return;
-    if (UnitAI.playerHarvestBlueprint.has(key)) return; // Already marked
-    UnitAI.playerHarvestBlueprint.add(key);
-    this.addHarvestMarker(coord);
-  }
+  // paintHarvestTile → moved to BlueprintSystem
 
-  /** Paint a farm patch on cleared plains */
-  private paintFarmPatch(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile || tile.terrain !== TerrainType.PLAINS) return;
-    if (Pathfinder.blockedTiles.has(key)) return;
+  // paintFarmPatch → moved to BlueprintSystem
 
-    // If tall grass (stage >= 2), mark for villager grass harvesting
-    const grassStage = this.grassAge.get(key);
-    if (grassStage !== undefined && grassStage >= 2) {
-      if (UnitAI.playerGrassBlueprint.has(key)) return; // Already marked
-      UnitAI.playerGrassBlueprint.add(key);
-      this.addFarmPatchMarker(coord); // Reuse farm markers visually
-      return;
-    }
-
-    // Otherwise mark as farm patch
-    if (UnitAI.farmPatches.has(key)) return; // Already a farm
-    if (this.farmPatchMarkers.has(key)) return;
-    UnitAI.farmPatches.add(key);
-    this.addFarmPatchMarker(coord);
-  }
-
-  private toggleWallBlueprint(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    // Validate: place on any non-water, non-forest, non-mountain, unoccupied terrain
-    if (this.isWaterTerrain(tile.terrain) || tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.MOUNTAIN) return;
-    if (this.isTileOccupied(key)) return;
-
-    const added = UnitAI.addBlueprint(coord);
-
-    if (added) {
-      // Show a ghost indicator on this tile
-      this.addBlueprintGhost(coord);
-    } else {
-      // Remove ghost indicator
-      this.removeBlueprintGhost(coord);
-    }
-  }
-
-  /** Paint a wall blueprint (additive only during drag — no toggle) */
-  private paintWallBlueprint(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-    // Allow water (damming) — only block forest and mountain
-    if (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.MOUNTAIN) return;
-    if (this.isTileOccupied(key)) return;
-    if (UnitAI.playerWallBlueprint.has(key)) return; // Already blueprinted
-    if (UnitAI.playerGateBlueprint.has(key)) return; // Don't overlap with gate blueprints
-    if (this.wallSystem.wallsBuilt.has(key)) return; // Already built
-
-    UnitAI.addBlueprint(coord);
-    this.addBlueprintGhost(coord);
-  }
-
-  /** Remove a wall blueprint during erase drag */
-  private removeWallBlueprint(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    if (UnitAI.playerWallBlueprint.has(key)) {
-      UnitAI.playerWallBlueprint.delete(key);
-      this.removeBlueprintGhost(coord);
-    }
-    if (UnitAI.playerGateBlueprint.has(key)) {
-      UnitAI.playerGateBlueprint.delete(key);
-      this.removeBlueprintGhost(coord);
-    }
-  }
-
-  private paintGateBlueprint(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-    if (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.MOUNTAIN) return;
-    if (this.isTileOccupied(key)) return;
-    if (UnitAI.playerGateBlueprint.has(key)) return; // Already blueprinted
-    if (UnitAI.playerWallBlueprint.has(key)) return; // Don't overlap with walls
-    if (this.wallSystem.gatesBuilt.has(key)) return; // Already built
-    if (this.wallSystem.wallsBuilt.has(key)) return; // Don't overlap with walls
-
-    UnitAI.addGateBlueprint(coord);
-    this.addBlueprintGhost(coord);
-  }
-
-  private clearHoverGhost(): void {
-    if (this.hoverGhost) {
-      this.renderer.scene.remove(this.hoverGhost);
-      this.hoverGhost.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.hoverGhost = null;
-    }
-    this.lastHoverKey = '';
-  }
-
-  private addBlueprintGhost(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    if (this.blueprintGhosts.has(key)) return;
-
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(coord);
-
-    // Transparent blue-tinted ghost wall pillar
-    const ghostGeo = new THREE.BoxGeometry(0.55, 2.0, 0.55);
-    const ghostMat = new THREE.MeshBasicMaterial({
-      color: 0x3498db,
-      transparent: true,
-      opacity: 0.3,
-      wireframe: false,
-      depthWrite: false,
-    });
-    const ghost = new THREE.Mesh(ghostGeo, ghostMat);
-    ghost.position.set(worldX, baseY + 1.0, worldZ);
-    ghost.name = `ghost_${key}`;
-    this.renderer.scene.add(ghost);
-    this.blueprintGhosts.set(key, ghost);
-  }
-
-  private removeBlueprintGhost(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    const ghost = this.blueprintGhosts.get(key);
-    if (ghost) {
-      this.renderer.scene.remove(ghost);
-      ghost.geometry.dispose();
-      (ghost.material as THREE.Material).dispose();
-      this.blueprintGhosts.delete(key);
-    }
-  }
-
-  private clearAllBlueprintGhosts(): void {
-    for (const [, ghost] of this.blueprintGhosts) {
-      this.renderer.scene.remove(ghost);
-      ghost.geometry.dispose();
-      (ghost.material as THREE.Material).dispose();
-    }
-    this.blueprintGhosts.clear();
-  }
-
-  // --- Harvest Blueprint ---
-
-  private toggleHarvestBlueprint(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    // Only mark forest tiles for harvesting
-    if (tile.terrain !== TerrainType.FOREST) return;
-
-    const added = UnitAI.addHarvestBlueprint(coord);
-
-    if (added) {
-      this.addHarvestMarker(coord);
-    } else {
-      this.removeHarvestMarker(coord);
-    }
-  }
-
-  private addHarvestMarker(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    if (this.harvestMarkers.has(key)) return;
-
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(coord);
-
-    // Green-tinted ring around the tree to show it's marked
-    const ringGeo = new THREE.RingGeometry(0.5, 0.7, 6);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x4caf50,
-      transparent: true,
-      opacity: 0.6,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(worldX, baseY + 0.05, worldZ);
-    ring.name = `harvest_${key}`;
-    this.renderer.scene.add(ring);
-    this.harvestMarkers.set(key, ring);
-  }
-
-  private removeHarvestMarker(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    const marker = this.harvestMarkers.get(key);
-    if (marker) {
-      this.renderer.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
-      this.harvestMarkers.delete(key);
-    }
-  }
-
-  private clearAllHarvestMarkers(): void {
-    for (const [, marker] of this.harvestMarkers) {
-      this.renderer.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
-    }
-    this.harvestMarkers.clear();
-  }
-
-  // --- Mine Mode (paint-select like harvest) ---
-
-  private paintMineTile(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-    // Builders can mine ANY terrain except water bodies (ocean, river, lake)
-    if (this.isWaterTerrain(tile.terrain)) return;
-    if (tile.elevation <= Cubitopia.MAX_MINE_DEPTH) return; // Can't mine at max depth
-    if (UnitAI.playerMineBlueprint.has(key)) return;
-    // Calculate target elevation: current elevation minus depth layers
-    const targetElev = Math.max(Cubitopia.MAX_MINE_DEPTH, tile.elevation - this.mineDepthLayers);
-    UnitAI.playerMineBlueprint.set(key, targetElev);
-    this.addMineMarker(coord, this.mineDepthLayers);
-  }
-
-  /** Remove mine marker — deselect a tile from mining queue */
-  private unpaintMineTile(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    if (!UnitAI.playerMineBlueprint.has(key)) return;
-    UnitAI.playerMineBlueprint.delete(key);
-    UnitAI.claimedMines.delete(key);
-    this.removeMineMarker(coord);
-  }
+  // Wall/harvest/mine blueprint methods → moved to BlueprintSystem
 
   /** Adjust mine depth with scroll wheel while in mine mode */
   adjustMineDepth(delta: number): void {
-    this.mineDepthLayers = Math.max(1, Math.min(20, this.mineDepthLayers + delta));
-    this.hud.setMineMode(true, this.mineDepthLayers);
-  }
-
-  private addMineMarker(coord: HexCoord, depthLayers: number = 1): void {
-    const key = `${coord.q},${coord.r}`;
-    // Remove existing marker if re-marking
-    if (this.mineMarkers.has(key)) {
-      this.removeMineMarker(coord);
-    }
-
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(coord);
-
-    // Orange-tinted ring to show tile is marked for mining
-    // Ring gets thicker/brighter for deeper mining targets
-    const innerRadius = 0.5 - Math.min(0.15, depthLayers * 0.015);
-    const ringGeo = new THREE.RingGeometry(innerRadius, 0.7, 6);
-    const brightness = Math.min(1.0, 0.5 + depthLayers * 0.05);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(1.0, brightness * 0.55, 0),
-      transparent: true,
-      opacity: Math.min(0.85, 0.5 + depthLayers * 0.03),
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(worldX, baseY + 0.05, worldZ);
-    ring.name = `mine_${key}`;
-    this.renderer.scene.add(ring);
-    this.mineMarkers.set(key, ring);
-  }
-
-  private removeMineMarker(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    const marker = this.mineMarkers.get(key);
-    if (marker) {
-      this.renderer.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
-      this.mineMarkers.delete(key);
-    }
-  }
-
-  private clearAllMineMarkers(): void {
-    for (const [, marker] of this.mineMarkers) {
-      this.renderer.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
-    }
-    this.mineMarkers.clear();
+    this.blueprintSystem.adjustMineDepth(delta);
+    this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers);
   }
 
   private toggleMineMode(): void {
@@ -1070,7 +777,7 @@ class Cubitopia {
     const wasActive = this.mineMode;
     this.clearAllModes();
     this.mineMode = !wasActive;
-    this.hud.setMineMode(this.mineMode, this.mineDepthLayers);
+    this.hud.setMineMode(this.mineMode, this.blueprintSystem.mineDepthLayers);
     canvasEl.style.cursor = this.mineMode ? 'crosshair' : 'default';
     StrategyCamera.suppressLeftDrag = this.mineMode;
     SelectionManager.suppressBoxSelect = this.mineMode;
@@ -1149,7 +856,7 @@ class Cubitopia {
     if (UnitAI.isMineComplete(key, tile.elevation)) {
       UnitAI.playerMineBlueprint.delete(key);
       UnitAI.claimedMines.delete(key);
-      this.removeMineMarker(minePos);
+      this.blueprintSystem.removeMineMarker(minePos);
     } else {
       // Release claim so the worker re-acquires it next idle tick (keeps mining)
       UnitAI.claimedMines.delete(key);
@@ -1542,7 +1249,7 @@ class Cubitopia {
         }
         return false;
       },
-      removeBlueprintGhost: (coord) => this.removeBlueprintGhost(coord),
+      removeBlueprintGhost: (coord) => this.blueprintSystem.removeBlueprintGhost(coord),
       rebuildTileShell: (coord) => this.rebuildTileShell(coord),
       rebuildVoxels: () => { if (this.currentMap) this.voxelBuilder.rebuildFromMap(this.currentMap); },
       updateResourceDisplay: (owner) => {
@@ -1584,6 +1291,14 @@ class Cubitopia {
       getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
+
+    // Blueprint system manages all visual markers (wall ghosts, harvest, mine, farm patches)
+    const blueprintOps: BlueprintOps = {
+      isTileOccupied: (key) => this.isTileOccupied(key),
+      isWaterTerrain: (terrain) => this.isWaterTerrain(terrain),
+      getGrassAge: (key) => this.grassAge.get(key),
+    };
+    this.blueprintSystem = new BlueprintSystem(ctx, blueprintOps);
   }
 
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
@@ -1665,7 +1380,7 @@ class Cubitopia {
     this.clearAllModes();
     this.wallBuildMode = !wasActive;
     this.hud.setBuildMode(this.wallBuildMode);
-    if (!this.wallBuildMode) this.clearHoverGhost();
+    if (!this.wallBuildMode) this.blueprintSystem.clearHoverGhost();
     canvasEl.style.cursor = this.wallBuildMode ? 'crosshair' : 'default';
     // Suppress camera pan and box-select during wall paint mode
     StrategyCamera.suppressLeftDrag = this.wallBuildMode;
@@ -1776,13 +1491,13 @@ class Cubitopia {
     this.rallyPointSetMode = false;
     this.rallyPointBuilding = null;
 
-    this.clearAllBlueprintGhosts();
-    this.clearHoverGhost();
+    this.blueprintSystem.clearAllBlueprintGhosts();
+    this.blueprintSystem.clearHoverGhost();
     UnitAI.clearBlueprints();
     UnitAI.clearHarvestBlueprints();
     UnitAI.barracksPositions.clear();
-    this.clearAllHarvestMarkers();
-    this.clearAllMineMarkers();
+    this.blueprintSystem.clearAllHarvestMarkers();
+    this.blueprintSystem.clearAllMineMarkers();
     this.wallBuildMode = false;
     this.harvestMode = false;
     this.barracksPlaceMode = false;
@@ -1820,7 +1535,7 @@ class Cubitopia {
     this.workshopSpawnQueue = [];
     this.workshopSpawnTimer = 0;
     this.workshopPlaceMode = false;
-    this.clearAllFarmPatchMarkers();
+    // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
     UnitAI.playerGrassBlueprint.clear();
     UnitAI.claimedFarms.clear();
@@ -2675,21 +2390,11 @@ class Cubitopia {
   private woodStockpile: number[] = [0, 0]; // [player0, player1]
   // Wall/gate state is managed by WallSystem (this.wallSystem)
 
-  // --- Wall Build Mode ---
+  // --- Build/Harvest/Mine Modes (visual markers in BlueprintSystem) ---
   private wallBuildMode = false;
-  private blueprintGhosts: Map<string, THREE.Mesh> = new Map();
   private wallRotation = 0; // 0 or Math.PI/2
-  private hoverGhost: THREE.Group | null = null;
-  private lastHoverKey = '';
-
-  // --- Harvest Mode ---
   private harvestMode = false;
-  private harvestMarkers: Map<string, THREE.Mesh> = new Map();
-
-  // --- Mine Mode ---
   private mineMode = false;
-  private mineDepthLayers = 3; // How many layers to dig (1-20), adjustable with scroll wheel
-  private mineMarkers: Map<string, THREE.Mesh> = new Map();
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
 
   // --- Tree Regrowth & Growth System ---
@@ -2807,7 +2512,6 @@ class Cubitopia {
   private siloPlaceMode = false;
   private siloRotation = 0;
   private farmPatchMode = false;
-  private farmPatchMarkers: Map<string, THREE.Mesh> = new Map();
   private foodStockpile: number[] = [0, 0]; // [player0, player1]
   private plantTreeMode = false;
   private plantCropsMode = false;
@@ -2852,7 +2556,7 @@ class Cubitopia {
     this.terrainDecorator.removeDecoration(treePos);
 
     // Remove harvest marker if it exists
-    this.removeHarvestMarker(treePos);
+    this.blueprintSystem.removeHarvestMarker(treePos);
 
     // Start regrowth timer for this tile
     this.treeRegrowthTimers.set(key, this.TREE_REGROW_TIME);
@@ -2878,7 +2582,7 @@ class Cubitopia {
 
     // Remove grass visual and reset to short stage
     this.terrainDecorator.removeGrassClump(key);
-    this.removeHarvestMarker(pos);
+    this.blueprintSystem.removeHarvestMarker(pos);
 
     // Hay yield: 2-3 food per tall grass tile
     const hayYield = 2 + Math.floor(Math.random() * 2);
@@ -3393,7 +3097,7 @@ class Cubitopia {
     this.rallyPointSetMode = false;
     this.rallyPointBuilding = null;
     this.hud.setRallyPointMode(false);
-    this.clearHoverGhost();
+    this.blueprintSystem.clearHoverGhost();
     this.tooltipController.hideTooltip();
     // Reset drag suppression flags
     StrategyCamera.suppressLeftDrag = false;
@@ -3402,38 +3106,7 @@ class Cubitopia {
 
   // placeFarmhouse, placeSilo → now handled by placeGenericBuilding
 
-  private addFarmPatchMarker(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    if (this.farmPatchMarkers.has(key)) return;
-
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(coord);
-
-    // Brown plowed earth square
-    const patchGeo = new THREE.PlaneGeometry(1.2, 1.2);
-    const patchMat = new THREE.MeshLambertMaterial({
-      color: 0x8b6914,
-      transparent: true,
-      opacity: 0.7,
-      side: THREE.DoubleSide,
-    });
-    const patch = new THREE.Mesh(patchGeo, patchMat);
-    patch.rotation.x = -Math.PI / 2;
-    patch.position.set(worldX, baseY + 0.03, worldZ);
-    patch.name = `farm_${key}`;
-    this.renderer.scene.add(patch);
-    this.farmPatchMarkers.set(key, patch);
-  }
-
-  private clearAllFarmPatchMarkers(): void {
-    for (const [, marker] of this.farmPatchMarkers) {
-      this.renderer.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
-    }
-    this.farmPatchMarkers.clear();
-  }
+  // addFarmPatchMarker, clearAllFarmPatchMarkers → moved to BlueprintSystem
 
   // doSpawnQueueFarmhouse → now handled by doSpawnQueueGeneric('farmhouse', ...)
 
@@ -3784,18 +3457,8 @@ class Cubitopia {
     UnitAI.farmPatches.add(key);
     this.clearedPlains.add(key);
 
-    // Add visual marker (brown tilled soil look)
-    if (!this.farmPatchMarkers.has(key)) {
-      const markerGeo = new THREE.PlaneGeometry(1.2, 1.2);
-      const markerMat = new THREE.MeshLambertMaterial({ color: 0x5d4037, transparent: true, opacity: 0.6 });
-      const marker = new THREE.Mesh(markerGeo, markerMat);
-      marker.rotation.x = -Math.PI / 2;
-      const wp = this.hexToWorld(coord);
-      const elev = this.getElevation(coord);
-      marker.position.set(wp.x, elev + 0.02, wp.z);
-      this.renderer.scene.add(marker);
-      this.farmPatchMarkers.set(key, marker);
-    }
+    // Add visual marker
+    this.blueprintSystem.addFarmPatchMarker(coord);
   }
 
   /** Check if terrain is any water type (ocean, river, lake, or waterfall) */
