@@ -18,6 +18,8 @@ import { Pathfinder } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
 import ResourceManager from './game/systems/ResourceManager';
+import AIController from './game/systems/AIController';
+import type { AIBuildingOps } from './game/systems/AIController';
 import {
   buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
   buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh
@@ -68,42 +70,7 @@ const CAMERA_CONFIG: CameraConfig = {
   zoomSpeed: 1.0,
 };
 
-// --- AI Build State ---
-
-interface AIBuildState {
-  barracks: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  forestry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  masonry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  farmhouse: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  workshop: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  silo: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  meshes: THREE.Group[];
-  spawnQueue: { type: UnitType; cost: number }[];
-  workerSpawnQueue: { type: UnitType; building: string }[];
-  spawnTimer: number;
-  workerSpawnTimer: number;
-  econTimer: number;
-  cmdTimer: number;
-  autoMarchTimer: number;
-  battleStarted: boolean;
-  armySize: number;
-  waveNumber: number;
-  mustering: boolean;
-  rallyTimer: number;
-  buildPhase: number; // 0=forestry, 1=barracks, 2=masonry, 3=farmhouse, 4=workshop, 5=silo, 6=done
-  tacticsTimer: number;
-  guardAssignments: Map<string, HexCoord>; // unitId → guard post position
-}
-
-function createAIBuildState(): AIBuildState {
-  return {
-    barracks: null, forestry: null, masonry: null, farmhouse: null, workshop: null, silo: null,
-    meshes: [], spawnQueue: [], workerSpawnQueue: [], spawnTimer: 0, workerSpawnTimer: 0,
-    econTimer: -10, cmdTimer: 0, autoMarchTimer: 0, battleStarted: false,
-    armySize: 0, waveNumber: 0, mustering: true, rallyTimer: 0, buildPhase: 0,
-    tacticsTimer: 0, guardAssignments: new Map(),
-  };
-}
+// --- AI Build State is managed by AIController (this.aiController.aiState) ---
 
 // --- Placed Building Registry ---
 
@@ -151,6 +118,7 @@ class Cubitopia {
   private debugOverlayContainer: HTMLElement | null = null;
   private debugOverlayLabels: Map<string, HTMLElement> = new Map();
   private resourceManager!: ResourceManager;
+  private aiController!: AIController;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -1571,6 +1539,19 @@ class Cubitopia {
   private initSystems(): void {
     const ctx = this.buildGameContext();
     this.resourceManager = new ResourceManager(ctx);
+
+    // Build adapter for AI building operations (delegates to main.ts methods)
+    const buildOps: AIBuildingOps = {
+      aiFindBuildTile: (bq, br, oq, or_) => this.aiFindBuildTile(bq, br, oq, or_),
+      buildForestryMesh: (pos, owner) => this.buildForestryMesh(pos, owner),
+      buildBarracksMesh: (pos, owner) => this.buildBarracksMesh(pos, owner),
+      buildMasonryMesh: (pos, owner) => this.buildMasonryMesh(pos, owner),
+      buildFarmhouseMesh: (pos, owner) => this.buildFarmhouseMesh(pos, owner),
+      buildWorkshopMesh: (pos, owner) => this.buildWorkshopMesh(pos, owner),
+      buildSiloMesh: (pos, owner) => this.buildSiloMesh(pos, owner),
+      registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.registerBuilding(kind, owner, pos, mesh, maxHealth),
+    };
+    this.aiController = new AIController(ctx, buildOps);
   }
 
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
@@ -1906,7 +1887,7 @@ class Cubitopia {
     this.grassGrowthTimers.clear();
     this.grassSpreadTimer = 0;
     // Clean up AI building meshes for both players
-    for (const st of this.aiState) {
+    for (const st of this.aiController.aiState) {
       for (const mesh of st.meshes) {
         this.renderer.scene.remove(mesh);
         mesh.traverse((child) => {
@@ -1917,11 +1898,7 @@ class Cubitopia {
         });
       }
     }
-    this.aiState = [createAIBuildState(), createAIBuildState()];
-    this.aiBarracksMesh = null;
-    this.aiSpawnQueue = [];
-    this.aiSpawnTimer = 0;
-    this.aiEconTimer = -15;
+    this.aiController.cleanup();
     if (this.barracksMesh) {
       this.renderer.scene.remove(this.barracksMesh);
       this.barracksMesh.traverse((child) => {
@@ -2440,8 +2417,8 @@ class Cubitopia {
     }));
 
     // Add AI queues for all players
-    for (let pid = 0; pid < this.aiState.length; pid++) {
-      const st = this.aiState[pid];
+    for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
+      const st = this.aiController.aiState[pid];
       const label = this.players.length > 1 ? `P${pid + 1} ` : '';
       // AI combat queue (barracks)
       if (st.spawnQueue.length > 0) {
@@ -2626,17 +2603,17 @@ class Cubitopia {
     // AI commander: periodically issue orders (skip if disableAI)
     if (!this.hud.debugFlags.disableAI) {
       // Player 2 (always AI)
-      this.updateSmartAICommander(1, delta);
-      this.updateSmartAIEconomy(1, delta);
-      this.updateSmartAISpawnQueue(1, delta);
-      this.updateSmartAITactics(1, delta);
+      this.aiController.updateSmartAICommander(1, delta);
+      this.aiController.updateSmartAIEconomy(1, delta);
+      this.aiController.updateSmartAISpawnQueue(1, delta);
+      this.aiController.updateSmartAITactics(1, delta);
 
       // Player 1 AI (only in AI vs AI mode)
       if (this.gameMode === 'aivai') {
-        this.updateSmartAICommander(0, delta);
-        this.updateSmartAIEconomy(0, delta);
-        this.updateSmartAISpawnQueue(0, delta);
-        this.updateSmartAITactics(0, delta);
+        this.aiController.updateSmartAICommander(0, delta);
+        this.aiController.updateSmartAIEconomy(0, delta);
+        this.aiController.updateSmartAISpawnQueue(0, delta);
+        this.aiController.updateSmartAITactics(0, delta);
       }
     }
 
@@ -3174,16 +3151,8 @@ class Cubitopia {
   // --- Formation state ---
   private selectedFormation: FormationType = FormationType.BOX;
 
-  // --- AI Economy State (shared structure for both AIs) ---
-  private aiState: [AIBuildState, AIBuildState] = [createAIBuildState(), createAIBuildState()];
-
-  // Legacy aliases for P2 AI (backward compat)
-  private get aiBarracks() { return this.aiState[1].barracks; }
-  private set aiBarracks(v) { this.aiState[1].barracks = v; }
-  private aiBarracksMesh: THREE.Group | null = null;
-  private aiSpawnQueue: { type: UnitType; cost: number }[] = [];
-  private aiSpawnTimer = 0;
-  private aiEconTimer = -15;
+  // AI state is managed by AIController (this.aiController.aiState)
+  // AI meshes are tracked in aiController.aiState[pid].meshes
 
   // Building mesh factories are in BuildingMeshFactory.ts
   // Thin wrappers delegate to imported functions
@@ -3226,575 +3195,6 @@ class Cubitopia {
     }
     return null;
   }
-
-  /** Generalized AI economy — builds all buildings and queues diverse units for any player */
-  private updateSmartAIEconomy(ownerId: number, delta: number): void {
-    if (!this.currentMap) return;
-    const st = this.aiState[ownerId];
-    st.econTimer += delta;
-    if (st.econTimer < 3) return; // Check every 3 seconds
-    st.econTimer = 0;
-
-    const player = this.players[ownerId];
-    if (!player) return;
-    const base = this.bases.find(b => b.owner === ownerId);
-    if (!base) return;
-
-    const wood = this.woodStockpile[ownerId];
-    const food = this.foodStockpile[ownerId];
-    const stone = this.stoneStockpile[ownerId];
-    const gold = player.resources.gold;
-    const toward = ownerId === 0 ? 3 : -3; // Direction toward center
-
-    // Count existing worker types
-    const lumberjacks = player.units.filter(u => u.type === UnitType.LUMBERJACK).length;
-    const builders = player.units.filter(u => u.type === UnitType.BUILDER).length;
-    const villagers = player.units.filter(u => u.type === UnitType.VILLAGER).length;
-
-    // --- PHASE 0: Build Forestry (need wood income) ---
-    if (st.buildPhase === 0) {
-      if (!st.forestry && wood >= 8) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, toward, -2);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 8;
-          player.resources.wood -= 8;
-          const mesh = this.buildForestryMesh(pos, ownerId);
-          const pb = this.registerBuilding('forestry', ownerId, pos, mesh);
-          st.forestry = { position: pos, worldPosition: pb.worldPosition };
-          st.meshes.push(mesh);
-        }
-      }
-      if (st.forestry) st.buildPhase = 1;
-    }
-
-    // --- PHASE 1: Build Barracks (need army) ---
-    if (st.buildPhase === 1) {
-      if (!st.barracks && wood >= 10) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, toward, 0);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 10;
-          player.resources.wood -= 10;
-          const mesh = this.buildBarracksMesh(pos, ownerId);
-          const pb = this.registerBuilding('barracks', ownerId, pos, mesh, Cubitopia.BARRACKS_MAX_HP);
-          st.barracks = { position: pos, worldPosition: pb.worldPosition };
-          UnitAI.barracksPositions.set(ownerId, pos);
-          st.meshes.push(mesh);
-          if (ownerId === 1) { this.aiBarracksMesh = mesh; }
-        }
-      }
-      if (st.barracks) st.buildPhase = 2;
-    }
-
-    // --- PHASE 2: Build Masonry (need stone/walls) ---
-    if (st.buildPhase === 2) {
-      if (!st.masonry && wood >= 10) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, toward, 2);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 10;
-          player.resources.wood -= 10;
-          const mesh = this.buildMasonryMesh(pos, ownerId);
-          const pb = this.registerBuilding('masonry', ownerId, pos, mesh);
-          st.masonry = { position: pos, worldPosition: pb.worldPosition };
-          st.meshes.push(mesh);
-        }
-      }
-      if (st.masonry) st.buildPhase = 3;
-    }
-
-    // --- PHASE 3: Build Farmhouse (need food) ---
-    if (st.buildPhase === 3) {
-      if (!st.farmhouse && wood >= 8) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, 0, toward);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 8;
-          player.resources.wood -= 8;
-          const mesh = this.buildFarmhouseMesh(pos, ownerId);
-          const pb = this.registerBuilding('farmhouse', ownerId, pos, mesh);
-          st.farmhouse = { position: pos, worldPosition: pb.worldPosition };
-          UnitAI.farmhousePositions.set(ownerId, pos);
-          st.meshes.push(mesh);
-        }
-      }
-      if (st.farmhouse) st.buildPhase = 4;
-    }
-
-    // --- PHASE 4: Build Workshop (need siege) ---
-    if (st.buildPhase === 4) {
-      if (!st.workshop && wood >= 15 && stone >= 5) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, toward * 2, 0);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 15;
-          this.stoneStockpile[ownerId] -= 5;
-          player.resources.wood -= 15;
-          player.resources.stone -= 5;
-          const mesh = this.buildWorkshopMesh(pos, ownerId);
-          const pb = this.registerBuilding('workshop', ownerId, pos, mesh);
-          st.workshop = { position: pos, worldPosition: pb.worldPosition };
-          st.meshes.push(mesh);
-        }
-      }
-      if (st.workshop) st.buildPhase = 5;
-    }
-
-    // --- PHASE 5: Build Silo ---
-    if (st.buildPhase === 5) {
-      if (!st.silo && wood >= 6) {
-        const pos = this.aiFindBuildTile(base.position.q, base.position.r, 0, -toward);
-        if (pos) {
-          this.woodStockpile[ownerId] -= 6;
-          player.resources.wood -= 6;
-          const mesh = this.buildSiloMesh(pos, ownerId);
-          const pb = this.registerBuilding('silo', ownerId, pos, mesh);
-          st.silo = { position: pos, worldPosition: pb.worldPosition };
-          UnitAI.siloPositions.set(ownerId, pos);
-          st.meshes.push(mesh);
-        }
-      }
-      if (st.silo) st.buildPhase = 6;
-    }
-
-    // --- ONGOING: Sell excess wood for gold ---
-    if (st.barracks && this.woodStockpile[ownerId] >= 15) {
-      this.woodStockpile[ownerId] -= 4;
-      player.resources.wood -= 4;
-      player.resources.gold += 5;
-    }
-
-    // --- ONGOING: Queue workers if we need them ---
-    if (st.forestry && lumberjacks < 4 && st.workerSpawnQueue.length < 2) {
-      st.workerSpawnQueue.push({ type: UnitType.LUMBERJACK, building: 'forestry' });
-    }
-    if (st.masonry && builders < 3 && st.workerSpawnQueue.length < 2) {
-      st.workerSpawnQueue.push({ type: UnitType.BUILDER, building: 'masonry' });
-    }
-    if (st.farmhouse && villagers < 3 && st.workerSpawnQueue.length < 2) {
-      st.workerSpawnQueue.push({ type: UnitType.VILLAGER, building: 'farmhouse' });
-    }
-
-    // --- ONGOING: Queue combat units (diverse composition) ---
-    const maxQueue = Math.min(3 + st.waveNumber, 8);
-    if (st.barracks && gold >= 5 && st.spawnQueue.length < maxQueue) {
-      const roll = Math.random();
-      const wave = st.waveNumber;
-      if (st.workshop && wave >= 3 && roll < 0.1) {
-        // Siege: trebuchet from workshop (special cost)
-        st.spawnQueue.push({ type: UnitType.TREBUCHET, cost: 15 });
-      } else if (wave >= 2 && roll < 0.25 && gold >= 10) {
-        st.spawnQueue.push({ type: UnitType.RIDER, cost: 10 });
-      } else if (roll < 0.45 && gold >= 8) {
-        st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-      } else if (roll < 0.55 && gold >= 6) {
-        st.spawnQueue.push({ type: UnitType.PALADIN, cost: 6 });
-      } else {
-        st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
-      }
-    }
-
-    // --- ONGOING: Direct lumberjacks toward enemy to clear forests ---
-    if (lumberjacks >= 2) {
-      const enemyBase = this.bases.find(b => b.owner !== ownerId && !b.destroyed);
-      if (enemyBase) {
-        const idleLumberjacks = player.units.filter(u =>
-          u.type === UnitType.LUMBERJACK && u.state === UnitState.IDLE
-        );
-        // Send some lumberjacks toward enemy to clear a path
-        for (let i = 0; i < Math.min(idleLumberjacks.length, 2); i++) {
-          const lj = idleLumberjacks[i];
-          // Find nearest forest tile between us and enemy
-          const dirQ = enemyBase.position.q > base.position.q ? 1 : -1;
-          let bestForest: HexCoord | null = null;
-          let bestDist = Infinity;
-          for (let dq = 0; dq < 15; dq++) {
-            for (let dr = -5; dr <= 5; dr++) {
-              const q = lj.position.q + dq * dirQ;
-              const r = lj.position.r + dr;
-              const key = `${q},${r}`;
-              const tile = this.currentMap!.tiles.get(key);
-              if (tile && tile.terrain === TerrainType.FOREST) {
-                const dist = Math.abs(q - lj.position.q) + Math.abs(r - lj.position.r);
-                if (dist < bestDist) {
-                  bestDist = dist;
-                  bestForest = { q, r };
-                }
-              }
-            }
-          }
-          if (bestForest) {
-            UnitAI.commandMove(lj, bestForest, this.currentMap!);
-          }
-        }
-      }
-    }
-  }
-
-  /** Generalized AI spawn queue — spawns combat + worker units for any player */
-  private updateSmartAISpawnQueue(ownerId: number, delta: number): void {
-    if (!this.currentMap) return;
-    const st = this.aiState[ownerId];
-    const player = this.players[ownerId];
-    if (!player) return;
-
-    // Combat unit spawning from barracks
-    if (st.barracks && st.spawnQueue.length > 0) {
-      st.spawnTimer += delta;
-      if (st.spawnTimer >= 5) {
-        st.spawnTimer = 0;
-        const next = st.spawnQueue[0];
-        if (player.resources.gold >= next.cost) {
-          player.resources.gold -= next.cost;
-          st.spawnQueue.shift();
-          const spawnFrom = next.type === UnitType.TREBUCHET && st.workshop ? st.workshop : st.barracks;
-          const pos = this.findSpawnTile(this.currentMap!, spawnFrom.position.q, spawnFrom.position.r, true);
-          const unit = UnitFactory.create(next.type, ownerId, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          player.units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          if (ownerId === 0) this.selectionManager.setPlayerUnits(this.allUnits, 0);
-        }
-      }
-    }
-
-    // Worker unit spawning from respective buildings
-    if (st.workerSpawnQueue.length > 0) {
-      st.workerSpawnTimer += delta;
-      if (st.workerSpawnTimer >= 4) {
-        st.workerSpawnTimer = 0;
-        const next = st.workerSpawnQueue[0];
-        const building = next.building === 'forestry' ? st.forestry :
-                         next.building === 'masonry' ? st.masonry :
-                         next.building === 'farmhouse' ? st.farmhouse : null;
-        if (building) {
-          st.workerSpawnQueue.shift();
-          const pos = this.findSpawnTile(this.currentMap!, building.position.q, building.position.r, true);
-          const unit = UnitFactory.create(next.type, ownerId, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          player.units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          if (ownerId === 0) this.selectionManager.setPlayerUnits(this.allUnits, 0);
-        }
-      }
-    }
-  }
-
-  /** Generalized AI commander — wave attacks for any player */
-  private updateSmartAICommander(ownerId: number, delta: number): void {
-    if (!this.currentMap) return;
-    const MAP_SIZE = 50;
-    const centerQ = Math.floor(MAP_SIZE / 2);
-    const centerR = Math.floor(MAP_SIZE / 2);
-    const st = this.aiState[ownerId];
-
-    st.autoMarchTimer += delta;
-    if (!st.battleStarted && st.autoMarchTimer >= 3) st.battleStarted = true;
-    if (!st.battleStarted) return;
-
-    st.cmdTimer += delta;
-    if (st.cmdTimer < 3) return;
-    st.cmdTimer = 0;
-
-    const player = this.players[ownerId];
-    if (!player) return;
-
-    const enemyBase = this.bases.find(b => b.owner !== ownerId && !b.destroyed);
-
-    const combatUnits = player.units.filter(u =>
-      u.type !== UnitType.BUILDER && u.type !== UnitType.LUMBERJACK && u.type !== UnitType.VILLAGER
-    );
-    const idleCombat = combatUnits.filter(u => u.state === UnitState.IDLE);
-    st.armySize = idleCombat.length;
-
-    const minArmySize = Math.min(3 + st.waveNumber, 6);
-
-    if (st.mustering && st.armySize >= minArmySize) {
-      st.mustering = false;
-      st.waveNumber++;
-
-      const archerCount = idleCombat.filter(u => u.type === UnitType.ARCHER).length;
-      const totalCount = idleCombat.length;
-      let formation: FormationType;
-      if (archerCount > totalCount * 0.5) formation = FormationType.LINE;
-      else if (totalCount >= 5) formation = FormationType.WEDGE;
-      else formation = FormationType.BOX;
-
-      let targetCenter: HexCoord;
-      if (enemyBase) {
-        const approachQ = enemyBase.position.q + (enemyBase.position.q < centerQ ? 3 : -3);
-        targetCenter = { q: approachQ, r: enemyBase.position.r };
-      } else {
-        targetCenter = { q: centerQ, r: centerR };
-      }
-
-      const sortedCombat = [...idleCombat].sort((a, b) =>
-        this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
-      );
-      const formationSlots = this.generateFormationTyped(targetCenter, sortedCombat.length, formation);
-
-      for (let i = 0; i < sortedCombat.length; i++) {
-        sortedCombat[i].stance = UnitStance.AGGRESSIVE;
-        (sortedCombat[i] as any)._postPosition = null; // Clear defensive post
-        st.guardAssignments.delete(sortedCombat[i].id); // Release guard duty
-        UnitAI.commandMove(sortedCombat[i], formationSlots[i] || targetCenter, this.currentMap!);
-      }
-
-    } else if (!st.mustering) {
-      const totalCombat = combatUnits.length;
-      const idleRatio = totalCombat > 0 ? idleCombat.length / totalCombat : 1;
-      if (idleRatio > 0.6 || totalCombat <= 2) st.mustering = true;
-
-      for (const unit of idleCombat) {
-        const enemy = UnitAI.findNearestEnemy(unit, this.allUnits, ownerId);
-        if (enemy) {
-          UnitAI.commandAttack(unit, enemy.position, enemy.id, this.currentMap!);
-        } else if (enemyBase) {
-          const surroundTile = this.findSurroundTile(enemyBase, unit);
-          UnitAI.commandMove(unit, surroundTile, this.currentMap!);
-        }
-      }
-    } else {
-      st.rallyTimer += 3;
-      if (st.rallyTimer >= 8) {
-        st.rallyTimer = 0;
-        if (st.barracks) {
-          const rallyQ = st.barracks.position.q + (st.barracks.position.q > centerQ ? -2 : 2);
-          const rallyPos: HexCoord = { q: rallyQ, r: st.barracks.position.r };
-          for (const unit of idleCombat) {
-            if (Pathfinder.heuristic(unit.position, rallyPos) > 3) {
-              unit.stance = UnitStance.DEFENSIVE;
-              UnitAI.commandMove(unit, rallyPos, this.currentMap!);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * AI Tactical layer — assigns guards to protect workers, buildings, and choke points.
-   * Runs on a slower tick (every ~8s) so it doesn't thrash assignments.
-   */
-  private updateSmartAITactics(ownerId: number, delta: number): void {
-    if (!this.currentMap) return;
-    const st = this.aiState[ownerId];
-    const player = this.players[ownerId];
-    if (!player) return;
-
-    st.tacticsTimer += delta;
-    if (st.tacticsTimer < 8) return; // Re-evaluate every 8 seconds
-    st.tacticsTimer = 0;
-
-    const base = this.bases.find(b => b.owner === ownerId && !b.destroyed);
-    if (!base) return;
-
-    // Collect all combat units and workers
-    const combatUnits = player.units.filter(u =>
-      u.state !== UnitState.DEAD &&
-      (u.type === UnitType.WARRIOR || u.type === UnitType.PALADIN ||
-       u.type === UnitType.ARCHER || u.type === UnitType.RIDER)
-    );
-    const workers = player.units.filter(u =>
-      u.state !== UnitState.DEAD &&
-      (u.type === UnitType.BUILDER || u.type === UnitType.LUMBERJACK || u.type === UnitType.VILLAGER)
-    );
-
-    // Don't assign guards if army is too small — need everyone for offense
-    if (combatUnits.length < 4) {
-      // Release all guard assignments
-      for (const [uid] of st.guardAssignments) {
-        const u = combatUnits.find(c => c.id === uid);
-        if (u && u.stance === UnitStance.DEFENSIVE && u.state === UnitState.IDLE) {
-          u.stance = UnitStance.AGGRESSIVE;
-        }
-      }
-      st.guardAssignments.clear();
-      return;
-    }
-
-    // Clean up dead/missing guard assignments
-    for (const [uid] of st.guardAssignments) {
-      const u = player.units.find(c => c.id === uid);
-      if (!u || u.state === UnitState.DEAD) {
-        st.guardAssignments.delete(uid);
-      }
-    }
-
-    // --- Decide how many guards we can afford ---
-    const maxGuards = Math.min(Math.floor(combatUnits.length * 0.3), 4); // Up to 30% of army, max 4
-    const currentGuards = st.guardAssignments.size;
-
-    if (currentGuards >= maxGuards) return; // Already have enough guards
-
-    // --- Identify guard posts (prioritized) ---
-    const guardPosts: { pos: HexCoord; priority: number; label: string }[] = [];
-
-    // 1. Choke points between bases — narrow passages flanked by mountains/water/forest
-    const enemyBase = this.bases.find(b => b.owner !== ownerId && !b.destroyed);
-    if (enemyBase) {
-      const chokePoint = this.findChokePoint(base.position, enemyBase.position);
-      if (chokePoint) {
-        guardPosts.push({ pos: chokePoint, priority: 3, label: 'choke' });
-      }
-    }
-
-    // 2. Near worker clusters — find the centroid of workers far from base
-    const farWorkers = workers.filter(w => Pathfinder.heuristic(w.position, base.position) > 5);
-    if (farWorkers.length >= 2) {
-      const avgQ = Math.round(farWorkers.reduce((s, w) => s + w.position.q, 0) / farWorkers.length);
-      const avgR = Math.round(farWorkers.reduce((s, w) => s + w.position.r, 0) / farWorkers.length);
-      guardPosts.push({ pos: { q: avgQ, r: avgR }, priority: 2, label: 'workers' });
-    }
-
-    // 2b. Lone worker near enemy territory — escort duty
-    if (enemyBase) {
-      const midQ = Math.round((base.position.q + enemyBase.position.q) / 2);
-      const loneWorkers = workers.filter(w => {
-        const distToEnemy = Pathfinder.heuristic(w.position, enemyBase!.position);
-        const distToMid = Math.abs(w.position.q - midQ);
-        return distToMid < 5 || distToEnemy < 10; // Near the front line
-      });
-      for (const lw of loneWorkers.slice(0, 1)) { // Max 1 escort post for lone workers
-        const alreadyEscorted = [...st.guardAssignments.values()].some(
-          gp => Pathfinder.heuristic(gp, lw.position) <= 3
-        );
-        if (!alreadyEscorted) {
-          guardPosts.push({ pos: { ...lw.position }, priority: 2, label: 'escort' });
-        }
-      }
-    }
-
-    // 3. Near key buildings (forestry, farmhouse, silo) — resource economy
-    const buildingsToGuard: { position: HexCoord }[] = [];
-    if (st.forestry) buildingsToGuard.push(st.forestry);
-    if (st.farmhouse) buildingsToGuard.push(st.farmhouse);
-    if (st.silo) buildingsToGuard.push(st.silo);
-    for (const bld of buildingsToGuard) {
-      // Only guard if no existing guard nearby
-      const alreadyGuarded = [...st.guardAssignments.values()].some(
-        gp => Pathfinder.heuristic(gp, bld.position) <= 3
-      );
-      if (!alreadyGuarded) {
-        guardPosts.push({ pos: bld.position, priority: 1, label: 'building' });
-      }
-    }
-
-    // Sort by priority (highest first)
-    guardPosts.sort((a, b) => b.priority - a.priority);
-
-    // --- Assign unguarded posts to available idle combat units ---
-    const alreadyGuarding = new Set(st.guardAssignments.keys());
-    const availableUnits = combatUnits.filter(u =>
-      u.state === UnitState.IDLE &&
-      u.stance !== UnitStance.DEFENSIVE &&
-      !alreadyGuarding.has(u.id)
-    );
-
-    // Prefer paladins and warriors for guard duty (tanky)
-    availableUnits.sort((a, b) => {
-      const prioA = a.type === UnitType.PALADIN ? 0 : a.type === UnitType.WARRIOR ? 1 : 2;
-      const prioB = b.type === UnitType.PALADIN ? 0 : b.type === UnitType.WARRIOR ? 1 : 2;
-      return prioA - prioB;
-    });
-
-    for (const post of guardPosts) {
-      if (st.guardAssignments.size >= maxGuards) break;
-      if (availableUnits.length === 0) break;
-
-      // Check if this post is already close to an existing guard
-      const alreadyCovered = [...st.guardAssignments.values()].some(
-        gp => Pathfinder.heuristic(gp, post.pos) <= 2
-      );
-      if (alreadyCovered) continue;
-
-      const guard = availableUnits.shift()!;
-      guard.stance = UnitStance.DEFENSIVE;
-      UnitAI.commandMove(guard, post.pos, this.currentMap!);
-      st.guardAssignments.set(guard.id, post.pos);
-    }
-
-    // --- Re-position existing guards whose post has drifted (escort duty follows workers) ---
-    for (const [uid, postPos] of st.guardAssignments) {
-      const guard = player.units.find(c => c.id === uid);
-      if (!guard || guard.state !== UnitState.IDLE) continue;
-      const distToPost = Pathfinder.heuristic(guard.position, postPos);
-      if (distToPost > 4) {
-        // Guard has drifted from post — re-send them
-        UnitAI.commandMove(guard, postPos, this.currentMap!);
-      }
-    }
-
-    // --- Release guards from posts that are no longer needed (e.g., building destroyed) ---
-    // If a guard has been at their post idle for a while and there's a wave mustering, recall them
-    if (!st.mustering) {
-      // During attack waves, pull guards back to join the fight
-      for (const [uid] of st.guardAssignments) {
-        const u = player.units.find(c => c.id === uid);
-        if (u && u.state === UnitState.IDLE && u.stance === UnitStance.DEFENSIVE) {
-          // Keep guards at high-priority posts (choke points), release lower priority ones
-          const postPos = st.guardAssignments.get(uid)!;
-          const isChokeGuard = enemyBase && this.findChokePoint(base.position, enemyBase.position)
-            && Pathfinder.heuristic(postPos, this.findChokePoint(base.position, enemyBase.position)!) <= 2;
-          if (!isChokeGuard && combatUnits.length <= 6) {
-            // Army is thin, recall this guard for the wave
-            u.stance = UnitStance.AGGRESSIVE;
-            st.guardAssignments.delete(uid);
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Find a choke point between two positions — a narrow passage where terrain
-   * forces units through a small gap. Scans tiles along the midline and scores
-   * them by how many adjacent blocked/impassable tiles there are.
-   */
-  private findChokePoint(from: HexCoord, to: HexCoord): HexCoord | null {
-    if (!this.currentMap) return null;
-    // Sample tiles along the line from 'from' to 'to', biased toward the midpoint
-    const steps = 20;
-    let bestTile: HexCoord | null = null;
-    let bestScore = 0; // Higher = more choke-like
-
-    for (let i = 3; i < steps - 3; i++) {
-      const t = i / steps;
-      const q = Math.round(from.q + (to.q - from.q) * t);
-      const r = Math.round(from.r + (to.r - from.r) * t);
-      const key = `${q},${r}`;
-      const tile = this.currentMap.tiles.get(key);
-      if (!tile || tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.MOUNTAIN) continue;
-      if (Pathfinder.blockedTiles.has(key)) continue;
-
-      // Count impassable neighbors — more blocked neighbors = narrower passage
-      const neighbors = Pathfinder.getHexNeighbors({ q, r });
-      let blockedCount = 0;
-      for (const n of neighbors) {
-        const nKey = `${n.q},${n.r}`;
-        const nTile = this.currentMap.tiles.get(nKey);
-        if (!nTile || nTile.terrain === TerrainType.WATER || nTile.terrain === TerrainType.MOUNTAIN
-            || nTile.terrain === TerrainType.FOREST || Pathfinder.blockedTiles.has(nKey)
-            || (nTile.elevation >= 8)) {
-          blockedCount++;
-        }
-      }
-
-      // Prefer tiles with 2-4 blocked neighbors (genuine choke) closer to the midpoint
-      const midBonus = 1 - Math.abs(t - 0.4) * 2; // Slight bias toward our side of mid
-      const score = blockedCount * 2 + midBonus;
-      if (blockedCount >= 2 && score > bestScore) {
-        bestScore = score;
-        bestTile = { q, r };
-      }
-    }
-
-    return bestTile;
-  }
-
-  // Legacy wrappers — call the new generalized methods
-  private updateAIEconomy(delta: number): void { this.updateSmartAIEconomy(1, delta); }
-  private updateAISpawnQueue(delta: number): void { this.updateSmartAISpawnQueue(1, delta); }
 
   private handleChopWood(unit: Unit, treePos: HexCoord): void {
     if (!this.currentMap) return;
@@ -4892,47 +4292,6 @@ class Cubitopia {
     }
     this.farmhouseSpawnQueue.push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' wood'})`, '#2ecc71');
-  }
-
-  // Wall orientation is now handled automatically by buildAdaptiveWallMesh()
-
-  /** Find a tile 2 away from the base for the unit to stand on (surround, not enter). */
-  private findSurroundTile(base: Base, unit: Unit): HexCoord {
-    const bq = base.position.q;
-    const br = base.position.r;
-
-    // Ring of tiles at distance 2 from the base
-    const ring: HexCoord[] = [];
-    for (let dq = -2; dq <= 2; dq++) {
-      for (let dr = -2; dr <= 2; dr++) {
-        const dist = Math.abs(dq) + Math.abs(dr);
-        if (dist === 2) {
-          const q = bq + dq;
-          const r = br + dr;
-          const tile = this.currentMap?.tiles.get(`${q},${r}`);
-          if (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.MOUNTAIN) {
-            ring.push({ q, r });
-          }
-        }
-      }
-    }
-
-    if (ring.length === 0) {
-      // Fallback: just go near but not on base
-      return { q: bq + (unit.position.q < bq ? -1 : 1), r: br };
-    }
-
-    // Pick the tile closest to the unit's current position (shortest march)
-    let best = ring[0];
-    let bestDist = Infinity;
-    for (const t of ring) {
-      const d = Math.abs(t.q - unit.position.q) + Math.abs(t.r - unit.position.r);
-      if (d < bestDist) {
-        bestDist = d;
-        best = t;
-      }
-    }
-    return best;
   }
 
   /** Get base tile positions that units should NOT walk onto */

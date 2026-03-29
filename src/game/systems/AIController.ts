@@ -2,6 +2,7 @@
 // AIController - AI Economy, Commander, Tactics
 // ============================================
 
+import * as THREE from 'three';
 import {
   HexCoord,
   GameContext,
@@ -17,16 +18,28 @@ import {
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import { UnitFactory } from '../entities/UnitFactory';
-import type BuildingSystem from './BuildingSystem';
+import type { PlacedBuilding, BuildingKind } from '../../types';
+
+/** Slim interface for the building operations AIController needs */
+export interface AIBuildingOps {
+  aiFindBuildTile(baseQ: number, baseR: number, offsetQ: number, offsetR: number): HexCoord | null;
+  buildForestryMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildBarracksMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildMasonryMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildFarmhouseMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildWorkshopMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildSiloMesh(pos: HexCoord, owner: number): THREE.Group;
+  registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth?: number): PlacedBuilding;
+}
 
 export default class AIController {
   private ctx: GameContext;
-  private buildingSystem: BuildingSystem;
+  private buildOps: AIBuildingOps;
   aiState: [AIBuildState, AIBuildState] = [createAIBuildState(), createAIBuildState()];
 
-  constructor(ctx: GameContext, buildingSystem: BuildingSystem) {
+  constructor(ctx: GameContext, buildOps: AIBuildingOps) {
     this.ctx = ctx;
-    this.buildingSystem = buildingSystem;
+    this.buildOps = buildOps;
   }
 
   // ===================== AI ECONOMY =====================
@@ -55,12 +68,12 @@ export default class AIController {
     // --- PHASE 0: Build Forestry ---
     if (st.buildPhase === 0) {
       if (!st.forestry && wood >= 8) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, toward, -2);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, -2);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 8;
           player.resources.wood -= 8;
-          const mesh = this.buildingSystem.buildForestryMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('forestry', ownerId, pos, mesh);
+          const mesh = this.buildOps.buildForestryMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('forestry', ownerId, pos, mesh);
           st.forestry = { position: pos, worldPosition: pb.worldPosition };
           st.meshes.push(mesh);
         }
@@ -71,12 +84,12 @@ export default class AIController {
     // --- PHASE 1: Build Barracks ---
     if (st.buildPhase === 1) {
       if (!st.barracks && wood >= 10) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, toward, 0);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, 0);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 10;
           player.resources.wood -= 10;
-          const mesh = this.buildingSystem.buildBarracksMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('barracks', ownerId, pos, mesh, 40);
+          const mesh = this.buildOps.buildBarracksMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('barracks', ownerId, pos, mesh, 40);
           st.barracks = { position: pos, worldPosition: pb.worldPosition };
           UnitAI.barracksPositions.set(ownerId, pos);
           st.meshes.push(mesh);
@@ -88,12 +101,12 @@ export default class AIController {
     // --- PHASE 2: Build Masonry ---
     if (st.buildPhase === 2) {
       if (!st.masonry && wood >= 10) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, toward, 2);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, 2);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 10;
           player.resources.wood -= 10;
-          const mesh = this.buildingSystem.buildMasonryMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('masonry', ownerId, pos, mesh);
+          const mesh = this.buildOps.buildMasonryMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('masonry', ownerId, pos, mesh);
           st.masonry = { position: pos, worldPosition: pb.worldPosition };
           st.meshes.push(mesh);
         }
@@ -104,12 +117,12 @@ export default class AIController {
     // --- PHASE 3: Build Farmhouse ---
     if (st.buildPhase === 3) {
       if (!st.farmhouse && wood >= 8) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, 0, toward);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, 0, toward);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 8;
           player.resources.wood -= 8;
-          const mesh = this.buildingSystem.buildFarmhouseMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('farmhouse', ownerId, pos, mesh);
+          const mesh = this.buildOps.buildFarmhouseMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('farmhouse', ownerId, pos, mesh);
           st.farmhouse = { position: pos, worldPosition: pb.worldPosition };
           UnitAI.farmhousePositions.set(ownerId, pos);
           st.meshes.push(mesh);
@@ -121,14 +134,14 @@ export default class AIController {
     // --- PHASE 4: Build Workshop ---
     if (st.buildPhase === 4) {
       if (!st.workshop && wood >= 15 && stone >= 5) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, toward * 2, 0);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward * 2, 0);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 15;
           this.ctx.stoneStockpile[ownerId] -= 5;
           player.resources.wood -= 15;
           player.resources.stone -= 5;
-          const mesh = this.buildingSystem.buildWorkshopMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('workshop', ownerId, pos, mesh);
+          const mesh = this.buildOps.buildWorkshopMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('workshop', ownerId, pos, mesh);
           st.workshop = { position: pos, worldPosition: pb.worldPosition };
           st.meshes.push(mesh);
         }
@@ -139,12 +152,12 @@ export default class AIController {
     // --- PHASE 5: Build Silo ---
     if (st.buildPhase === 5) {
       if (!st.silo && wood >= 6) {
-        const pos = this.buildingSystem.aiFindBuildTile(base.position.q, base.position.r, 0, -toward);
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, 0, -toward);
         if (pos) {
           this.ctx.woodStockpile[ownerId] -= 6;
           player.resources.wood -= 6;
-          const mesh = this.buildingSystem.buildSiloMesh(pos, ownerId);
-          const pb = this.buildingSystem.registerBuilding('silo', ownerId, pos, mesh);
+          const mesh = this.buildOps.buildSiloMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('silo', ownerId, pos, mesh);
           st.silo = { position: pos, worldPosition: pb.worldPosition };
           UnitAI.siloPositions.set(ownerId, pos);
           st.meshes.push(mesh);
