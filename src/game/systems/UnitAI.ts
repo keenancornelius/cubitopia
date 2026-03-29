@@ -92,6 +92,12 @@ export class UnitAI {
         unit.attackCooldown = Math.max(0, unit.attackCooldown - delta);
         unit.gatherCooldown = Math.max(0, unit.gatherCooldown - delta);
 
+        // Healer passive: heal nearby allies every tick
+        if (unit.type === UnitType.HEALER) {
+          const healed = CombatSystem.processHealerTick(unit, allUnits, delta);
+          for (const hid of healed) events.push({ type: 'heal', healerId: unit.id, targetId: hid } as any);
+        }
+
         switch (unit.state) {
           case UnitState.IDLE:
             UnitAI.handleIdle(unit, allUnits, player, map, events);
@@ -179,6 +185,41 @@ export class UnitAI {
   // --- State Handlers ---
 
   private static handleIdle(unit: Unit, allUnits: Unit[], player: Player, map: GameMap, events: UnitEvent[]): void {
+    // --- Healer: seek injured allies and stay near them ---
+    if (unit.type === UnitType.HEALER) {
+      let bestAlly: Unit | null = null;
+      let bestScore = Infinity;
+      for (const ally of allUnits) {
+        if (ally.owner !== unit.owner || ally === unit || ally.currentHealth <= 0) continue;
+        if (ally.currentHealth >= ally.stats.maxHealth) continue;
+        const dist = Pathfinder.heuristic(unit.position, ally.position);
+        const hpRatio = ally.currentHealth / ally.stats.maxHealth;
+        const score = dist + hpRatio * 5; // Prioritize low HP + close
+        if (score < bestScore) { bestScore = score; bestAlly = ally; }
+      }
+      if (bestAlly) {
+        const dist = Pathfinder.heuristic(unit.position, bestAlly.position);
+        if (dist > unit.stats.range) {
+          UnitAI.commandMove(unit, bestAlly.position, map);
+        }
+      } else {
+        // No injured allies — follow nearest combat unit
+        let nearestCombat: Unit | null = null;
+        let nearestDist = Infinity;
+        for (const ally of allUnits) {
+          if (ally.owner !== unit.owner || ally === unit || ally.currentHealth <= 0) continue;
+          if (ally.type === UnitType.HEALER || ally.type === UnitType.BUILDER ||
+              ally.type === UnitType.LUMBERJACK || ally.type === UnitType.VILLAGER) continue;
+          const d = Pathfinder.heuristic(unit.position, ally.position);
+          if (d < nearestDist) { nearestDist = d; nearestCombat = ally; }
+        }
+        if (nearestCombat && nearestDist > 3) {
+          UnitAI.commandMove(unit, nearestCombat.position, map);
+        }
+      }
+      return;
+    }
+
     // --- Worker units: flee from nearby enemies, then do their jobs ---
     if (unit.type === UnitType.BUILDER || unit.type === UnitType.LUMBERJACK || unit.type === UnitType.VILLAGER) {
       // FLEE CHECK: if an enemy is within 3 tiles, run away toward own base
@@ -1660,10 +1701,13 @@ export class UnitAI {
     if (unit.type === UnitType.ARCHER && dist <= 2 && target.stats.range <= 1 && map) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
-        const result = CombatSystem.resolve(unit, target);
+        const result = CombatSystem.resolve(unit, target, allUnits);
         CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
         events.push({ type: 'combat', attacker: unit, defender: target, result });
+        // Battlemage AoE splash
+        const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
+        for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
           events.push({ type: 'unit:killed', unit: target, killer: unit });
@@ -1689,11 +1733,14 @@ export class UnitAI {
     if (dist <= unit.stats.range) {
       // In range — attack if cooldown is ready
       if (unit.attackCooldown <= 0) {
-        const result = CombatSystem.resolve(unit, target);
+        const result = CombatSystem.resolve(unit, target, allUnits);
         CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
 
         events.push({ type: 'combat', attacker: unit, defender: target, result });
+        // Battlemage AoE splash
+        const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
+        for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
 
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
@@ -1775,13 +1822,18 @@ export class UnitAI {
   /** Get detection range for a unit type — how far it can "see" threats */
   private static getDetectionRange(unit: Unit): number {
     switch (unit.type) {
-      case UnitType.ARCHER:    return 6;  // Archers see far
-      case UnitType.PALADIN:  return 5;  // Paladins have wide aggro
-      case UnitType.SCOUT:     return 7;
-      case UnitType.RIDER:     return 4;
-      case UnitType.TREBUCHET: return 7;
-      case UnitType.CATAPULT:  return 5;
-      default:                 return 4;  // Warriors etc.
+      case UnitType.ARCHER:       return 6;
+      case UnitType.PALADIN:     return 5;
+      case UnitType.SCOUT:        return 7;
+      case UnitType.RIDER:        return 4;
+      case UnitType.TREBUCHET:    return 7;
+      case UnitType.CATAPULT:     return 5;
+      case UnitType.HEALER:       return 5;  // Sees allies in need
+      case UnitType.ASSASSIN:     return 6;  // Keen senses
+      case UnitType.SHIELDBEARER: return 3;  // Short range tank
+      case UnitType.BERSERKER:    return 5;  // Sees red
+      case UnitType.BATTLEMAGE:   return 6;  // Ranged caster
+      default:                    return 4;
     }
   }
 

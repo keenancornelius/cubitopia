@@ -32,6 +32,7 @@ import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
 import MenuController from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
+import SoundManager from './engine/SoundManager';
 import type { DebugOps } from './game/systems/DebugController';
 import {
   EngineConfig,
@@ -119,6 +120,7 @@ class Cubitopia {
   private natureSystem!: NatureSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
+  private sound: SoundManager;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -137,6 +139,7 @@ class Cubitopia {
     this.selectionManager.setScene(this.renderer.scene);
     this.hud = new HUD();
     this.clock = new THREE.Clock();
+    this.sound = new SoundManager();
     this.menuController = new MenuController({
       onStartGame: (mode, mapType) => { this.gameMode = mode; this.mapType = mapType; this.startNewGame(); },
       onPlayAgain: () => this.regenerateMap(),
@@ -1778,13 +1781,18 @@ class Cubitopia {
       // Arena mode: large combat armies on opposite sides, aggressive stance
       const arenaCenter = Math.floor(MAP_SIZE / 2);
       const armyDefs: { type: UnitType; count: number }[] = [
-        { type: UnitType.WARRIOR, count: 5 },
-        { type: UnitType.ARCHER, count: 4 },
-        { type: UnitType.RIDER, count: 3 },
+        { type: UnitType.WARRIOR, count: 4 },
+        { type: UnitType.ARCHER, count: 3 },
+        { type: UnitType.RIDER, count: 2 },
         { type: UnitType.PALADIN, count: 2 },
         { type: UnitType.MAGE, count: 2 },
         { type: UnitType.CATAPULT, count: 1 },
-        { type: UnitType.SCOUT, count: 2 },
+        { type: UnitType.SCOUT, count: 1 },
+        { type: UnitType.HEALER, count: 2 },
+        { type: UnitType.ASSASSIN, count: 2 },
+        { type: UnitType.SHIELDBEARER, count: 2 },
+        { type: UnitType.BERSERKER, count: 2 },
+        { type: UnitType.BATTLEMAGE, count: 1 },
       ];
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
         let idx = 0;
@@ -2100,6 +2108,7 @@ class Cubitopia {
 
       if (event.type === 'unit:killed' && event.unit) {
         this.removeUnitFromGame(event.unit, event.killer);
+        this.sound.play('death');
       }
       if (event.type === 'combat' && event.attacker && event.defender && !this.hud.debugFlags.disableCombat) {
         this.unitRenderer.updateHealthBar(event.attacker);
@@ -2109,21 +2118,32 @@ class Cubitopia {
         this.unitRenderer.showDamageEffect(event.defender.worldPosition);
         this.unitRenderer.flashUnit(event.defender.id, 0.15);
 
-        // If attacker is an archer, fire a projectile
-        if (event.attacker.type === UnitType.ARCHER) {
-          this.unitRenderer.fireProjectile(
-            event.attacker.worldPosition,
-            event.defender.worldPosition,
-            0xFF8800 // orange arrow
-          );
-        }
-        // If attacker is a trebuchet or catapult, fire a boulder
+        // Sound effects based on attacker type
         if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
-          this.unitRenderer.fireBoulder(
-            event.attacker.worldPosition,
-            event.defender.worldPosition
-          );
+          this.sound.play('hit_siege');
+        } else if (event.attacker.stats.range > 1) {
+          this.sound.play('hit_ranged');
+        } else if (event.attacker.type === UnitType.ASSASSIN) {
+          this.sound.play('assassin_strike');
+        } else {
+          this.sound.play('hit_melee');
         }
+
+        // Projectile VFX by attacker type
+        if (event.attacker.type === UnitType.ARCHER) {
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800);
+        } else if (event.attacker.type === UnitType.MAGE) {
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9);
+        } else if (event.attacker.type === UnitType.BATTLEMAGE) {
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff);
+          this.sound.play('splash_aoe');
+        } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
+          this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition);
+        }
+      }
+      // Heal events
+      if ((event as any).type === 'heal') {
+        this.sound.play('heal', 0.4);
       }
       if (event.type === 'builder:place_wall' && event.result && !this.hud.debugFlags.disableBuild) {
         // Check if this is a gate or wall blueprint

@@ -179,6 +179,12 @@ export enum UnitType {
   BUILDER = 'builder',
   LUMBERJACK = 'lumberjack',
   VILLAGER = 'villager',
+  // Phase 1 units
+  HEALER = 'healer',
+  ASSASSIN = 'assassin',
+  SHIELDBEARER = 'shieldbearer',
+  BERSERKER = 'berserker',
+  BATTLEMAGE = 'battlemage',
 }
 
 export interface ResourceNode {

@@ -72,6 +72,32 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 1.0, attackSpeed: 0.6, color: 0xdaa520,
     carryCapacity: 5, isSiege: false,
   },
+  // --- Phase 1 units ---
+  [UnitType.HEALER]: {
+    stats: { maxHealth: 7, attack: 0, defense: 2, movement: 2, range: 2 },
+    moveSpeed: 1.1, attackSpeed: 0.0, color: 0x00e676,
+    carryCapacity: 0, isSiege: false,
+  },
+  [UnitType.ASSASSIN]: {
+    stats: { maxHealth: 6, attack: 7, defense: 0, movement: 3, range: 1 },
+    moveSpeed: 2.8, attackSpeed: 1.8, color: 0x4a148c,
+    carryCapacity: 0, isSiege: false,
+  },
+  [UnitType.SHIELDBEARER]: {
+    stats: { maxHealth: 20, attack: 1, defense: 7, movement: 1, range: 1 },
+    moveSpeed: 0.7, attackSpeed: 0.5, color: 0xb0bec5,
+    carryCapacity: 0, isSiege: false,
+  },
+  [UnitType.BERSERKER]: {
+    stats: { maxHealth: 12, attack: 5, defense: 1, movement: 2, range: 1 },
+    moveSpeed: 1.8, attackSpeed: 1.3, color: 0xd50000,
+    carryCapacity: 0, isSiege: false,
+  },
+  [UnitType.BATTLEMAGE]: {
+    stats: { maxHealth: 9, attack: 6, defense: 1, movement: 2, range: 3 },
+    moveSpeed: 1.0, attackSpeed: 0.5, color: 0x7c4dff,
+    carryCapacity: 0, isSiege: false,
+  },
 };
 
 // Backward-compat export — UnitRenderer imports this
