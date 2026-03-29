@@ -1395,49 +1395,63 @@ export class HUD {
               <div class="unit-icon" style="background:#c0392b; font-weight:bold; color:white;">1</div>
               <div>
                 <div class="unit-name" style="color:#c0392b;">Warrior</div>
-                <div class="unit-desc">Melee combat unit. 5 gold. Attacks enemies and auto-patrols.</div>
+                <div class="unit-desc">Melee combat unit. 5 gold. Solid all-round fighter.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#8e44ad; font-weight:bold; color:white;">2</div>
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Archer</div>
-                <div class="unit-desc">Ranged combat unit. 8 gold. Attacks from distance, longer detection range.</div>
+                <div class="unit-desc">Ranged unit. 8 gold. Range 4, kites melee threats. Flees & fires when enemies close in.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#d35400; font-weight:bold; color:white;">3</div>
               <div>
                 <div class="unit-name" style="color:#d35400;">Rider</div>
-                <div class="unit-desc">Fast cavalry unit. 10 gold. Fast movement speed.</div>
+                <div class="unit-desc">Fast cavalry. 10 gold. High speed, great for flanking and pursuit.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#8B4513; font-weight:bold; color:white;">4</div>
+              <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">4</div>
+              <div>
+                <div class="unit-name" style="color:#3498db;">Paladin</div>
+                <div class="unit-desc">Heavy tank. 6 gold. High HP & defense. Ideal for holding choke points.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#8B4513; font-weight:bold; color:white;">L</div>
               <div>
                 <div class="unit-name" style="color:#8B4513;">Lumberjack</div>
-                <div class="unit-desc">Wood harvester. 3 wood. Auto-chops trees and carries wood to stockpile. Use <span class="key" style="font-size:9px;">H</span> to mark.</div>
+                <div class="unit-desc">Wood harvester. 3 wood. Auto-chops marked trees <span class="key" style="font-size:9px;">H</span> and carries wood to stockpile.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#b8860b; font-weight:bold; color:white;">5</div>
+              <div class="unit-icon" style="background:#b8860b; font-weight:bold; color:white;">B</div>
               <div>
                 <div class="unit-name" style="color:#b8860b;">Builder</div>
-                <div class="unit-desc">Stone miner & builder. 3 wood. Mines stone from mountains, clay from sand/desert. Use <span class="key" style="font-size:9px;">N</span> for mining, <span class="key" style="font-size:9px;">B</span> for walls.</div>
+                <div class="unit-desc">Miner & mason. 4 wood. Mines stone/clay <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#daa520; font-weight:bold; color:white;">6</div>
+              <div class="unit-icon" style="background:#daa520; font-weight:bold; color:white;">V</div>
               <div>
                 <div class="unit-name" style="color:#daa520;">Villager</div>
-                <div class="unit-desc">Food harvester. 3 wood. Harvests farms and tall grass for food + grass fiber. Use <span class="key" style="font-size:9px;">J</span> to mark.</div>
+                <div class="unit-desc">Farmer. 3 wood. Harvests farms & tall grass <span class="key" style="font-size:9px;">J</span> for food + grass fiber.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#5d4037; font-weight:bold; color:white;">7</div>
+              <div class="unit-icon" style="background:#8e44ad; font-weight:bold; color:white;">C</div>
+              <div>
+                <div class="unit-name" style="color:#8e44ad;">Catapult</div>
+                <div class="unit-desc">Siege weapon. 3 rope + 3 stone + 3 wood. Range 4, damages walls. Built at Workshop.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#5d4037; font-weight:bold; color:white;">T</div>
               <div>
                 <div class="unit-name" style="color:#795548;">Trebuchet</div>
-                <div class="unit-desc">Heavy siege weapon. 3 rope + 5 stone + 5 wood. Long range, massive damage. Built at Workshop.</div>
+                <div class="unit-desc">Heavy siege. 6 rope + 4 stone + 4 wood. Range 6, massive damage. Built at Workshop.</div>
               </div>
             </div>
           </div>
@@ -1487,7 +1501,7 @@ export class HUD {
             <div>
               <div style="font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Stances</div>
               <div class="tip"><span class="tip-bullet" style="color:#7f8c8d;">●</span> <span><strong style="color:#7f8c8d;">Passive</strong> — Units hold position and never attack, even when hit. Use for scouting or retreat.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><strong style="color:#2980b9;">Defensive</strong> — Units hold position but fight back if enemies enter weapon range. Default stance.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><strong style="color:#2980b9;">Defensive</strong> — Units guard their command position. They chase enemies that enter detection range, then return to post when threats leave. Archers kite melee threats instead of chasing. Default stance.</span></div>
               <div class="tip"><span class="tip-bullet" style="color:#c0392b;">●</span> <span><strong style="color:#c0392b;">Aggressive</strong> — Units actively chase and attack enemies within detection range. Auto-patrols area.</span></div>
             </div>
             <div>
@@ -1512,6 +1526,9 @@ export class HUD {
           <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Your units spread their attacks across multiple enemies instead of all targeting one — fewer wasted hits!</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Archers automatically flee from melee threats and reposition to maintain range advantage.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Destroy the enemy base to win!</span></div>
         </div>
 
