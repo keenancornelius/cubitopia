@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~2998 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces.
+- `src/main.ts` — **Central orchestrator (~3060 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -87,14 +87,16 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/BlueprintSystem.ts` — **Visual markers (~353 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
 - `src/game/systems/FormationSystem.ts` — **Pure formation functions (~155 lines)**. Box, line, wedge, circle formations + hex ring helper + unit priority sorting. No class state.
 - `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~290 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
-- `src/ui/MenuController.ts` — **Main menu & game-over UI (~145 lines)**. Pure DOM manipulation. Uses `MenuCallbacks` interface (onStartGame, onPlayAgain).
+- `src/ui/MenuController.ts` — **Main menu with map selector (~220 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
-- `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
-- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~122 lines)**. Single `UNIT_CONFIG` table per UnitType: stats, moveSpeed, attackSpeed, color, carryCapacity, isSiege. No switch/ternary chains. Adding a unit = adding one config entry.
+- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~145 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, healer tick.
+- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~155 lines)**. Single `UNIT_CONFIG` table per UnitType (16 types). Adding a unit = adding one config entry.
+- `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
+- `src/engine/SoundManager.ts` — **Procedural audio (~220 lines)**. Web Audio API synthesized SFX (14 sounds). Zero asset files. Melee/ranged/siege hits, death, heal, AoE splash, UI sounds.
 - `src/ui/HUD.ts` — All UI: resource panel, build buttons, help overlay, debug panel, spawn queues
-- `src/engine/UnitRenderer.ts` — 3D unit mesh generation, animations, health bars, labels
-- `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, etc.)
+- `src/engine/UnitRenderer.ts` — 3D unit mesh generation, animations, health bars, labels (16 unit meshes)
+- `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
 - `src/engine/Renderer.ts` — Three.js scene setup, lighting
 - `src/engine/Camera.ts` — Camera controls (pan, zoom, rotate)
@@ -129,20 +131,25 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - **Archer kiting:** Archers flee from melee enemies within 2 tiles, fire-then-reposition. Works in both idle and attacking states.
 - **Re-aggro:** Combat units check for threats while moving (attack-move or aggressive stance units redirect to new targets entering detection range)
 
-### Unit Types (current)
-| Type | Enum | Role |
-|------|------|------|
-| Warrior | WARRIOR | Melee DPS |
-| Archer | ARCHER | Ranged (range 4, kites melee) |
-| Rider | RIDER | Fast cavalry |
-| Paladin | PALADIN | Tanky melee (was "Defender", renamed) |
-| Catapult | CATAPULT | Siege, medium range |
-| Trebuchet | TREBUCHET | Siege, long range, slow |
-| Scout | SCOUT | Fast, low damage, recon |
-| Mage | MAGE | Ranged magic |
-| Builder | BUILDER | Mines stone/clay, builds walls |
-| Lumberjack | LUMBERJACK | Chops trees, carries wood |
-| Villager | VILLAGER | Farms, harvests grass |
+### Unit Types (16 total)
+| Type | Enum | Role | Special |
+|------|------|------|---------|
+| Warrior | WARRIOR | Melee DPS | — |
+| Archer | ARCHER | Ranged (range 4) | Kites melee enemies |
+| Rider | RIDER | Fast cavalry | — |
+| Paladin | PALADIN | Tanky melee | — |
+| Catapult | CATAPULT | Siege, medium range | Damages walls |
+| Trebuchet | TREBUCHET | Siege, long range | Damages walls |
+| Scout | SCOUT | Fast recon | — |
+| Mage | MAGE | Ranged magic | Blue projectiles |
+| Builder | BUILDER | Worker | Mines stone/clay, builds walls |
+| Lumberjack | LUMBERJACK | Worker | Chops trees, carries wood |
+| Villager | VILLAGER | Worker | Farms, harvests grass |
+| Healer | HEALER | Support | Auto-heals allies in range 2 (2 HP/1.5s) |
+| Assassin | ASSASSIN | Burst DPS | +3 attack from full HP (ambush) |
+| Shieldbearer | SHIELDBEARER | Tank | +2 defense aura to allies within 2 hex |
+| Berserker | BERSERKER | Melee DPS | Up to +4 attack at low HP (rage) |
+| Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
 
 ---
 
@@ -371,15 +378,15 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - `[READY]` Introduce CommandQueue pattern for input → simulation decoupling (multiplayer prep)
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
 
-### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [READY]
-Make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry. New units:
-- **Healer** — support, restores HP to adjacent allies per turn
-- **Assassin/Rogue** — stealth, high burst damage, fragile, can bypass walls
-- **Shieldbearer** — frontline tank, grants armor aura to adjacent allies (Stoneguard unique)
-- **Berserker** — melee DPS that gets stronger at low HP (Wildborne unique)
-- **Battlemage** — AoE ranged magic (Arcanists unique)
-- **Sea Raider** — amphibious fighter, land + water (Tidecallers unique)
-- **Siege Tower** — slow, lets melee units attack over walls
+### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [WIP]
+UnitFactory is fully data-driven. 5 of 7 new units implemented with unique abilities:
+- `[DONE]` **Healer** — auto-heals allies in range 2, seeks injured, follows combat units
+- `[DONE]` **Assassin** — ambush bonus (+3 attack from full HP), fast, dual daggers
+- `[DONE]` **Shieldbearer** — armor aura (+2 defense to allies within 2 hex), massive shield
+- `[DONE]` **Berserker** — rage mechanic (up to +4 attack at low HP), war paint
+- `[DONE]` **Battlemage** — AoE splash damage to enemies within 1 hex of target
+- `[READY]` **Sea Raider** — amphibious fighter, land + water (Tidecallers unique, needs Phase 4 water tiles)
+- `[READY]` **Siege Tower** — slow, lets melee units attack over walls
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.
