@@ -136,23 +136,23 @@ class Cubitopia {
     this.hud.onBuildWalls(() => this.toggleBuildMode());
     this.hud.onHarvest(() => this.toggleHarvestMode());
     this.hud.onMine(() => this.toggleMineMode());
-    this.hud.onBarracks(() => this.toggleBarracksMode());
-    this.hud.onForestry(() => this.toggleForestryMode());
-    this.hud.onMasonry(() => this.toggleMasonryMode());
+    this.hud.onBarracks(() => this.toggleBuildingPlaceMode('barracks'));
+    this.hud.onForestry(() => this.toggleBuildingPlaceMode('forestry'));
+    this.hud.onMasonry(() => this.toggleBuildingPlaceMode('masonry'));
     this.hud.onSellWood(() => this.resourceManager.doSellWood());
     this.hud.onSpawnWarrior(() => this.doSpawnQueue(UnitType.WARRIOR, 5, 'Warrior'));
     this.hud.onSpawnArcher(() => this.doSpawnQueue(UnitType.ARCHER, 8, 'Archer'));
     this.hud.onSpawnRider(() => this.doSpawnQueue(UnitType.RIDER, 10, 'Rider'));
     this.hud.onSpawnLumberjack(() => this.doSpawnQueueForestry(UnitType.LUMBERJACK, 3, 'Lumberjack'));
     this.hud.onSpawnBuilder(() => this.doSpawnQueueMasonry(UnitType.BUILDER, 3, 'Builder'));
-    this.hud.onFarmhouse(() => this.toggleFarmhouseMode());
-    this.hud.onSilo(() => this.toggleSiloMode());
+    this.hud.onFarmhouse(() => this.toggleBuildingPlaceMode('farmhouse'));
+    this.hud.onSilo(() => this.toggleBuildingPlaceMode('silo'));
     this.hud.onFarmPatch(() => this.toggleFarmPatchMode());
     this.hud.onPlantTree(() => this.togglePlantTreeMode());
     this.hud.onSpawnVillager(() => this.doSpawnQueueFarmhouse(UnitType.VILLAGER, 3, 'Villager'));
     this.hud.onHelp(() => this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp());
     this.hud.onPlantCrops(() => this.togglePlantCropsMode());
-    this.hud.onWorkshop(() => this.toggleWorkshopMode());
+    this.hud.onWorkshop(() => this.toggleBuildingPlaceMode('workshop'));
     this.hud.onSpawnTrebuchet(() => this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet'));
     this.hud.onCraftRope(() => this.resourceManager.craftRope());
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
@@ -209,9 +209,9 @@ class Cubitopia {
 
       if (e.key === 'b' || e.key === 'B') this.toggleBuildMode();
       if (e.key === 'h' || e.key === 'H') this.toggleHarvestMode();
-      if (e.key === 'k' || e.key === 'K') this.toggleBarracksMode();
-      if (e.key === 'f' || e.key === 'F') this.toggleForestryMode();
-      if (e.key === 'm' || e.key === 'M') this.toggleMasonryMode();
+      if (e.key === 'k' || e.key === 'K') this.toggleBuildingPlaceMode('barracks');
+      if (e.key === 'f' || e.key === 'F') this.toggleBuildingPlaceMode('forestry');
+      if (e.key === 'm' || e.key === 'M') this.toggleBuildingPlaceMode('masonry');
       if (e.key === 'r' || e.key === 'R') {
         // R rotates in any placement mode (walls auto-orient, no rotation needed)
         if (this.wallBuildMode) {
@@ -237,9 +237,9 @@ class Cubitopia {
         }
       }
       if (e.key === 'g' || e.key === 'G') this.resourceManager.doSellWood();
-      if (e.key === 'p' || e.key === 'P') this.toggleFarmhouseMode();
-      if (e.key === 'i' || e.key === 'I') this.toggleSiloMode();
-      if (e.key === 'w' || e.key === 'W') this.toggleWorkshopMode();
+      if (e.key === 'p' || e.key === 'P') this.toggleBuildingPlaceMode('farmhouse');
+      if (e.key === 'i' || e.key === 'I') this.toggleBuildingPlaceMode('silo');
+      if (e.key === 'w' || e.key === 'W') this.toggleBuildingPlaceMode('workshop');
       if (e.key === 'j' || e.key === 'J') this.toggleFarmPatchMode();
       if (e.key === 't' || e.key === 'T') this.togglePlantTreeMode();
       if (e.key === 'n' || e.key === 'N') this.toggleMineMode();
@@ -398,17 +398,17 @@ class Cubitopia {
         if (this.wallBuildMode) {
           this.toggleWallBlueprint(hexCoord);
         } else if (this.barracksPlaceMode) {
-          this.placeBarracks(hexCoord);
+          this.placeGenericBuilding('barracks', hexCoord);
         } else if (this.forestryPlaceMode) {
-          this.placeForestry(hexCoord);
+          this.placeGenericBuilding('forestry', hexCoord);
         } else if (this.masonryPlaceMode) {
-          this.placeMasonry(hexCoord);
+          this.placeGenericBuilding('masonry', hexCoord);
         } else if (this.farmhousePlaceMode) {
-          this.placeFarmhouse(hexCoord);
+          this.placeGenericBuilding('farmhouse', hexCoord);
         } else if (this.siloPlaceMode) {
-          this.placeSilo(hexCoord);
+          this.placeGenericBuilding('silo', hexCoord);
         } else if (this.workshopPlaceMode) {
-          this.placeWorkshop(hexCoord);
+          this.placeGenericBuilding('workshop', hexCoord);
         } else if (this.rallyPointSetMode && this.rallyPointBuilding) {
           this.setRallyPoint(this.rallyPointBuilding, hexCoord);
           this.hud.showNotification(`🚩 Rally point set for ${this.rallyPointBuilding}`, '#2ecc71');
@@ -1684,37 +1684,22 @@ class Cubitopia {
     SelectionManager.suppressBoxSelect = this.harvestMode;
   }
 
-  private toggleBarracksMode(): void {
+  /** Generic building placement mode toggle — replaces per-building toggleX methods */
+  private toggleBuildingPlaceMode(kind: BuildingKind): void {
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.barracksPlaceMode;
+    const modeKey = `${kind}PlaceMode` as keyof this;
+    const wasActive = this[modeKey] as boolean;
     this.clearAllModes();
-    this.barracksPlaceMode = !wasActive;
-    this.hud.setBarracksMode(this.barracksPlaceMode);
-    canvasEl.style.cursor = this.barracksPlaceMode ? 'crosshair' : 'default';
-  }
-
-  private toggleForestryMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.forestryPlaceMode;
-    this.clearAllModes();
-    this.forestryPlaceMode = !wasActive;
-    this.hud.setForestryMode(this.forestryPlaceMode);
-    canvasEl.style.cursor = this.forestryPlaceMode ? 'crosshair' : 'default';
-  }
-
-  private toggleMasonryMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.masonryPlaceMode;
-    this.clearAllModes();
-    this.masonryPlaceMode = !wasActive;
-    this.hud.setMasonryMode(this.masonryPlaceMode);
-    canvasEl.style.cursor = this.masonryPlaceMode ? 'crosshair' : 'default';
+    (this as any)[modeKey] = !wasActive;
+    const hudSetter = `set${kind.charAt(0).toUpperCase() + kind.slice(1)}Mode` as keyof HUD;
+    (this.hud[hudSetter] as (v: boolean) => void)(!wasActive);
+    canvasEl.style.cursor = !wasActive ? 'crosshair' : 'default';
   }
 
   private doSpawnQueue(type: UnitType, cost: number, name: string): void {
     if (!this.barracks) {
       this.hud.showNotification(`📍 Place a Barracks first, then press ${name} again`, '#e67e22');
-      this.toggleBarracksMode();
+      this.toggleBuildingPlaceMode('barracks');
       return;
     }
     if (!this.hud.debugFlags.freeBuild && this.players[0].resources.gold < cost) {
@@ -1729,7 +1714,7 @@ class Cubitopia {
   private doSpawnQueueForestry(type: UnitType, cost: number, name: string): void {
     if (!this.forestry) {
       this.hud.showNotification(`📍 Place a Forestry first, then press ${name} again`, '#e67e22');
-      this.toggleForestryMode();
+      this.toggleBuildingPlaceMode('forestry');
       return;
     }
     if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
@@ -1744,7 +1729,7 @@ class Cubitopia {
   private doSpawnQueueMasonry(type: UnitType, cost: number, name: string): void {
     if (!this.masonry) {
       this.hud.showNotification(`📍 Place a Masonry first, then press ${name} again`, '#e67e22');
-      this.toggleMasonryMode();
+      this.toggleBuildingPlaceMode('masonry');
       return;
     }
     if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
@@ -3231,145 +3216,89 @@ class Cubitopia {
   // ===================== END GRASS SYSTEM =====================
 
 
-  private placeBarracks(coord: HexCoord): void {
+  // --- Data-driven building placement config ---
+  private readonly BUILDING_PLACEMENT_CONFIG: Record<BuildingKind, {
+    woodCost: number; stoneCost: number;
+    allowedTerrain: TerrainType[];
+    maxHealth?: number;
+    notification?: string;
+    unitAIHook?: (coord: HexCoord) => void;
+  }> = {
+    barracks:  { woodCost: 10, stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: WallSystem.BARRACKS_MAX_HP, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
+    forestry:  { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    masonry:   { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    farmhouse: { woodCost: 6,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
+    workshop:  { woodCost: 12, stoneCost: 4, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
+    silo:      { woodCost: 5,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Silo built! Villagers will carry crops here. Place farm patches [J]', unitAIHook: (c) => UnitAI.siloPositions.set(0, c) },
+  };
+
+  /** Generic building placement — replaces 6 individual placeX methods */
+  private placeGenericBuilding(kind: BuildingKind, coord: HexCoord): void {
     if (!this.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.currentMap.tiles.get(key);
     if (!tile) return;
 
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT) return;
+    const cfg = this.BUILDING_PLACEMENT_CONFIG[kind];
+    if (!cfg.allowedTerrain.includes(tile.terrain)) return;
     if (this.isTileOccupied(key)) {
-      this.hud.showNotification('⚠️ Tile already occupied!', '#e67e22');
+      this.hud.showNotification('Tile already occupied!', '#e67e22');
       return;
     }
 
-    if (!this.hud.debugFlags.freePlace) {
-      if (this.woodStockpile[0] < 10) {
-        this.hud.showNotification(`⚠️ Need 10 wood to build barracks! (have ${this.woodStockpile[0]})`, '#e67e22');
+    // Resource check (skip if debug freePlace for most buildings; silo always charges)
+    const skipCost = this.hud.debugFlags.freePlace && kind !== 'silo';
+    if (!skipCost) {
+      if (this.woodStockpile[0] < cfg.woodCost || this.stoneStockpile[0] < cfg.stoneCost) {
+        const needs = cfg.stoneCost > 0 ? `${cfg.woodCost} wood + ${cfg.stoneCost} stone` : `${cfg.woodCost} wood`;
+        this.hud.showNotification(`Need ${needs} to build ${kind}! (have ${this.woodStockpile[0]} wood, ${this.stoneStockpile[0]} stone)`, '#e67e22');
         return;
       }
-      this.woodStockpile[0] -= 10;
-      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 10);
+      this.woodStockpile[0] -= cfg.woodCost;
+      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - cfg.woodCost);
+      if (cfg.stoneCost > 0) {
+        this.stoneStockpile[0] -= cfg.stoneCost;
+        this.players[0].resources.stone = Math.max(0, this.players[0].resources.stone - cfg.stoneCost);
+      }
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildingSystem.buildBarracksMesh(coord, 0);
-    this.buildingSystem.registerBuilding('barracks', 0, coord, mesh, WallSystem.BARRACKS_MAX_HP);
-    UnitAI.barracksPositions.set(0, coord);
+    // Build mesh via BuildingSystem
+    const meshBuilder = this.buildingSystem[`build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh` as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
+    const mesh = meshBuilder.call(this.buildingSystem, coord, 0);
+    this.buildingSystem.registerBuilding(kind, 0, coord, mesh, cfg.maxHealth);
 
-    this.barracksPlaceMode = false;
-    this.hud.setBarracksMode(false);
+    // Post-placement hooks
+    if (cfg.unitAIHook) cfg.unitAIHook(coord);
+
+    // Exit placement mode
+    this.exitPlacementMode(kind);
     this.resourceManager.updateStockpileVisual(0);
+    if (cfg.notification) this.hud.showNotification(cfg.notification, '#2ecc71');
   }
 
-  private placeForestry(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('⚠️ Tile already occupied!', '#e67e22');
-      return;
+  /** Exit placement mode for a specific building kind */
+  private exitPlacementMode(kind: BuildingKind): void {
+    switch (kind) {
+      case 'barracks': this.barracksPlaceMode = false; this.hud.setBarracksMode(false); break;
+      case 'forestry': this.forestryPlaceMode = false; this.hud.setForestryMode(false); break;
+      case 'masonry': this.masonryPlaceMode = false; this.hud.setMasonryMode(false); break;
+      case 'farmhouse': this.farmhousePlaceMode = false; this.hud.setFarmhouseMode(false); break;
+      case 'workshop': this.workshopPlaceMode = false; this.hud.setWorkshopMode(false); break;
+      case 'silo': this.siloPlaceMode = false; this.hud.setSiloMode(false); break;
     }
-
-    if (!this.hud.debugFlags.freePlace) {
-      if (this.woodStockpile[0] < 8) {
-        this.hud.showNotification(`⚠️ Need 8 wood to build forestry! (have ${this.woodStockpile[0]})`, '#e67e22');
-        return;
-      }
-      this.woodStockpile[0] -= 8;
-      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 8);
-    }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    const mesh = this.buildingSystem.buildForestryMesh(coord, 0);
-    this.buildingSystem.registerBuilding('forestry', 0, coord, mesh);
-
-    this.forestryPlaceMode = false;
-    this.hud.setForestryMode(false);
-    this.resourceManager.updateStockpileVisual(0);
-  }
-
-  private placeMasonry(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('⚠️ Tile already occupied!', '#e67e22');
-      return;
-    }
-
-    if (!this.hud.debugFlags.freePlace) {
-      if (this.woodStockpile[0] < 8) {
-        this.hud.showNotification(`⚠️ Need 8 wood to build masonry! (have ${this.woodStockpile[0]})`, '#e67e22');
-        return;
-      }
-      this.woodStockpile[0] -= 8;
-      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 8);
-    }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    const mesh = this.buildingSystem.buildMasonryMesh(coord, 0);
-    this.buildingSystem.registerBuilding('masonry', 0, coord, mesh);
-
-    this.masonryPlaceMode = false;
-    this.hud.setMasonryMode(false);
-    this.resourceManager.updateStockpileVisual(0);
   }
 
   // --- Workshop ---
 
-  private toggleWorkshopMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.workshopPlaceMode;
-    this.clearAllModes();
-    this.workshopPlaceMode = !wasActive;
-    this.hud.setWorkshopMode(this.workshopPlaceMode);
-    canvasEl.style.cursor = this.workshopPlaceMode ? 'crosshair' : 'default';
-  }
+  // toggleWorkshopMode → now handled by toggleBuildingPlaceMode('workshop')
 
-  private placeWorkshop(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT && tile.terrain !== TerrainType.FOREST) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('⚠️ Tile already occupied!', '#e67e22');
-      return;
-    }
-
-    if (!this.hud.debugFlags.freePlace) {
-      if (this.woodStockpile[0] < 12 || this.stoneStockpile[0] < 4) {
-        this.hud.showNotification(`⚠️ Need 12 wood + 4 stone for Workshop! (have ${this.woodStockpile[0]} wood, ${this.stoneStockpile[0]} stone)`, '#e67e22');
-        return;
-      }
-      this.woodStockpile[0] -= 12;
-      this.players[0].resources.wood -= 12;
-      this.stoneStockpile[0] -= 4;
-      this.players[0].resources.stone -= 4;
-    }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    const mesh = this.buildingSystem.buildWorkshopMesh(coord, 0);
-    this.buildingSystem.registerBuilding('workshop', 0, coord, mesh);
-
-    this.workshopPlaceMode = false;
-    this.hud.setWorkshopMode(false);
-    this.resourceManager.updateStockpileVisual(0);
-    this.hud.showNotification('Workshop built!', '#2ecc71');
-  }
+  // placeWorkshop → now handled by placeGenericBuilding('workshop', coord)
 
   private doSpawnQueueWorkshop(type: UnitType, name: string): void {
     if (!this.workshop) {
       this.hud.showNotification(`📍 Place a Workshop first [W], then press 7 again`, '#e67e22');
-      this.toggleWorkshopMode();
+      this.toggleBuildingPlaceMode('workshop');
       return;
     }
     // Trebuchet costs: 3 rope + 5 stone + 5 wood
@@ -3396,21 +3325,7 @@ class Cubitopia {
 
   // --- Toggle modes for farmhouse, silo, farm patches ---
 
-  private toggleFarmhouseMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    this.clearAllModes();
-    this.farmhousePlaceMode = !this.farmhousePlaceMode;
-    this.hud.setFarmhouseMode(this.farmhousePlaceMode);
-    canvasEl.style.cursor = this.farmhousePlaceMode ? 'crosshair' : 'default';
-  }
-
-  private toggleSiloMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    this.clearAllModes();
-    this.siloPlaceMode = !this.siloPlaceMode;
-    this.hud.setSiloMode(this.siloPlaceMode);
-    canvasEl.style.cursor = this.siloPlaceMode ? 'crosshair' : 'default';
-  }
+  // toggleFarmhouseMode, toggleSiloMode → now handled by toggleBuildingPlaceMode
 
   private toggleFarmPatchMode(): void {
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
@@ -3497,66 +3412,7 @@ class Cubitopia {
     SelectionManager.suppressBoxSelect = false;
   }
 
-  private placeFarmhouse(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('Tile already occupied!', '#e67e22');
-      return;
-    }
-
-    if (!this.hud.debugFlags.freePlace) {
-      if (this.woodStockpile[0] < 6) {
-        this.hud.showNotification(`Need 6 wood to build farmhouse! (have ${this.woodStockpile[0]})`, '#e67e22');
-        return;
-      }
-      this.woodStockpile[0] -= 6;
-      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 6);
-    }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    const mesh = this.buildingSystem.buildFarmhouseMesh(coord, 0);
-    this.buildingSystem.registerBuilding('farmhouse', 0, coord, mesh);
-    UnitAI.farmhousePositions.set(0, coord);
-
-    this.farmhousePlaceMode = false;
-    this.hud.setFarmhouseMode(false);
-    this.resourceManager.updateStockpileVisual(0);
-    this.hud.showNotification('Farmhouse built! Now build a Silo [I] and farm patches [J]', '#2ecc71');
-  }
-
-  private placeSilo(coord: HexCoord): void {
-    if (!this.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.DESERT) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('Tile already occupied!', '#e67e22');
-      return;
-    }
-
-    if (this.woodStockpile[0] < 5) {
-      this.hud.showNotification(`Need 5 wood to build silo! (have ${this.woodStockpile[0]})`, '#e67e22');
-      return;
-    }
-    this.woodStockpile[0] -= 5;
-    this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 5);
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    const mesh = this.buildingSystem.buildSiloMesh(coord, 0);
-    this.buildingSystem.registerBuilding('silo', 0, coord, mesh);
-    UnitAI.siloPositions.set(0, coord);
-
-    this.siloPlaceMode = false;
-    this.hud.setSiloMode(false);
-    this.hud.showNotification('Silo built! Villagers will carry crops here. Place farm patches [J]', '#2ecc71');
-  }
+  // placeFarmhouse, placeSilo → now handled by placeGenericBuilding
 
   private addFarmPatchMarker(coord: HexCoord): void {
     const key = `${coord.q},${coord.r}`;
@@ -3594,7 +3450,7 @@ class Cubitopia {
   private doSpawnQueueFarmhouse(type: UnitType, cost: number, name: string): void {
     if (!this.farmhouse) {
       this.hud.showNotification(`📍 Place a Farmhouse first, then press ${name} again`, '#e67e22');
-      this.toggleFarmhouseMode();
+      this.toggleBuildingPlaceMode('farmhouse');
       return;
     }
     if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
