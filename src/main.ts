@@ -2357,6 +2357,20 @@ class Cubitopia {
           this.unitRenderer.queueDeferredEffect(200, applyDamageVisuals);
         }
       }
+      // Battlemage AoE splash — show damage visuals on splashed units
+      if ((event as any).type === 'combat:splash') {
+        const splashEvt = event as any;
+        const victim = this.allUnits.find(u => u.id === splashEvt.unitId);
+        if (victim) {
+          this.unitRenderer.updateHealthBar(victim);
+          this.unitRenderer.showDamageEffect(victim.worldPosition);
+          this.unitRenderer.flashUnit(victim.id, 0.12);
+          if (victim.currentHealth <= 0) {
+            this.removeUnitFromGame(victim, undefined);
+            this.sound.play('death');
+          }
+        }
+      }
       // Greatsword cleave knockback — move units to new hex positions
       if ((event as any).type === 'combat:cleave') {
         const ce = event as any;

@@ -23,6 +23,8 @@ interface UnitMeshGroup {
   trebFireStart: number;            // timestamp when fire was triggered (0 = idle)
   trebPendingTarget: { x: number; y: number; z: number } | null; // queued boulder target
   trebOnImpact?: () => void; // callback when boulder lands
+  // Attack animation hold — prevents jerky snapping between attack/idle
+  attackAnimStart: number; // time when attack animation began (0 = not attacking)
 }
 
 // Player team colors for the base/flag
@@ -128,6 +130,7 @@ export class UnitRenderer {
       lastPosition: pos.clone(),
       trebFireStart: 0,
       trebPendingTarget: null,
+      attackAnimStart: 0,
     });
     this.scene.add(group);
   }
@@ -929,6 +932,14 @@ export class UnitRenderer {
         const hood = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.4), new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }));
         hood.position.y = 1.0;
         group.add(hood);
+        // Team color hood trim
+        const hoodTrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.42), new THREE.MeshLambertMaterial({ color: playerColor }));
+        hoodTrim.position.y = 0.92;
+        group.add(hoodTrim);
+        // Team color belt
+        const healBelt = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.06, 0.52), new THREE.MeshLambertMaterial({ color: playerColor }));
+        healBelt.position.y = 0.08;
+        group.add(healBelt);
         // Glowing hands (emissive green)
         const glowMat = new THREE.MeshLambertMaterial({ color: 0x00e676, emissive: 0x00e676, emissiveIntensity: 0.5 });
         group.add(makeArmGroup('arm-left', 0xffffff, -0.3, 0.35));
@@ -946,45 +957,88 @@ export class UnitRenderer {
         break;
       }
       case UnitType.ASSASSIN: {
-        // === ASSASSIN — Dark purple cloak, daggers, slim build ===
-        const cloakGeo = new THREE.BoxGeometry(0.4, 0.6, 0.4);
-        const cloakMat = new THREE.MeshLambertMaterial({ color: 0x1a0033 });
-        const cloak = new THREE.Mesh(cloakGeo, cloakMat);
-        cloak.position.y = 0.3;
-        cloak.castShadow = true;
-        group.add(cloak);
-        // Dark hood
-        const aHood = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.38), new THREE.MeshLambertMaterial({ color: 0x0d001a }));
-        aHood.position.y = 0.78;
-        group.add(aHood);
-        // Glowing eyes
-        const eyeMat = new THREE.MeshLambertMaterial({ color: 0xaa00ff, emissive: 0xaa00ff, emissiveIntensity: 0.8 });
-        for (const ex of [-0.07, 0.07]) {
+        // === ASSASSIN — Slim, hooded rogue with daggers attached to arms ===
+        // Slim torso — dark leather armor
+        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.55, 0.35), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
+        aBody.position.y = 0.28;
+        aBody.castShadow = true;
+        group.add(aBody);
+        // Leather straps across chest (X pattern)
+        const strapMat = new THREE.MeshLambertMaterial({ color: 0x2d1b4e });
+        const strapL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.45, 0.37), strapMat);
+        strapL.position.set(0, 0.3, 0);
+        strapL.rotation.z = 0.35;
+        group.add(strapL);
+        const strapR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.45, 0.37), strapMat);
+        strapR.position.set(0, 0.3, 0);
+        strapR.rotation.z = -0.35;
+        group.add(strapR);
+        // Team color belt with poison vials
+        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.37), new THREE.MeshLambertMaterial({ color: playerColor }));
+        aBelt.position.y = 0.05;
+        group.add(aBelt);
+        // Tiny poison vials on belt
+        const vialMat = new THREE.MeshLambertMaterial({ color: 0x76ff03, emissive: 0x76ff03, emissiveIntensity: 0.4 });
+        for (const vx of [-0.1, 0.0, 0.1]) {
+          const vial = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.04), vialMat);
+          vial.position.set(vx, 0.05, 0.18);
+          group.add(vial);
+        }
+        // Hooded head — deep cowl
+        const aHoodBack = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.35, 0.38), new THREE.MeshLambertMaterial({ color: 0x0d001a }));
+        aHoodBack.position.y = 0.78;
+        group.add(aHoodBack);
+        // Hood peak (pointed front drape)
+        const hoodPeak = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.1), new THREE.MeshLambertMaterial({ color: 0x0d001a }));
+        hoodPeak.position.set(0, 0.9, 0.2);
+        group.add(hoodPeak);
+        // Face shadow (dark recessed area under hood)
+        const faceShadow = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.04), new THREE.MeshLambertMaterial({ color: 0x050010 }));
+        faceShadow.position.set(0, 0.78, 0.19);
+        group.add(faceShadow);
+        // Glowing eyes (sinister purple)
+        const eyeMat = new THREE.MeshLambertMaterial({ color: 0xaa00ff, emissive: 0xaa00ff, emissiveIntensity: 1.0 });
+        for (const ex of [-0.06, 0.06]) {
           const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.02), eyeMat);
-          eye.position.set(ex, 0.82, 0.18);
+          eye.position.set(ex, 0.8, 0.2);
           group.add(eye);
         }
-        // Oversized wicked daggers — curved blades, poison-drip look
-        group.add(makeArmGroup('arm-left', 0x1a0033, -0.25, 0.3));
-        group.add(makeArmGroup('arm-right', 0x1a0033, 0.25, 0.3));
+        // Team color shoulder pads
+        for (const sx of [-0.22, 0.22]) {
+          const sPad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.15), new THREE.MeshLambertMaterial({ color: playerColor }));
+          sPad.position.set(sx, 0.55, 0);
+          group.add(sPad);
+        }
+        // LEFT ARM with WICKED DAGGER
+        const aArmL = makeArmGroup('arm-left', 0x1a0033, -0.24, 0.3);
         const daggerBladeMat = new THREE.MeshLambertMaterial({ color: 0xd0d0d0 });
         const daggerPoisonMat = new THREE.MeshLambertMaterial({ color: 0x76ff03, emissive: 0x76ff03, emissiveIntensity: 0.3 });
-        for (const dx of [-0.25, 0.25]) {
-          // Long curved blade
-          const dBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.45, 0.08), daggerBladeMat);
-          dBlade.position.set(dx, 0.0, 0.12);
-          dBlade.rotation.z = dx > 0 ? 0.1 : -0.1; // slight outward curve
-          group.add(dBlade);
-          // Poison edge glow along blade
-          const pEdge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.35, 0.09), daggerPoisonMat);
-          pEdge.position.set(dx + (dx > 0 ? 0.03 : -0.03), -0.03, 0.12);
-          pEdge.rotation.z = dx > 0 ? 0.1 : -0.1;
-          group.add(pEdge);
-          // Serrated grip
-          const dGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.06), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
-          dGrip.position.set(dx, 0.25, 0.12);
-          group.add(dGrip);
-        }
+        // Left dagger blade (extends forward from hand)
+        const ldBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.4), daggerBladeMat);
+        ldBlade.position.set(0, -0.15, 0.25);
+        aArmL.add(ldBlade);
+        // Left poison edge
+        const ldPoison = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.35), daggerPoisonMat);
+        ldPoison.position.set(-0.03, -0.15, 0.25);
+        aArmL.add(ldPoison);
+        // Left grip
+        const ldGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
+        ldGrip.position.set(0, -0.15, 0.02);
+        aArmL.add(ldGrip);
+        group.add(aArmL);
+        // RIGHT ARM with WICKED DAGGER
+        const aArmR = makeArmGroup('arm-right', 0x1a0033, 0.24, 0.3);
+        const rdBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.4), daggerBladeMat);
+        rdBlade.position.set(0, -0.15, 0.25);
+        aArmR.add(rdBlade);
+        const rdPoison = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.35), daggerPoisonMat);
+        rdPoison.position.set(0.03, -0.15, 0.25);
+        aArmR.add(rdPoison);
+        const rdGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
+        rdGrip.position.set(0, -0.15, 0.02);
+        aArmR.add(rdGrip);
+        group.add(aArmR);
+        // Legs — slim, dark
         group.add(makeLegGroup('leg-left', 0x1a0033, -0.1, 0));
         group.add(makeLegGroup('leg-right', 0x1a0033, 0.1, 0));
         break;
@@ -1067,93 +1121,246 @@ export class UnitRenderer {
         break;
       }
       case UnitType.BERSERKER: {
-        // === BERSERKER — Bare-chested, war paint, dual axes ===
-        const bBody = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.45), new THREE.MeshLambertMaterial({ color: 0xd4a574 }));
-        bBody.position.y = 0.3;
+        // === BERSERKER — Massive bare-chested brute, war paint, spiked fur mantle, dual war axes on arms ===
+        // Muscular torso (wide, stocky)
+        const bBody = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.65, 0.5), new THREE.MeshLambertMaterial({ color: 0xc9956b }));
+        bBody.position.y = 0.33;
         bBody.castShadow = true;
         group.add(bBody);
-        // War paint (red X across chest)
+        // Pectoral definition (darker skin tone for muscle shadow)
+        const pecMat = new THREE.MeshLambertMaterial({ color: 0xb07d55 });
+        const pecL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.52), pecMat);
+        pecL.position.set(-0.1, 0.45, 0);
+        group.add(pecL);
+        const pecR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.15, 0.52), pecMat);
+        pecR.position.set(0.1, 0.45, 0);
+        group.add(pecR);
+        // War paint — jagged red V across chest
         const paintMat = new THREE.MeshLambertMaterial({ color: 0xd50000 });
-        const paintV = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.47), paintMat);
+        const paintV = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.52), paintMat);
         paintV.position.set(0, 0.35, 0);
-        paintV.rotation.z = 0.4;
+        paintV.rotation.z = 0.35;
         group.add(paintV);
-        const paintV2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.4, 0.47), paintMat);
+        const paintV2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.52), paintMat);
         paintV2.position.set(0, 0.35, 0);
-        paintV2.rotation.z = -0.4;
+        paintV2.rotation.z = -0.35;
         group.add(paintV2);
-        // Wild hair
-        const hair = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.4), new THREE.MeshLambertMaterial({ color: 0x8d6e63 }));
-        hair.position.y = 1.0;
-        group.add(hair);
-        const bHead = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.35), new THREE.MeshLambertMaterial({ color: 0xd4a574 }));
-        bHead.position.y = 0.82;
+        // Fur mantle across shoulders (ragged animal hide)
+        const furMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+        const furMantle = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.15, 0.55), furMat);
+        furMantle.position.y = 0.63;
+        group.add(furMantle);
+        // Fur spikes/tufts sticking up from mantle
+        for (const sx of [-0.25, 0, 0.25]) {
+          const tuft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.08), furMat);
+          tuft.position.set(sx, 0.75, -0.15);
+          tuft.rotation.z = sx * 0.3;
+          group.add(tuft);
+        }
+        // Skull trophy on belt
+        const skullMat = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 });
+        const skull = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.08), skullMat);
+        skull.position.set(0.15, 0.05, 0.26);
+        group.add(skull);
+        const skullJaw = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.06), skullMat);
+        skullJaw.position.set(0.15, 0.0, 0.28);
+        group.add(skullJaw);
+        // Team color fur mantle trim
+        const furTrim = new THREE.Mesh(new THREE.BoxGeometry(0.74, 0.04, 0.57), new THREE.MeshLambertMaterial({ color: playerColor }));
+        furTrim.position.y = 0.57;
+        group.add(furTrim);
+        // Leather belt with team color buckle
+        const bBelt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.52), new THREE.MeshLambertMaterial({ color: 0x4e342e }));
+        bBelt.position.y = 0.05;
+        group.add(bBelt);
+        const bBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), new THREE.MeshLambertMaterial({ color: playerColor }));
+        bBuckle.position.set(0, 0.05, 0.26);
+        group.add(bBuckle);
+        // Head — scarred, fierce
+        const bHead = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.32, 0.38), new THREE.MeshLambertMaterial({ color: 0xc9956b }));
+        bHead.position.y = 0.84;
         group.add(bHead);
-        // Rage eyes (glow brighter at low HP — visual handled in update)
-        const rEyeMat = new THREE.MeshLambertMaterial({ color: 0xff1744, emissive: 0xff1744, emissiveIntensity: 0.3 });
-        for (const ex of [-0.07, 0.07]) {
-          const rEye = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.02), rEyeMat);
-          rEye.position.set(ex, 0.85, 0.17);
+        // Wild spiked hair (multiple tufts going back and up)
+        const hairMat = new THREE.MeshLambertMaterial({ color: 0x8d6e63 });
+        const hairBase = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.4), hairMat);
+        hairBase.position.y = 1.0;
+        group.add(hairBase);
+        for (const hx of [-0.12, 0, 0.12]) {
+          const spike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.14, 0.06), hairMat);
+          spike.position.set(hx, 1.12, -0.1);
+          spike.rotation.x = -0.3;
+          group.add(spike);
+        }
+        // Scar across face (diagonal dark line)
+        const scarMat = new THREE.MeshLambertMaterial({ color: 0x8b5e3c });
+        const scar = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.2, 0.4), scarMat);
+        scar.position.set(0.05, 0.87, 0);
+        scar.rotation.z = 0.3;
+        group.add(scar);
+        // Rage eyes (glow brighter at low HP)
+        const rEyeMat = new THREE.MeshLambertMaterial({ color: 0xff1744, emissive: 0xff1744, emissiveIntensity: 0.5 });
+        for (const ex of [-0.08, 0.08]) {
+          const rEye = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.02), rEyeMat);
+          rEye.position.set(ex, 0.87, 0.19);
           rEye.name = 'rage-eye';
           group.add(rEye);
         }
-        // Oversized dual war axes — massive crescent blades
-        group.add(makeArmGroup('arm-left', 0xd4a574, -0.32, 0.3));
-        group.add(makeArmGroup('arm-right', 0xd4a574, 0.32, 0.3));
-        const axeBladeMat = new THREE.MeshLambertMaterial({ color: 0x9e9e9e });
+        // Angry brow ridge
+        const browMat = new THREE.MeshLambertMaterial({ color: 0xb07d55 });
+        const brow = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.04), browMat);
+        brow.position.set(0, 0.92, 0.19);
+        group.add(brow);
+        // LEFT ARM with WAR AXE
+        const bArmL = makeArmGroup('arm-left', 0xc9956b, -0.35, 0.33);
         const axeHandleMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+        const axeBladeMat = new THREE.MeshLambertMaterial({ color: 0x9e9e9e });
         const axeEdgeMat = new THREE.MeshLambertMaterial({ color: 0xcccccc });
-        for (const ax of [-0.32, 0.32]) {
-          // Long handle
-          const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.65, 0.05), axeHandleMat);
-          handle.position.set(ax, 0.05, 0.08);
-          group.add(handle);
-          // Oversized axe head — main blade
-          const bigBlade = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.2, 0.06), axeBladeMat);
-          bigBlade.position.set(ax + (ax > 0 ? 0.12 : -0.12), -0.18, 0.08);
-          group.add(bigBlade);
-          // Sharp edge extension (wider crescent)
-          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.04), axeEdgeMat);
-          edge.position.set(ax + (ax > 0 ? 0.15 : -0.15), -0.28, 0.08);
-          group.add(edge);
-          // Back spike
-          const spike = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), axeBladeMat);
-          spike.position.set(ax + (ax > 0 ? -0.08 : 0.08), -0.18, 0.08);
-          group.add(spike);
-        }
-        group.add(makeLegGroup('leg-left', 0x5d4037, -0.12, 0));
-        group.add(makeLegGroup('leg-right', 0x5d4037, 0.12, 0));
+        // Left axe handle
+        const lHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.6), axeHandleMat);
+        lHandle.position.set(0, -0.15, 0.3);
+        bArmL.add(lHandle);
+        // Left axe blade (crescent)
+        const lBlade = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.2), axeBladeMat);
+        lBlade.position.set(-0.1, -0.15, 0.55);
+        bArmL.add(lBlade);
+        const lEdge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.1), axeEdgeMat);
+        lEdge.position.set(-0.13, -0.15, 0.65);
+        bArmL.add(lEdge);
+        // Left back spike
+        const lSpike = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.08), axeBladeMat);
+        lSpike.position.set(0.08, -0.15, 0.55);
+        bArmL.add(lSpike);
+        group.add(bArmL);
+        // RIGHT ARM with WAR AXE
+        const bArmR = makeArmGroup('arm-right', 0xc9956b, 0.35, 0.33);
+        const rHandle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.6), axeHandleMat);
+        rHandle.position.set(0, -0.15, 0.3);
+        bArmR.add(rHandle);
+        const rBlade = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.2), axeBladeMat);
+        rBlade.position.set(0.1, -0.15, 0.55);
+        bArmR.add(rBlade);
+        const rEdge = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.06, 0.1), axeEdgeMat);
+        rEdge.position.set(0.13, -0.15, 0.65);
+        bArmR.add(rEdge);
+        const rSpike = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.08), axeBladeMat);
+        rSpike.position.set(-0.08, -0.15, 0.55);
+        bArmR.add(rSpike);
+        group.add(bArmR);
+        // Legs — leather pants, fur-trimmed boots
+        group.add(makeLegGroup('leg-left', 0x5d4037, -0.14, 0));
+        group.add(makeLegGroup('leg-right', 0x5d4037, 0.14, 0));
         break;
       }
       case UnitType.BATTLEMAGE: {
-        // === BATTLEMAGE — Arcane robes, floating orbs, staff ===
-        const bmRobe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.5), new THREE.MeshLambertMaterial({ color: 0x311b92 }));
-        bmRobe.position.y = 0.35;
-        bmRobe.castShadow = true;
-        group.add(bmRobe);
-        // Glowing rune belt
-        const runeBelt = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.06, 0.52), new THREE.MeshLambertMaterial({ color: 0x7c4dff, emissive: 0x7c4dff, emissiveIntensity: 0.6 }));
-        runeBelt.position.y = 0.15;
+        // === BATTLEMAGE — Wizard with floppy hat, arcane robes, staff ===
+        // Flowing robes (wider at bottom for wizard silhouette)
+        const bmRobeBottom = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.35, 0.55), new THREE.MeshLambertMaterial({ color: 0x1a0066 }));
+        bmRobeBottom.position.y = 0.18;
+        bmRobeBottom.castShadow = true;
+        group.add(bmRobeBottom);
+        const bmRobeTop = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.4, 0.45), new THREE.MeshLambertMaterial({ color: 0x311b92 }));
+        bmRobeTop.position.y = 0.45;
+        group.add(bmRobeTop);
+        // Robe collar (team colored, raised)
+        const collarMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const collarL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.3), collarMat);
+        collarL.position.set(-0.24, 0.65, -0.05);
+        group.add(collarL);
+        const collarR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.3), collarMat);
+        collarR.position.set(0.24, 0.65, -0.05);
+        group.add(collarR);
+        // Glowing rune belt with arcane buckle
+        const runeBelt = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.47), new THREE.MeshLambertMaterial({ color: 0x7c4dff, emissive: 0x7c4dff, emissiveIntensity: 0.6 }));
+        runeBelt.position.y = 0.28;
         group.add(runeBelt);
-        // Head with arcane circlet
-        const bmHead = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
-        bmHead.position.y = 0.88;
+        const runeBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.5 }));
+        runeBuckle.position.set(0, 0.28, 0.24);
+        group.add(runeBuckle);
+        // Arcane symbols on robe front
+        const symMat = new THREE.MeshLambertMaterial({ color: 0x9c27b0, emissive: 0x9c27b0, emissiveIntensity: 0.3 });
+        const sym1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.47), symMat);
+        sym1.position.set(0, 0.5, 0);
+        group.add(sym1);
+        const sym2 = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.12, 0.47), symMat);
+        sym2.position.set(0, 0.5, 0);
+        group.add(sym2);
+        // Head — old wizard face
+        const bmHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.32), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
+        bmHead.position.y = 0.85;
         group.add(bmHead);
-        const circlet = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.06, 0.38), new THREE.MeshLambertMaterial({ color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.3 }));
-        circlet.position.y = 1.02;
-        group.add(circlet);
-        // Staff in right hand
-        const staff = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.0, 0.06), new THREE.MeshLambertMaterial({ color: 0x4a148c }));
-        staff.position.set(0.3, 0.5, 0);
-        group.add(staff);
+        // Bushy eyebrows
+        const browMat = new THREE.MeshLambertMaterial({ color: 0x9e9e9e });
+        for (const bx of [-0.08, 0.08]) {
+          const brow = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), browMat);
+          brow.position.set(bx, 0.92, 0.16);
+          group.add(brow);
+        }
+        // Wise eyes
+        const bmEyeMat = new THREE.MeshLambertMaterial({ color: 0x2196f3, emissive: 0x2196f3, emissiveIntensity: 0.4 });
+        for (const ex of [-0.07, 0.07]) {
+          const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.02), bmEyeMat);
+          eye.position.set(ex, 0.87, 0.17);
+          group.add(eye);
+        }
+        // Short beard
+        const beardMat = new THREE.MeshLambertMaterial({ color: 0x9e9e9e });
+        const beard = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.08), beardMat);
+        beard.position.set(0, 0.74, 0.15);
+        group.add(beard);
+        // === FLOPPY WIZARD HAT ===
+        // Hat brim (wide, flat disk)
+        const hatBrimMat = new THREE.MeshLambertMaterial({ color: 0x1a0066 });
+        const hatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.04, 0.55), hatBrimMat);
+        hatBrim.position.y = 1.02;
+        group.add(hatBrim);
+        // Hat cone base (shorter, wider)
+        const hatConeMat = new THREE.MeshLambertMaterial({ color: 0x220077 });
+        const hatBase = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), hatConeMat);
+        hatBase.position.y = 1.15;
+        group.add(hatBase);
+        // Hat cone mid (narrowing)
+        const hatMid = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.2, 0.22), hatConeMat);
+        hatMid.position.y = 1.35;
+        group.add(hatMid);
+        // Hat tip (bent/floppy — tilts to one side)
+        const hatTip = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.18, 0.14), hatConeMat);
+        hatTip.position.set(0.1, 1.48, 0.05);
+        hatTip.rotation.z = -0.4; // floppy lean to the right
+        hatTip.rotation.x = 0.2; // slight forward droop
+        hatTip.name = 'wizard-hat-tip';
+        group.add(hatTip);
+        // Team color hat band
+        const hatBand = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.32), new THREE.MeshLambertMaterial({ color: playerColor }));
+        hatBand.position.y = 1.04;
+        group.add(hatBand);
+        // Star emblem on hat
+        const starMat = new THREE.MeshLambertMaterial({ color: 0xffd700, emissive: 0xffd700, emissiveIntensity: 0.6 });
+        const star = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), starMat);
+        star.position.set(0, 1.12, 0.16);
+        star.rotation.z = Math.PI / 4; // diamond orientation
+        group.add(star);
+        // RIGHT ARM with STAFF (staff is arm child so it moves with animation)
+        const bmArmR = makeArmGroup('arm-right', 0x311b92, 0.3, 0.4);
+        const staff = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.1), new THREE.MeshLambertMaterial({ color: 0x4a148c }));
+        staff.position.set(0, -0.15, 0.5);
+        bmArmR.add(staff);
         // Orb atop staff
         const orbMat = new THREE.MeshLambertMaterial({ color: 0xb388ff, emissive: 0x7c4dff, emissiveIntensity: 0.8 });
-        const orb = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), orbMat);
-        orb.position.set(0.3, 1.05, 0);
+        const orb = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), orbMat);
+        orb.position.set(0, -0.15, 1.1);
         orb.name = 'battlemage-orb';
-        group.add(orb);
-        group.add(makeArmGroup('arm-left', 0x311b92, -0.3, 0.35));
-        group.add(makeArmGroup('arm-right', 0x311b92, 0.3, 0.35));
+        bmArmR.add(orb);
+        group.add(bmArmR);
+        // Left arm — open hand for casting
+        const bmArmL = makeArmGroup('arm-left', 0x311b92, -0.3, 0.4);
+        group.add(bmArmL);
+        // Floating arcane particles around the mage (2 small orbiting spheres)
+        for (let i = 0; i < 2; i++) {
+          const fOrb = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), new THREE.MeshLambertMaterial({ color: 0xb388ff, emissive: 0x7c4dff, emissiveIntensity: 1.0 }));
+          fOrb.position.set(Math.cos(i * Math.PI) * 0.4, 0.6, Math.sin(i * Math.PI) * 0.4);
+          fOrb.name = 'float-orb';
+          group.add(fOrb);
+        }
         group.add(makeLegGroup('leg-left', 0x1a0033, -0.12, 0));
         group.add(makeLegGroup('leg-right', 0x1a0033, 0.12, 0));
         break;
@@ -1333,13 +1540,22 @@ export class UnitRenderer {
         );
         mageWaist.position.y = 0.55;
         group.add(mageWaist);
-        // Glowing rune on chest (team color, emissive)
-        const rune = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.12, 0.02),
-          new THREE.MeshBasicMaterial({ color: playerColor, transparent: true, opacity: 0.8 })
+        // Team color sash/belt
+        const mageSash = new THREE.Mesh(
+          new THREE.BoxGeometry(0.52, 0.06, 0.47),
+          new THREE.MeshLambertMaterial({ color: playerColor })
         );
-        rune.position.set(0, 0.42, 0.23);
-        group.add(rune);
+        mageSash.position.y = 0.15;
+        group.add(mageSash);
+        // Team color shoulder marks
+        for (const sx of [-0.28, 0.28]) {
+          const mMark = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.08, 0.2),
+            new THREE.MeshLambertMaterial({ color: playerColor })
+          );
+          mMark.position.set(sx, 0.6, 0);
+          group.add(mMark);
+        }
         // Head
         const mageHead = new THREE.Mesh(
           new THREE.BoxGeometry(0.3, 0.3, 0.3),
@@ -1974,16 +2190,33 @@ export class UnitRenderer {
     entry.group.rotation.z *= 0.85;
     entry.group.rotation.x *= 0.85;
 
-    if (state === 'gathering') {
+    // Attack animation hold — prevent jerky snapping by ensuring the attack
+    // animation plays for at least one full cycle before transitioning away.
+    // Minimum hold = 0.6s (enough for one clean swing to complete).
+    const ATTACK_HOLD_MIN = 0.6;
+    let effectiveState = state;
+    if (state === 'attacking') {
+      if (entry.attackAnimStart === 0) entry.attackAnimStart = time;
+    } else if (entry.attackAnimStart > 0) {
+      // State left 'attacking' — check if we should keep animating the attack
+      const elapsed = time - entry.attackAnimStart;
+      if (elapsed < ATTACK_HOLD_MIN) {
+        effectiveState = 'attacking'; // keep playing attack anim
+      } else {
+        entry.attackAnimStart = 0; // release hold
+      }
+    }
+
+    if (effectiveState === 'gathering') {
       this.animateGathering(entry, type, armLeft, armRight, legLeft, legRight, time, unitId);
-    } else if (state === 'attacking') {
+    } else if (effectiveState === 'attacking') {
       this.animateAttacking(entry, type, armLeft, armRight, legLeft, legRight, time, unitId);
-    } else if (state === 'building') {
+    } else if (effectiveState === 'building') {
       this.animateBuilding(entry, type, armLeft, armRight, time);
-    } else if (state === 'returning') {
+    } else if (effectiveState === 'returning') {
       this.animateReturning(entry, armLeft, armRight, legLeft, legRight, time);
       this.showCarryVisual(entry, true);
-    } else if (state === 'moving') {
+    } else if (effectiveState === 'moving') {
       this.animateMoving(entry, type, armLeft, armRight, legLeft, legRight, time);
       this.showCarryVisual(entry, false);
     } else {
@@ -2208,7 +2441,7 @@ export class UnitRenderer {
       }
       case UnitType.ASSASSIN: {
         // Pierce attack: fast jump-stab lunge
-        const speed = 3.0; // faster than others — assassin is quick
+        const speed = 1.8; // fast but readable — gives time for wind-up and strike
         const cycle = (time * speed) % 1;
         if (cycle < 0.15) {
           // Crouch: body dips down, arms pull back
@@ -2370,7 +2603,7 @@ export class UnitRenderer {
       }
       case UnitType.SCOUT: {
         // Quick dagger slash: fast flurry of pokes
-        const speed = 3.5;
+        const speed = 2.2;
         const cycle = (time * speed) % 1;
         if (cycle < 0.2) {
           const p = cycle / 0.2;
@@ -2720,6 +2953,20 @@ export class UnitRenderer {
         if (armRight) armRight.rotation.x = Math.sin(time * walkSpeed) * 0.25;
         break;
       }
+    }
+    // === NATURAL WALK SWAY — applies to ALL units ===
+    // Left-right body bobble synced to leg stride for natural walking feel.
+    // Siege units (trebuchet, catapult) already have their own rocking — skip them.
+    if (type !== UnitType.TREBUCHET && type !== UnitType.CATAPULT) {
+      // Use the same frequency as legs so the sway syncs with stride
+      const swayFreq = type === UnitType.RIDER ? 8
+        : (type === UnitType.WARRIOR || type === UnitType.PALADIN) ? 6
+        : (type === UnitType.ARCHER || type === UnitType.SCOUT) ? 9
+        : 7;
+      // Body tilts left-right with each step (rotation.z)
+      entry.group.rotation.z = Math.sin(time * swayFreq) * 0.04;
+      // Slight vertical bob (bounce with each step)
+      entry.group.position.y += Math.abs(Math.sin(time * swayFreq)) * 0.02;
     }
   }
 
