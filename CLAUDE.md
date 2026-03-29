@@ -20,15 +20,51 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 3. Update the **help menu** in `src/ui/HUD.ts` (`createHelpOverlay`) with any new/changed gameplay features
 4. `git add` relevant files (not node_modules/dist)
 5. `git commit` with a descriptive message
+6. **Run the Introspective Review** (see below)
 
 ### When to commit:
 - Before starting a new feature that touches 3+ files
 - After completing a working feature (checkpoint)
 - Before any rename/refactor that touches many files
 - Before experimental changes the user wants to try
-- After updating project archtecture in CLAUDE.md or Instructions
-- After updating the CLAUDE.md and instruction files on quirks and discoveries about the code base.
-- After updating the help menu with new or missing info.
+- After updating project architecture in CLAUDE.md or Instructions
+- After updating the CLAUDE.md and instruction files on quirks and discoveries about the code base
+- After updating the help menu with new or missing info
+
+### Introspective Review Protocol (run on every commit)
+After each commit, pause and run through these checks before moving on. This is how the project stays coherent as it grows.
+
+**1. Architecture Accuracy Check**
+- Does the Key Files section still reflect reality? (line counts, descriptions, ownership)
+- Are any new files missing from the Key Files list?
+- Do any integration notes reference methods/fields that have been moved or deleted?
+- Are backward-compat shims still needed, or can they be removed?
+
+**2. Shrink-Wrap Audit**
+- Run `wc -l src/main.ts` — is it the same or smaller than before this commit?
+- Did we introduce any new code in main.ts that should have been a standalone module?
+- Are there any new functions over 40 lines that should be extracted?
+- Any new repetitive patterns that could be data-driven?
+
+**3. Roadmap Alignment Check**
+- Does this commit advance any roadmap phase? If so, update the roadmap status.
+- Did this commit create or remove architecture prep needed for a future phase?
+- Are any roadmap items now unblocked by this change?
+- Does the current extraction target list need reordering based on what we learned?
+
+**4. Vision Coherence Check**
+- Does the current code structure support the tribe system (Phase 2)? Would adding a `TribeConfig` today require touching main.ts?
+- Is UnitFactory closer to being data-driven, or did we add more hardcoded switch cases?
+- Are new subsystems using the slim ops interface pattern, or did we create tight coupling?
+- Would a new developer reading CLAUDE.md understand the project's direction and how to contribute?
+
+**5. Cleanup Sweep**
+- Remove stale TODO comments that were resolved by this commit
+- Delete dead code paths, unused imports, orphaned type declarations
+- Update line counts in CLAUDE.md if they've drifted by more than 50 lines
+- Check if any Mistakes Log entries are now irrelevant (problem fully resolved, code deleted)
+
+If any check fails, fix it before starting the next task. The 5 minutes spent here saves hours of drift.
 ---
 
 ## Project Architecture
@@ -137,11 +173,9 @@ Archer: 6, Paladin: 5, Trebuchet: 7, Catapult: 5, Scout: 7, Rider: 4, default (W
 These are separate from weapon range — detection range is how far units "see" threats.
 
 ### Spawn Queue Types
-- Barracks: `spawnQueue` — costs gold
-- Forestry: `forestrySpawnQueue` — costs wood
-- Masonry: `masonrySpawnQueue` — costs wood
-- Farmhouse: `farmhouseSpawnQueue` — costs wood
-- Workshop: `workshopSpawnQueue` — costs rope + stone + wood (compound cost object, not single number)
+- Barracks, Forestry, Masonry, Farmhouse: handled by `SPAWN_QUEUE_CONFIG` + `doSpawnQueueGeneric()` (single-resource cost)
+- Workshop: `doSpawnQueueWorkshop()` — compound cost (rope + stone + wood), kept separate due to multi-resource validation
+- Spawn processing loop in `updateRTS()` is already data-driven via `spawnConfigs[]` array
 
 ---
 
@@ -202,11 +236,11 @@ We use two patterns depending on the code being extracted:
 No remaining files to wire. Future extractions will target new code regions.
 
 ### Next Extraction Targets (priority order)
-1. **BuildingPlacementSystem** — player-side `handleBuild*()`, blueprint ghosts, placement validation (~300-400 lines)
-2. **TooltipUIController** — `showBuildingTooltip`, `queueUnitFromTooltip`, `demolishBuilding`, upgrade UI (~200-300 lines)
-3. **CombatResolver** — damage application, unit death, territory capture (~200+ lines)
-4. **GameInitializer** — `startNewGame`, map gen orchestration, `initSystems` wiring (~200+ lines)
-5. **FormationSystem** — formation math, rally points, unit grouping (~150+ lines)
+1. **BlueprintSystem** — wall/harvest blueprint ghosts, blueprint markers, ghost mesh lifecycle (~100-150 lines)
+2. **CombatResolver** — damage application, unit death, territory capture (~200+ lines)
+3. **GameInitializer** — `startNewGame`, map gen orchestration, `initSystems` wiring (~200+ lines)
+4. **FormationSystem** — formation math, rally points, unit grouping (~150+ lines)
+5. **SpawnQueueSystem** — spawn processing loop, timer management, queue state (~100-150 lines)
 
 ### Shrink-Wrap Discipline (ENFORCED)
 **Every feature addition or refactor MUST leave main.ts the same size or smaller.**
@@ -229,8 +263,10 @@ No remaining files to wire. Future extractions will target new code regions.
 - Owns building registry (`placedBuildings`), `wallConnectable`, `barracksHealth`, `buildingSpawnIndex`
 - Delegates mesh creation to BuildingMeshFactory pure functions
 - Uses `setWallRefs()` callback for wall rebuild on building demolition
-- `showBuildingTooltip` and `queueUnitFromTooltip` remain in main.ts (deep UI coupling)
+- Tooltip UI extracted to `BuildingTooltipController` — no tooltip state left in BuildingSystem
 - Backward-compat getters (`this.barracks`, `this.forestry`, etc.) still in main.ts, delegate to buildingSystem
+- Building placement uses data-driven `BUILDING_PLACEMENT_CONFIG` in main.ts (one generic method for all 6 types)
+- Spawn queuing uses data-driven `SPAWN_QUEUE_CONFIG` in main.ts (one generic method for barracks/forestry/masonry/farmhouse)
 
 ### AIController Integration Notes
 - Uses `AIBuildingOps` slim interface instead of full BuildingSystem dependency
@@ -252,9 +288,28 @@ private buildGameContext(): GameContext {
 
 ---
 
-## Feature Roadmap (Tentative)
+## Feature Roadmap
 
-### Phase 1: Expanded Unit Types + Data-Driven UnitFactory
+### Roadmap Review Rules
+- **On every commit:** check if the commit advances or blocks any phase. Update status markers below.
+- **Before starting any Phase N feature:** verify all Phase N-1 architecture prep items are complete.
+- **When adding a new system:** ask "does this make the tribe system easier or harder to build?" If harder, redesign.
+- **When touching UnitFactory, BuildingMeshFactory, or AIController:** ask "is this still data-driven? Could a new tribe slot in without code changes?"
+- **Status markers:** `[DONE]` = shipped, `[WIP]` = in progress, `[BLOCKED]` = dependency unmet, `[READY]` = can start, unmarked = future
+
+### Phase 0: Architecture Foundation (Current) [WIP]
+Get main.ts under 3000 lines. All systems modular. Data-driven configs for buildings, units, spawning.
+- `[DONE]` Extract AIController, BuildingSystem, WallSystem, ResourceManager
+- `[DONE]` Extract BuildingTooltipController
+- `[DONE]` Data-driven building placement (BUILDING_PLACEMENT_CONFIG)
+- `[DONE]` Data-driven spawn queuing (SPAWN_QUEUE_CONFIG)
+- `[DONE]` Pure mesh factories (BuildingMeshFactory, DefenseMeshFactory)
+- `[READY]` Extract BlueprintSystem, CombatResolver, GameInitializer, FormationSystem
+- `[READY]` Convert UnitFactory to data-driven config tables (prerequisite for Phase 1)
+- `[READY]` Remove backward-compat getters once all callers migrated
+- **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
+
+### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [BLOCKED on Phase 0 gate]
 Make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry. New units:
 - **Healer** — support, restores HP to adjacent allies per turn
 - **Assassin/Rogue** — stealth, high burst damage, fragile, can bypass walls
@@ -264,8 +319,9 @@ Make UnitFactory fully data-driven (stat tables, not switch cases) so adding a u
 - **Sea Raider** — amphibious fighter, land + water (Tidecallers unique)
 - **Siege Tower** — slow, lets melee units attack over walls
 
-### Phase 2: 4 Base Tribes (Free in Base Game)
+### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.
+- **Phase gate:** TribeConfig interface exists, UnitFactory/BuildingMeshFactory/AIController all read from it, one "default" tribe works end-to-end
 
 **Stoneguard** (defensive/builder)
 - Unique unit: Shieldbearer (armor aura to adjacent allies)
@@ -299,15 +355,15 @@ Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonu
 - Passive: "Tidal Knowledge" — reveals all coastal tiles at game start
 - AI: coastal expansion, controls water, flanks from unexpected angles
 
-Architecture prep:
-- `TribeConfig` interface: stat modifiers, color palette, unique unit/building defs, AI personality params, passive ability, starting bonus
-- UnitFactory reads stats from config table — adding a unit = adding a data entry
-- UnitRenderer skin-aware (color palette lookup from tribe config, not hardcoded)
-- BuildingMeshFactory accepts tribe style parameter for visual variants
-- AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
+Architecture prep (check these on every commit touching these systems):
+- `[READY]` `TribeConfig` interface: stat modifiers, color palette, unique unit/building defs, AI personality params, passive ability, starting bonus
+- `[READY]` UnitFactory reads stats from config table — adding a unit = adding a data entry
+- `[READY]` UnitRenderer skin-aware (color palette lookup from tribe config, not hardcoded)
+- `[READY]` BuildingMeshFactory accepts tribe style parameter for visual variants
+- `[READY]` AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
 - Future DLC tribes slot in by adding more TribeConfig entries
 
-### Phase 3: Naval Combat & Water Tiles
+### Phase 3: Naval Combat & Water Tiles [BLOCKED on Phase 2]
 - **Water hex tiles** — new terrain type, impassable for land units
 - **Port building** — coastal building that spawns naval units
 - **Naval unit types:** Galley (transport), Warship (ranged combat), Fishing Boat (gathering)
@@ -318,7 +374,7 @@ Architecture prep:
 - Map generator needs island/continent modes with water bodies
 - NavalSystem.ts as its own subsystem
 
-### Phase 4: Polish & Revenue Features
+### Phase 4: Polish & Revenue Features [BLOCKED on Phase 2]
 - **Tech tree** — per-tribe research unlocks (buildings, units, upgrades)
 - **Fog of war** — tile visibility based on unit sight radius
 - **Multiplayer** — start with hot-seat, then networked (WebSocket)
