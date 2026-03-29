@@ -91,7 +91,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
-- `src/game/entities/UnitFactory.ts` — Unit stats, speeds, attack speeds, colors
+- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~122 lines)**. Single `UNIT_CONFIG` table per UnitType: stats, moveSpeed, attackSpeed, color, carryCapacity, isSiege. No switch/ternary chains. Adding a unit = adding one config entry.
 - `src/ui/HUD.ts` — All UI: resource panel, build buttons, help overlay, debug panel, spawn queues
 - `src/engine/UnitRenderer.ts` — 3D unit mesh generation, animations, health bars, labels
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, etc.)
@@ -351,7 +351,7 @@ private buildGameContext(): GameContext {
 - **When handling player input:** ask "does this mutate game state directly?" If so, route through a command/action pattern instead. Multiplayer needs command serialization.
 - **Status markers:** `[DONE]` = shipped, `[WIP]` = in progress, `[BLOCKED]` = dependency unmet, `[READY]` = can start, unmarked = future
 
-### Phase 0: Architecture Foundation (Current) [WIP]
+### Phase 0: Architecture Foundation [DONE]
 Get main.ts under 3000 lines. All systems modular. Data-driven configs for buildings, units, spawning.
 - `[DONE]` Extract AIController, BuildingSystem, WallSystem, ResourceManager
 - `[DONE]` Extract BuildingTooltipController
@@ -365,13 +365,13 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - `[DONE]` Extract DebugController (all playtester/debug commands)
 - `[DONE]` **main.ts < 3000 lines (2998 achieved)**
 - `[READY]` Extract CombatEventHandler, InputManager, SpawnQueueSystem
-- `[READY]` Convert UnitFactory to data-driven config tables (prerequisite for Phase 1)
+- `[DONE]` Convert UnitFactory to data-driven config tables (single UNIT_CONFIG record per type)
 - `[READY]` Remove backward-compat getters once all callers migrated
 - `[READY]` Replace `Math.random()` in game logic with seeded PRNG (multiplayer prep)
 - `[READY]` Introduce CommandQueue pattern for input → simulation decoupling (multiplayer prep)
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
 
-### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [BLOCKED on Phase 0 gate]
+### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [READY]
 Make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry. New units:
 - **Healer** — support, restores HP to adjacent allies per turn
 - **Assassin/Rogue** — stealth, high burst damage, fragile, can bypass walls
