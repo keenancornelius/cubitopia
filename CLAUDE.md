@@ -180,6 +180,9 @@ These are separate from weapon range — detection range is how far units "see" 
 - Workshop: `doSpawnQueueWorkshop()` — compound cost (rope + stone + wood), kept separate due to multi-resource validation
 - Spawn processing loop in `updateRTS()` is already data-driven via `spawnConfigs[]` array
 
+### Planned Resources (not yet implemented)
+- **Gold** — universal advanced resource (Phase 3). Earned from neutral city income + trade routes. Spent on city upgrades, mercenaries, tech research, army upkeep. When adding new resource types, extend the Player.resources interface and SPAWN_QUEUE_CONFIG to support multi-resource costs generically (workshop already does this as a one-off).
+
 ---
 
 ## Mistakes Log
@@ -322,6 +325,8 @@ private buildGameContext(): GameContext {
 - **Before starting any Phase N feature:** verify all Phase N-1 architecture prep items are complete.
 - **When adding a new system:** ask "does this make the tribe system easier or harder to build?" If harder, redesign.
 - **When touching UnitFactory, BuildingMeshFactory, or AIController:** ask "is this still data-driven? Could a new tribe slot in without code changes?"
+- **When touching game logic:** ask "is this deterministic? Does it use Math.random()?" If so, swap to seeded PRNG. Multiplayer depends on this.
+- **When handling player input:** ask "does this mutate game state directly?" If so, route through a command/action pattern instead. Multiplayer needs command serialization.
 - **Status markers:** `[DONE]` = shipped, `[WIP]` = in progress, `[BLOCKED]` = dependency unmet, `[READY]` = can start, unmarked = future
 
 ### Phase 0: Architecture Foundation (Current) [WIP]
@@ -337,6 +342,8 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - `[READY]` Extract UIMenuController, CombatEventHandler, InputManager, SpawnQueueSystem
 - `[READY]` Convert UnitFactory to data-driven config tables (prerequisite for Phase 1)
 - `[READY]` Remove backward-compat getters once all callers migrated
+- `[READY]` Replace `Math.random()` in game logic with seeded PRNG (multiplayer prep)
+- `[READY]` Introduce CommandQueue pattern for input → simulation decoupling (multiplayer prep)
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
 
 ### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [BLOCKED on Phase 0 gate]
@@ -393,22 +400,90 @@ Architecture prep (check these on every commit touching these systems):
 - `[READY]` AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
 - Future DLC tribes slot in by adding more TribeConfig entries
 
-### Phase 3: Naval Combat & Water Tiles [BLOCKED on Phase 2]
+### Phase 3: Neutral Cities & Gold Economy [BLOCKED on Phase 2 gate]
+Capturable map objectives that create contested territory and drive strategic decisions. Introduces the gold resource.
+
+**Neutral City Mechanics:**
+- Cities spawn at map generation on strategic hexes (crossroads, hilltops, resource-rich areas)
+- Start neutral with NPC garrison (scaled to city tier). Must destroy garrison + hold for 2 turns to capture
+- Can be recaptured by any player — ownership flips on hold timer
+- **City tiers:** Village (1 hex) → Town (3 hex cluster) → City (7 hex cluster). Upgrade by spending gold + building infrastructure in the city's influence radius (3 hexes)
+- Each tier upgrade increases gold income, unlocks new recruit options, and grants passive bonuses
+
+**City Bonuses (scale with tier and surrounding infrastructure):**
+- **Gold income** — base gold/turn + bonus per farm/building within influence radius
+- **Healing aura** — friendly units in city radius slowly regenerate HP
+- **Vision range** — reveals terrain around the city (synergizes with fog of war)
+- **Unique recruits** — higher-tier cities can train mercenary units not available at home base
+- **Trade routes** — connected cities (within N hexes of each other, both owned) generate bonus gold
+
+**Gold Economy:**
+- Gold is the universal advanced resource (alongside wood, stone, food, fiber)
+- **Earned from:** city income, trade routes, certain terrain deposits, selling surplus resources
+- **Spent on:** city tier upgrades, mercenary hiring, tech tree research (Phase 5), army upkeep (large armies cost gold/turn), diplomatic actions (future)
+- **Strategic tension:** spread thin to hold more cities for income, or consolidate and push with fewer
+
+**Architecture:**
+- `CitySystem.ts` — city state, garrison, ownership, tier, income calculation, influence radius
+- `CityConfig` data table — city types, tier thresholds, bonus tables, garrison compositions
+- `GoldEconomy` module — income/expense tracking, upkeep calculation, trade route detection
+- Map generator places cities using strategic value heuristic (distance from bases, terrain, resources)
+- **Phase gate:** 3+ neutral cities on every generated map, capture/recapture works, gold income flows, at least 2 city tiers functional
+
+### Phase 4: Naval Combat & Water Tiles [BLOCKED on Phase 3]
 - **Water hex tiles** — new terrain type, impassable for land units
 - **Port building** — coastal building that spawns naval units
 - **Naval unit types:** Galley (transport), Warship (ranged combat), Fishing Boat (gathering)
-- **Coastal mechanics** — amphibious assault via ports, naval trade routes
+- **Coastal mechanics** — amphibious assault via ports, naval trade routes (feed into gold economy)
 - **Bridges/docks** — buildable structures connecting land masses
 - Pathfinder needs terrain-type awareness (land/water/coastal)
 - UnitAI needs embark/disembark state machine
 - Map generator needs island/continent modes with water bodies
 - NavalSystem.ts as its own subsystem
+- Tidecallers tribe gets full naval advantage here
 
-### Phase 4: Polish & Revenue Features [BLOCKED on Phase 2]
-- **Tech tree** — per-tribe research unlocks (buildings, units, upgrades)
-- **Fog of war** — tile visibility based on unit sight radius
-- **Multiplayer** — start with hot-seat, then networked (WebSocket)
-- **Map editor** — let players create and share maps
-- **Campaign mode** — scripted scenarios with objectives
-- **Steam Workshop** — custom tribes, maps, mods
-- **DLC tribes** — additional paid tribes beyond the 4 base tribes
+### Phase 5: Competitive Multiplayer (Primary Revenue Target) [BLOCKED on Phase 3]
+Online competitive multiplayer is the core revenue driver. Architecture decisions made NOW must keep this feasible.
+
+**Networking Model: Deterministic Lockstep**
+- All clients run identical game simulation; only player commands are exchanged over network
+- Requires: seeded RNG (no `Math.random()` in game logic), deterministic floating point, command queue
+- Fallback: if lockstep proves too strict, switch to server-authoritative with client prediction
+- Protocol: WebSocket for real-time, with reconnect support via state snapshots
+
+**Multiplayer Modes:**
+- **Ranked 1v1** — primary competitive mode, ELO matchmaking, seasonal ladders
+- **2v2 / FFA** — team and free-for-all variants (2-4 players)
+- **Custom lobbies** — private games with configurable rules (map size, starting resources, city count, timer)
+- **Spectator mode** — watch live games with fog of war toggle
+
+**Competitive Features:**
+- **Turn timer** — configurable per-turn time limit (30s / 60s / 90s / unlimited)
+- **Fog of war** — tile visibility based on unit sight radius + city vision (critical for competitive)
+- **Ranked seasons** — seasonal resets, placement matches, reward tracks
+- **Replay system** — full game replay from serialized command log (comes free with lockstep)
+- **Anti-cheat** — server validates command legality, detects desync (lockstep hash comparison)
+
+**Architecture Prep (start in Phase 0, enforce throughout):**
+- `[READY]` Replace all `Math.random()` in game logic with seeded PRNG (keep Math.random for visuals only)
+- `[READY]` All game state mutations go through `CommandQueue` — no direct state writes from input handlers
+- `[READY]` Game state must be fully serializable (for snapshots, reconnect, replays)
+- `[READY]` Separate "simulation tick" from "render frame" — simulation runs at fixed rate, renderer interpolates
+- `[READY]` Player input → Command object → CommandQueue → simulation processes commands deterministically
+- Network layer wraps CommandQueue: local mode processes immediately, online mode broadcasts then processes on confirmation
+
+**Revenue Model:**
+- Base game free (4 tribes, ranked play, all gameplay features)
+- **DLC tribes** — additional paid tribes with unique units/buildings/passives
+- **Cosmetic packs** — voxel skins, city themes, terrain themes, victory animations
+- **Battle pass** — seasonal cosmetic reward track
+- **Steam Workshop** — custom maps, mods (drives retention)
+
+### Phase 6: Polish & Content [BLOCKED on Phase 5]
+- **Tech tree** — per-tribe research unlocks (buildings, units, upgrades), costs gold
+- **Campaign mode** — scripted scenarios with objectives and narrative
+- **Map editor** — let players create and share maps via Steam Workshop
+- **Achievements & stats** — tracked across ranked and campaign
+- **Tutorial / onboarding** — guided first game with progressive feature unlocks
+- **Sound & music** — procedural ambient + combat sfx + tribal music themes
+- **AI difficulty tiers** — easy/medium/hard/brutal, each with distinct personality
