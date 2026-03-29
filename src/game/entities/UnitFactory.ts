@@ -72,7 +72,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 1.0, attackSpeed: 0.6, color: 0xdaa520,
     carryCapacity: 5, isSiege: false,
   },
-  // --- Phase 1 units ---
+  // --- Advanced combat units ---
   [UnitType.HEALER]: {
     stats: { maxHealth: 7, attack: 0, defense: 2, movement: 2, range: 2 },
     moveSpeed: 1.1, attackSpeed: 0.0, color: 0x00e676,

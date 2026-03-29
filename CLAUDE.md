@@ -379,7 +379,7 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
 
 ### Phase 1: Expanded Unit Types + Data-Driven UnitFactory [WIP]
-UnitFactory is fully data-driven. 5 of 7 new units implemented with unique abilities:
+UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" separation. 5 of 7 new units implemented with unique abilities:
 - `[DONE]` **Healer** — auto-heals allies in range 2, seeks injured, follows combat units
 - `[DONE]` **Assassin** — ambush bonus (+3 attack from full HP), fast, dual daggers
 - `[DONE]` **Shieldbearer** — armor aura (+2 defense to allies within 2 hex), massive shield
@@ -397,6 +397,8 @@ UnitFactory is fully data-driven. 5 of 7 new units implemented with unique abili
 - `[DONE]` Weapon-specific attack animations — assassin jump-stab, berserker overhead cleave, shieldbearer bash+stab, battlemage staff slam, healer channel sway
 - `[DONE]` Swing streak VFX — slash/stab/smash trail arcs spawn on weapon strikes, fade + scale over 350ms
 - `[DONE]` Weapon-specific impact sounds — hit_pierce (sharp stab), hit_cleave (whoosh+chop), hit_blunt (bass thud) in SoundManager
+- `[DONE]` Normalized all combat units — eliminated "Phase 1" separation in isCombatType, HUD hasCombat, stance UI, COMBAT_TYPES array. All non-worker units are combat units.
+- `[DONE]` Arena spawns one of each combat unit type (12 per side)
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.

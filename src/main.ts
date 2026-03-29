@@ -1824,18 +1824,19 @@ class Cubitopia {
     if (isArena) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
       const arenaCenter = Math.floor(MAP_SIZE / 2);
+      // One of each combat unit type — unified roster, no Phase 1 separation
       const armyDefs: { type: UnitType; count: number }[] = [
-        { type: UnitType.WARRIOR, count: 4 },
-        { type: UnitType.ARCHER, count: 3 },
-        { type: UnitType.RIDER, count: 2 },
-        { type: UnitType.PALADIN, count: 2 },
-        { type: UnitType.MAGE, count: 2 },
-        { type: UnitType.TREBUCHET, count: 2 },
+        { type: UnitType.WARRIOR, count: 1 },
+        { type: UnitType.ARCHER, count: 1 },
+        { type: UnitType.RIDER, count: 1 },
+        { type: UnitType.PALADIN, count: 1 },
+        { type: UnitType.MAGE, count: 1 },
+        { type: UnitType.TREBUCHET, count: 1 },
         { type: UnitType.SCOUT, count: 1 },
-        { type: UnitType.HEALER, count: 2 },
-        { type: UnitType.ASSASSIN, count: 2 },
-        { type: UnitType.SHIELDBEARER, count: 2 },
-        { type: UnitType.BERSERKER, count: 2 },
+        { type: UnitType.HEALER, count: 1 },
+        { type: UnitType.ASSASSIN, count: 1 },
+        { type: UnitType.SHIELDBEARER, count: 1 },
+        { type: UnitType.BERSERKER, count: 1 },
         { type: UnitType.BATTLEMAGE, count: 1 },
       ];
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
@@ -2049,8 +2050,7 @@ class Cubitopia {
     ];
 
     const isCombatType = (t: UnitType) =>
-      t === UnitType.WARRIOR || t === UnitType.ARCHER || t === UnitType.RIDER ||
-      t === UnitType.PALADIN || t === UnitType.CATAPULT || t === UnitType.TREBUCHET;
+      t !== UnitType.BUILDER && t !== UnitType.LUMBERJACK && t !== UnitType.VILLAGER;
 
     for (const cfg of spawnConfigs) {
       const building = this.buildingSystem.getNextSpawnBuilding(cfg.kind as any, 0);

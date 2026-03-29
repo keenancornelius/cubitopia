@@ -1,6 +1,6 @@
 // ============================================
 // CUBITOPIA - Combat System
-// Handles unit-vs-unit combat resolution + Phase 1 ability modifiers
+// Handles unit-vs-unit combat resolution + ability modifiers
 // ============================================
 
 import { Unit, UnitType } from '../../types';

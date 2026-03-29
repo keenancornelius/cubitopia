@@ -179,7 +179,7 @@ export enum UnitType {
   BUILDER = 'builder',
   LUMBERJACK = 'lumberjack',
   VILLAGER = 'villager',
-  // Phase 1 units
+  // Advanced combat units
   HEALER = 'healer',
   ASSASSIN = 'assassin',
   SHIELDBEARER = 'shieldbearer',

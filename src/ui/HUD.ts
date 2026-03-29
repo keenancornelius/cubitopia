@@ -421,8 +421,18 @@ export class HUD {
     [UnitType.LUMBERJACK]: '#27ae60',
     [UnitType.VILLAGER]: '#bdc3c7',
   };
-  private static readonly COMBAT_TYPES = [UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.PALADIN, UnitType.CATAPULT, UnitType.TREBUCHET, UnitType.SCOUT, UnitType.MAGE];
+  private static readonly COMBAT_TYPES = [
+    UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.PALADIN,
+    UnitType.CATAPULT, UnitType.TREBUCHET, UnitType.SCOUT, UnitType.MAGE,
+    UnitType.HEALER, UnitType.ASSASSIN, UnitType.SHIELDBEARER,
+    UnitType.BERSERKER, UnitType.BATTLEMAGE,
+  ];
   private static readonly WORKER_TYPES = [UnitType.BUILDER, UnitType.LUMBERJACK, UnitType.VILLAGER];
+
+  /** Check if a unit type is a combat unit (not a worker) */
+  private static isCombatType(t: UnitType): boolean {
+    return t !== UnitType.BUILDER && t !== UnitType.LUMBERJACK && t !== UnitType.VILLAGER;
+  }
 
   /** Build the resource bar DOM once so event listeners survive updates */
   private buildResourceBarDOM(bar: HTMLElement): void {
@@ -1119,12 +1129,8 @@ export class HUD {
 
     if (units.length === 0) return;
 
-    // Show command panel for combat units
-    const hasCombat = units.some(u =>
-      u.type === UnitType.WARRIOR || u.type === UnitType.ARCHER ||
-      u.type === UnitType.RIDER || u.type === UnitType.PALADIN ||
-      u.type === UnitType.CATAPULT || u.type === UnitType.TREBUCHET || u.type === UnitType.MAGE
-    );
+    // Show command panel for combat units (all non-worker types)
+    const hasCombat = units.some(u => HUD.isCombatType(u.type));
     this.showSelectionCommands(hasCombat, units);
   }
 
@@ -1180,11 +1186,7 @@ export class HUD {
 
     if (hasCombat) {
       // Current stance (use first combat unit's stance as reference)
-      const combatUnit = units.find(u =>
-        u.type === UnitType.WARRIOR || u.type === UnitType.ARCHER ||
-        u.type === UnitType.RIDER || u.type === UnitType.PALADIN ||
-        u.type === UnitType.CATAPULT || u.type === UnitType.MAGE
-      );
+      const combatUnit = units.find(u => HUD.isCombatType(u.type));
       const currentStance = combatUnit?.stance ?? UnitStance.DEFENSIVE;
 
       // STANCE section
