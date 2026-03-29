@@ -495,9 +495,7 @@ export class UnitAI {
     }
 
     // --- Combat units behavior ---
-    if (unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-        unit.type === UnitType.RIDER || unit.type === UnitType.CATAPULT ||
-        unit.type === UnitType.PALADIN || unit.type === UnitType.TREBUCHET) {
+    if (UnitAI.isCombatUnit(unit)) {
 
       // Detection ranges per unit type
       const detectionRange = UnitAI.getDetectionRange(unit);
@@ -623,6 +621,14 @@ export class UnitAI {
               return;
             }
           }
+          // Arena mode: actively seek nearest enemy and charge
+          if (UnitAI.arenaMode) {
+            const nearestEnemy = UnitAI.findNearestEnemy(unit, allUnits, player.id);
+            if (nearestEnemy) {
+              UnitAI.commandAttack(unit, nearestEnemy.position, nearestEnemy.id, map);
+            }
+            return;
+          }
           // Patrol: if unit has a patrol route, walk it
           const patrolRoute = (unit as any)._patrolRoute as HexCoord[] | undefined;
           if (patrolRoute && patrolRoute.length > 0) {
@@ -675,15 +681,21 @@ export class UnitAI {
         }
       }
 
+      // Arena mode: always seek nearest enemy and charge — no rally/wave
+      if (UnitAI.arenaMode) {
+        const nearestEnemy = UnitAI.findNearestEnemy(unit, allUnits, player.id);
+        if (nearestEnemy) {
+          UnitAI.commandAttack(unit, nearestEnemy.position, nearestEnemy.id, map);
+        }
+        return;
+      }
+
       // AI: rally near barracks, then attack in waves
       const rallyPoint = UnitAI.barracksPositions.get(unit.owner) ?? UnitAI.basePositions.get(unit.owner);
       if (!rallyPoint) return;
 
       const idleCombat = allUnits.filter(u =>
-        u.owner === unit.owner && u.state !== UnitState.DEAD &&
-        (u.type === UnitType.WARRIOR || u.type === UnitType.ARCHER ||
-         u.type === UnitType.RIDER || u.type === UnitType.CATAPULT ||
-         u.type === UnitType.PALADIN || u.type === UnitType.TREBUCHET)
+        u.owner === unit.owner && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
       );
       const distToRally = Pathfinder.heuristic(unit.position, rallyPoint);
 
@@ -963,6 +975,9 @@ export class UnitAI {
    */
   private static keepWallPlans: Map<number, HexCoord[]> = new Map();
   private static keepGatePlans: Map<number, HexCoord[]> = new Map();
+
+  /** Arena mode: all units seek and destroy, no rally/wave */
+  static arenaMode = false;
 
   /** Base positions per player — set by main.ts on game init */
   static basePositions: Map<number, HexCoord> = new Map();
@@ -1817,6 +1832,19 @@ export class UnitAI {
       }
     }
     return nearest;
+  }
+
+  /** Is this unit a combat unit (not a worker/healer)? */
+  private static isCombatUnit(unit: Unit): boolean {
+    switch (unit.type) {
+      case UnitType.WARRIOR: case UnitType.ARCHER: case UnitType.RIDER:
+      case UnitType.CATAPULT: case UnitType.PALADIN: case UnitType.TREBUCHET:
+      case UnitType.ASSASSIN: case UnitType.SHIELDBEARER: case UnitType.BERSERKER:
+      case UnitType.BATTLEMAGE: case UnitType.SCOUT: case UnitType.MAGE:
+        return true;
+      default:
+        return false;
+    }
   }
 
   /** Get detection range for a unit type — how far it can "see" threats */

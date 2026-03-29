@@ -1887,6 +1887,7 @@ class Cubitopia {
 
     UnitAI.basePositions.set(0, p1BaseCoord);
     UnitAI.basePositions.set(1, p2BaseCoord);
+    UnitAI.arenaMode = isArena;
     UnitAI.siloPositions.set(0, p1BaseCoord);
     UnitAI.siloPositions.set(1, p2BaseCoord);
 
