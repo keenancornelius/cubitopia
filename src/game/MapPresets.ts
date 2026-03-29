@@ -20,7 +20,7 @@ export const MAP_PRESETS: MapPreset[] = [
   {
     type: MapType.ARENA,
     label: 'ARENA',
-    description: 'Flat combat arena — test units and watch armies clash',
+    description: 'Colosseum combat arena — walled ring, sand floor, tiered seating',
     size: 30,
     color: '#e74c3c',
   },
@@ -54,63 +54,68 @@ export function getPreset(type: MapType): MapPreset {
 // --- Arena Map Generator ---
 // Flat hex grid, no resources, no terrain noise. Pure combat sandbox.
 
-export function generateArenaMap(size: number, seed?: number): GameMap {
+export interface ArenaMap extends GameMap {
+  wallPositions: HexCoord[];   // Perimeter wall hex coords (colosseum wall ring)
+  gatePositions: HexCoord[];   // Gate hex coords (4 cardinal entries)
+}
+
+export function generateArenaMap(size: number, seed?: number): ArenaMap {
   const actualSeed = seed ?? Math.floor(Math.random() * 999999);
   const tiles = new Map<string, Tile>();
   const center = Math.floor(size / 2);
+  const wallRing: HexCoord[] = [];
+  const gateRing: HexCoord[] = [];
+
+  // Colosseum dimensions
+  const floorRadius = Math.floor(size / 2) - 5;  // Sand fighting floor
+  const wallRadius = floorRadius + 1;              // Wall ring just outside floor
+  const tierRadius = wallRadius + 3;               // Spectator tiers outside walls
+  const outerEdge = (size / 2) - 1;
 
   for (let q = 0; q < size; q++) {
     for (let r = 0; r < size; r++) {
       const key = `${q},${r}`;
-      const distFromCenter = Math.sqrt(
-        (q - center) ** 2 + (r - center) ** 2
-      );
-
-      // Circular arena with sand border ring
-      const arenaRadius = (size / 2) - 2;
-      const borderRadius = (size / 2) - 1;
+      const dist = Math.sqrt((q - center) ** 2 + (r - center) ** 2);
 
       let terrain: TerrainType;
       let elevation: number;
+      let topBlock: BlockType;
 
-      if (distFromCenter > borderRadius) {
-        // Outside arena — water moat
+      if (dist > outerEdge) {
+        // Outside — water void
         terrain = TerrainType.WATER;
         elevation = -2;
-      } else if (distFromCenter > arenaRadius) {
-        // Border ring — sand/desert edge
-        terrain = TerrainType.DESERT;
-        elevation = 1;
-      } else {
-        // Arena floor — flat plains
+        topBlock = BlockType.WATER;
+      } else if (dist > tierRadius) {
+        // Outer ground — stone walkway
         terrain = TerrainType.PLAINS;
+        elevation = 4;
+        topBlock = BlockType.STONE;
+      } else if (dist > wallRadius + 0.5) {
+        // Spectator tiers — rising stone seating (colosseum effect)
+        terrain = TerrainType.PLAINS;
+        const tierStep = dist - wallRadius;
+        elevation = Math.min(5, Math.floor(tierStep) + 2);
+        topBlock = BlockType.STONE;
+      } else if (dist > floorRadius + 0.5) {
+        // Wall ring zone — flat at elevation 1 (walls go on top)
+        terrain = TerrainType.PLAINS;
+        elevation = 1;
+        topBlock = BlockType.STONE;
+      } else {
+        // Arena floor — flat sand at elevation 0
+        terrain = TerrainType.DESERT; // Desert = sand texture, no grass spawns
         elevation = 0;
-
-        // Small raised center platform (3-hex radius)
-        if (distFromCenter <= 3) {
-          elevation = 1;
-        }
-
-        // Scatter a few stone pillars for cover (deterministic based on seed)
-        const pillarHash = ((q * 73856093) ^ (r * 19349663) ^ actualSeed) >>> 0;
-        if (distFromCenter > 5 && distFromCenter < arenaRadius - 3) {
-          if (pillarHash % 47 === 0) {
-            terrain = TerrainType.MOUNTAIN;
-            elevation = 3;
-          }
-        }
+        topBlock = BlockType.SAND;
       }
 
-      // Build voxel blocks for this tile
+      // Build voxel column
       const blocks: VoxelBlock[] = [];
       if (terrain !== TerrainType.WATER) {
-        const topBlock = terrain === TerrainType.MOUNTAIN ? BlockType.STONE
-          : terrain === TerrainType.DESERT ? BlockType.SAND
-          : BlockType.GRASS;
         for (let y = -1; y <= elevation; y++) {
           blocks.push({
             localPosition: { x: 0, y, z: 0 },
-            type: y === elevation ? topBlock : BlockType.DIRT,
+            type: y === elevation ? topBlock : (y >= elevation - 1 ? BlockType.STONE : BlockType.DIRT),
             health: 100,
             maxHealth: 100,
           });
@@ -129,10 +134,33 @@ export function generateArenaMap(size: number, seed?: number): GameMap {
         visible: true,
         explored: true,
       });
+
+      // Compute wall ring positions
+      const ringDist = Math.abs(dist - wallRadius);
+      if (ringDist < 0.8 && terrain !== TerrainType.WATER) {
+        const dq = q - center;
+        const dr = r - center;
+        // Gates at 4 cardinal entries
+        const isGate =
+          (dr < -floorRadius + 0.5 && Math.abs(dq) <= 1) ||  // North
+          (dr > floorRadius - 0.5 && Math.abs(dq) <= 1) ||   // South
+          (dq > floorRadius - 0.5 && Math.abs(dr) <= 1) ||   // East
+          (dq < -floorRadius + 0.5 && Math.abs(dr) <= 1);    // West
+
+        if (isGate) {
+          gateRing.push({ q, r });
+        } else {
+          wallRing.push({ q, r });
+        }
+      }
     }
   }
 
-  return { width: size, height: size, tiles, seed: actualSeed, mapType: MapType.ARENA };
+  return {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.ARENA,
+    wallPositions: wallRing,
+    gatePositions: gateRing,
+  };
 }
 
 // --- Map Generator Parameter Overrides ---

@@ -56,7 +56,7 @@ import {
   BuildingKind,
   MapType,
 } from './types';
-import { getPreset, generateArenaMap } from './game/MapPresets';
+import { getPreset, generateArenaMap, ArenaMap } from './game/MapPresets';
 
 // --- Configuration ---
 
@@ -1709,8 +1709,10 @@ class Cubitopia {
         }
       }
 
-      this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev);
-
+      // Arena: no trees, grass, or decorations — bare colosseum floor
+      if (this.mapType !== MapType.ARENA) {
+        this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev);
+      }
     });
 
     // Add water curtains on river/lake tiles where they drop to a lower water neighbor
@@ -1760,11 +1762,10 @@ class Cubitopia {
     // Initialize grass tracking for map-generated grass
     this.natureSystem.initializeGrassTracking();
 
-    // Create players
-    const makeResources = (): PlayerResources => ({
-      food: 50, wood: 50, stone: 20, iron: 10, gold: 25, crystal: 0,
-      grass_fiber: 0, clay: 0, rope: 0,
-    });
+    // Create players — arena gets abundant resources for testing
+    const makeResources = (): PlayerResources => isArena
+      ? { food: 999, wood: 999, stone: 999, iron: 999, gold: 999, crystal: 0, grass_fiber: 0, clay: 0, rope: 0 }
+      : { food: 50, wood: 50, stone: 20, iron: 10, gold: 25, crystal: 0, grass_fiber: 0, clay: 0, rope: 0 };
 
     const p1IsAI = this.gameMode === 'aivai';
     this.players = [
@@ -1896,10 +1897,25 @@ class Cubitopia {
     UnitAI.generateKeepWallPlan(0, p1BaseCoord, map);
     UnitAI.generateKeepWallPlan(1, p2BaseCoord, map);
 
+    // Arena: place colosseum wall ring + gate entries
+    if (isArena && (map as ArenaMap).wallPositions) {
+      const arenaMap = map as ArenaMap;
+      // Place walls around entire perimeter
+      for (const pos of arenaMap.wallPositions) {
+        this.wallSystem.placeWallDirect(pos, 0); // Neutral walls (player 0 owns)
+      }
+      // Place gates at 4 cardinal entries
+      for (const pos of arenaMap.gatePositions) {
+        this.wallSystem.placeGateDirect(pos, 0);
+      }
+      // Rebuild all connections so wall meshes adapt to neighbors
+      this.wallSystem.rebuildAllConnections();
+    }
+
     // Set camera bounds to prevent panning off the map
     this.camera.setMapBounds(-3, -3, MAP_SIZE * 1.5 + 3, MAP_SIZE * 1.5 + 3);
 
-    // Camera focuses on map center for auto-battler view
+    // Camera focuses on map center
     const centerQ = Math.floor(MAP_SIZE / 2);
     this.camera.focusOn(new THREE.Vector3(centerQ * 1.5, 2, midR * 1.5));
 

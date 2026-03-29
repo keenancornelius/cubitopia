@@ -176,6 +176,43 @@ export default class WallSystem {
     this.ops.updateStockpileVisual(unit.owner);
   }
 
+  // --- Direct Placement (arena/scenario — skips resource checks) ---
+
+  placeWallDirect(pos: HexCoord, owner: number): void {
+    const key = `${pos.q},${pos.r}`;
+    this.wallsBuilt.add(key);
+    this.wallOwners.set(key, owner);
+    this.wallHealth.set(key, WallSystem.WALL_MAX_HP);
+    this.ops.getWallConnectable().add(key);
+    UnitAI.wallsBuilt.add(key);
+    UnitAI.wallOwners.set(key, owner);
+    Pathfinder.blockedTiles.add(key);
+    this.buildAdaptiveWallMesh(pos, owner);
+  }
+
+  placeGateDirect(pos: HexCoord, owner: number): void {
+    const key = `${pos.q},${pos.r}`;
+    this.gatesBuilt.add(key);
+    this.gateOwners.set(key, owner);
+    this.gateHealth.set(key, WallSystem.GATE_MAX_HP);
+    this.ops.getWallConnectable().add(key);
+    Pathfinder.blockedTiles.add(key);
+    Pathfinder.gateTiles.set(key, owner);
+    this.buildGateMesh(pos, owner);
+  }
+
+  /** Rebuild all wall/gate neighbor connections (call after batch placement) */
+  rebuildAllConnections(): void {
+    for (const key of this.wallsBuilt) {
+      const [q, r] = key.split(',').map(Number);
+      this.buildAdaptiveWallMesh({ q, r }, this.wallOwners.get(key) ?? 0);
+    }
+    for (const key of this.gatesBuilt) {
+      const [q, r] = key.split(',').map(Number);
+      this.buildGateMesh({ q, r }, this.gateOwners.get(key) ?? 0);
+    }
+  }
+
   // --- Damage ---
 
   damageWall(coord: HexCoord, damage: number): boolean {
