@@ -166,6 +166,7 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
 
+    this.initSystems();
     this.setupEventHandlers();
     this.setupResizeHandler();
   }
@@ -1526,25 +1527,34 @@ class Cubitopia {
     return { x, y, z };
   }
 
-  /** Build a GameContext that exposes shared state to extracted systems */
+  /** Build a live GameContext that always reads current values from `this`.
+   *  Uses getter properties so reassigned arrays/objects stay in sync. */
   private buildGameContext(): GameContext {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this;
     return {
-      currentMap: this.currentMap,
-      players: this.players,
-      allUnits: this.allUnits,
-      bases: this.bases,
-      scene: this.renderer.scene,
-      hud: this.hud,
-      unitRenderer: this.unitRenderer,
-      selectionManager: this.selectionManager,
-      terrainDecorator: this.terrainDecorator,
-      voxelBuilder: this.voxelBuilder,
-      woodStockpile: this.woodStockpile,
-      stoneStockpile: this.stoneStockpile,
-      foodStockpile: this.foodStockpile,
-      grassFiberStockpile: this.grassFiberStockpile,
-      clayStockpile: this.clayStockpile,
-      ropeStockpile: this.ropeStockpile,
+      get currentMap() { return self.currentMap; },
+      get players() { return self.players; },
+      get allUnits() { return self.allUnits; },
+      get bases() { return self.bases; },
+      get scene() { return self.renderer.scene; },
+      get hud() { return self.hud; },
+      get unitRenderer() { return self.unitRenderer; },
+      get selectionManager() { return self.selectionManager; },
+      get terrainDecorator() { return self.terrainDecorator; },
+      get voxelBuilder() { return self.voxelBuilder; },
+      get woodStockpile() { return self.woodStockpile; },
+      set woodStockpile(v) { self.woodStockpile = v; },
+      get stoneStockpile() { return self.stoneStockpile; },
+      set stoneStockpile(v) { self.stoneStockpile = v; },
+      get foodStockpile() { return self.foodStockpile; },
+      set foodStockpile(v) { self.foodStockpile = v; },
+      get grassFiberStockpile() { return self.grassFiberStockpile; },
+      set grassFiberStockpile(v) { self.grassFiberStockpile = v; },
+      get clayStockpile() { return self.clayStockpile; },
+      set clayStockpile(v) { self.clayStockpile = v; },
+      get ropeStockpile() { return self.ropeStockpile; },
+      set ropeStockpile(v) { self.ropeStockpile = v; },
       hexToWorld: (pos: HexCoord) => this.hexToWorld(pos),
       getElevation: (pos: HexCoord) => this.getElevation(pos),
       isTileOccupied: (key: string) => this.isTileOccupied(key),
