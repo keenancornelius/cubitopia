@@ -2186,8 +2186,8 @@ class Cubitopia {
         } else if (event.attacker.type === UnitType.ASSASSIN) {
           this.sound.play('assassin_strike');
           this.sound.play('hit_pierce');
-        } else if (event.attacker.type === UnitType.RIDER) {
-          this.sound.play('hit_pierce'); // lance thrust
+        } else if (event.attacker.type === UnitType.RIDER || event.attacker.type === UnitType.SCOUT) {
+          this.sound.play('hit_pierce'); // lance thrust / dagger
         } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK) {
           this.sound.play('hit_cleave'); // axe / heavy weapon
         } else if (event.attacker.type === UnitType.SHIELDBEARER || event.attacker.type === UnitType.PALADIN
@@ -2200,11 +2200,11 @@ class Cubitopia {
         // Projectile VFX by attacker type — pass target ID for live tracking
         const defId = event.defender.id;
         if (event.attacker.type === UnitType.ARCHER) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800, defId);
+          this.unitRenderer.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId);
         } else if (event.attacker.type === UnitType.MAGE) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId);
+          this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId, false);
         } else if (event.attacker.type === UnitType.BATTLEMAGE) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId);
+          this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId, true);
           this.sound.play('splash_aoe');
         } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
           this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition);
@@ -2311,8 +2311,9 @@ class Cubitopia {
     // Update swing streak trails (fade out + cleanup)
     this.unitRenderer.updateSwingTrails(gameTime);
 
-    // Update projectiles (arrows in flight)
+    // Update projectiles (arrows in flight) + trail particles (sparks, smoke)
     this.unitRenderer.updateProjectiles(delta);
+    this.unitRenderer.updateTrailParticles();
 
     // --- Base damage: units near enemy base deal damage ---
     this.updateBaseDamage(delta);

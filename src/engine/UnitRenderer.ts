@@ -1016,6 +1016,165 @@ export class UnitRenderer {
         group.add(makeLegGroup('leg-right', 0x1a0033, 0.12, 0));
         break;
       }
+      case UnitType.SCOUT: {
+        // Agile scout — light leather armor, binoculars/spyglass, messenger bag, team bandana
+        const scoutBody = new THREE.Mesh(
+          new THREE.BoxGeometry(0.45, 0.55, 0.4),
+          new THREE.MeshLambertMaterial({ color: 0x5D4037 }) // dark leather
+        );
+        scoutBody.position.y = 0.3; scoutBody.castShadow = true;
+        group.add(scoutBody);
+        // Leather belt with team color buckle
+        const scoutBelt = new THREE.Mesh(
+          new THREE.BoxGeometry(0.48, 0.06, 0.42),
+          new THREE.MeshLambertMaterial({ color: playerColor })
+        );
+        scoutBelt.position.y = 0.18;
+        group.add(scoutBelt);
+        // Messenger bag strap (diagonal across chest)
+        const strap = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.5, 0.06),
+          new THREE.MeshLambertMaterial({ color: 0x3E2723 })
+        );
+        strap.position.set(-0.1, 0.35, 0.15);
+        strap.rotation.z = 0.4;
+        group.add(strap);
+        // Messenger bag on hip
+        const bag = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, 0.15, 0.12),
+          new THREE.MeshLambertMaterial({ color: 0x4E342E })
+        );
+        bag.position.set(0.2, 0.1, 0.1);
+        group.add(bag);
+        // Head
+        const scoutHead = new THREE.Mesh(
+          new THREE.BoxGeometry(0.32, 0.3, 0.32),
+          new THREE.MeshLambertMaterial({ color: 0xffdbac })
+        );
+        scoutHead.position.y = 0.78;
+        group.add(scoutHead);
+        // Bandana (team color, wrapped around head)
+        const bandana = new THREE.Mesh(
+          new THREE.BoxGeometry(0.36, 0.1, 0.36),
+          new THREE.MeshLambertMaterial({ color: playerColor })
+        );
+        bandana.position.y = 0.88;
+        group.add(bandana);
+        // Spyglass in right hand (long brass tube)
+        const spyglassHandle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.05, 0.35),
+          new THREE.MeshLambertMaterial({ color: 0xB8860B }) // brass
+        );
+        spyglassHandle.position.set(0, -0.05, 0.15);
+        // Spyglass lens (wider end)
+        const spyglassLens = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.08, 0.04),
+          new THREE.MeshBasicMaterial({ color: 0x88CCFF, transparent: true, opacity: 0.7 })
+        );
+        spyglassLens.position.set(0, -0.05, 0.33);
+        const rightArm = makeArmGroup('arm-right', 0x5D4037, 0.28, 0.35);
+        rightArm.add(spyglassHandle);
+        rightArm.add(spyglassLens);
+        group.add(rightArm);
+        group.add(makeArmGroup('arm-left', 0x5D4037, -0.28, 0.35));
+        // Light boots
+        group.add(makeLegGroup('leg-left', 0x3E2723, -0.1, 0));
+        group.add(makeLegGroup('leg-right', 0x3E2723, 0.1, 0));
+        break;
+      }
+      case UnitType.MAGE: {
+        // Arcane mage — flowing blue robe, pointed hat, staff with crystal, rune accents
+        const mageBody = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.65, 0.45),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 }) // deep blue robe
+        );
+        mageBody.position.y = 0.32; mageBody.castShadow = true;
+        group.add(mageBody);
+        // Robe hem (wider at bottom — gives flowing robe look)
+        const robeHem = new THREE.Mesh(
+          new THREE.BoxGeometry(0.58, 0.15, 0.52),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+        );
+        robeHem.position.y = 0.07;
+        group.add(robeHem);
+        // Golden trim at waist
+        const mageWaist = new THREE.Mesh(
+          new THREE.BoxGeometry(0.52, 0.04, 0.47),
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+        );
+        mageWaist.position.y = 0.55;
+        group.add(mageWaist);
+        // Glowing rune on chest (team color, emissive)
+        const rune = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.12, 0.02),
+          new THREE.MeshBasicMaterial({ color: playerColor, transparent: true, opacity: 0.8 })
+        );
+        rune.position.set(0, 0.42, 0.23);
+        group.add(rune);
+        // Head
+        const mageHead = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3, 0.3, 0.3),
+          new THREE.MeshLambertMaterial({ color: 0xffdbac })
+        );
+        mageHead.position.y = 0.82;
+        group.add(mageHead);
+        // Pointed wizard hat — brim + cone
+        const hatBrim = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.04, 0.5),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+        );
+        hatBrim.position.y = 0.95;
+        group.add(hatBrim);
+        const hatCone = new THREE.Mesh(
+          new THREE.BoxGeometry(0.25, 0.35, 0.25),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
+        );
+        hatCone.position.y = 1.15;
+        group.add(hatCone);
+        const hatTip = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.15, 0.12),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+        );
+        hatTip.position.y = 1.35;
+        group.add(hatTip);
+        // Hat star (golden accent on front)
+        const hatStar = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.08, 0.02),
+          new THREE.MeshBasicMaterial({ color: 0xFFD700 })
+        );
+        hatStar.position.set(0, 1.1, 0.13);
+        group.add(hatStar);
+        // Staff in right hand — tall wooden staff with crystal orb
+        const staffShaft = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.9, 0.05),
+          new THREE.MeshLambertMaterial({ color: 0x5D4037 })
+        );
+        staffShaft.position.set(0, 0.1, 0);
+        // Crystal orb at top (glowing blue, emissive)
+        const crystal = new THREE.Mesh(
+          new THREE.SphereGeometry(0.1, 6, 6),
+          new THREE.MeshBasicMaterial({ color: 0x42A5F5, transparent: true, opacity: 0.85 })
+        );
+        crystal.position.set(0, 0.6, 0);
+        // Crystal cage (golden prongs holding the orb)
+        for (let ci = 0; ci < 3; ci++) {
+          const prong = new THREE.Mesh(
+            new THREE.BoxGeometry(0.02, 0.15, 0.02),
+            new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+          );
+          const cAngle = (ci / 3) * Math.PI * 2;
+          prong.position.set(Math.cos(cAngle) * 0.06, 0.55, Math.sin(cAngle) * 0.06);
+          staffShaft.add(prong);
+        }
+        staffShaft.add(crystal);
+        const mageRightArm = makeArmGroup('arm-right', 0x1565C0, 0.3, 0.35);
+        mageRightArm.add(staffShaft);
+        group.add(mageRightArm);
+        group.add(makeArmGroup('arm-left', 0x1565C0, -0.3, 0.35));
+        group.add(makeLegGroup('leg-left', 0x0D47A1, -0.12, 0));
+        group.add(makeLegGroup('leg-right', 0x0D47A1, 0.12, 0));
+        break;
+      }
       default: {
         // Generic unit: simple body + head + limbs + team color shoulder marks
         const unitColor = UNIT_COLORS[type] || 0xffffff;
@@ -1026,7 +1185,6 @@ export class UnitRenderer {
         body.castShadow = true;
         group.add(body);
 
-        // Team color shoulder marks
         for (const sx of [-0.27, 0.27]) {
           const markGeo = new THREE.BoxGeometry(0.12, 0.08, 0.2);
           const markMat = new THREE.MeshLambertMaterial({ color: playerColor });
@@ -1041,11 +1199,8 @@ export class UnitRenderer {
         head.position.y = 0.8;
         group.add(head);
 
-        // Arms
         group.add(makeArmGroup('arm-left', 0xffdbac, -0.3, 0.35));
         group.add(makeArmGroup('arm-right', 0xffdbac, 0.3, 0.35));
-
-        // Legs
         group.add(makeLegGroup('leg-left', unitColor, -0.12, 0));
         group.add(makeLegGroup('leg-right', unitColor, 0.12, 0));
         break;
@@ -1950,6 +2105,59 @@ export class UnitRenderer {
         if (armLeft) { armLeft.rotation.x = 0.5; armLeft.rotation.z = -sway; }
         break;
       }
+      case UnitType.SCOUT: {
+        // Quick dagger slash: fast flurry of pokes
+        const speed = 3.5;
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.2) {
+          const p = cycle / 0.2;
+          if (armRight) armRight.rotation.x = -0.4 * p;
+        } else if (cycle < 0.35) {
+          const p = (cycle - 0.2) / 0.15;
+          if (armRight) armRight.rotation.x = -0.4 + 1.6 * p;
+          entry.group.rotation.x = 0.06 * p;
+          if (cycle >= 0.28 && cycle < 0.33) this.trySpawnTrail(unitId, 'stab', time, 0.25);
+        } else if (cycle < 0.5) {
+          if (armRight) armRight.rotation.x = 1.2;
+        } else {
+          const p = (cycle - 0.5) / 0.5;
+          if (armRight) armRight.rotation.x = 1.2 * (1 - p);
+          entry.group.rotation.x = 0.06 * (1 - p);
+        }
+        if (armLeft) armLeft.rotation.x = 0.15;
+        break;
+      }
+      case UnitType.MAGE: {
+        // Staff channel: arms raise, staff glows, then thrust forward to cast
+        const speed = 1.5;
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.5) {
+          // Channel: raise arms, lean back slightly
+          const p = cycle / 0.5;
+          if (armRight) armRight.rotation.x = -0.6 * p;
+          if (armLeft) {
+            armLeft.rotation.x = -0.4 * p;
+            armLeft.rotation.z = -0.3 * p;
+          }
+          entry.group.rotation.x = -0.04 * p;
+        } else if (cycle < 0.65) {
+          // Cast: thrust staff forward
+          const p = (cycle - 0.5) / 0.15;
+          if (armRight) armRight.rotation.x = -0.6 + 1.8 * p;
+          if (armLeft) armLeft.rotation.x = -0.4 + 0.8 * p;
+          entry.group.rotation.x = -0.04 + 0.12 * p;
+        } else if (cycle < 0.75) {
+          if (armRight) armRight.rotation.x = 1.2;
+          if (armLeft) armLeft.rotation.x = 0.4;
+          entry.group.rotation.x = 0.08;
+        } else {
+          const p = (cycle - 0.75) / 0.25;
+          if (armRight) armRight.rotation.x = 1.2 * (1 - p);
+          if (armLeft) armLeft.rotation.x = 0.4 * (1 - p);
+          entry.group.rotation.x = 0.08 * (1 - p);
+        }
+        break;
+      }
       default: {
         // Generic melee: simple arm swing
         const speed = 2.5;
@@ -2345,21 +2553,288 @@ export class UnitRenderer {
     requestAnimationFrame(animate);
   }
 
+  // Active trail emitters (attached to projectiles)
+  private trailParticles: Array<{
+    mesh: THREE.Mesh;
+    velocity: { x: number; y: number; z: number };
+    startTime: number;
+    duration: number;
+  }> = [];
+
   /**
-   * Fire a projectile (arrow) from one position to another
+   * Fire an arrow projectile — shaft + fletching + arrowhead
+   */
+  fireArrow(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string): void {
+    const group = new THREE.Group();
+    // Shaft
+    const shaft = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.03, 0.35),
+      new THREE.MeshLambertMaterial({ color: 0x8B4513 }) // wood brown
+    );
+    group.add(shaft);
+    // Arrowhead (darker metal)
+    const head = new THREE.Mesh(
+      new THREE.BoxGeometry(0.06, 0.06, 0.08),
+      new THREE.MeshLambertMaterial({ color: 0x444444 })
+    );
+    head.position.z = 0.2;
+    group.add(head);
+    // Fletching (3 colored fins)
+    for (let i = 0; i < 3; i++) {
+      const fin = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, 0.01, 0.06),
+        new THREE.MeshBasicMaterial({ color: 0xFF8800, transparent: true, opacity: 0.9 })
+      );
+      fin.position.z = -0.15;
+      fin.rotation.z = (i / 3) * Math.PI * 2;
+      group.add(fin);
+    }
+    group.position.set(fromPos.x, fromPos.y + 0.5, fromPos.z);
+    this.scene.add(group);
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
+    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId });
+  }
+
+  /**
+   * Fire a magic orb — glowing sphere + orbiting sparkles + trail
+   */
+  fireMagicOrb(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number, targetUnitId?: string, isAoE = false): void {
+    const group = new THREE.Group();
+    // Core glowing orb
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.12, 8, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 })
+    );
+    group.add(core);
+    // Bright inner glow
+    const glow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 8, 8),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.3, side: THREE.BackSide })
+    );
+    group.add(glow);
+    // Orbiting sparkle ring (4 tiny cubes)
+    for (let i = 0; i < 4; i++) {
+      const sparkle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.04, 0.04),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })
+      );
+      sparkle.name = `sparkle-${i}`;
+      const angle = (i / 4) * Math.PI * 2;
+      sparkle.position.set(Math.cos(angle) * 0.2, Math.sin(angle) * 0.2, 0);
+      group.add(sparkle);
+    }
+    // Mark as magic for trail spawning in update loop
+    (group as any)._magicColor = color;
+    (group as any)._isAoE = isAoE;
+    group.position.set(fromPos.x, fromPos.y + 0.5, fromPos.z);
+    this.scene.add(group);
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
+    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.6, targetUnitId });
+  }
+
+  /**
+   * Fire a generic projectile (legacy fallback)
    */
   fireProjectile(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number = 0xFF8800, targetUnitId?: string): void {
     const arrowGeo = new THREE.BoxGeometry(0.05, 0.05, 0.2);
     const arrowMat = new THREE.MeshBasicMaterial({ color });
     const arrow = new THREE.Mesh(arrowGeo, arrowMat);
-
     arrow.position.set(fromPos.x, fromPos.y + 0.5, fromPos.z);
     this.scene.add(arrow);
-
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-
     this.projectiles.push({ mesh: arrow, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId });
+  }
+
+  /**
+   * Spawn a massive AoE explosion at a hex position.
+   * Firecracker sparks shoot from center, smoke puffs billow, fire flashes on surrounding hexes.
+   * @param centerWorld world position of impact center
+   * @param radius number of hex rings to affect (1 = 7 hexes, 2 = 19 hexes)
+   * @param color primary explosion color
+   */
+  spawnAoEExplosion(centerWorld: { x: number; y: number; z: number }, radius: number, color: number): void {
+    const t = performance.now() / 1000;
+    const cx = centerWorld.x, cy = centerWorld.y, cz = centerWorld.z;
+
+    // === PHASE 1: Central flash burst ===
+    const flashGeo = new THREE.SphereGeometry(0.6, 8, 8);
+    const flashMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 1.0 });
+    const flash = new THREE.Mesh(flashGeo, flashMat);
+    flash.position.set(cx, cy + 0.5, cz);
+    this.scene.add(flash);
+    // Animate flash: expand + fade
+    const flashStart = t;
+    const animFlash = () => {
+      const elapsed = performance.now() / 1000 - flashStart;
+      if (elapsed > 0.3) {
+        this.scene.remove(flash);
+        flashGeo.dispose(); flashMat.dispose();
+        return;
+      }
+      const p = elapsed / 0.3;
+      const s = 1 + p * 3;
+      flash.scale.set(s, s, s);
+      flashMat.opacity = 1.0 - p;
+      requestAnimationFrame(animFlash);
+    };
+    requestAnimationFrame(animFlash);
+
+    // === PHASE 2: Firecracker sparks shooting out from center ===
+    const sparkCount = 25 + radius * 15;
+    for (let i = 0; i < sparkCount; i++) {
+      const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
+      const isWhite = Math.random() > 0.5;
+      const sparkColor = isWhite ? 0xFFFFCC : color;
+      const sparkMat = new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 1.0 });
+      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      spark.position.set(cx, cy + 0.5, cz);
+      this.scene.add(spark);
+
+      // Random direction — radiate outward with upward bias
+      const angle = Math.random() * Math.PI * 2;
+      const upAngle = Math.random() * Math.PI * 0.6; // mostly upward
+      const speed = 2 + Math.random() * 4;
+      const vx = Math.cos(angle) * Math.sin(upAngle) * speed;
+      const vy = Math.cos(upAngle) * speed * 0.8 + 1;
+      const vz = Math.sin(angle) * Math.sin(upAngle) * speed;
+
+      const startTime = t + Math.random() * 0.05; // slight stagger
+      const duration = 0.4 + Math.random() * 0.5;
+
+      this.trailParticles.push({
+        mesh: spark, velocity: { x: vx, y: vy, z: vz },
+        startTime, duration,
+      });
+    }
+
+    // === PHASE 3: Smoke puffs billowing outward ===
+    const smokeCount = 8 + radius * 4;
+    for (let i = 0; i < smokeCount; i++) {
+      const smokeGeo = new THREE.SphereGeometry(0.15 + Math.random() * 0.2, 6, 6);
+      const smokeMat = new THREE.MeshBasicMaterial({
+        color: 0x333333, transparent: true, opacity: 0.6,
+      });
+      const smoke = new THREE.Mesh(smokeGeo, smokeMat);
+      const sAngle = Math.random() * Math.PI * 2;
+      const sDist = Math.random() * 0.5;
+      smoke.position.set(cx + Math.cos(sAngle) * sDist, cy + 0.3, cz + Math.sin(sAngle) * sDist);
+      this.scene.add(smoke);
+
+      const smokeStart = t + Math.random() * 0.15;
+      const smokeDuration = 0.8 + Math.random() * 0.6;
+      const svx = Math.cos(sAngle) * (0.5 + Math.random() * 1.0);
+      const svy = 0.8 + Math.random() * 1.5;
+      const svz = Math.sin(sAngle) * (0.5 + Math.random() * 1.0);
+
+      this.trailParticles.push({
+        mesh: smoke, velocity: { x: svx, y: svy, z: svz },
+        startTime: smokeStart, duration: smokeDuration,
+      });
+    }
+
+    // === PHASE 4: Fire flashes on hex positions in the AoE radius ===
+    // Generate hex ring positions around center
+    const hexPositions: Array<{ x: number; z: number }> = [{ x: cx, z: cz }]; // center hex
+    for (let ring = 1; ring <= radius; ring++) {
+      const hexesInRing = 6 * ring;
+      for (let h = 0; h < hexesInRing; h++) {
+        const hAngle = (h / hexesInRing) * Math.PI * 2;
+        const hx = cx + Math.cos(hAngle) * ring * 1.5;
+        const hz = cz + Math.sin(hAngle) * ring * 1.5;
+        hexPositions.push({ x: hx, z: hz });
+      }
+    }
+
+    for (let hi = 0; hi < hexPositions.length; hi++) {
+      const hp = hexPositions[hi];
+      const delay = 0.02 + hi * 0.015 + Math.random() * 0.05; // ripple outward
+
+      // Fire column flash
+      const fireGeo = new THREE.BoxGeometry(0.8, 0.4, 0.8);
+      const fireMat = new THREE.MeshBasicMaterial({
+        color, transparent: true, opacity: 0.0,
+      });
+      const fire = new THREE.Mesh(fireGeo, fireMat);
+      fire.position.set(hp.x, cy + 0.2, hp.z);
+      this.scene.add(fire);
+
+      // Ember particles shooting up from each hex
+      const emberCount = 3 + Math.floor(Math.random() * 3);
+      for (let ei = 0; ei < emberCount; ei++) {
+        const emberGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
+        const emberMat = new THREE.MeshBasicMaterial({
+          color: Math.random() > 0.3 ? color : 0xFFCC00,
+          transparent: true, opacity: 1.0,
+        });
+        const ember = new THREE.Mesh(emberGeo, emberMat);
+        ember.position.set(hp.x + (Math.random() - 0.5) * 0.5, cy + 0.3, hp.z + (Math.random() - 0.5) * 0.5);
+        this.scene.add(ember);
+        this.trailParticles.push({
+          mesh: ember,
+          velocity: { x: (Math.random() - 0.5) * 1.5, y: 2 + Math.random() * 3, z: (Math.random() - 0.5) * 1.5 },
+          startTime: t + delay, duration: 0.4 + Math.random() * 0.4,
+        });
+      }
+
+      // Animate fire flash: appear → peak → fade
+      const fireStart = t + delay;
+      const fireDur = 0.3 + Math.random() * 0.15;
+      const animFire = () => {
+        const elapsed = performance.now() / 1000 - fireStart;
+        if (elapsed < 0) { requestAnimationFrame(animFire); return; }
+        if (elapsed > fireDur) {
+          this.scene.remove(fire);
+          fireGeo.dispose(); fireMat.dispose();
+          return;
+        }
+        const p = elapsed / fireDur;
+        // Quick flash up, slow fade
+        if (p < 0.3) {
+          fireMat.opacity = (p / 0.3) * 0.7;
+          const s = 1 + p * 2;
+          fire.scale.set(1, s, 1);
+        } else {
+          fireMat.opacity = 0.7 * (1 - (p - 0.3) / 0.7);
+          fire.scale.y = 1 + 0.6 * (1 - (p - 0.3) / 0.7);
+        }
+        fire.position.y = cy + 0.2 + fire.scale.y * 0.15;
+        requestAnimationFrame(animFire);
+      };
+      requestAnimationFrame(animFire);
+    }
+  }
+
+  /** Update trail particles (sparks, smoke, embers) — gravity + fade */
+  updateTrailParticles(): void {
+    const now = performance.now() / 1000;
+    for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+      const tp = this.trailParticles[i];
+      const elapsed = now - tp.startTime;
+      if (elapsed < 0) continue; // not started yet (delayed spawn)
+      const progress = elapsed / tp.duration;
+      if (progress >= 1) {
+        this.scene.remove(tp.mesh);
+        tp.mesh.geometry?.dispose();
+        (tp.mesh.material as THREE.Material).dispose();
+        this.trailParticles.splice(i, 1);
+        continue;
+      }
+      // Apply velocity + gravity
+      const dt = 0.016;
+      tp.mesh.position.x += tp.velocity.x * dt;
+      tp.mesh.position.y += tp.velocity.y * dt;
+      tp.mesh.position.z += tp.velocity.z * dt;
+      tp.velocity.y -= 6 * dt; // gravity
+      // Drag
+      tp.velocity.x *= 0.98;
+      tp.velocity.z *= 0.98;
+      // Fade
+      const mat = tp.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = (1 - progress) * (mat.opacity > 0 ? 1 : 0);
+    }
   }
 
   /**
@@ -2443,7 +2918,45 @@ export class UnitRenderer {
           proj.mesh.rotation.x += 0.15;
           proj.mesh.rotation.z += 0.08;
         }
+
+        // Magic orb effects: rotate sparkles + emit trail particles
+        const magicColor = (proj.mesh as any)._magicColor;
+        if (magicColor !== undefined) {
+          // Rotate sparkle ring around the orb
+          for (let si = 0; si < 4; si++) {
+            const sparkle = proj.mesh.getObjectByName(`sparkle-${si}`);
+            if (sparkle) {
+              const angle = currentTime * 5 + (si / 4) * Math.PI * 2;
+              const r = 0.2 + Math.sin(currentTime * 3) * 0.05;
+              sparkle.position.set(Math.cos(angle) * r, Math.sin(angle) * r, 0);
+            }
+          }
+          // Emit trail sparkles behind the projectile
+          if (Math.random() < 0.4) {
+            const tGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
+            const tMat = new THREE.MeshBasicMaterial({
+              color: Math.random() > 0.5 ? magicColor : 0xFFFFCC,
+              transparent: true, opacity: 0.8,
+            });
+            const tParticle = new THREE.Mesh(tGeo, tMat);
+            tParticle.position.copy(proj.mesh.position);
+            this.scene.add(tParticle);
+            this.trailParticles.push({
+              mesh: tParticle,
+              velocity: { x: (Math.random() - 0.5) * 0.5, y: 0.3 + Math.random() * 0.5, z: (Math.random() - 0.5) * 0.5 },
+              startTime: currentTime, duration: 0.3 + Math.random() * 0.2,
+            });
+          }
+        }
       } else {
+        // Projectile arrived — check for AoE explosion
+        if ((proj.mesh as any)._isAoE) {
+          const magicCol = (proj.mesh as any)._magicColor ?? 0x7c4dff;
+          this.spawnAoEExplosion(
+            { x: proj.endPos.x, y: proj.endPos.y - 0.5, z: proj.endPos.z },
+            1, magicCol
+          );
+        }
         toRemove.push(i);
       }
     }
@@ -2452,7 +2965,6 @@ export class UnitRenderer {
     for (let i = toRemove.length - 1; i >= 0; i--) {
       const proj = this.projectiles[toRemove[i]];
       this.scene.remove(proj.mesh);
-      // Dispose geometry/materials (handle both Mesh and Group)
       proj.mesh.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
