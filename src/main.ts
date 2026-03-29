@@ -28,6 +28,8 @@ import type { TooltipOps } from './game/systems/BuildingTooltipController';
 import BlueprintSystem from './game/systems/BlueprintSystem';
 import type { BlueprintOps } from './game/systems/BlueprintSystem';
 import { generateFormation, generateBoxFormation, getUnitFormationPriority, getHexRing } from './game/systems/FormationSystem';
+import NatureSystem from './game/systems/NatureSystem';
+import type { NatureOps } from './game/systems/NatureSystem';
 import {
   EngineConfig,
   CameraConfig,
@@ -109,6 +111,7 @@ class Cubitopia {
   private aiController!: AIController;
   private tooltipController!: BuildingTooltipController;
   private blueprintSystem!: BlueprintSystem;
+  private natureSystem!: NatureSystem;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -843,8 +846,8 @@ class Cubitopia {
     // Always clean up decorations when mining
     this.terrainDecorator.removeDecoration(minePos);
     this.terrainDecorator.removeGrassClump(key);
-    this.grassAge.delete(key);
-    this.grassGrowthTimers.delete(key);
+    this.natureSystem.grassAge.delete(key);
+    this.natureSystem.grassGrowthTimers.delete(key);
 
     // Rebuild shell blocks for the mined tile AND its neighbors (newly exposed walls)
     this.rebuildTileShell(minePos);
@@ -1251,9 +1254,20 @@ class Cubitopia {
     const blueprintOps: BlueprintOps = {
       isTileOccupied: (key) => this.isTileOccupied(key),
       isWaterTerrain: (terrain) => this.isWaterTerrain(terrain),
-      getGrassAge: (key) => this.grassAge.get(key),
+      getGrassAge: (key) => this.natureSystem.getGrassAge(key),
     };
     this.blueprintSystem = new BlueprintSystem(ctx, blueprintOps);
+
+    // Nature system — tree regrowth/sprouting and grass growth/spreading
+    const natureOps: NatureOps = {
+      getMap: () => this.currentMap,
+      removeDecoration: (pos) => this.terrainDecorator.removeDecoration(pos),
+      addTreeAtStage: (pos, baseY, stage) => this.terrainDecorator.addTreeAtStage(pos, baseY, stage),
+      removeGrassClump: (key) => this.terrainDecorator.removeGrassClump(key),
+      addGrassAtStage: (pos, baseY, stage) => this.terrainDecorator.addGrassAtStage(pos, baseY, stage),
+      hasGrass: (key) => this.terrainDecorator.hasGrass(key),
+    };
+    this.natureSystem = new NatureSystem(natureOps);
   }
 
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
@@ -1500,13 +1514,7 @@ class Cubitopia {
     UnitAI.farmhousePositions.clear();
     UnitAI.grassTiles.clear();
     // Building meshes are cleaned up by buildingSystem.cleanup() above
-    this.treeRegrowthTimers.clear();
-    this.treeAge.clear();
-    this.treeGrowthTimers.clear();
-    this.treeSproutTimer = 0;
-    this.grassAge.clear();
-    this.grassGrowthTimers.clear();
-    this.grassSpreadTimer = 0;
+    this.natureSystem.cleanup();
     // Clean up AI building meshes for both players
     for (const st of this.aiController.aiState) {
       for (const mesh of st.meshes) {
@@ -1753,7 +1761,7 @@ class Cubitopia {
     this.addOceanPlane(MAP_SIZE);
 
     // Initialize grass tracking for map-generated grass
-    this.initializeGrassTracking();
+    this.natureSystem.initializeGrassTracking();
 
     // Create players
     const makeResources = (): PlayerResources => ({
@@ -2202,16 +2210,9 @@ class Cubitopia {
     // Update enemy resource bar
     this.hud.updateEnemyResources(this.players[1], this.woodStockpile[1], this.foodStockpile[1], this.stoneStockpile[1]);
 
-    // Tree regrowth (stumps re-grow, but no auto-spreading sprouts) — skip if disableTreeGrowth
-    if (!this.hud.debugFlags.disableTreeGrowth) {
-      this.updateTreeRegrowth(delta);
-    }
-    // updateTreeSprouts disabled — players plant trees manually via Forestry menu
-
-    // Grass growth & spreading — skip if disableGrassGrowth
-    if (!this.hud.debugFlags.disableGrassGrowth) {
-      this.updateGrassGrowth(delta);
-      this.updateGrassSpread(delta);
+    // Nature simulation (tree regrowth, grass growth/spread)
+    if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
+      this.natureSystem.update(delta);
     }
 
     // Update base health bar billboards
@@ -2352,24 +2353,6 @@ class Cubitopia {
   private mineMode = false;
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
 
-  // --- Tree Regrowth & Growth System ---
-  private treeRegrowthTimers: Map<string, number> = new Map(); // "q,r" → seconds until sapling appears
-  private treeAge: Map<string, number> = new Map(); // "q,r" → growth stage (0=sapling, 1=young, 2=mature)
-  private treeGrowthTimers: Map<string, number> = new Map(); // "q,r" → seconds until next growth stage
-  private treeSproutTimer = 0;
-  private readonly TREE_REGROW_TIME = 12; // seconds for a chopped stump to sprout a sapling
-  private readonly TREE_GROWTH_TIME = 10; // seconds per growth stage (sapling→young→mature)
-  private readonly TREE_SPROUT_INTERVAL = 5; // seconds between new sprout checks
-  private readonly TREE_SPROUT_CHANCE = 0.2; // chance per eligible tile per check
-
-  // --- Grass Growth & Spreading System ---
-  private grassAge: Map<string, number> = new Map(); // "q,r" → growth stage (0=short, 1=medium, 2=tall/harvestable)
-  private grassGrowthTimers: Map<string, number> = new Map(); // "q,r" → seconds until next growth stage
-  private grassSpreadTimer = 0;
-  private readonly GRASS_GROWTH_TIME = 8; // seconds per growth stage
-  private readonly GRASS_SPREAD_INTERVAL = 6; // seconds between spread checks
-  private readonly GRASS_SPREAD_CHANCE = 0.15; // chance per eligible adjacent tile
-
   // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
   // Backwards-compatible single-building shortcuts delegate to buildingSystem
   private get barracks() { return this.buildingSystem.getFirstBuilding('barracks'); }
@@ -2470,7 +2453,7 @@ class Cubitopia {
   private foodStockpile: number[] = [0, 0]; // [player0, player1]
   private plantTreeMode = false;
   private plantCropsMode = false;
-  private clearedPlains: Set<string> = new Set(); // Tiles where grass was harvested → eligible for crops
+  // clearedPlains moved to NatureSystem
 
   // --- Workshop & Trebuchet Spawning ---
   private workshopPlaceMode = false;
@@ -2513,16 +2496,12 @@ class Cubitopia {
     // Remove harvest marker if it exists
     this.blueprintSystem.removeHarvestMarker(treePos);
 
-    // Start regrowth timer for this tile
-    this.treeRegrowthTimers.set(key, this.TREE_REGROW_TIME);
-
     // Wood yield scales with tree age: sapling=2, young=4, mature=6
-    const age = this.treeAge.get(key) ?? 2; // default 2 (mature) for map-generated trees
+    const age = this.natureSystem.getTreeAge(key) ?? 2; // default 2 (mature) for map-generated trees
     const woodYield = age === 0 ? 2 : age === 1 ? 4 : 6;
 
-    // Clean up growth tracking
-    this.treeAge.delete(key);
-    this.treeGrowthTimers.delete(key);
+    // Start regrowth timer, clean up growth tracking
+    this.natureSystem.onTreeChopped(key);
 
     // Load wood onto the lumberjack — they must carry it back to the stockpile
     unit.carryAmount = Math.min(woodYield, unit.carryCapacity);
@@ -2542,13 +2521,8 @@ class Cubitopia {
     // Hay yield: 2-3 food per tall grass tile
     const hayYield = 2 + Math.floor(Math.random() * 2);
 
-    // Reset grass to short (stage 0) — it will regrow
-    this.terrainDecorator.addGrassAtStage(pos, tile.elevation * 0.5, 0);
-    this.grassAge.set(key, 0);
-    this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
-
-    // Mark as cleared plains — eligible for crop planting
-    this.clearedPlains.add(key);
+    // Reset grass to short (stage 0) — it will regrow; mark as cleared plains
+    this.natureSystem.onGrassHarvested(key, pos, tile.elevation * 0.5);
 
     // Grass fiber bonus — harvesting grass also yields fiber (plant material for rope)
     const fiberYield = 1 + Math.floor(Math.random() * 2); // 1-2 fiber
@@ -2562,306 +2536,6 @@ class Cubitopia {
     unit.carryAmount = Math.min(hayYield, unit.carryCapacity);
     unit.carryType = ResourceType.FOOD;
   }
-
-  /** Tick down regrowth timers — spawn saplings when ready, then grow them */
-  private updateTreeRegrowth(delta: number): void {
-    if (!this.currentMap) return;
-
-    // 1. Regrowth timers: chopped stumps → saplings
-    for (const [key, remaining] of this.treeRegrowthTimers) {
-      const newTime = remaining - delta;
-      if (newTime <= 0) {
-        this.treeRegrowthTimers.delete(key);
-        const tile = this.currentMap.tiles.get(key);
-        if (!tile) continue;
-        if (tile.terrain !== TerrainType.PLAINS) continue;
-        if (Pathfinder.blockedTiles.has(key)) continue;
-
-        // Spawn as sapling (stage 0)
-        tile.terrain = TerrainType.FOREST;
-        const [q, r] = key.split(',').map(Number);
-        this.terrainDecorator.addTreeAtStage({ q, r }, tile.elevation * 0.5, 0);
-        this.treeAge.set(key, 0);
-        this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
-      } else {
-        this.treeRegrowthTimers.set(key, newTime);
-      }
-    }
-
-    // 2. Growth timers: saplings → young → mature
-    for (const [key, remaining] of this.treeGrowthTimers) {
-      const newTime = remaining - delta;
-      if (newTime <= 0) {
-        const currentStage = this.treeAge.get(key) ?? 0;
-        const newStage = currentStage + 1;
-
-        if (newStage > 2) {
-          // Fully mature — stop growing
-          this.treeGrowthTimers.delete(key);
-          this.treeAge.set(key, 2);
-          continue;
-        }
-
-        const tile = this.currentMap.tiles.get(key);
-        if (!tile || tile.terrain !== TerrainType.FOREST) {
-          this.treeGrowthTimers.delete(key);
-          this.treeAge.delete(key);
-          continue;
-        }
-
-        // Remove old decoration, add new stage
-        const [q, r] = key.split(',').map(Number);
-        this.terrainDecorator.removeDecoration({ q, r });
-        this.terrainDecorator.addTreeAtStage({ q, r }, tile.elevation * 0.5, newStage);
-        this.treeAge.set(key, newStage);
-
-        if (newStage < 2) {
-          this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
-        } else {
-          this.treeGrowthTimers.delete(key); // mature, done growing
-        }
-      } else {
-        this.treeGrowthTimers.set(key, newTime);
-      }
-    }
-  }
-
-  /** Periodically sprout new saplings — both near forests and spontaneously on plains */
-  private updateTreeSprouts(delta: number): void {
-    if (!this.currentMap) return;
-    this.treeSproutTimer += delta;
-    if (this.treeSproutTimer < this.TREE_SPROUT_INTERVAL) return;
-    this.treeSproutTimer = 0;
-
-    const adjacentCandidates: string[] = [];
-    const wildCandidates: string[] = [];
-
-    this.currentMap.tiles.forEach((tile, key) => {
-      if (tile.terrain !== TerrainType.PLAINS) return;
-      if (Pathfinder.blockedTiles.has(key)) return;
-      if (this.treeRegrowthTimers.has(key)) return;
-      if (UnitAI.farmPatches.has(key)) return; // Never sprout on farm patches
-
-      const [q, r] = key.split(',').map(Number);
-      const neighbors = this.getHexNeighbors(q, r);
-      const hasForestNeighbor = neighbors.some(([nq, nr]) => {
-        const nt = this.currentMap!.tiles.get(`${nq},${nr}`);
-        return nt && nt.terrain === TerrainType.FOREST;
-      });
-
-      if (hasForestNeighbor) {
-        adjacentCandidates.push(key);
-      } else {
-        wildCandidates.push(key);
-      }
-    });
-
-    // Forest-adjacent sprouts: higher chance (spreading)
-    for (const key of adjacentCandidates) {
-      if (Math.random() < this.TREE_SPROUT_CHANCE) {
-        this.sproutSapling(key);
-      }
-    }
-
-    // Wild/spontaneous sprouts: lower chance, max 2 per cycle to keep it natural
-    let wildCount = 0;
-    for (const key of wildCandidates) {
-      if (wildCount >= 2) break;
-      if (Math.random() < 0.005) { // ~0.5% per plains tile per cycle
-        this.sproutSapling(key);
-        wildCount++;
-      }
-    }
-
-    // Cull overcrowded saplings/young trees (>4 adjacent forest tiles)
-    this.cullOvercrowdedSaplings();
-  }
-
-  /** Count how many adjacent tiles are forest (trees or sprouts) */
-  private countAdjacentForest(q: number, r: number): number {
-    const neighbors = this.getHexNeighbors(q, r);
-    let count = 0;
-    for (const [nq, nr] of neighbors) {
-      const nt = this.currentMap?.tiles.get(`${nq},${nr}`);
-      if (nt && nt.terrain === TerrainType.FOREST) count++;
-    }
-    return count;
-  }
-
-  /** Helper to sprout a sapling on a tile — blocked if too many adjacent trees or farm patches */
-  private sproutSapling(key: string): void {
-    if (!this.currentMap) return;
-    const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
-
-    // Never sprout on farm patches
-    if (UnitAI.farmPatches.has(key)) return;
-
-    // Density check: don't sprout if 4+ neighbors are already forest
-    const [q, r] = key.split(',').map(Number);
-    if (this.countAdjacentForest(q, r) >= 4) return;
-
-    tile.terrain = TerrainType.FOREST;
-    this.terrainDecorator.addTreeAtStage({ q, r }, tile.elevation * 0.5, 0);
-    this.treeAge.set(key, 0);
-    this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
-  }
-
-  /** Remove saplings/young trees that are overcrowded (>4 adjacent forest tiles) */
-  private cullOvercrowdedSaplings(): void {
-    if (!this.currentMap) return;
-    const toCull: string[] = [];
-    for (const [key, age] of this.treeAge) {
-      if (age > 1) continue; // only cull saplings (0) and young trees (1)
-      const [q, r] = key.split(',').map(Number);
-      if (this.countAdjacentForest(q, r) >= 4) {
-        toCull.push(key);
-      }
-    }
-    for (const key of toCull) {
-      const tile = this.currentMap.tiles.get(key);
-      if (!tile) continue;
-      tile.terrain = TerrainType.PLAINS;
-      const [q, r] = key.split(',').map(Number);
-      this.terrainDecorator.removeDecoration({ q, r });
-      this.treeAge.delete(key);
-      this.treeGrowthTimers.delete(key);
-    }
-  }
-
-  /** Get hex neighbors for offset coordinates */
-  private getHexNeighbors(q: number, r: number): [number, number][] {
-    const even = q % 2 === 0;
-    if (even) {
-      return [
-        [q + 1, r - 1], [q + 1, r],
-        [q - 1, r - 1], [q - 1, r],
-        [q, r - 1], [q, r + 1],
-      ];
-    } else {
-      return [
-        [q + 1, r], [q + 1, r + 1],
-        [q - 1, r], [q - 1, r + 1],
-        [q, r - 1], [q, r + 1],
-      ];
-    }
-  }
-
-  // ===================== GRASS GROWTH & SPREADING =====================
-
-  /** Tick grass growth timers — short → medium → tall */
-  private updateGrassGrowth(delta: number): void {
-    if (!this.currentMap) return;
-
-    for (const [key, remaining] of this.grassGrowthTimers) {
-      const newTime = remaining - delta;
-      if (newTime <= 0) {
-        const currentStage = this.grassAge.get(key) ?? 0;
-        const newStage = currentStage + 1;
-
-        if (newStage > 2) {
-          this.grassGrowthTimers.delete(key);
-          this.grassAge.set(key, 2);
-          continue;
-        }
-
-        const tile = this.currentMap.tiles.get(key);
-        if (!tile || tile.terrain !== TerrainType.PLAINS) {
-          this.grassGrowthTimers.delete(key);
-          this.grassAge.delete(key);
-          continue;
-        }
-
-        const [q, r] = key.split(',').map(Number);
-        this.terrainDecorator.addGrassAtStage({ q, r }, tile.elevation * 0.5, newStage);
-        this.grassAge.set(key, newStage);
-
-        if (newStage < 2) {
-          this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
-        } else {
-          this.grassGrowthTimers.delete(key); // fully grown
-        }
-      } else {
-        this.grassGrowthTimers.set(key, newTime);
-      }
-    }
-
-    // Sync UnitAI.grassTiles with current grass state
-    UnitAI.grassTiles.clear();
-    for (const [key, stage] of this.grassAge) {
-      if (stage >= 2) {
-        UnitAI.grassTiles.add(key);
-      }
-    }
-  }
-
-  /** Periodically spread grass to adjacent plains tiles */
-  private updateGrassSpread(delta: number): void {
-    if (!this.currentMap) return;
-    this.grassSpreadTimer += delta;
-    if (this.grassSpreadTimer < this.GRASS_SPREAD_INTERVAL) return;
-    this.grassSpreadTimer = 0;
-
-    // Collect grass tiles that are at least medium stage to spread from
-    const spreadCandidates: string[] = [];
-    for (const [key, stage] of this.grassAge) {
-      if (stage >= 1) spreadCandidates.push(key);
-    }
-
-    // Try to spread to adjacent empty plains tiles
-    let spreadCount = 0;
-    for (const key of spreadCandidates) {
-      if (spreadCount >= 3) break; // cap spread per cycle for performance
-      const [q, r] = key.split(',').map(Number);
-      const neighbors = this.getHexNeighbors(q, r);
-
-      for (const [nq, nr] of neighbors) {
-        if (spreadCount >= 3) break;
-        const nKey = `${nq},${nr}`;
-        const nTile = this.currentMap.tiles.get(nKey);
-        if (!nTile) continue;
-        if (nTile.terrain !== TerrainType.PLAINS) continue;
-        if (this.grassAge.has(nKey)) continue; // already has grass
-        if (Pathfinder.blockedTiles.has(nKey)) continue;
-        if (UnitAI.farmPatches.has(nKey)) continue;
-        // High-elevation stone surfaces don't get grass
-        if (nTile.elevation * 0.5 >= 3.0) continue;
-
-        if (Math.random() < this.GRASS_SPREAD_CHANCE) {
-          this.terrainDecorator.addGrassAtStage({ q: nq, r: nr }, nTile.elevation * 0.5, 0);
-          this.grassAge.set(nKey, 0);
-          this.grassGrowthTimers.set(nKey, this.GRASS_GROWTH_TIME);
-          spreadCount++;
-        }
-      }
-    }
-  }
-
-  /** Initialize grass tracking for map-generated grass (called after map creation) */
-  private initializeGrassTracking(): void {
-    if (!this.currentMap) return;
-    for (const [key, tile] of this.currentMap.tiles) {
-      if (tile.terrain === TerrainType.PLAINS && this.terrainDecorator.hasGrass(key)) {
-        // Map-generated grass starts at stage 1 or 2 (medium/tall)
-        const stage = Math.random() > 0.5 ? 2 : 1;
-        this.grassAge.set(key, stage);
-        if (stage < 2) {
-          this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
-        }
-      }
-    }
-
-    // Sync UnitAI.grassTiles with initial grass state
-    UnitAI.grassTiles.clear();
-    for (const [key, stage] of this.grassAge) {
-      if (stage >= 2) {
-        UnitAI.grassTiles.add(key);
-      }
-    }
-  }
-
-  // ===================== END GRASS SYSTEM =====================
-
 
   // --- Data-driven building placement config ---
   private readonly BUILDING_PLACEMENT_CONFIG: Record<BuildingKind, {
@@ -3008,7 +2682,7 @@ class Cubitopia {
     if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.MOUNTAIN) return;
     if (Pathfinder.blockedTiles.has(key)) return;
     if (UnitAI.farmPatches.has(key)) return;
-    if (this.treeAge.has(key)) return; // Already has a tree/sapling
+    if (this.natureSystem.treeAge.has(key)) return; // Already has a tree/sapling
 
     // Cost 1 wood
     if (this.woodStockpile[0] < 1) return;
@@ -3019,8 +2693,8 @@ class Cubitopia {
     // Sprout a sapling
     tile.terrain = TerrainType.FOREST;
     this.terrainDecorator.addTreeAtStage(coord, tile.elevation * 0.5, 0);
-    this.treeAge.set(key, 0);
-    this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
+    this.natureSystem.treeAge.set(key, 0);
+    this.natureSystem.treeGrowthTimers.set(key, this.natureSystem.TREE_GROWTH_TIME);
   }
 
   /** Clear all build/placement modes */
@@ -3295,7 +2969,7 @@ class Cubitopia {
     }
 
     // Must be cleared of grass (grass stage 0 or in clearedPlains set)
-    const grassStage = this.grassAge.get(key);
+    const grassStage = this.natureSystem.getGrassAge(key);
     if (grassStage !== undefined && grassStage >= 1) {
       this.hud.showNotification('⚠️ Harvest the grass first before planting crops!', '#e67e22');
       return;
@@ -3307,7 +2981,7 @@ class Cubitopia {
 
     // Place farm patch
     UnitAI.farmPatches.add(key);
-    this.clearedPlains.add(key);
+    this.natureSystem.clearedPlains.add(key);
 
     // Add visual marker
     this.blueprintSystem.addFarmPatchMarker(coord);
@@ -3596,8 +3270,8 @@ class Cubitopia {
         tile.terrain = TerrainType.PLAINS;
         const [q, r] = key.split(',').map(Number);
         this.terrainDecorator.removeDecoration({ q, r });
-        this.treeAge.delete(key);
-        this.treeRegrowthTimers.delete(key);
+        this.natureSystem.treeAge.delete(key);
+        this.natureSystem.treeRegrowthTimers.delete(key);
         count++;
       }
     }
