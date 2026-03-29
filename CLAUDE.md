@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3307 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces.
+- `src/main.ts` — **Central orchestrator (~2998 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -87,6 +87,8 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/BlueprintSystem.ts` — **Visual markers (~353 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
 - `src/game/systems/FormationSystem.ts` — **Pure formation functions (~155 lines)**. Box, line, wedge, circle formations + hex ring helper + unit priority sorting. No class state.
 - `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~290 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
+- `src/ui/MenuController.ts` — **Main menu & game-over UI (~145 lines)**. Pure DOM manipulation. Uses `MenuCallbacks` interface (onStartGame, onPlayAgain).
+- `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
 - `src/game/entities/UnitFactory.ts` — Unit stats, speeds, attack speeds, colors
@@ -213,7 +215,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently **~3307 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~2968 lines extracted/consolidated so far across 12 modules + data-driven refactors.
+Shrink `src/main.ts` (currently **~2998 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~3277 lines extracted/consolidated so far across 14 modules + data-driven refactors.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -246,15 +248,17 @@ We use two patterns depending on the code being extracted:
 | `BlueprintSystem.ts` | ~337 | Stateful subsystem (BlueprintOps interface) |
 | `FormationSystem.ts` | ~148 | Pure functions (no class state) |
 | `NatureSystem.ts` | ~326 | Stateful subsystem (NatureOps interface) |
+| `MenuController.ts` | ~113 | Stateful subsystem (MenuCallbacks interface) |
+| `DebugController.ts` | ~173 | Stateful subsystem (DebugOps interface) |
+| Final compaction | ~23 | ASCII banner + stale comments |
 
 ### All Pre-Extracted Modules Now Wired
 No remaining files to wire. Future extractions will target new code regions.
 
 ### Next Extraction Targets (priority order)
-1. **UIMenuController** — `showMainMenu`, `showGameOverScreen` (~120 lines)
-2. **CombatEventHandler** — event dispatch loop, damage application, unit death (~100+ lines)
-3. **InputManager** — keyboard/mouse handler breakout from `setupEventHandlers` (~200+ lines)
-4. **SpawnQueueSystem** — spawn processing loop, timer management, queue state (~100-150 lines)
+1. **CombatEventHandler** — event dispatch loop, damage application, unit death (~100+ lines)
+2. **InputManager** — keyboard/mouse handler breakout from `setupEventHandlers` (~200+ lines)
+3. **SpawnQueueSystem** — spawn processing loop, timer management, queue state (~100-150 lines)
 
 ### Shrink-Wrap Discipline (ENFORCED)
 **Every feature addition or refactor MUST leave main.ts the same size or smaller.**
@@ -263,7 +267,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- Target: get main.ts under 3000 lines within the next 1-2 extraction rounds (~307 lines to go)
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000)
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -303,6 +307,18 @@ No remaining files to wire. Future extractions will target new code regions.
 - `paintWallBlueprint`/`paintGateBlueprint` do NOT check `wallsBuilt`/`gatesBuilt` counts — callers in main.ts drag handlers must do those checks
 - `paintMineTile` requires `maxMineDepth` parameter (passed from `Cubitopia.MAX_MINE_DEPTH`)
 - `cleanup()` disposes all marker meshes and resets `mineDepthLayers` to 3
+
+### MenuController Integration Notes
+- Pure DOM manipulation — no game state dependencies
+- Uses `MenuCallbacks` interface: `onStartGame(mode)`, `onPlayAgain()`
+- main.ts provides callbacks in constructor: `onStartGame` triggers `startNewGame`, `onPlayAgain` triggers `regenerateMap`
+- `showMainMenu()`, `showGameOverScreen(winner, isVictory, gameMode)`, `removeGameOverOverlay()`, `removeMainMenuOverlay()`
+
+### DebugController Integration Notes
+- All debug/playtester commands extracted from main.ts HUD callbacks
+- Uses `DebugOps` slim interface (~30 callbacks): state access, spawn helpers, renderer access, world helpers, resource getters/setters, HUD, terrain, nature, win condition
+- main.ts creates adapter in `initDebugController()` — all HUD debug button callbacks redirect to `this.debugController.*`
+- Methods: spawnUnit, spawnEnemyUnit, giveResources, killAllEnemy, damageBase, healSelected, buffSelected, teleportSelected, instantWin, instantLose, clearTrees, clearStones
 
 ### AIController Integration Notes
 - Uses `AIBuildingOps` slim interface instead of full BuildingSystem dependency
@@ -345,7 +361,10 @@ Get main.ts under 3000 lines. All systems modular. Data-driven configs for build
 - `[DONE]` Pure mesh factories (BuildingMeshFactory, DefenseMeshFactory)
 - `[DONE]` Extract FormationSystem (pure functions, no class state)
 - `[DONE]` Extract NatureSystem (tree/grass vegetation lifecycle)
-- `[READY]` Extract UIMenuController, CombatEventHandler, InputManager, SpawnQueueSystem
+- `[DONE]` Extract MenuController (main menu + game-over UI)
+- `[DONE]` Extract DebugController (all playtester/debug commands)
+- `[DONE]` **main.ts < 3000 lines (2998 achieved)**
+- `[READY]` Extract CombatEventHandler, InputManager, SpawnQueueSystem
 - `[READY]` Convert UnitFactory to data-driven config tables (prerequisite for Phase 1)
 - `[READY]` Remove backward-compat getters once all callers migrated
 - `[READY]` Replace `Math.random()` in game logic with seeded PRNG (multiplayer prep)
