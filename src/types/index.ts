@@ -281,6 +281,24 @@ export interface GameMap {
   height: number;
   tiles: Map<string, Tile>;  // key = "q,r"
   seed: number;
+  mapType?: MapType;
+}
+
+// --- Map Types ---
+export enum MapType {
+  STANDARD = 'standard',
+  ARENA = 'arena',
+  HIGHLAND = 'highland',
+  ARCHIPELAGO = 'archipelago',
+  FLATLAND = 'flatland',
+}
+
+export interface MapPreset {
+  type: MapType;
+  label: string;
+  description: string;
+  size: number;          // hex grid dimension
+  color: string;         // menu button accent color
 }
 
 // --- Engine Types ---

@@ -53,7 +53,9 @@ import {
   GameContext,
   PlacedBuilding,
   BuildingKind,
+  MapType,
 } from './types';
+import { getPreset, generateArenaMap } from './game/MapPresets';
 
 // --- Configuration ---
 
@@ -105,6 +107,7 @@ class Cubitopia {
   // gameOverOverlay and mainMenuOverlay moved to MenuController
   private gameSpeed = 1;
   private gameMode: 'pvai' | 'aivai' = 'pvai';
+  private mapType: MapType = MapType.STANDARD;
   private debugOverlayContainer: HTMLElement | null = null;
   private debugOverlayLabels: Map<string, HTMLElement> = new Map();
   private resourceManager!: ResourceManager;
@@ -135,7 +138,7 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
     this.menuController = new MenuController({
-      onStartGame: (mode) => { this.gameMode = mode; this.startNewGame(); },
+      onStartGame: (mode, mapType) => { this.gameMode = mode; this.mapType = mapType; this.startNewGame(); },
       onPlayAgain: () => this.regenerateMap(),
     });
 
@@ -1644,22 +1647,31 @@ class Cubitopia {
   }
 
   startNewGame(): void {
-    const mapGen = new MapGenerator();
-    const MAP_SIZE = 50;
-    const map = mapGen.generate(MAP_SIZE, MAP_SIZE);
+    const preset = getPreset(this.mapType);
+    const MAP_SIZE = preset.size;
+    let map: GameMap;
+    if (this.mapType === MapType.ARENA) {
+      map = generateArenaMap(MAP_SIZE);
+    } else {
+      const mapGen = new MapGenerator();
+      map = mapGen.generate(MAP_SIZE, MAP_SIZE);
+    }
     this.currentMap = map;
 
-    // Flatten terrain around base spawn areas BEFORE building voxels
+    // Base positions (used for spawning + base placement)
     const midR = Math.floor(MAP_SIZE / 2);
-    const BASE_INSET = 5; // Tiles inward from corner edges
-    // Bases spawn at opposite corners (bottom-left vs top-right)
+    const BASE_INSET = this.mapType === MapType.ARENA ? 3 : 5;
     const P1_Q = BASE_INSET;
     const P1_R = MAP_SIZE - 1 - BASE_INSET;
     const P2_Q = MAP_SIZE - 1 - BASE_INSET;
     const P2_R = BASE_INSET;
-    const FLATTEN_RADIUS = 4;
-    this.flattenBaseArea(map, P1_Q, P1_R, FLATTEN_RADIUS);
-    this.flattenBaseArea(map, P2_Q, P2_R, FLATTEN_RADIUS);
+
+    // Flatten terrain around base spawn areas BEFORE building voxels (skip for arena)
+    if (this.mapType !== MapType.ARENA) {
+      const FLATTEN_RADIUS = 4;
+      this.flattenBaseArea(map, P1_Q, P1_R, FLATTEN_RADIUS);
+      this.flattenBaseArea(map, P2_Q, P2_R, FLATTEN_RADIUS);
+    }
 
     // Build terrain
     map.tiles.forEach((tile, key) => {
@@ -1759,42 +1771,72 @@ class Cubitopia {
         resources: makeResources(), technology: [], isAI: true, defeated: false },
     ];
 
-    // --- Auto-Battler Spawn: armies on opposite corners ---
+    // --- Spawn Units ---
+    const isArena = this.mapType === MapType.ARENA;
 
-    // Player 1 (Blue) — near base: Builders, lumberjacks, villagers (no free combat units)
-    const p1Defs = [
-      { type: UnitType.BUILDER, pq: P1_Q + 2, pr: P1_R },
-      { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R - 2 },
-      { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R + 2 },
-      { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R - 4 },
-      { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R + 4 },
-    ];
-
-    for (const def of p1Defs) {
-      const pos = this.findSpawnTile(map, def.pq, def.pr);
-      const unit = UnitFactory.create(def.type, 0, pos);
-      const wp = this.hexToWorld(pos);
-      unit.worldPosition = { ...wp };
-      this.players[0].units.push(unit);
-      this.unitRenderer.addUnit(unit, this.getElevation(pos));
-    }
-
-    // Player 2 (Red AI) — near base, workers only (same as player — must build up)
-    const p2Defs = [
-      { type: UnitType.BUILDER, pq: P2_Q - 2, pr: P2_R },
-      { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R - 2 },
-      { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R + 2 },
-      { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R - 4 },
-      { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R + 4 },
-    ];
-
-    for (const def of p2Defs) {
-      const pos = this.findSpawnTile(map, def.pq, def.pr);
-      const unit = UnitFactory.create(def.type, 1, pos);
-      const wp = this.hexToWorld(pos);
-      unit.worldPosition = { ...wp };
-      this.players[1].units.push(unit);
-      this.unitRenderer.addUnit(unit, this.getElevation(pos));
+    if (isArena) {
+      // Arena mode: large combat armies on opposite sides, aggressive stance
+      const arenaCenter = Math.floor(MAP_SIZE / 2);
+      const armyDefs: { type: UnitType; count: number }[] = [
+        { type: UnitType.WARRIOR, count: 5 },
+        { type: UnitType.ARCHER, count: 4 },
+        { type: UnitType.RIDER, count: 3 },
+        { type: UnitType.PALADIN, count: 2 },
+        { type: UnitType.MAGE, count: 2 },
+        { type: UnitType.CATAPULT, count: 1 },
+        { type: UnitType.SCOUT, count: 2 },
+      ];
+      const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
+        let idx = 0;
+        for (const def of armyDefs) {
+          for (let i = 0; i < def.count; i++) {
+            const oq = baseQ + (idx % 5) * (owner === 0 ? 1 : -1);
+            const or2 = baseR - 4 + Math.floor(idx / 5) * 2;
+            const pos = this.findSpawnTile(map, oq, or2);
+            const unit = UnitFactory.create(def.type, owner, pos);
+            const wp = this.hexToWorld(pos);
+            unit.worldPosition = { ...wp };
+            unit.stance = UnitStance.AGGRESSIVE;
+            this.players[owner].units.push(unit);
+            this.unitRenderer.addUnit(unit, this.getElevation(pos));
+            idx++;
+          }
+        }
+      };
+      spawnArmy(0, arenaCenter - 8, arenaCenter);
+      spawnArmy(1, arenaCenter + 8, arenaCenter);
+    } else {
+      // Standard mode: workers near base
+      const p1Defs = [
+        { type: UnitType.BUILDER, pq: P1_Q + 2, pr: P1_R },
+        { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R - 2 },
+        { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R + 2 },
+        { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R - 4 },
+        { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R + 4 },
+      ];
+      for (const def of p1Defs) {
+        const pos = this.findSpawnTile(map, def.pq, def.pr);
+        const unit = UnitFactory.create(def.type, 0, pos);
+        const wp = this.hexToWorld(pos);
+        unit.worldPosition = { ...wp };
+        this.players[0].units.push(unit);
+        this.unitRenderer.addUnit(unit, this.getElevation(pos));
+      }
+      const p2Defs = [
+        { type: UnitType.BUILDER, pq: P2_Q - 2, pr: P2_R },
+        { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R - 2 },
+        { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R + 2 },
+        { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R - 4 },
+        { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R + 4 },
+      ];
+      for (const def of p2Defs) {
+        const pos = this.findSpawnTile(map, def.pq, def.pr);
+        const unit = UnitFactory.create(def.type, 1, pos);
+        const wp = this.hexToWorld(pos);
+        unit.worldPosition = { ...wp };
+        this.players[1].units.push(unit);
+        this.unitRenderer.addUnit(unit, this.getElevation(pos));
+      }
     }
 
     this.allUnits = [...this.players[0].units, ...this.players[1].units];

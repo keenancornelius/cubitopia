@@ -1,10 +1,13 @@
 /**
- * MenuController — Main menu and game-over screen UI.
+ * MenuController — Main menu, map selector, and game-over screen UI.
  * Pure DOM manipulation, no game state dependencies.
  */
 
+import { MapType } from '../types';
+import { MAP_PRESETS } from '../game/MapPresets';
+
 export interface MenuCallbacks {
-  onStartGame(mode: 'pvai' | 'aivai'): void;
+  onStartGame(mode: 'pvai' | 'aivai', mapType: MapType): void;
   onPlayAgain(): void;
 }
 
@@ -12,6 +15,8 @@ export default class MenuController {
   private mainMenuOverlay: HTMLElement | null = null;
   private gameOverOverlay: HTMLElement | null = null;
   private callbacks: MenuCallbacks;
+  private selectedMap: MapType = MapType.STANDARD;
+  private selectedMode: 'pvai' | 'aivai' = 'pvai';
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks;
@@ -23,6 +28,8 @@ export default class MenuController {
       this.mainMenuOverlay.remove();
       this.mainMenuOverlay = null;
     }
+    this.selectedMap = MapType.STANDARD;
+    this.selectedMode = 'pvai';
 
     const overlay = document.createElement('div');
     overlay.style.cssText = `
@@ -41,49 +48,140 @@ export default class MenuController {
     title.textContent = 'CUBITOPIA';
     overlay.appendChild(title);
 
-    // Subtitle
     const subtitle = document.createElement('div');
-    subtitle.style.cssText = 'font-size:14px; color:#888; letter-spacing:4px; margin-bottom:60px; text-transform:uppercase;';
+    subtitle.style.cssText = 'font-size:14px; color:#888; letter-spacing:4px; margin-bottom:40px; text-transform:uppercase;';
     subtitle.textContent = 'Voxel Strategy';
     overlay.appendChild(subtitle);
 
-    // Mode buttons
-    const btnContainer = document.createElement('div');
-    btnContainer.style.cssText = 'display:flex; flex-direction:column; gap:16px; align-items:center;';
+    // --- Game Mode Selector ---
+    const sectionLabel = (text: string) => {
+      const lbl = document.createElement('div');
+      lbl.style.cssText = 'font-size:11px; color:#555; letter-spacing:3px; text-transform:uppercase; margin-bottom:10px;';
+      lbl.textContent = text;
+      return lbl;
+    };
 
-    const mkMenuBtn = (label: string, sublabel: string, color: string, mode: 'pvai' | 'aivai') => {
+    overlay.appendChild(sectionLabel('GAME MODE'));
+
+    const modeRow = document.createElement('div');
+    modeRow.style.cssText = 'display:flex; gap:12px; margin-bottom:30px;';
+
+    const modeButtons: HTMLButtonElement[] = [];
+    const mkModeBtn = (label: string, mode: 'pvai' | 'aivai', color: string) => {
       const btn = document.createElement('button');
       btn.style.cssText = `
-        background: transparent; color:${color}; border:2px solid ${color}; padding:16px 48px;
-        font-size:18px; font-family:'Courier New',monospace; font-weight:bold;
-        border-radius:4px; cursor:pointer; letter-spacing:3px; min-width:320px;
+        background: transparent; color:${color}; border:2px solid ${color}; padding:10px 24px;
+        font-size:13px; font-family:'Courier New',monospace; font-weight:bold;
+        border-radius:4px; cursor:pointer; letter-spacing:2px; min-width:160px;
         transition: all 0.2s;
       `;
-      btn.innerHTML = `${label}<br><span style="font-size:11px;color:#888;font-weight:normal;letter-spacing:1px;">${sublabel}</span>`;
-      btn.addEventListener('mouseenter', () => {
+      btn.textContent = label;
+      modeButtons.push(btn);
+
+      const updateModeSelection = () => {
+        modeButtons.forEach(b => {
+          b.style.background = 'transparent';
+          b.style.color = b.dataset.color!;
+        });
         btn.style.background = color;
         btn.style.color = '#000';
-      });
-      btn.addEventListener('mouseleave', () => {
-        btn.style.background = 'transparent';
-        btn.style.color = color;
-      });
+      };
+
+      btn.dataset.color = color;
       btn.addEventListener('click', () => {
-        overlay.remove();
-        this.mainMenuOverlay = null;
-        this.callbacks.onStartGame(mode);
+        this.selectedMode = mode;
+        updateModeSelection();
       });
+
+      // Default: pvai is selected
+      if (mode === 'pvai') {
+        setTimeout(() => updateModeSelection(), 0);
+      }
       return btn;
     };
 
-    btnContainer.appendChild(mkMenuBtn('PLAYER vs AI', 'Command your army against the AI opponent', '#3498db', 'pvai'));
-    btnContainer.appendChild(mkMenuBtn('AI vs AI', 'Watch two AI commanders battle it out', '#e74c3c', 'aivai'));
-    overlay.appendChild(btnContainer);
+    modeRow.appendChild(mkModeBtn('PLAYER vs AI', 'pvai', '#3498db'));
+    modeRow.appendChild(mkModeBtn('AI vs AI', 'aivai', '#e74c3c'));
+    overlay.appendChild(modeRow);
+
+    // --- Map Type Selector ---
+    overlay.appendChild(sectionLabel('MAP TYPE'));
+
+    const mapGrid = document.createElement('div');
+    mapGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:12px; max-width:600px;';
+
+    const mapButtons: HTMLButtonElement[] = [];
+    const descEl = document.createElement('div');
+    descEl.style.cssText = 'font-size:12px; color:#777; text-align:center; margin-bottom:30px; min-height:18px; max-width:400px;';
+
+    for (const preset of MAP_PRESETS) {
+      const btn = document.createElement('button');
+      btn.style.cssText = `
+        background: transparent; color:${preset.color}; border:2px solid ${preset.color}; padding:8px 18px;
+        font-size:12px; font-family:'Courier New',monospace; font-weight:bold;
+        border-radius:4px; cursor:pointer; letter-spacing:2px; min-width:120px;
+        transition: all 0.2s;
+      `;
+      btn.textContent = preset.label;
+      btn.dataset.color = preset.color;
+      btn.dataset.type = preset.type;
+      mapButtons.push(btn);
+
+      const updateMapSelection = () => {
+        mapButtons.forEach(b => {
+          b.style.background = 'transparent';
+          b.style.color = b.dataset.color!;
+        });
+        btn.style.background = preset.color;
+        btn.style.color = '#000';
+        descEl.textContent = preset.description;
+      };
+
+      btn.addEventListener('click', () => {
+        this.selectedMap = preset.type;
+        updateMapSelection();
+      });
+
+      // Default: standard selected
+      if (preset.type === MapType.STANDARD) {
+        setTimeout(() => updateMapSelection(), 0);
+      }
+
+      mapGrid.appendChild(btn);
+    }
+
+    overlay.appendChild(mapGrid);
+    overlay.appendChild(descEl);
+
+    // --- Start Button ---
+    const startBtn = document.createElement('button');
+    startBtn.style.cssText = `
+      background: linear-gradient(135deg, #2ecc71, #27ae60); color:#fff;
+      border:2px solid rgba(255,255,255,0.2); padding:16px 56px;
+      font-size:20px; font-family:'Courier New',monospace; font-weight:bold;
+      border-radius:6px; cursor:pointer; letter-spacing:4px;
+      transition: all 0.2s; text-transform:uppercase;
+    `;
+    startBtn.textContent = 'START BATTLE';
+    startBtn.addEventListener('mouseenter', () => {
+      startBtn.style.transform = 'scale(1.05)';
+      startBtn.style.boxShadow = '0 0 30px rgba(46,204,113,0.4)';
+    });
+    startBtn.addEventListener('mouseleave', () => {
+      startBtn.style.transform = 'scale(1)';
+      startBtn.style.boxShadow = 'none';
+    });
+    startBtn.addEventListener('click', () => {
+      overlay.remove();
+      this.mainMenuOverlay = null;
+      this.callbacks.onStartGame(this.selectedMode, this.selectedMap);
+    });
+    overlay.appendChild(startBtn);
 
     // Version
     const ver = document.createElement('div');
     ver.style.cssText = 'position:absolute; bottom:20px; color:#444; font-size:10px; letter-spacing:2px;';
-    ver.textContent = 'v0.1 — PLAYTEST BUILD';
+    ver.textContent = 'v0.2 — PLAYTEST BUILD';
     overlay.appendChild(ver);
 
     document.body.appendChild(overlay);
@@ -104,24 +202,24 @@ export default class MenuController {
     `;
 
     const color = isVictory ? '#2ecc71' : '#e74c3c';
-    let title: string;
-    let subtitle: string;
+    let titleText: string;
+    let subtitleText: string;
     if (gameMode === 'aivai') {
-      title = winner + ' WINS!';
-      subtitle = winner + ' destroyed the opposing base!';
+      titleText = winner + ' WINS!';
+      subtitleText = winner + ' destroyed the opposing base!';
     } else {
-      title = isVictory ? 'VICTORY!' : 'DEFEAT!';
-      subtitle = isVictory ? 'You destroyed the enemy base!' : 'Your base has been destroyed!';
+      titleText = isVictory ? 'VICTORY!' : 'DEFEAT!';
+      subtitleText = isVictory ? 'You destroyed the enemy base!' : 'Your base has been destroyed!';
     }
 
     overlay.innerHTML = `
       <div style="font-size: 64px; font-weight: bold; color: ${color};
         text-shadow: 0 0 30px ${color}, 0 0 60px ${color}; margin-bottom: 16px;
         letter-spacing: 8px;">
-        ${title}
+        ${titleText}
       </div>
       <div style="font-size: 20px; color: #bbb; margin-bottom: 40px;">
-        ${subtitle}
+        ${subtitleText}
       </div>
       <button id="play-again-btn" style="
         background: linear-gradient(135deg, ${color}, ${isVictory ? '#27ae60' : '#c0392b'});
