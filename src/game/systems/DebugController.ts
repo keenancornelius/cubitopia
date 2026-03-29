@@ -68,29 +68,33 @@ export default class DebugController {
     this.ops = ops;
   }
 
-  spawnUnit(type: UnitType): void {
+  spawnUnit(type: UnitType, count = 1): void {
     const bases = this.ops.getBases();
     const base = bases.find(b => b.owner === 0);
     if (!base) return;
-    const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
-    const unit = UnitFactory.create(type, 0, pos);
-    const wp = this.ops.hexToWorld(pos);
-    unit.worldPosition = { ...wp };
-    this.ops.addUnitToWorld(unit);
+    for (let i = 0; i < count; i++) {
+      const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
+      const unit = UnitFactory.create(type, 0, pos);
+      const wp = this.ops.hexToWorld(pos);
+      unit.worldPosition = { ...wp };
+      this.ops.addUnitToWorld(unit);
+    }
     this.ops.updateResourceDisplay();
-    this.ops.showNotification(`🐛 Spawned ${type}`, '#9c27b0');
+    this.ops.showNotification(`🐛 Spawned ${count}x ${type}`, '#9c27b0');
   }
 
-  spawnEnemyUnit(type: UnitType): void {
+  spawnEnemyUnit(type: UnitType, count = 1): void {
     const bases = this.ops.getBases();
     const base = bases.find(b => b.owner === 1);
     if (!base) return;
-    const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
-    const unit = UnitFactory.create(type, 1, pos);
-    const wp = this.ops.hexToWorld(pos);
-    unit.worldPosition = { ...wp };
-    this.ops.addUnitToWorld(unit);
-    this.ops.showNotification(`🐛 Spawned enemy ${type}`, '#b71c1c');
+    for (let i = 0; i < count; i++) {
+      const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
+      const unit = UnitFactory.create(type, 1, pos);
+      const wp = this.ops.hexToWorld(pos);
+      unit.worldPosition = { ...wp };
+      this.ops.addUnitToWorld(unit);
+    }
+    this.ops.showNotification(`🐛 Spawned ${count}x enemy ${type}`, '#b71c1c');
   }
 
   giveResources(): void {

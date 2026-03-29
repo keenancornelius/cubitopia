@@ -1829,14 +1829,15 @@ export class HUD {
   };
   gameSpeed = 1;
 
-  private _onDebugSpawn: ((type: UnitType) => void) | null = null;
+  private debugSpawnCount = 1;
+  private _onDebugSpawn: ((type: UnitType, count: number) => void) | null = null;
   private _onDebugGiveResources: (() => void) | null = null;
   private _onDebugKillAllEnemy: (() => void) | null = null;
   private _onDebugDamageBase: ((owner: number, amount: number) => void) | null = null;
   private _onDebugGameSpeed: ((speed: number) => void) | null = null;
   private _onDebugTeleportMode: (() => void) | null = null;
   private _onDebugHealSelected: (() => void) | null = null;
-  private _onDebugSpawnEnemy: ((type: UnitType) => void) | null = null;
+  private _onDebugSpawnEnemy: ((type: UnitType, count: number) => void) | null = null;
   private _onDebugBuffSelected: ((stat: string) => void) | null = null;
   private _onDebugInstantWin: (() => void) | null = null;
   private _onDebugInstantLose: (() => void) | null = null;
@@ -1844,14 +1845,14 @@ export class HUD {
   private _onDebugClearStones: (() => void) | null = null;
   private _onDebugKillSelected: (() => void) | null = null;
 
-  onDebugSpawn(cb: (type: UnitType) => void) { this._onDebugSpawn = cb; }
+  onDebugSpawn(cb: (type: UnitType, count: number) => void) { this._onDebugSpawn = cb; }
   onDebugGiveResources(cb: () => void) { this._onDebugGiveResources = cb; }
   onDebugKillAllEnemy(cb: () => void) { this._onDebugKillAllEnemy = cb; }
   onDebugDamageBase(cb: (owner: number, amount: number) => void) { this._onDebugDamageBase = cb; }
   onDebugGameSpeed(cb: (speed: number) => void) { this._onDebugGameSpeed = cb; }
   onDebugTeleportMode(cb: () => void) { this._onDebugTeleportMode = cb; }
   onDebugHealSelected(cb: () => void) { this._onDebugHealSelected = cb; }
-  onDebugSpawnEnemy(cb: (type: UnitType) => void) { this._onDebugSpawnEnemy = cb; }
+  onDebugSpawnEnemy(cb: (type: UnitType, count: number) => void) { this._onDebugSpawnEnemy = cb; }
   onDebugBuffSelected(cb: (stat: string) => void) { this._onDebugBuffSelected = cb; }
   onDebugInstantWin(cb: () => void) { this._onDebugInstantWin = cb; }
   onDebugInstantLose(cb: () => void) { this._onDebugInstantLose = cb; }
@@ -2037,6 +2038,29 @@ export class HUD {
     worldRow.appendChild(mkBtn('Instant Lose', '#b71c1c', () => this._onDebugInstantLose?.()));
     this.debugPanel.appendChild(worldRow);
 
+    // --- SPAWN COUNT SELECTOR ---
+    mkSection('Spawn Count', '#ff9800');
+    const countRow = document.createElement('div');
+    countRow.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;margin-bottom:4px;';
+    const countLabel = document.createElement('span');
+    countLabel.style.cssText = 'color:#fff;font-size:11px;margin-right:6px;';
+    countLabel.textContent = 'Count:';
+    countRow.appendChild(countLabel);
+    const countBtns: HTMLButtonElement[] = [];
+    for (const n of [1, 3, 5, 10, 20]) {
+      const cb = document.createElement('button');
+      cb.textContent = `${n}`;
+      cb.style.cssText = `padding:2px 8px;margin:1px;border:none;border-radius:3px;cursor:pointer;font-size:11px;font-weight:bold;color:#fff;background:${n === 1 ? '#ff9800' : '#555'};`;
+      cb.onclick = () => {
+        this.debugSpawnCount = n;
+        countBtns.forEach(b => b.style.background = '#555');
+        cb.style.background = '#ff9800';
+      };
+      countBtns.push(cb);
+      countRow.appendChild(cb);
+    }
+    this.debugPanel.appendChild(countRow);
+
     // --- SPAWN PLAYER UNITS ---
     mkSection('Spawn Player Units', '#9c27b0');
 
@@ -2045,10 +2069,14 @@ export class HUD {
       { type: UnitType.ARCHER, label: 'Archer', color: '#8e44ad' },
       { type: UnitType.RIDER, label: 'Rider', color: '#d35400' },
       { type: UnitType.PALADIN, label: 'Paladin', color: '#3498db' },
-      { type: UnitType.CATAPULT, label: 'Catapult', color: '#8e44ad' },
       { type: UnitType.TREBUCHET, label: 'Trebuchet', color: '#5d4037' },
       { type: UnitType.SCOUT, label: 'Scout', color: '#1abc9c' },
       { type: UnitType.MAGE, label: 'Mage', color: '#2980b9' },
+      { type: UnitType.HEALER, label: 'Healer', color: '#27ae60' },
+      { type: UnitType.ASSASSIN, label: 'Assassin', color: '#2c3e50' },
+      { type: UnitType.SHIELDBEARER, label: 'Shield', color: '#7f8c8d' },
+      { type: UnitType.BERSERKER, label: 'Berserker', color: '#e74c3c' },
+      { type: UnitType.BATTLEMAGE, label: 'Battlemage', color: '#8e44ad' },
       { type: UnitType.LUMBERJACK, label: 'Lumberjack', color: '#6d4c41' },
       { type: UnitType.BUILDER, label: 'Builder', color: '#b8860b' },
       { type: UnitType.VILLAGER, label: 'Villager', color: '#daa520' },
@@ -2057,7 +2085,7 @@ export class HUD {
     const spawnRow = document.createElement('div');
     spawnRow.style.cssText = 'display:flex;flex-wrap:wrap;';
     for (const ud of unitDefs) {
-      spawnRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawn?.(ud.type)));
+      spawnRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawn?.(ud.type, this.debugSpawnCount)));
     }
     this.debugPanel.appendChild(spawnRow);
 
@@ -2066,7 +2094,7 @@ export class HUD {
     const enemyRow = document.createElement('div');
     enemyRow.style.cssText = 'display:flex;flex-wrap:wrap;';
     for (const ud of unitDefs) {
-      enemyRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawnEnemy?.(ud.type)));
+      enemyRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawnEnemy?.(ud.type, this.debugSpawnCount)));
     }
     this.debugPanel.appendChild(enemyRow);
   }

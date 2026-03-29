@@ -228,14 +228,14 @@ class Cubitopia {
 
     // Debug panel callbacks
     this.hud.buildDebugPanel();
-    this.hud.onDebugSpawn((type) => this.debugController.spawnUnit(type));
+    this.hud.onDebugSpawn((type, count) => this.debugController.spawnUnit(type, count));
     this.hud.onDebugGiveResources(() => this.debugController.giveResources());
     this.hud.onDebugKillAllEnemy(() => this.debugController.killAllEnemy());
     this.hud.onDebugDamageBase((owner, amount) => this.debugController.damageBase(owner, amount));
     this.hud.onDebugGameSpeed((speed) => { this.gameSpeed = speed; this.hud.showNotification(`⏩ Speed: ${speed}x`, '#00bcd4'); });
     this.hud.onDebugTeleportMode(() => { this.hud.debugFlags.teleportMode = !this.hud.debugFlags.teleportMode; });
     this.hud.onDebugHealSelected(() => this.debugController.healSelected());
-    this.hud.onDebugSpawnEnemy((type) => this.debugController.spawnEnemyUnit(type));
+    this.hud.onDebugSpawnEnemy((type, count) => this.debugController.spawnEnemyUnit(type, count));
     this.hud.onDebugBuffSelected((stat) => this.debugController.buffSelected(stat));
     this.hud.onDebugInstantWin(() => this.debugController.instantWin());
     this.hud.onDebugInstantLose(() => this.debugController.instantLose());
@@ -1787,7 +1787,7 @@ class Cubitopia {
         { type: UnitType.RIDER, count: 2 },
         { type: UnitType.PALADIN, count: 2 },
         { type: UnitType.MAGE, count: 2 },
-        { type: UnitType.CATAPULT, count: 1 },
+        { type: UnitType.TREBUCHET, count: 2 },
         { type: UnitType.SCOUT, count: 1 },
         { type: UnitType.HEALER, count: 2 },
         { type: UnitType.ASSASSIN, count: 2 },
