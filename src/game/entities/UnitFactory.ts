@@ -1,147 +1,96 @@
 // ============================================
-// CUBITOPIA - Unit Factory
-// Creates units with proper stats for RTS gameplay
+// CUBITOPIA - Unit Factory (Data-Driven)
+// Single config table per unit type — adding a new unit = adding one entry
 // ============================================
 
-import { Unit, UnitType, UnitStats, UnitState, UnitStance, HexCoord, ResourceType } from '../../types';
+import { Unit, UnitType, UnitStats, UnitState, UnitStance, HexCoord } from '../../types';
 
-// Base stats for each unit type
-const UNIT_STATS: Record<UnitType, UnitStats> = {
+// --- Unified Unit Config Table ---
+// Every per-type value lives here. No switch/ternary chains elsewhere.
+export interface UnitConfig {
+  stats: UnitStats;
+  moveSpeed: number;      // world units per second
+  attackSpeed: number;     // attacks per second
+  color: number;           // hex color for rendering
+  carryCapacity: number;   // resource carry limit
+  isSiege: boolean;        // can damage walls/buildings
+}
+
+export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
   [UnitType.WARRIOR]: {
-    maxHealth: 10,
-    attack: 3,
-    defense: 3,
-    movement: 2,
-    range: 1,
+    stats: { maxHealth: 10, attack: 3, defense: 3, movement: 2, range: 1 },
+    moveSpeed: 1.5, attackSpeed: 1.0, color: 0xc0392b,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.ARCHER]: {
-    maxHealth: 8,
-    attack: 3,
-    defense: 1,
-    movement: 2,
-    range: 4,
+    stats: { maxHealth: 8, attack: 3, defense: 1, movement: 2, range: 4 },
+    moveSpeed: 1.3, attackSpeed: 1.5, color: 0x27ae60,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.RIDER]: {
-    maxHealth: 10,
-    attack: 3,
-    defense: 2,
-    movement: 4,
-    range: 1,
+    stats: { maxHealth: 10, attack: 3, defense: 2, movement: 4, range: 1 },
+    moveSpeed: 3.0, attackSpeed: 1.2, color: 0xf39c12,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.PALADIN]: {
-    maxHealth: 15,
-    attack: 1,
-    defense: 5,
-    movement: 1,
-    range: 1,
+    stats: { maxHealth: 15, attack: 1, defense: 5, movement: 1, range: 1 },
+    moveSpeed: 0.8, attackSpeed: 0.6, color: 0x7f8c8d,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.CATAPULT]: {
-    maxHealth: 6,
-    attack: 6,
-    defense: 0,
-    movement: 1,
-    range: 4,
+    stats: { maxHealth: 6, attack: 6, defense: 0, movement: 1, range: 4 },
+    moveSpeed: 0.6, attackSpeed: 0.3, color: 0x8e44ad,
+    carryCapacity: 4, isSiege: true,
   },
   [UnitType.TREBUCHET]: {
-    maxHealth: 8,
-    attack: 9,
-    defense: 0,
-    movement: 1,
-    range: 6,
+    stats: { maxHealth: 8, attack: 9, defense: 0, movement: 1, range: 6 },
+    moveSpeed: 0.4, attackSpeed: 0.2, color: 0x5d4037,
+    carryCapacity: 4, isSiege: true,
   },
   [UnitType.SCOUT]: {
-    maxHealth: 6,
-    attack: 1,
-    defense: 1,
-    movement: 5,
-    range: 1,
+    stats: { maxHealth: 6, attack: 1, defense: 1, movement: 5, range: 1 },
+    moveSpeed: 3.5, attackSpeed: 1.5, color: 0x2ecc71,
+    carryCapacity: 5, isSiege: false,
   },
   [UnitType.MAGE]: {
-    maxHealth: 8,
-    attack: 5,
-    defense: 1,
-    movement: 2,
-    range: 2,
+    stats: { maxHealth: 8, attack: 5, defense: 1, movement: 2, range: 2 },
+    moveSpeed: 1.2, attackSpeed: 0.8, color: 0x2980b9,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.BUILDER]: {
-    maxHealth: 8,
-    attack: 1,
-    defense: 2,
-    movement: 2,
-    range: 1,
+    stats: { maxHealth: 8, attack: 1, defense: 2, movement: 2, range: 1 },
+    moveSpeed: 1.0, attackSpeed: 0.5, color: 0xd4a574,
+    carryCapacity: 4, isSiege: false,
   },
   [UnitType.LUMBERJACK]: {
-    maxHealth: 8,
-    attack: 2,
-    defense: 1,
-    movement: 2,
-    range: 1,
+    stats: { maxHealth: 8, attack: 2, defense: 1, movement: 2, range: 1 },
+    moveSpeed: 1.2, attackSpeed: 0.8, color: 0x6d4c41,
+    carryCapacity: 6, isSiege: false,
   },
   [UnitType.VILLAGER]: {
-    maxHealth: 7,
-    attack: 1,
-    defense: 1,
-    movement: 2,
-    range: 1,
+    stats: { maxHealth: 7, attack: 1, defense: 1, movement: 2, range: 1 },
+    moveSpeed: 1.0, attackSpeed: 0.6, color: 0xdaa520,
+    carryCapacity: 5, isSiege: false,
   },
 };
 
-// Move speed multipliers per unit type (world units per second)
-const UNIT_MOVE_SPEEDS: Record<UnitType, number> = {
-  [UnitType.WARRIOR]: 1.5,
-  [UnitType.ARCHER]: 1.3,
-  [UnitType.RIDER]: 3.0,
-  [UnitType.PALADIN]: 0.8,
-  [UnitType.CATAPULT]: 0.6,
-  [UnitType.TREBUCHET]: 0.4,
-  [UnitType.SCOUT]: 3.5,
-  [UnitType.MAGE]: 1.2,
-  [UnitType.BUILDER]: 1.0,
-  [UnitType.LUMBERJACK]: 1.2,
-  [UnitType.VILLAGER]: 1.0,
-};
-
-// Attack speed (attacks per second)
-const UNIT_ATTACK_SPEEDS: Record<UnitType, number> = {
-  [UnitType.WARRIOR]: 1.0,
-  [UnitType.ARCHER]: 1.5,
-  [UnitType.RIDER]: 1.2,
-  [UnitType.PALADIN]: 0.6,
-  [UnitType.CATAPULT]: 0.3,
-  [UnitType.TREBUCHET]: 0.2,
-  [UnitType.SCOUT]: 1.5,
-  [UnitType.MAGE]: 0.8,
-  [UnitType.BUILDER]: 0.5,
-  [UnitType.LUMBERJACK]: 0.8,
-  [UnitType.VILLAGER]: 0.6,
-};
-
-// Colors for rendering each unit type (used by UnitRenderer)
-export const UNIT_COLORS: Record<UnitType, number> = {
-  [UnitType.WARRIOR]: 0xc0392b,   // red
-  [UnitType.ARCHER]: 0x27ae60,    // green
-  [UnitType.RIDER]: 0xf39c12,     // orange
-  [UnitType.PALADIN]: 0x7f8c8d,  // gray
-  [UnitType.CATAPULT]: 0x8e44ad,  // purple
-  [UnitType.TREBUCHET]: 0x5d4037, // dark wood brown
-  [UnitType.SCOUT]: 0x2ecc71,     // light green
-  [UnitType.MAGE]: 0x2980b9,      // blue
-  [UnitType.BUILDER]: 0xd4a574,   // tan/brown (construction worker)
-  [UnitType.LUMBERJACK]: 0x6d4c41, // dark brown (woodsman)
-  [UnitType.VILLAGER]: 0xdaa520,   // goldenrod (farmer)
-};
+// Backward-compat export — UnitRenderer imports this
+export const UNIT_COLORS: Record<UnitType, number> = Object.fromEntries(
+  Object.entries(UNIT_CONFIG).map(([k, v]) => [k, v.color])
+) as Record<UnitType, number>;
 
 let nextUnitId = 0;
 
 export class UnitFactory {
   static create(type: UnitType, owner: number, position: HexCoord): Unit {
-    const stats = { ...UNIT_STATS[type] };
+    const cfg = UNIT_CONFIG[type];
+    const stats = { ...cfg.stats };
     return {
       id: `unit_${nextUnitId++}`,
       type,
       owner,
       position: { ...position },
-      worldPosition: { x: 0, y: 0, z: 0 }, // Set by caller after hex→world conversion
+      worldPosition: { x: 0, y: 0, z: 0 },
       targetPosition: null,
       command: null,
       state: UnitState.IDLE,
@@ -153,17 +102,21 @@ export class UnitFactory {
       experience: 0,
       attackCooldown: 0,
       gatherCooldown: 0,
-      moveSpeed: UNIT_MOVE_SPEEDS[type],
-      attackSpeed: UNIT_ATTACK_SPEEDS[type],
+      moveSpeed: cfg.moveSpeed,
+      attackSpeed: cfg.attackSpeed,
       carryAmount: 0,
-      carryCapacity: type === UnitType.LUMBERJACK ? 6 : type === UnitType.VILLAGER ? 5 : type === UnitType.SCOUT ? 5 : 4,
+      carryCapacity: cfg.carryCapacity,
       carryType: null,
-      stance: UnitStance.DEFENSIVE, // Default: attack enemies that enter range
-      isSiege: type === UnitType.TREBUCHET || type === UnitType.CATAPULT,
+      stance: UnitStance.DEFENSIVE,
+      isSiege: cfg.isSiege,
     };
   }
 
   static getStats(type: UnitType): UnitStats {
-    return { ...UNIT_STATS[type] };
+    return { ...UNIT_CONFIG[type].stats };
+  }
+
+  static getConfig(type: UnitType): UnitConfig {
+    return UNIT_CONFIG[type];
   }
 }
