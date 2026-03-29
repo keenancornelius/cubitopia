@@ -3655,13 +3655,9 @@ class Cubitopia {
     this.rallyPoints.set(buildingKey, target);
 
     // Get building position for the flag line
-    let buildingPos: HexCoord | null = null;
-    if (buildingKey === 'barracks' && this.barracks) buildingPos = this.barracks.position;
-    else if (buildingKey === 'forestry' && this.forestry) buildingPos = this.forestry.position;
-    else if (buildingKey === 'masonry' && this.masonry) buildingPos = this.masonry.position;
-    else if (buildingKey === 'farmhouse' && this.farmhouse) buildingPos = this.farmhouse.position;
-
-    if (!buildingPos) return;
+    const bld = this.buildingSystem.getFirstBuilding(buildingKey as BuildingKind, 0);
+    if (!bld) return;
+    const buildingPos = bld.position;
 
     // Remove old flag + line
     const oldFlag = this.rallyFlagMeshes.get(buildingKey);

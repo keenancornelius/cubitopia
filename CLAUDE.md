@@ -34,13 +34,14 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~4372 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, building placement, unit spawning, tooltip UI, formation helpers, and input handling. Delegates subsystems via adapter interfaces.
+- `src/main.ts` — **Central orchestrator (~4118 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, formation helpers, and input handling. Delegates subsystems via adapter interfaces.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
 - `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~226 lines)**. Deposit handlers, crafting recipes, stockpile visuals.
 - `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~196 lines)**. Standalone functions for all 6 building types.
 - `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
+- `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~144 lines)**. Building click tooltip, queue buttons, demolish. Uses `TooltipOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
 - `src/game/entities/UnitFactory.ts` — Unit stats, speeds, attack speeds, colors
@@ -166,7 +167,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently **~4372 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~1900 lines extracted so far across 7 modules.
+Shrink `src/main.ts` (currently **~4118 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~2157 lines extracted/consolidated so far across 8 modules + data-driven refactors.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -192,6 +193,10 @@ We use two patterns depending on the code being extracted:
 | `AIController.ts` wiring | ~649 | Stateful subsystem (AIBuildingOps interface) |
 | `BuildingSystem.ts` wiring | ~231 | Stateful subsystem (wall rebuild callback) |
 | `WallSystem.ts` wiring | ~376 | Stateful subsystem (WallSystemOps interface) |
+| `BuildingTooltipController.ts` | ~82 | Stateful subsystem (TooltipOps interface) |
+| Placement method consolidation | ~144 | Data-driven config (BUILDING_PLACEMENT_CONFIG) |
+| Toggle method consolidation | ~36 | Generic toggleBuildingPlaceMode |
+| Spawn queue consolidation | ~24 | Data-driven config (SPAWN_QUEUE_CONFIG) |
 
 ### All Pre-Extracted Modules Now Wired
 No remaining files to wire. Future extractions will target new code regions.
