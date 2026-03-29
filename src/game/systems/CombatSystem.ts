@@ -4,6 +4,7 @@
 // ============================================
 
 import { Unit, UnitType } from '../../types';
+import { CombatLog } from '../../ui/ArenaDebugConsole';
 
 export interface CombatResult {
   attackerDamage: number;
@@ -116,6 +117,7 @@ export class CombatSystem {
       if (dist <= healRange) {
         ally.currentHealth = Math.min(ally.stats.maxHealth, ally.currentHealth + healAmount);
         healed.push(ally.id);
+        CombatLog.logHeal(healer, ally, healAmount);
       }
     }
     return healed;

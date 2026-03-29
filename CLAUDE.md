@@ -94,7 +94,8 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~593 lines)**. Web Audio API synthesized SFX (20 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
-- `src/ui/HUD.ts` — **All UI (~2165 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/HUD.ts` — **All UI (~2175 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/ArenaDebugConsole.ts` — **Arena combat monitor (~330 lines)**. Live combat log overlay showing targeting decisions, kiting events, damage/kills, knockbacks, peel decisions, heal ticks. Toggle with F9 or debug panel button. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
@@ -409,6 +410,10 @@ UnitFactory is fully data-driven. All combat units normalized — no "Phase 1" s
 - `[DONE]` **Shieldbearer heater shield** — redesigned model: 3-point top + pointed bottom heater shape, no torso clipping. Shield bash attack animation (draw back + explosive forward slam) with knockback. No gladius — shield IS the weapon.
 - `[DONE]` **Combat role system** — data-driven RANGED_KITERS (Archer/Mage/Battlemage kite melee threats) and TANK_PEELERS (Shieldbearer/Paladin prioritize enemies attacking nearby squishies). Replaced all hardcoded `UnitType.ARCHER` kiting checks with role-based `isRangedKiter()`. Future roles can be added by extending the sets.
 - `[DONE]` **isCombatUnit exclusion pattern** — converted from inclusion list (which missed GREATSWORD) to exclusion-based (not worker = combat). Matches the pattern used in main.ts and HUD.ts.
+- `[DONE]` **Arena base spawning fix** — fixed asymmetric base placement caused by findSpawnTile search-order bias. Direct coordinates for arena bases, separated army/base offsets.
+- `[DONE]` **Arena team-colored walls** — wall ring split by hemisphere: blue (player 0) on left, red (player 1) on right. Uses existing wall owner team stripe rendering.
+- `[DONE]` **Arena spawn separation** — armies now spawn at their respective bases (offset ±8 from center), maximizing starting distance. Units spread inward toward center from base position.
+- `[DONE]` **Arena Debug Console** — live combat monitor overlay (F9 or debug panel button). Logs targeting decisions (with scores), kiting events (success/fail + positions), damage dealt/taken, kills, knockbacks, peel decisions, heals. Filterable by event type. Shows live unit counts and HP pools per team. Static `CombatLog` class enables zero-config logging from UnitAI and CombatSystem.
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.

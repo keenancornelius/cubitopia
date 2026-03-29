@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { Unit, UnitType, UnitState, UnitStance, CommandType, HexCoord, GameMap, TerrainType, Player } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
+import { CombatLog } from '../../ui/ArenaDebugConsole';
 
 export interface UnitAIDebugFlags {
   disableChop?: boolean;
@@ -527,9 +528,12 @@ export class UnitAI {
               }
               const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
               if (fleeTile) {
+                CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
                 UnitAI.commandMove(unit, fleeTile, map);
                 unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
                 return;
+              } else {
+                CombatLog.logKite(unit, enemy, false);
               }
             }
 
@@ -588,9 +592,12 @@ export class UnitAI {
             if (dist <= 2 && enemy.stats.range <= 1) {
               const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
               if (fleeTile) {
+                CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
                 UnitAI.commandMove(unit, fleeTile, map);
                 unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
                 return;
+              } else {
+                CombatLog.logKite(unit, enemy, false);
               }
             }
             if (dist <= unit.stats.range) {
@@ -657,9 +664,12 @@ export class UnitAI {
         if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
           const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
           if (fleeTile) {
+            CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
             UnitAI.commandMove(unit, fleeTile, map);
             unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
             return;
+          } else {
+            CombatLog.logKite(unit, enemy, false);
           }
         }
 
@@ -1748,9 +1758,12 @@ export class UnitAI {
       // Now kite away
       const fleeTile = UnitAI.findKiteTile(unit, target, map);
       if (fleeTile) {
+        CombatLog.logKite(unit, target, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
         UnitAI.commandMove(unit, fleeTile, map);
         unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
         return;
+      } else {
+        CombatLog.logKite(unit, target, false);
       }
     }
 
@@ -1951,6 +1964,23 @@ export class UnitAI {
       if (score < bestScore) {
         bestScore = score;
         bestEnemy = other;
+      }
+    }
+    // Log targeting decision
+    if (bestEnemy && CombatLog.isEnabled()) {
+      const dist = Pathfinder.heuristic(unit.position, bestEnemy.position);
+      CombatLog.logTarget(unit, bestEnemy, bestScore, dist);
+      // Log peel decision if applicable
+      if (peelTargets.size > 0 && peelTargets.has(bestEnemy.id)) {
+        // Find which squishy we're peeling for
+        for (const ally of allUnits) {
+          if (ally.owner !== playerId || ally.state === UnitState.DEAD) continue;
+          if (!UnitAI.isRangedKiter(ally.type) && ally.type !== UnitType.HEALER) continue;
+          if (bestEnemy.command?.targetUnitId === ally.id) {
+            CombatLog.logPeel(unit, bestEnemy, ally);
+            break;
+          }
+        }
       }
     }
     return bestEnemy;

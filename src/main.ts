@@ -57,6 +57,7 @@ import {
   MapType,
 } from './types';
 import { getPreset, generateArenaMap, ArenaMap } from './game/MapPresets';
+import { ArenaDebugConsole, CombatLog } from './ui/ArenaDebugConsole';
 
 // --- Configuration ---
 
@@ -121,6 +122,7 @@ class Cubitopia {
   private menuController!: MenuController;
   private debugController!: DebugController;
   private sound: SoundManager;
+  private arenaDebugConsole: ArenaDebugConsole;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -140,6 +142,7 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
     this.sound = new SoundManager();
+    this.arenaDebugConsole = new ArenaDebugConsole();
     this.menuController = new MenuController({
       onStartGame: (mode, mapType) => { this.gameMode = mode; this.mapType = mapType; this.startNewGame(); },
       onPlayAgain: () => this.regenerateMap(),
@@ -242,6 +245,7 @@ class Cubitopia {
     this.hud.onDebugClearTrees(() => this.debugController.clearTrees());
     this.hud.onDebugClearStones(() => this.debugController.clearStones());
     this.hud.onDebugKillSelected(() => this.respawnSelectedUnits());
+    this.hud.onDebugToggleCombatMonitor(() => { this.arenaDebugConsole.setUnits(this.allUnits); this.arenaDebugConsole.toggle(); });
 
     // Selection changed
     this.selectionManager.onSelect((units) => {
@@ -320,6 +324,7 @@ class Cubitopia {
       if (e.key === '7') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
       if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
       if (e.key === '`') this.hud.toggleDebugPanel();
+      if (e.key === 'F9') { this.arenaDebugConsole.setUnits(this.allUnits); this.arenaDebugConsole.toggle(); }
     });
 
     // Ghost preview on mousemove (for all placement modes)
@@ -1844,7 +1849,9 @@ class Cubitopia {
         let idx = 0;
         for (const def of armyDefs) {
           for (let i = 0; i < def.count; i++) {
-            const oq = baseQ + (idx % 5) * (owner === 0 ? 1 : -1);
+            // Spread units INWARD toward center from their base
+            // owner 0 (blue, left) spreads +q; owner 1 (red, right) spreads -q
+            const oq = baseQ + (idx % 5 + 1) * (owner === 0 ? 1 : -1);
             const or2 = baseR - 4 + Math.floor(idx / 5) * 2;
             const pos = this.findSpawnTile(map, oq, or2);
             const unit = UnitFactory.create(def.type, owner, pos);
@@ -1857,11 +1864,12 @@ class Cubitopia {
           }
         }
       };
-      // Spawn armies inward of bases — symmetric offsets from center
-      // Armies at offset 5 (5 hexes from center), bases at offset 7 (behind troops)
-      const arenaSpawnOffset = 5;
-      spawnArmy(0, arenaCenter - arenaSpawnOffset, arenaCenter);
-      spawnArmy(1, arenaCenter + arenaSpawnOffset, arenaCenter);
+      // Spawn armies AT their bases — maximum separation across arena
+      // Base offset 8 (near wall, 3 hexes from wall ring at radius 11)
+      // Units spread inward from base toward center
+      const arenaBaseOffset = 8;
+      spawnArmy(0, arenaCenter - arenaBaseOffset, arenaCenter);
+      spawnArmy(1, arenaCenter + arenaBaseOffset, arenaCenter);
     } else {
       // Standard mode: workers near base
       const p1Defs = [
@@ -1904,12 +1912,12 @@ class Cubitopia {
     const BASE_MAX_HEALTH = 500;
     const arenaCenter = Math.floor(MAP_SIZE / 2);
 
-    // Arena: bases behind army spawn, symmetric from center; Standard: map corners
-    // Base offset (7) puts bases 1 hex behind armies (offset 6), 4 hexes from wall (radius 11)
-    // Arena uses direct coords (no findSpawnTile) to avoid search-order bias breaking symmetry
-    const b1Q = isArena ? arenaCenter - 7 : P1_Q;
+    // Arena: bases at army spawn origin, symmetric from center; Standard: map corners
+    // Base offset 8 = same as army origin, 3 hexes from wall ring (radius 11)
+    // Arena uses direct coords (no findSpawnTile) to avoid search-order bias
+    const b1Q = isArena ? arenaCenter - 8 : P1_Q;
     const b1R = isArena ? arenaCenter : P1_R;
-    const b2Q = isArena ? arenaCenter + 7 : P2_Q;
+    const b2Q = isArena ? arenaCenter + 8 : P2_Q;
     const b2R = isArena ? arenaCenter : P2_R;
 
     const p1BaseCoord = isArena ? { q: b1Q, r: b1R } : this.findSpawnTile(map, b1Q, b1R);
@@ -1946,13 +1954,16 @@ class Cubitopia {
     Pathfinder.gateTiles.clear();
 
     // Arena: place colosseum wall ring + gate entries AFTER pathfinder init
+    // Walls colored by team: blue (owner 0) on left half, red (owner 1) on right
     if (isArena && (map as ArenaMap).wallPositions) {
       const arenaMap = map as ArenaMap;
       for (const pos of arenaMap.wallPositions) {
-        this.wallSystem.placeWallDirect(pos, 0);
+        const wallOwner = pos.q < arenaCenter ? 0 : pos.q > arenaCenter ? 1 : 0;
+        this.wallSystem.placeWallDirect(pos, wallOwner);
       }
       for (const pos of arenaMap.gatePositions) {
-        this.wallSystem.placeGateDirect(pos, 0);
+        const gateOwner = pos.q < arenaCenter ? 0 : pos.q > arenaCenter ? 1 : 0;
+        this.wallSystem.placeGateDirect(pos, gateOwner);
       }
       this.wallSystem.rebuildAllConnections();
     }
@@ -2173,10 +2184,17 @@ class Cubitopia {
       }
 
       if (event.type === 'unit:killed' && event.unit) {
+        if (event.killer) CombatLog.logKill(event.killer, event.unit);
         this.removeUnitFromGame(event.unit, event.killer);
         this.sound.play('death');
       }
       if (event.type === 'combat' && event.attacker && event.defender && !this.hud.debugFlags.disableCombat) {
+        // Log damage to arena debug console
+        CombatLog.logDamage(
+          event.attacker, event.defender,
+          event.result?.defenderDamage ?? 0,
+          event.result?.attackerDamage ?? 0
+        );
         this.unitRenderer.updateHealthBar(event.attacker);
         this.unitRenderer.updateHealthBar(event.defender);
 

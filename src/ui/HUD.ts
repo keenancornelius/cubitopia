@@ -1902,6 +1902,7 @@ export class HUD {
   private _onDebugClearTrees: (() => void) | null = null;
   private _onDebugClearStones: (() => void) | null = null;
   private _onDebugKillSelected: (() => void) | null = null;
+  private _onDebugToggleCombatMonitor: (() => void) | null = null;
 
   onDebugSpawn(cb: (type: UnitType, count: number) => void) { this._onDebugSpawn = cb; }
   onDebugGiveResources(cb: () => void) { this._onDebugGiveResources = cb; }
@@ -1917,6 +1918,7 @@ export class HUD {
   onDebugClearTrees(cb: () => void) { this._onDebugClearTrees = cb; }
   onDebugClearStones(cb: () => void) { this._onDebugClearStones = cb; }
   onDebugKillSelected(cb: () => void) { this._onDebugKillSelected = cb; }
+  onDebugToggleCombatMonitor(cb: () => void) { this._onDebugToggleCombatMonitor = cb; }
 
   buildDebugPanel(): void {
     if (this.debugPanel) return;
@@ -2085,6 +2087,13 @@ export class HUD {
     selRow.appendChild(mkBtn('+SPD', '#00bcd4', () => this._onDebugBuffSelected?.('moveSpeed')));
     selRow.appendChild(mkBtn('+RNG', '#9b59b6', () => this._onDebugBuffSelected?.('range')));
     this.debugPanel.appendChild(selRow);
+
+    // --- ARENA COMBAT MONITOR ---
+    mkSection('Arena Combat Monitor', '#00d4ff');
+    const monitorRow = document.createElement('div');
+    monitorRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
+    monitorRow.appendChild(mkBtn('Toggle Combat Monitor (~)', '#00838f', () => this._onDebugToggleCombatMonitor?.()));
+    this.debugPanel.appendChild(monitorRow);
 
     // --- WORLD ACTIONS ---
     mkSection('World Actions', '#795548');
