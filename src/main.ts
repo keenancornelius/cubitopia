@@ -17,6 +17,11 @@ import { UnitAI } from './game/systems/UnitAI';
 import { Pathfinder } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
+import ResourceManager from './game/systems/ResourceManager';
+import {
+  buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
+  buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh
+} from './game/systems/BuildingMeshFactory';
 import {
   EngineConfig,
   CameraConfig,
@@ -34,6 +39,7 @@ import {
   VoxelBlock,
   UnitStance,
   FormationType,
+  GameContext,
 } from './types';
 
 // --- Configuration ---
@@ -140,6 +146,7 @@ class Cubitopia {
   private mainMenuOverlay: HTMLElement | null = null;
   private debugOverlayContainer: HTMLElement | null = null;
   private debugOverlayLabels: Map<string, HTMLElement> = new Map();
+  private resourceManager!: ResourceManager;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -173,7 +180,7 @@ class Cubitopia {
     this.hud.onBarracks(() => this.toggleBarracksMode());
     this.hud.onForestry(() => this.toggleForestryMode());
     this.hud.onMasonry(() => this.toggleMasonryMode());
-    this.hud.onSellWood(() => this.doSellWood());
+    this.hud.onSellWood(() => this.resourceManager.doSellWood());
     this.hud.onSpawnWarrior(() => this.doSpawnQueue(UnitType.WARRIOR, 5, 'Warrior'));
     this.hud.onSpawnArcher(() => this.doSpawnQueue(UnitType.ARCHER, 8, 'Archer'));
     this.hud.onSpawnRider(() => this.doSpawnQueue(UnitType.RIDER, 10, 'Rider'));
@@ -188,7 +195,7 @@ class Cubitopia {
     this.hud.onPlantCrops(() => this.togglePlantCropsMode());
     this.hud.onWorkshop(() => this.toggleWorkshopMode());
     this.hud.onSpawnTrebuchet(() => this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet'));
-    this.hud.onCraftRope(() => this.craftRope());
+    this.hud.onCraftRope(() => this.resourceManager.craftRope());
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
@@ -270,7 +277,7 @@ class Cubitopia {
           if (this.hoverGhost) this.hoverGhost.rotation.y = this.workshopRotation;
         }
       }
-      if (e.key === 'g' || e.key === 'G') this.doSellWood();
+      if (e.key === 'g' || e.key === 'G') this.resourceManager.doSellWood();
       if (e.key === 'p' || e.key === 'P') this.toggleFarmhouseMode();
       if (e.key === 'i' || e.key === 'I') this.toggleSiloMode();
       if (e.key === 'w' || e.key === 'W') this.toggleWorkshopMode();
@@ -285,7 +292,7 @@ class Cubitopia {
       if (e.key === '5') this.doSpawnQueueMasonry(UnitType.BUILDER, 3, 'Builder');
       if (e.key === '6') this.doSpawnQueueFarmhouse(UnitType.VILLAGER, 3, 'Villager');
       if (e.key === '7') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
-      if (e.key === 'l' || e.key === 'L') this.craftRope();
+      if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
       if (e.key === '`') this.hud.toggleDebugPanel();
     });
 
@@ -1336,22 +1343,6 @@ class Cubitopia {
     }
   }
 
-  /** Handle stone deposit at stockpile */
-  private handleStoneDeposit(unit: Unit): void {
-    const stoneAmount = unit.carryAmount;
-    if (stoneAmount <= 0) return;
-
-    this.stoneStockpile[unit.owner] += stoneAmount;
-    this.updateStockpileVisual(unit.owner);
-
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
   private issueCommand(worldPos: THREE.Vector3): void {
     if (!this.currentMap) return;
     const selected = this.selectionManager.getSelectedUnits();
@@ -1535,6 +1526,39 @@ class Cubitopia {
     return { x, y, z };
   }
 
+  /** Build a GameContext that exposes shared state to extracted systems */
+  private buildGameContext(): GameContext {
+    return {
+      currentMap: this.currentMap,
+      players: this.players,
+      allUnits: this.allUnits,
+      bases: this.bases,
+      scene: this.renderer.scene,
+      hud: this.hud,
+      unitRenderer: this.unitRenderer,
+      selectionManager: this.selectionManager,
+      terrainDecorator: this.terrainDecorator,
+      voxelBuilder: this.voxelBuilder,
+      woodStockpile: this.woodStockpile,
+      stoneStockpile: this.stoneStockpile,
+      foodStockpile: this.foodStockpile,
+      grassFiberStockpile: this.grassFiberStockpile,
+      clayStockpile: this.clayStockpile,
+      ropeStockpile: this.ropeStockpile,
+      hexToWorld: (pos: HexCoord) => this.hexToWorld(pos),
+      getElevation: (pos: HexCoord) => this.getElevation(pos),
+      isTileOccupied: (key: string) => this.isTileOccupied(key),
+      findSpawnTile: (map: GameMap, q: number, r: number, allowOccupied?: boolean) => this.findSpawnTile(map, q, r, allowOccupied),
+      isWaterTerrain: (terrain: TerrainType) => this.isWaterTerrain(terrain),
+    };
+  }
+
+  /** Rebuild systems after state reset (e.g. regenerateMap) */
+  private initSystems(): void {
+    const ctx = this.buildGameContext();
+    this.resourceManager = new ResourceManager(ctx);
+  }
+
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
   private flattenBaseArea(map: GameMap, baseQ: number, midR: number, radius: number): void {
     // Use a consistent flat elevation (3) for the entire base area
@@ -1658,19 +1682,6 @@ class Cubitopia {
     this.masonryPlaceMode = !wasActive;
     this.hud.setMasonryMode(this.masonryPlaceMode);
     canvasEl.style.cursor = this.masonryPlaceMode ? 'crosshair' : 'default';
-  }
-
-  private doSellWood(): void {
-    if (this.woodStockpile[0] >= 4) {
-      this.woodStockpile[0] -= 4;
-      this.players[0].resources.wood -= 4;
-      this.players[0].resources.gold += 5;
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-      this.updateStockpileVisual(0);
-      this.hud.showNotification('💰 Sold 4 wood → 5 gold', '#2ecc71');
-    } else {
-      this.hud.showNotification(`⚠️ Need 4 wood to sell! (have ${this.woodStockpile[0]})`, '#e67e22');
-    }
   }
 
   private doSpawnQueue(type: UnitType, cost: number, name: string): void {
@@ -1926,10 +1937,11 @@ class Cubitopia {
       });
       this.workshopMesh = null;
     }
-    for (const [, group] of this.stockpileMeshes) {
-      this.renderer.scene.remove(group);
+    if (this.resourceManager) {
+      this.resourceManager.cleanup();
     }
-    this.stockpileMeshes.clear();
+    // Initialize extracted systems with fresh state references
+    this.initSystems();
     if (this.gameOverOverlay) {
       this.gameOverOverlay.remove();
       this.gameOverOverlay = null;
@@ -2267,8 +2279,8 @@ class Cubitopia {
     this.camera.focusOn(new THREE.Vector3(centerQ * 1.5, 2, midR * 1.5));
 
     // Display initial stockpiles
-    this.updateStockpileVisual(0);
-    this.updateStockpileVisual(1);
+    this.resourceManager.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(1);
 
     // Update HUD mode indicator
     this.hud.setGameMode(this.gameMode);
@@ -2564,7 +2576,7 @@ class Cubitopia {
         this.handleChopWood(event.unit!, event.result.position);
       }
       if (event.type === 'lumberjack:deposit' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        this.handleWoodDeposit(event.unit!);
+        this.resourceManager.handleWoodDeposit(event.unit!);
       }
       if (event.type === 'builder:mine' && event.result && !this.hud.debugFlags.disableMine) {
         this.handleMineTerrain(event.unit!, event.result.position);
@@ -2572,21 +2584,21 @@ class Cubitopia {
       if (event.type === 'builder:deposit_stone' && event.unit && !this.hud.debugFlags.disableDeposit) {
         // Route by carryType — builders can now carry stone, clay, or grass fiber
         if (event.unit!.carryType === ResourceType.CLAY) {
-          this.handleClayDeposit(event.unit!);
+          this.resourceManager.handleClayDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.GRASS_FIBER) {
-          this.handleGrassFiberDeposit(event.unit!);
+          this.resourceManager.handleGrassFiberDeposit(event.unit!);
         } else {
-          this.handleStoneDeposit(event.unit!);
+          this.resourceManager.handleStoneDeposit(event.unit!);
         }
       }
       if (event.type === 'villager:harvest' && event.result && !this.hud.debugFlags.disableHarvest) {
-        this.handleCropHarvest(event.unit!, event.result.position);
+        this.resourceManager.handleCropHarvest(event.unit!, event.result.position);
       }
       if (event.type === 'villager:harvest_grass' && event.result && !this.hud.debugFlags.disableHarvest) {
         this.handleHarvestGrass(event.unit!, event.result.position);
       }
       if (event.type === 'villager:deposit' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        this.handleFoodDeposit(event.unit!);
+        this.resourceManager.handleFoodDeposit(event.unit!);
       }
       if (event.type === 'unit:attack_wall' && event.unit && event.result) {
         const key = `${event.result.position.q},${event.result.position.r}`;
@@ -2802,7 +2814,7 @@ class Cubitopia {
   private wallOwners = new Map<string, number>(); // "q,r" → owner
   /** Unified set of all tiles that walls can visually connect to (walls, gates, buildings) */
   private wallConnectable = new Set<string>();
-  private stockpileMeshes: Map<string, THREE.Group> = new Map();
+
   private wallMeshMap: Map<string, THREE.Group> = new Map(); // "q,r" → mesh group
   private wallMeshes: THREE.Group[] = []; // Track wall mesh groups for cleanup
   private wallHealth: Map<string, number> = new Map(); // "q,r" → current health
@@ -3199,205 +3211,25 @@ class Cubitopia {
   private aiSpawnTimer = 0;
   private aiEconTimer = -15;
 
-  /** Create a simple building mesh for AI */
-  // ============================================================
-  // SHARED BUILDING MESH FACTORIES — used by both player & AI
-  // All buildings share the castle stucco palette but each has
-  // a unique silhouette + decoration so they're instantly
-  // recognizable at a glance.
-  // ============================================================
-
-  private createBuildingGroup(pos: HexCoord, owner: number, name: string): THREE.Group {
-    const worldX = pos.q * 1.5;
-    const worldZ = pos.r * 1.5 + (pos.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(pos);
-    const group = new THREE.Group();
-    group.position.set(worldX, baseY, worldZ);
-    group.name = `${name}_${owner}`;
-    return group;
-  }
-
-  /** Helper: create a mesh and set its position (Object.assign breaks in Three.js v0.183+ because position is read-only) */
-  private static bm(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    return m;
-  }
-
-  /** FORESTRY — Timber lodge: rectangular stone building with peaked A-frame roof
-   *  and log pile on the side. Green accent trim distinguishes it. */
+  // Building mesh factories are in BuildingMeshFactory.ts
+  // Thin wrappers delegate to imported functions
   private buildForestryMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'forestry');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xe8dcc8; const dark = 0x3a5a28;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.5, 0.25, 1.5), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.12, 0));
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.0), new THREE.MeshLambertMaterial({ color: stucco }));
-    hall.position.y = 0.85; hall.castShadow = true; g.add(hall);
-    for (const side of [-1, 1]) {
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.12, 1.15), new THREE.MeshLambertMaterial({ color: dark }));
-      slab.position.set(side * 0.28, 1.65, 0); slab.rotation.z = side * 0.45; g.add(slab);
-    }
-    g.add(B(new THREE.BoxGeometry(0.08, 0.08, 1.15), new THREE.MeshLambertMaterial({ color: 0x5a3a1a }), 0, 1.88, 0));
-    g.add(B(new THREE.BoxGeometry(0.4, 0.65, 0.12), new THREE.MeshLambertMaterial({ color: 0x2c1810 }), 0, 0.57, 0.52));
-    const logMat = new THREE.MeshLambertMaterial({ color: 0x6b4226 });
-    for (let i = 0; i < 3; i++) {
-      const log = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.7), logMat);
-      log.position.set(0.62, 0.4 + i * 0.14, 0); g.add(log);
-    }
-    g.add(B(new THREE.BoxGeometry(1.25, 0.1, 1.05), new THREE.MeshLambertMaterial({ color: 0x4a7c3a }), 0, 1.46, 0));
-    g.add(B(new THREE.BoxGeometry(1.4, 0.1, 1.4), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.3, 0));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildForestryMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
-
-  /** BARRACKS — Military fortress: L-shaped stone building with flat crenellated
-   *  fighting roof, weapon rack, shield emblem, and training dummy. */
   private buildBarracksMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'barracks');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xc8b89a; const stone2 = 0xbaa888;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.6, 0.3, 1.6), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.15, 0));
-    const hallA = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 0.8), new THREE.MeshLambertMaterial({ color: stucco }));
-    hallA.position.set(0, 0.95, -0.15); hallA.castShadow = true; g.add(hallA);
-    const hallB = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.7), new THREE.MeshLambertMaterial({ color: stone2 }));
-    hallB.position.set(-0.3, 0.85, 0.4); hallB.castShadow = true; g.add(hallB);
-    g.add(B(new THREE.BoxGeometry(1.4, 0.12, 0.9), new THREE.MeshLambertMaterial({ color: 0xa09078 }), 0, 1.66, -0.15));
-    const cMat = new THREE.MeshLambertMaterial({ color: stucco });
-    for (const [cx, cz] of [[-0.6,-0.55],[-0.3,-0.55],[0,-0.55],[0.3,-0.55],[0.6,-0.55],[-0.6,0.25],[-0.3,0.25],[0,0.25],[0.3,0.25],[0.6,0.25]]) {
-      g.add(B(new THREE.BoxGeometry(0.15, 0.22, 0.15), cMat, cx, 1.82, cz));
-    }
-    g.add(B(new THREE.BoxGeometry(0.5, 0.7, 0.15), new THREE.MeshLambertMaterial({ color: 0x2c2218 }), 0.15, 0.65, 0.26));
-    const sMat = new THREE.MeshLambertMaterial({ color: 0x8899aa });
-    const sGeo = new THREE.BoxGeometry(0.04, 0.7, 0.04);
-    const s1 = new THREE.Mesh(sGeo, sMat); s1.position.set(0.67, 0.9, 0); s1.rotation.z = 0.2; g.add(s1);
-    const s2 = new THREE.Mesh(sGeo, sMat); s2.position.set(0.67, 0.9, 0); s2.rotation.z = -0.2; g.add(s2);
-    g.add(B(new THREE.BoxGeometry(0.25, 0.25, 0.05), new THREE.MeshLambertMaterial({ color: tc }), -0.25, 1.2, 0.42));
-    g.add(B(new THREE.BoxGeometry(1.5, 0.1, 1.5), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.35, 0));
-    const pMat = new THREE.MeshLambertMaterial({ color: 0x7a5a3a });
-    g.add(B(new THREE.BoxGeometry(0.06, 0.6, 0.06), pMat, 0.5, 0.6, 0.5));
-    g.add(B(new THREE.BoxGeometry(0.35, 0.05, 0.05), pMat, 0.5, 0.8, 0.5));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildBarracksMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
-
-  /** MASONRY — Stone workshop: squat round tower with heavy buttressed walls,
-   *  stone blocks stacked outside, and a chimney. */
   private buildMasonryMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'masonry');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xd5cbb8; const stone = 0x9a9080;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.5, 0.25, 1.5), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.12, 0));
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.65, 1.5, 8), new THREE.MeshLambertMaterial({ color: stucco }));
-    tower.position.y = 1.0; tower.castShadow = true; g.add(tower);
-    g.add(B(new THREE.CylinderGeometry(0.7, 0.7, 0.15, 8), new THREE.MeshLambertMaterial({ color: stone }), 0, 1.82, 0));
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const m = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.2, 0.15), new THREE.MeshLambertMaterial({ color: stucco }));
-      m.position.set(Math.cos(angle) * 0.55, 1.98, Math.sin(angle) * 0.55); g.add(m);
-    }
-    g.add(B(new THREE.BoxGeometry(0.18, 0.8, 0.18), new THREE.MeshLambertMaterial({ color: stone }), 0.5, 1.9, 0));
-    g.add(B(new THREE.BoxGeometry(0.35, 0.6, 0.15), new THREE.MeshLambertMaterial({ color: 0x2c2218 }), 0, 0.55, 0.6));
-    const bMat = new THREE.MeshLambertMaterial({ color: 0xb0a898 });
-    for (let i = 0; i < 4; i++) {
-      g.add(B(new THREE.BoxGeometry(0.2, 0.2, 0.2), bMat, -0.55 + (i % 2) * 0.22, 0.35 + Math.floor(i / 2) * 0.22, 0.35));
-    }
-    g.add(B(new THREE.BoxGeometry(1.4, 0.1, 1.4), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.3, 0));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildMasonryMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
-
-  /** FARMHOUSE — Barn-style: warm stucco walls with wide red-brown gabled roof,
-   *  hay bales beside the door, and a windmill vane on top. */
   private buildFarmhouseMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'farmhouse');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xe0d0a8; const barn = 0x8b3a2a;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.5, 0.2, 1.5), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.1, 0));
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.0, 1.0), new THREE.MeshLambertMaterial({ color: stucco }));
-    body.position.y = 0.7; body.castShadow = true; g.add(body);
-    for (const side of [-1, 1]) {
-      const slab = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 1.1), new THREE.MeshLambertMaterial({ color: barn }));
-      slab.position.set(side * 0.32, 1.38, 0); slab.rotation.z = side * 0.38; g.add(slab);
-    }
-    g.add(B(new THREE.BoxGeometry(0.1, 0.1, 1.1), new THREE.MeshLambertMaterial({ color: 0x5a2a1a }), 0, 1.58, 0));
-    g.add(B(new THREE.BoxGeometry(0.55, 0.65, 0.1), new THREE.MeshLambertMaterial({ color: 0x5a3018 }), 0, 0.52, 0.52));
-    const hayMat = new THREE.MeshLambertMaterial({ color: 0xd4b45c });
-    g.add(B(new THREE.BoxGeometry(0.25, 0.2, 0.25), hayMat, 0.5, 0.3, 0.45));
-    g.add(B(new THREE.BoxGeometry(0.25, 0.2, 0.25), hayMat, 0.5, 0.5, 0.45));
-    const vaneMat = new THREE.MeshLambertMaterial({ color: 0x9a8a6a });
-    const vGeo = new THREE.BoxGeometry(0.03, 0.5, 0.03);
-    const v1 = new THREE.Mesh(vGeo, vaneMat); v1.position.set(0, 1.9, 0); v1.rotation.z = 0.78; g.add(v1);
-    const v2 = new THREE.Mesh(vGeo, vaneMat); v2.position.set(0, 1.9, 0); v2.rotation.z = -0.78; g.add(v2);
-    g.add(B(new THREE.BoxGeometry(1.4, 0.1, 1.4), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.25, 0));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildFarmhouseMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
-
-  /** WORKSHOP — Forge/siege workshop: dark heavy structure with flat reinforced roof,
-   *  anvil outside, rope coils, and a tall smokestack. */
   private buildWorkshopMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'workshop');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xc0b098; const iron = 0x5a5550;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.6, 0.25, 1.6), new THREE.MeshLambertMaterial({ color: 0x606060 }), 0, 0.12, 0));
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 1.3), new THREE.MeshLambertMaterial({ color: stucco }));
-    body.position.y = 0.85; body.castShadow = true; g.add(body);
-    g.add(B(new THREE.BoxGeometry(1.55, 0.15, 1.45), new THREE.MeshLambertMaterial({ color: iron }), 0, 1.52, 0));
-    for (const z of [-0.4, 0, 0.4]) {
-      g.add(B(new THREE.BoxGeometry(1.55, 0.06, 0.08), new THREE.MeshLambertMaterial({ color: 0x4a4540 }), 0, 1.62, z));
-    }
-    g.add(B(new THREE.BoxGeometry(0.22, 1.2, 0.22), new THREE.MeshLambertMaterial({ color: 0x5a5048 }), -0.55, 1.8, -0.45));
-    g.add(B(new THREE.BoxGeometry(0.28, 0.1, 0.28), new THREE.MeshLambertMaterial({ color: iron }), -0.55, 2.45, -0.45));
-    g.add(B(new THREE.BoxGeometry(0.55, 0.75, 0.12), new THREE.MeshLambertMaterial({ color: 0x2a1c10 }), 0, 0.62, 0.68));
-    g.add(B(new THREE.BoxGeometry(0.3, 0.08, 0.2), new THREE.MeshLambertMaterial({ color: 0x404040 }), 0.6, 0.42, 0.5));
-    g.add(B(new THREE.BoxGeometry(0.15, 0.3, 0.15), new THREE.MeshLambertMaterial({ color: 0x505050 }), 0.6, 0.23, 0.5));
-    const coil = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.04, 6, 12), new THREE.MeshLambertMaterial({ color: 0xc9a96e }));
-    coil.position.set(-0.6, 0.6, 0.5); coil.rotation.y = Math.PI / 2; g.add(coil);
-    g.add(B(new THREE.BoxGeometry(1.5, 0.1, 1.5), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.3, 0));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildWorkshopMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
-
-  /** SILO — Grain tower: tall cylindrical stone tower with conical cap, small
-   *  window slits, and reinforcement bands. Tallest building — visible from far. */
   private buildSiloMesh(pos: HexCoord, owner: number): THREE.Group {
-    const g = this.createBuildingGroup(pos, owner, 'silo');
-    const tc = owner === 0 ? 0x3498db : 0xe74c3c;
-    const stucco = 0xe0d8c8;
-    const B = Cubitopia.bm;
-
-    g.add(B(new THREE.BoxGeometry(1.3, 0.2, 1.3), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.1, 0));
-    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 2.2, 8), new THREE.MeshLambertMaterial({ color: stucco }));
-    tower.position.y = 1.3; tower.castShadow = true; g.add(tower);
-    const bandMat = new THREE.MeshLambertMaterial({ color: 0xb8b0a0 });
-    for (const y of [0.6, 1.3, 2.0]) {
-      g.add(B(new THREE.CylinderGeometry(0.5, 0.5, 0.08, 8), bandMat, 0, y, 0));
-    }
-    g.add(B(new THREE.ConeGeometry(0.5, 0.6, 8), new THREE.MeshLambertMaterial({ color: 0xc0b098 }), 0, 2.7, 0));
-    const slitMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2;
-      g.add(B(new THREE.BoxGeometry(0.06, 0.2, 0.06), slitMat, Math.cos(angle) * 0.45, 1.5, Math.sin(angle) * 0.45));
-    }
-    g.add(B(new THREE.BoxGeometry(1.2, 0.1, 1.2), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.25, 0));
-
-    this.renderer.scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
-    return g;
+    return buildSiloMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
   }
 
   /** Find a buildable tile near a position for AI building placement */
@@ -4055,28 +3887,6 @@ class Cubitopia {
     unit.carryType = ResourceType.FOOD;
   }
 
-  /** Handle lumberjack depositing wood at the stockpile */
-  private handleWoodDeposit(unit: Unit): void {
-    const woodAmount = unit.carryAmount;
-    if (woodAmount <= 0) return;
-
-    // Add wood to player's stockpile
-    this.woodStockpile[unit.owner] += woodAmount;
-    this.players[unit.owner].resources.wood += woodAmount;
-
-    // Update stockpile visual near the player's base
-    this.updateStockpileVisual(unit.owner);
-
-    // Update resources in HUD
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-
-    // Clear carry state
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
   /** Tick down regrowth timers — spawn saplings when ready, then grow them */
   private updateTreeRegrowth(delta: number): void {
     if (!this.currentMap) return;
@@ -4391,7 +4201,7 @@ class Cubitopia {
     if (this.isTileOccupied(key)) return;
 
     // Don't build on stockpile locations
-    for (const [sKey] of this.stockpileMeshes) {
+    for (const [sKey] of this.resourceManager.stockpileMeshes) {
       const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
       if (base) {
         const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
@@ -4444,7 +4254,7 @@ class Cubitopia {
       }
     }
 
-    this.updateStockpileVisual(unit.owner);
+    this.resourceManager.updateStockpileVisual(unit.owner);
   }
 
   private handleBuildGate(unit: Unit, gatePos: HexCoord): void {
@@ -4462,7 +4272,7 @@ class Cubitopia {
     if (this.isTileOccupied(key)) return;
 
     // Don't build on stockpile locations
-    for (const [sKey] of this.stockpileMeshes) {
+    for (const [sKey] of this.resourceManager.stockpileMeshes) {
       const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
       if (base) {
         const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
@@ -4516,7 +4326,7 @@ class Cubitopia {
       }
     }
 
-    this.updateStockpileVisual(unit.owner);
+    this.resourceManager.updateStockpileVisual(unit.owner);
   }
 
   /** Damage a wall and return true if destroyed */
@@ -5047,7 +4857,7 @@ class Cubitopia {
 
     this.barracksPlaceMode = false;
     this.hud.setBarracksMode(false);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
   }
 
   private placeForestry(coord: HexCoord): void {
@@ -5077,7 +4887,7 @@ class Cubitopia {
 
     this.forestryPlaceMode = false;
     this.hud.setForestryMode(false);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
   }
 
   private placeMasonry(coord: HexCoord): void {
@@ -5107,7 +4917,7 @@ class Cubitopia {
 
     this.masonryPlaceMode = false;
     this.hud.setMasonryMode(false);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
   }
 
   // --- Workshop ---
@@ -5150,7 +4960,7 @@ class Cubitopia {
 
     this.workshopPlaceMode = false;
     this.hud.setWorkshopMode(false);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
     this.hud.showNotification('Workshop built!', '#2ecc71');
   }
 
@@ -5180,52 +4990,6 @@ class Cubitopia {
     this.workshopSpawnQueue.push({ type, cost: actualCost });
     this.hud.updateWorkshopSpawnQueue(this.workshopSpawnQueue);
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost.rope + ' rope + ' + cost.stone + ' stone + ' + cost.wood + ' wood'})`, '#2ecc71');
-  }
-
-  /** Craft rope: 3 grass fiber + 2 clay → 1 rope */
-  private craftRope(): void {
-    const fiberNeeded = 3;
-    const clayNeeded = 2;
-    if (this.grassFiberStockpile[0] < fiberNeeded || this.clayStockpile[0] < clayNeeded) {
-      this.hud.showNotification(`⚠️ Need ${fiberNeeded} grass fiber + ${clayNeeded} clay to craft rope! (have ${this.grassFiberStockpile[0]} fiber, ${this.clayStockpile[0]} clay)`, '#e67e22');
-      return;
-    }
-    this.grassFiberStockpile[0] -= fiberNeeded;
-    this.players[0].resources.grass_fiber -= fiberNeeded;
-    this.clayStockpile[0] -= clayNeeded;
-    this.players[0].resources.clay -= clayNeeded;
-    this.ropeStockpile[0] += 1;
-    this.players[0].resources.rope += 1;
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    this.hud.showNotification(`🪢 Crafted 1 rope (${this.ropeStockpile[0]} total)`, '#2ecc71');
-  }
-
-  /** Handle grass fiber deposit at stockpile */
-  private handleGrassFiberDeposit(unit: Unit): void {
-    const amount = unit.carryAmount;
-    if (amount <= 0) return;
-    this.grassFiberStockpile[unit.owner] += amount;
-    this.players[unit.owner].resources.grass_fiber += amount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  /** Handle clay deposit at stockpile */
-  private handleClayDeposit(unit: Unit): void {
-    const amount = unit.carryAmount;
-    if (amount <= 0) return;
-    this.clayStockpile[unit.owner] += amount;
-    this.players[unit.owner].resources.clay += amount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
   }
 
   // --- Toggle modes for farmhouse, silo, farm patches ---
@@ -5358,7 +5122,7 @@ class Cubitopia {
 
     this.farmhousePlaceMode = false;
     this.hud.setFarmhouseMode(false);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
     this.hud.showNotification('Farmhouse built! Now build a Silo [I] and farm patches [J]', '#2ecc71');
   }
 
@@ -5424,28 +5188,6 @@ class Cubitopia {
     this.farmPatchMarkers.clear();
   }
 
-  /** Handle villager harvesting a farm patch (collects food) */
-  private handleCropHarvest(unit: Unit, farmPos: HexCoord): void {
-    const foodYield = 3; // Each harvest gives 3 food
-    unit.carryAmount = Math.min(foodYield, unit.carryCapacity);
-    unit.carryType = ResourceType.FOOD;
-  }
-
-  /** Handle villager depositing food at the silo */
-  private handleFoodDeposit(unit: Unit): void {
-    const foodAmount = unit.carryAmount;
-    if (foodAmount <= 0) return;
-
-    this.foodStockpile[unit.owner] += foodAmount;
-    this.players[unit.owner].resources.food += foodAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
   private doSpawnQueueFarmhouse(type: UnitType, cost: number, name: string): void {
     if (!this.farmhouse) {
       this.hud.showNotification(`📍 Place a Farmhouse first, then press ${name} again`, '#e67e22');
@@ -5461,95 +5203,6 @@ class Cubitopia {
   }
 
   // Wall orientation is now handled automatically by buildAdaptiveWallMesh()
-
-  private updateStockpileVisual(owner: number): void {
-    const base = this.bases.find(b => b.owner === owner);
-    if (!base) return;
-
-    const stockKey = `stockpile_${owner}`;
-    // Remove old stockpile mesh
-    const oldGroup = this.stockpileMeshes.get(stockKey);
-    if (oldGroup) {
-      this.renderer.scene.remove(oldGroup);
-      oldGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-    }
-
-    // Get all three stockpile counts
-    const woodCount = this.woodStockpile[owner];
-    const stoneCount = this.stoneStockpile[owner];
-    const foodCount = this.foodStockpile[owner];
-
-    // Don't show anything if all stockpiles are empty
-    if (woodCount <= 0 && stoneCount <= 0 && foodCount <= 0) return;
-
-    // Create a container group near the base
-    const group = new THREE.Group();
-    const baseWorldX = base.position.q * 1.5;
-    const baseWorldZ = base.position.r * 1.5 + (base.position.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.getElevation(base.position);
-
-    // Base offset to the side of the base, raised above terrain
-    const offsetX = owner === 0 ? -2.5 : 2.5;
-    group.position.set(baseWorldX + offsetX, baseY + 0.5, baseWorldZ);
-
-    // Helper function to create a stockpile pile
-    const createPile = (count: number, color: number, label: string, posZ: number) => {
-      if (count <= 0) return;
-
-      const pileGroup = new THREE.Group();
-      pileGroup.position.z = posZ;
-
-      // Stack blocks proportional to count
-      const blockCount = Math.min(count, 20); // Cap visual at 20
-      for (let i = 0; i < blockCount; i++) {
-        const row = i % 4;
-        const layer = Math.floor(i / 4);
-        const blockGeo = new THREE.BoxGeometry(0.4, 0.2, 0.4);
-        const blockMat = new THREE.MeshLambertMaterial({ color });
-        const block = new THREE.Mesh(blockGeo, blockMat);
-        block.position.set(row * 0.45 - 0.7, 0.15 + layer * 0.22, 0);
-        block.castShadow = true;
-        pileGroup.add(block);
-      }
-
-      // Label showing count
-      const canvas = document.createElement('canvas');
-      canvas.width = 64;
-      canvas.height = 32;
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 20px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(`${count}`, 32, 24);
-      const texture = new THREE.CanvasTexture(canvas);
-      const labelGeo = new THREE.PlaneGeometry(1, 0.5);
-      const labelMat = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthTest: false });
-      const labelMesh = new THREE.Mesh(labelGeo, labelMat);
-      labelMesh.position.y = 1.5;
-      labelMesh.renderOrder = 999;
-      pileGroup.add(labelMesh);
-
-      return pileGroup;
-    };
-
-    // Create the three piles: food at Z-1.5, wood at Z0, stone at Z+1.5
-    const foodPile = createPile(foodCount, 0xdaa520, 'Food', -1.5);
-    if (foodPile) group.add(foodPile);
-
-    const woodPile = createPile(woodCount, 0x8B6914, 'Wood', 0);
-    if (woodPile) group.add(woodPile);
-
-    const stonePile = createPile(stoneCount, 0x888888, 'Stone', 1.5);
-    if (stonePile) group.add(stonePile);
-
-    this.renderer.scene.add(group);
-    this.stockpileMeshes.set(stockKey, group);
-  }
 
   /** Find a tile 2 away from the base for the unit to stand on (surround, not enter). */
   private findSurroundTile(base: Base, unit: Unit): HexCoord {
@@ -6107,7 +5760,7 @@ class Cubitopia {
     this.ropeStockpile[0] += 999;
     this.players[0].resources.rope += 999;
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    this.updateStockpileVisual(0);
+    this.resourceManager.updateStockpileVisual(0);
     this.hud.showNotification('🐛 +999 all resources', '#4caf50');
   }
 
