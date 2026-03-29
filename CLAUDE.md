@@ -58,7 +58,13 @@ After each commit, pause and run through these checks before moving on. This is 
 - Are new subsystems using the slim ops interface pattern, or did we create tight coupling?
 - Would a new developer reading CLAUDE.md understand the project's direction and how to contribute?
 
-**5. Cleanup Sweep**
+**5. Multiplayer-Readiness Check**
+- Did this commit introduce any `Math.random()` calls in game logic? If so, replace with seeded PRNG. (`Math.random()` is OK in rendering/particles/visual-only code.)
+- Does any new player input directly mutate game state? If so, refactor to produce a Command object that the simulation consumes. (Direct mutation = impossible to serialize for netcode.)
+- Is the new code's game state fully serializable? No closures, DOM refs, or Three.js objects stored in simulation state.
+- Could this code run identically on two separate clients given the same inputs? If not, identify the non-determinism source and fix it.
+
+**6. Cleanup Sweep**
 - Remove stale TODO comments that were resolved by this commit
 - Delete dead code paths, unused imports, orphaned type declarations
 - Update line counts in CLAUDE.md if they've drifted by more than 50 lines
