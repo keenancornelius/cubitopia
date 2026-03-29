@@ -28,6 +28,7 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 - Before experimental changes the user wants to try
 - After updating project archtecture in CLAUDE.md or Instructions
 - After updating the CLAUDE.md and instruction files on quirks and discoveries about the code base.
+- After updating the help menu with new or missing info.
 ---
 
 ## Project Architecture
@@ -157,7 +158,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently ~4979 lines, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules.
+Shrink `src/main.ts` (currently ~4748 lines, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -181,16 +182,21 @@ We use two patterns depending on the code being extracted:
 | `DefenseMeshFactory.ts` | ~268 | Pure mesh factory (config object) |
 | Spawn queue dedup | ~67 | Data-driven config array |
 | `AIController.ts` wiring | ~649 | Stateful subsystem (AIBuildingOps interface) |
+| `BuildingSystem.ts` wiring | ~231 | Stateful subsystem (wall rebuild callback) |
 
 ### Next Extraction Targets (priority order)
-1. **BuildingSystem wiring** (~502 lines)
-   - Already extracted to `BuildingSystem.ts` but not wired in
-2. **WallSystem wiring** (~743 lines)
+1. **WallSystem wiring** (~743 lines)
    - Already extracted to `WallSystem.ts` but not wired in
 
 ### Files Already Extracted (not yet wired)
-- `src/game/systems/BuildingSystem.ts` (502 lines)
 - `src/game/systems/WallSystem.ts` (743 lines)
+
+### BuildingSystem Integration Notes
+- Owns building registry (`placedBuildings`), `wallConnectable`, `barracksHealth`, `buildingSpawnIndex`
+- Delegates mesh creation to BuildingMeshFactory pure functions
+- Uses `setWallRefs()` callback for wall rebuild on building demolition
+- `showBuildingTooltip` and `queueUnitFromTooltip` remain in main.ts (deep UI coupling)
+- Backward-compat getters (`this.barracks`, `this.forestry`, etc.) still in main.ts, delegate to buildingSystem
 
 ### AIController Integration Notes
 - Uses `AIBuildingOps` slim interface instead of full BuildingSystem dependency

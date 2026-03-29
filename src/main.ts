@@ -18,12 +18,9 @@ import { Pathfinder } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
 import ResourceManager from './game/systems/ResourceManager';
+import BuildingSystem from './game/systems/BuildingSystem';
 import AIController from './game/systems/AIController';
 import type { AIBuildingOps } from './game/systems/AIController';
-import {
-  buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
-  buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh
-} from './game/systems/BuildingMeshFactory';
 import {
   buildAdaptiveWallMesh as createWallMesh,
   buildGateMesh as createGateMesh,
@@ -46,6 +43,8 @@ import {
   UnitStance,
   FormationType,
   GameContext,
+  PlacedBuilding,
+  BuildingKind,
 } from './types';
 
 // --- Configuration ---
@@ -71,23 +70,7 @@ const CAMERA_CONFIG: CameraConfig = {
 };
 
 // --- AI Build State is managed by AIController (this.aiController.aiState) ---
-
-// --- Placed Building Registry ---
-
-type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo';
-
-interface PlacedBuilding {
-  id: string;
-  kind: BuildingKind;
-  owner: number;
-  position: HexCoord;
-  worldPosition: { x: number; y: number; z: number };
-  mesh: THREE.Group;
-  health: number;
-  maxHealth: number;
-}
-
-let nextBuildingId = 0;
+// --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
 
 // --- Game Class ---
 
@@ -118,6 +101,7 @@ class Cubitopia {
   private debugOverlayContainer: HTMLElement | null = null;
   private debugOverlayLabels: Map<string, HTMLElement> = new Map();
   private resourceManager!: ResourceManager;
+  private buildingSystem!: BuildingSystem;
   private aiController!: AIController;
 
   constructor() {
@@ -457,7 +441,7 @@ class Cubitopia {
       raycaster.setFromCamera(mouse, this.camera.camera);
 
       // Check all placed building meshes
-      const buildingMeshes: THREE.Object3D[] = this.placedBuildings.map(pb => pb.mesh);
+      const buildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
 
       if (buildingMeshes.length > 0) {
         const hits = raycaster.intersectObjects(buildingMeshes, true);
@@ -466,7 +450,7 @@ class Cubitopia {
           let clickedPB: PlacedBuilding | null = null;
           let obj: THREE.Object3D | null = hits[0].object;
           while (obj) {
-            const found = this.placedBuildings.find(pb => pb.mesh === obj);
+            const found = this.buildingSystem.placedBuildings.find(pb => pb.mesh === obj);
             if (found) { clickedPB = found; break; }
             obj = obj.parent;
           }
@@ -1429,7 +1413,7 @@ class Cubitopia {
     if (this.wallsBuilt.has(key)) return true;
     if (this.gatesBuilt.has(key)) return true;
     // Check all placed buildings (player + AI)
-    for (const pb of this.placedBuildings) {
+    for (const pb of this.buildingSystem.placedBuildings) {
       if (`${pb.position.q},${pb.position.r}` === key) return true;
     }
     return false;
@@ -1540,16 +1524,23 @@ class Cubitopia {
     const ctx = this.buildGameContext();
     this.resourceManager = new ResourceManager(ctx);
 
-    // Build adapter for AI building operations (delegates to main.ts methods)
+    // BuildingSystem owns registry, mesh builders, and queries
+    this.buildingSystem = new BuildingSystem(ctx);
+    this.buildingSystem.setWallRefs(
+      this.wallsBuilt, this.wallOwners,
+      (pos, owner) => this.buildAdaptiveWallMesh(pos, owner),
+    );
+
+    // AI building operations delegate to BuildingSystem
     const buildOps: AIBuildingOps = {
-      aiFindBuildTile: (bq, br, oq, or_) => this.aiFindBuildTile(bq, br, oq, or_),
-      buildForestryMesh: (pos, owner) => this.buildForestryMesh(pos, owner),
-      buildBarracksMesh: (pos, owner) => this.buildBarracksMesh(pos, owner),
-      buildMasonryMesh: (pos, owner) => this.buildMasonryMesh(pos, owner),
-      buildFarmhouseMesh: (pos, owner) => this.buildFarmhouseMesh(pos, owner),
-      buildWorkshopMesh: (pos, owner) => this.buildWorkshopMesh(pos, owner),
-      buildSiloMesh: (pos, owner) => this.buildSiloMesh(pos, owner),
-      registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.registerBuilding(kind, owner, pos, mesh, maxHealth),
+      aiFindBuildTile: (bq, br, oq, or_) => this.buildingSystem.aiFindBuildTile(bq, br, oq, or_),
+      buildForestryMesh: (pos, owner) => this.buildingSystem.buildForestryMesh(pos, owner),
+      buildBarracksMesh: (pos, owner) => this.buildingSystem.buildBarracksMesh(pos, owner),
+      buildMasonryMesh: (pos, owner) => this.buildingSystem.buildMasonryMesh(pos, owner),
+      buildFarmhouseMesh: (pos, owner) => this.buildingSystem.buildFarmhouseMesh(pos, owner),
+      buildWorkshopMesh: (pos, owner) => this.buildingSystem.buildWorkshopMesh(pos, owner),
+      buildSiloMesh: (pos, owner) => this.buildingSystem.buildSiloMesh(pos, owner),
+      registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.buildingSystem.registerBuilding(kind, owner, pos, mesh, maxHealth),
     };
     this.aiController = new AIController(ctx, buildOps);
   }
@@ -1748,14 +1739,12 @@ class Cubitopia {
     this.stoneStockpile = [0, 0];
     this.wallsBuilt.clear();
     this.wallOwners.clear();
-    this.wallConnectable.clear();
     this.wallHealth.clear();
     this.wallMeshMap.clear();
     this.gatesBuilt.clear();
     this.gateOwners.clear();
     this.gateHealth.clear();
     this.gateMeshMap.clear();
-    this.barracksHealth.clear();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
     for (const wg of this.wallMeshes) {
@@ -1823,13 +1812,7 @@ class Cubitopia {
     this.forestryRotation = 0;
     this.masonryRotation = 0;
     // Remove all placed building meshes from scene
-    this.hideBuildingTooltip();
-    for (const pb of this.placedBuildings) {
-      this.renderer.scene.remove(pb.mesh);
-    }
-    this.placedBuildings = [];
-    this.selectedBuilding = null;
-    this.buildingSpawnIndex = { barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0 };
+    this.buildingSystem.cleanup();
     this.spawnQueue = [];
     this.spawnTimer = 0;
     this.forestrySpawnQueue = [];
@@ -1859,26 +1842,7 @@ class Cubitopia {
     UnitAI.siloPositions.clear();
     UnitAI.farmhousePositions.clear();
     UnitAI.grassTiles.clear();
-    if (this.farmhouseMesh) {
-      this.renderer.scene.remove(this.farmhouseMesh);
-      this.farmhouseMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.farmhouseMesh = null;
-    }
-    if (this.siloMesh) {
-      this.renderer.scene.remove(this.siloMesh);
-      this.siloMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.siloMesh = null;
-    }
+    // Building meshes are cleaned up by buildingSystem.cleanup() above
     this.treeRegrowthTimers.clear();
     this.treeAge.clear();
     this.treeGrowthTimers.clear();
@@ -1899,46 +1863,7 @@ class Cubitopia {
       }
     }
     this.aiController.cleanup();
-    if (this.barracksMesh) {
-      this.renderer.scene.remove(this.barracksMesh);
-      this.barracksMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.barracksMesh = null;
-    }
-    if (this.forestryMesh) {
-      this.renderer.scene.remove(this.forestryMesh);
-      this.forestryMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.forestryMesh = null;
-    }
-    if (this.masonryMesh) {
-      this.renderer.scene.remove(this.masonryMesh);
-      this.masonryMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.masonryMesh = null;
-    }
-    if (this.workshopMesh) {
-      this.renderer.scene.remove(this.workshopMesh);
-      this.workshopMesh.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-      this.workshopMesh = null;
-    }
+    // Legacy per-type mesh cleanup removed — buildingSystem.cleanup() handles all
     if (this.resourceManager) {
       this.resourceManager.cleanup();
     }
@@ -2255,8 +2180,8 @@ class Cubitopia {
     this.baseRenderer.addBase(p2Base, this.getElevation(p2BaseCoord));
 
     // Register bases as wall-connectable structures
-    this.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
-    this.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
+    this.buildingSystem.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
+    this.buildingSystem.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
 
     // Tell UnitAI where the bases are (for lumberjack return trips)
     UnitAI.basePositions.set(0, p1BaseCoord);
@@ -2371,7 +2296,7 @@ class Cubitopia {
       t === UnitType.PALADIN || t === UnitType.CATAPULT || t === UnitType.TREBUCHET;
 
     for (const cfg of spawnConfigs) {
-      const building = this.getNextSpawnBuilding(cfg.kind as any, 0);
+      const building = this.buildingSystem.getNextSpawnBuilding(cfg.kind as any, 0);
       if (!building || cfg.queue.length === 0) continue;
 
       const timer = cfg.getTimer() + delta;
@@ -2384,7 +2309,7 @@ class Cubitopia {
           cfg.deductCost(next);
           cfg.queue.shift();
           // Spawn unit at building position (round-robin)
-          const spawnBuilding = this.getNextSpawnBuilding(cfg.kind as any, 0)!;
+          const spawnBuilding = this.buildingSystem.getNextSpawnBuilding(cfg.kind as any, 0)!;
           const pos = this.findSpawnTile(this.currentMap!, spawnBuilding.position.q, spawnBuilding.position.r, true);
           const unit = UnitFactory.create(next.type, 0, pos);
           const wp = this.hexToWorld(pos);
@@ -2556,7 +2481,7 @@ class Cubitopia {
         const isSiege = event.unit.isSiege === true; // Trebuchets/siege engines
         // ALL structures (walls, gates, buildings) require siege weapons to destroy
         if (!isSiege) continue; // Non-siege units cannot damage structures
-        if (this.barracksHealth.has(key)) {
+        if (this.buildingSystem.barracksHealth.has(key)) {
           this.damageBarracks(event.result.position, event.unit.stats.attack);
         } else if (this.gatesBuilt.has(key)) {
           this.damageGate(event.result.position, event.unit.stats.attack);
@@ -2676,7 +2601,7 @@ class Cubitopia {
           this.baseRenderer.showDestruction(base);
           // Remove base from wall-connectable registry and rebuild adjacent walls
           const baseKey = `${base.position.q},${base.position.r}`;
-          this.wallConnectable.delete(baseKey);
+          this.buildingSystem.wallConnectable.delete(baseKey);
           const baseNeighbors = Pathfinder.getHexNeighbors(base.position);
           for (const n of baseNeighbors) {
             const nKey = `${n.q},${n.r}`;
@@ -2763,8 +2688,7 @@ class Cubitopia {
   private woodStockpile: number[] = [0, 0]; // [player0, player1]
   private wallsBuilt = new Set<string>(); // Track built wall tiles
   private wallOwners = new Map<string, number>(); // "q,r" → owner
-  /** Unified set of all tiles that walls can visually connect to (walls, gates, buildings) */
-  private wallConnectable = new Set<string>();
+  // wallConnectable is managed by BuildingSystem (this.buildingSystem.wallConnectable)
 
   private wallMeshMap: Map<string, THREE.Group> = new Map(); // "q,r" → mesh group
   private wallMeshes: THREE.Group[] = []; // Track wall mesh groups for cleanup
@@ -2777,7 +2701,7 @@ class Cubitopia {
   private gateHealth: Map<string, number> = new Map(); // "q,r" → current health
   private static readonly GATE_MAX_HP = 20; // Same as walls
   private static readonly BARRACKS_MAX_HP = 40; // Buildings are tougher, siege-only
-  private barracksHealth: Map<string, number> = new Map(); // "q,r" → health
+  // barracksHealth is managed by BuildingSystem (this.buildingSystem.barracksHealth)
   private gateMeshMap: Map<string, THREE.Group> = new Map(); // "q,r" → mesh group
   private gateMeshes: THREE.Group[] = []; // Track gate mesh groups for cleanup
 
@@ -2816,99 +2740,21 @@ class Cubitopia {
   private readonly GRASS_SPREAD_INTERVAL = 6; // seconds between spread checks
   private readonly GRASS_SPREAD_CHANCE = 0.15; // chance per eligible adjacent tile
 
-  // --- Building Registry (supports multiple buildings of each type) ---
-  private placedBuildings: PlacedBuilding[] = [];
-  private selectedBuilding: PlacedBuilding | null = null;
-  private buildingTooltipEl: HTMLElement | null = null;
-  private buildingSpawnIndex: Record<BuildingKind, number> = {
-    barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
-  };
+  // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
+  // Backwards-compatible single-building shortcuts delegate to buildingSystem
+  private get barracks() { return this.buildingSystem.getFirstBuilding('barracks'); }
+  private get forestry() { return this.buildingSystem.getFirstBuilding('forestry'); }
+  private get masonry() { return this.buildingSystem.getFirstBuilding('masonry'); }
+  private get farmhouse() { return this.buildingSystem.getFirstBuilding('farmhouse'); }
+  private get silo() { return this.buildingSystem.getFirstBuilding('silo'); }
+  private get workshop() { return this.buildingSystem.getFirstBuilding('workshop'); }
 
-  // --- Backwards-compatible single-building shortcuts (first placed of each type) ---
-  private get barracks() { return this.getFirstBuilding('barracks'); }
-  private get forestry() { return this.getFirstBuilding('forestry'); }
-  private get masonry() { return this.getFirstBuilding('masonry'); }
-  private get farmhouse() { return this.getFirstBuilding('farmhouse'); }
-  private get silo() { return this.getFirstBuilding('silo'); }
-  private get workshop() { return this.getFirstBuilding('workshop'); }
-
-  private getFirstBuilding(kind: BuildingKind): { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null {
-    const b = this.placedBuildings.find(pb => pb.kind === kind && pb.owner === 0);
-    return b ? { position: b.position, worldPosition: b.worldPosition } : null;
-  }
-
-  private getBuildingsOfKind(kind: BuildingKind, owner = 0): PlacedBuilding[] {
-    return this.placedBuildings.filter(pb => pb.kind === kind && pb.owner === owner);
-  }
-
-  private getNextSpawnBuilding(kind: BuildingKind, owner = 0): PlacedBuilding | null {
-    const buildings = this.getBuildingsOfKind(kind, owner);
-    if (buildings.length === 0) return null;
-    const idx = this.buildingSpawnIndex[kind] % buildings.length;
-    this.buildingSpawnIndex[kind] = idx + 1;
-    return buildings[idx];
-  }
-
-  // Legacy mesh refs (point to first placed of each type, used by some old code)
-  private get barracksMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'barracks' && pb.owner === 0); return b?.mesh ?? null; }
-  private set barracksMesh(_v: THREE.Group | null) { /* no-op: mesh stored in PlacedBuilding */ }
-  private get forestryMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'forestry' && pb.owner === 0); return b?.mesh ?? null; }
-  private set forestryMesh(_v: THREE.Group | null) { /* no-op */ }
-  private get masonryMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'masonry' && pb.owner === 0); return b?.mesh ?? null; }
-  private set masonryMesh(_v: THREE.Group | null) { /* no-op */ }
-  private get farmhouseMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'farmhouse' && pb.owner === 0); return b?.mesh ?? null; }
-  private set farmhouseMesh(_v: THREE.Group | null) { /* no-op */ }
-  private get siloMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'silo' && pb.owner === 0); return b?.mesh ?? null; }
-  private set siloMesh(_v: THREE.Group | null) { /* no-op */ }
-  private get workshopMesh(): THREE.Group | null { const b = this.placedBuildings.find(pb => pb.kind === 'workshop' && pb.owner === 0); return b?.mesh ?? null; }
-  private set workshopMesh(_v: THREE.Group | null) { /* no-op */ }
-
-  /** Register a new building in the registry. Returns the PlacedBuilding record. */
-  private registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth = 40): PlacedBuilding {
-    const pb: PlacedBuilding = {
-      id: `bld_${nextBuildingId++}`,
-      kind, owner, position: pos,
-      worldPosition: this.hexToWorld(pos),
-      mesh, health: maxHealth, maxHealth,
-    };
-    this.placedBuildings.push(pb);
-    // Also register hex key with wallConnectable + barracksHealth for backwards compat
-    const key = `${pos.q},${pos.r}`;
-    this.wallConnectable.add(key);
-    this.barracksHealth.set(key, maxHealth);
-    return pb;
-  }
-
-  /** Remove a building from the registry, clean up mesh and pathfinding. */
-  private unregisterBuilding(pb: PlacedBuilding): void {
-    const idx = this.placedBuildings.indexOf(pb);
-    if (idx >= 0) this.placedBuildings.splice(idx, 1);
-    const key = `${pb.position.q},${pb.position.r}`;
-    this.wallConnectable.delete(key);
-    this.barracksHealth.delete(key);
-    Pathfinder.blockedTiles.delete(key);
-    this.renderer.scene.remove(pb.mesh);
-    // Rebuild adjacent walls
-    const neighbors = Pathfinder.getHexNeighbors(pb.position);
-    for (const n of neighbors) {
-      const nKey = `${n.q},${n.r}`;
-      if (this.wallsBuilt.has(nKey)) {
-        this.buildAdaptiveWallMesh(n, this.wallOwners.get(nKey) ?? 0);
-      }
-    }
-    if (this.selectedBuilding === pb) this.selectedBuilding = null;
-  }
-
-  /** Find a placed building at a hex coordinate */
-  private getBuildingAt(pos: HexCoord, owner?: number): PlacedBuilding | null {
-    const key = `${pos.q},${pos.r}`;
-    return this.placedBuildings.find(pb => `${pb.position.q},${pb.position.r}` === key && (owner === undefined || pb.owner === owner)) ?? null;
-  }
+  // Query/registry methods are in BuildingSystem — accessed via this.buildingSystem.*
 
   /** Show a tooltip for a clicked building with info, actions, and unit queue */
   private showBuildingTooltip(pb: PlacedBuilding, screenX: number, screenY: number): void {
-    this.hideBuildingTooltip();
-    this.selectedBuilding = pb;
+    this.buildingSystem.hideBuildingTooltip();
+    this.buildingSystem.selectedBuilding = pb;
 
     const el = document.createElement('div');
     el.id = 'building-tooltip';
@@ -2949,7 +2795,7 @@ class Cubitopia {
     html += `</div>`;
 
     // Unit queue buttons based on building kind
-    const queueBtns = this.getBuildingQueueOptions(pb.kind);
+    const queueBtns = this.buildingSystem.getBuildingQueueOptions(pb.kind);
     if (queueBtns.length > 0 && pb.owner === 0) {
       html += `<div style="margin-top:4px;font-size:11px;color:#aaa;margin-bottom:4px">Queue Units:</div>`;
       html += `<div>`;
@@ -2961,7 +2807,7 @@ class Cubitopia {
 
     el.innerHTML = html;
     document.body.appendChild(el);
-    this.buildingTooltipEl = el;
+    this.buildingSystem.buildingTooltipEl = el;
 
     // Clamp position so tooltip doesn't overflow screen
     const r = el.getBoundingClientRect();
@@ -2972,7 +2818,7 @@ class Cubitopia {
     const rallyBtn = el.querySelector('#btt-rally');
     if (rallyBtn) {
       rallyBtn.addEventListener('click', () => {
-        this.hideBuildingTooltip();
+        this.buildingSystem.hideBuildingTooltip();
         this.enterRallyPointModeForBuilding(pb.kind);
       });
     }
@@ -2981,7 +2827,7 @@ class Cubitopia {
     if (demolishBtn) {
       demolishBtn.addEventListener('click', () => {
         this.demolishBuilding(pb);
-        this.hideBuildingTooltip();
+        this.buildingSystem.hideBuildingTooltip();
       });
     }
 
@@ -2997,47 +2843,10 @@ class Cubitopia {
     // Close tooltip when clicking elsewhere
     const closeHandler = (ev: MouseEvent) => {
       if (el.contains(ev.target as Node)) return;
-      this.hideBuildingTooltip();
+      this.buildingSystem.hideBuildingTooltip();
       document.removeEventListener('mousedown', closeHandler, true);
     };
     setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 50);
-  }
-
-  /** Hide the building tooltip */
-  private hideBuildingTooltip(): void {
-    if (this.buildingTooltipEl) {
-      this.buildingTooltipEl.remove();
-      this.buildingTooltipEl = null;
-    }
-    this.selectedBuilding = null;
-  }
-
-  /** Get unit queue options for a building kind */
-  private getBuildingQueueOptions(kind: BuildingKind): { type: string; label: string; costLabel: string }[] {
-    switch (kind) {
-      case 'barracks': return [
-        { type: 'warrior', label: 'Warrior', costLabel: '5g' },
-        { type: 'archer', label: 'Archer', costLabel: '8g' },
-        { type: 'rider', label: 'Rider', costLabel: '10g' },
-        { type: 'paladin', label: 'Paladin', costLabel: '6g' },
-      ];
-      case 'forestry': return [
-        { type: 'lumberjack', label: 'Lumberjack', costLabel: '3w' },
-        { type: 'scout', label: 'Scout', costLabel: '4w' },
-      ];
-      case 'masonry': return [
-        { type: 'builder', label: 'Builder', costLabel: '4w' },
-      ];
-      case 'farmhouse': return [
-        { type: 'villager', label: 'Villager', costLabel: '3w' },
-      ];
-      case 'workshop': return [
-        { type: 'trebuchet', label: 'Trebuchet', costLabel: '6r+4s+4w' },
-        { type: 'catapult', label: 'Catapult', costLabel: '3r+3s+3w' },
-      ];
-      case 'silo': return []; // Storage building, no units
-      default: return [];
-    }
   }
 
   /** Queue a unit from the building tooltip */
@@ -3097,7 +2906,7 @@ class Cubitopia {
     this.woodStockpile[0] += refund;
     this.players[0].resources.wood += refund;
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    this.unregisterBuilding(pb);
+    this.buildingSystem.unregisterBuilding(pb);
     this.hud.showNotification(`${pb.kind.charAt(0).toUpperCase() + pb.kind.slice(1)} demolished. Refunded ${refund} wood.`);
   }
 
@@ -3154,47 +2963,7 @@ class Cubitopia {
   // AI state is managed by AIController (this.aiController.aiState)
   // AI meshes are tracked in aiController.aiState[pid].meshes
 
-  // Building mesh factories are in BuildingMeshFactory.ts
-  // Thin wrappers delegate to imported functions
-  private buildForestryMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildForestryMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-  private buildBarracksMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildBarracksMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-  private buildMasonryMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildMasonryMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-  private buildFarmhouseMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildFarmhouseMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-  private buildWorkshopMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildWorkshopMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-  private buildSiloMesh(pos: HexCoord, owner: number): THREE.Group {
-    return buildSiloMesh(pos, owner, this.renderer.scene, (p) => this.getElevation(p));
-  }
-
-  /** Find a buildable tile near a position for AI building placement */
-  private aiFindBuildTile(baseQ: number, baseR: number, offsetQ: number, offsetR: number): HexCoord | null {
-    if (!this.currentMap) return null;
-    const preferQ = baseQ + offsetQ;
-    const preferR = baseR + offsetR;
-    for (let radius = 0; radius < 5; radius++) {
-      for (let dq = -radius; dq <= radius; dq++) {
-        for (let dr = -radius; dr <= radius; dr++) {
-          const q = preferQ + dq;
-          const r = preferR + dr;
-          const key = `${q},${r}`;
-          const tile = this.currentMap.tiles.get(key);
-          if (tile && tile.terrain === TerrainType.PLAINS && !Pathfinder.blockedTiles.has(key) && !this.isTileOccupied(key)) {
-            return { q, r };
-          }
-        }
-      }
-    }
-    return null;
-  }
+  // Building mesh creation + aiFindBuildTile are in BuildingSystem
 
   private handleChopWood(unit: Unit, treePos: HexCoord): void {
     if (!this.currentMap) return;
@@ -3593,7 +3362,7 @@ class Cubitopia {
     this.wallsBuilt.add(key);
     this.wallOwners.set(key, unit.owner);
     this.wallHealth.set(key, Cubitopia.WALL_MAX_HP);
-    this.wallConnectable.add(key);
+    this.buildingSystem.wallConnectable.add(key);
 
     // If built on water, convert tile to plains (dam) and remove water visuals
     if (this.isWaterTerrain(tile.terrain)) {
@@ -3664,7 +3433,7 @@ class Cubitopia {
     this.gatesBuilt.add(key);
     this.gateOwners.set(key, unit.owner);
     this.gateHealth.set(key, Cubitopia.GATE_MAX_HP);
-    this.wallConnectable.add(key);
+    this.buildingSystem.wallConnectable.add(key);
 
     // If built on water, convert tile to plains (dam) and remove water visuals
     if (this.isWaterTerrain(tile.terrain)) {
@@ -3741,7 +3510,7 @@ class Cubitopia {
       Pathfinder.blockedTiles.delete(key);
 
       // Remove from connectable registry
-      this.wallConnectable.delete(key);
+      this.buildingSystem.wallConnectable.delete(key);
 
       // Rebuild adjacent wall meshes to remove connections
       const neighbors = Pathfinder.getHexNeighbors(coord);
@@ -3796,7 +3565,7 @@ class Cubitopia {
       Pathfinder.gateTiles.delete(key);
 
       // Remove from connectable registry
-      this.wallConnectable.delete(key);
+      this.buildingSystem.wallConnectable.delete(key);
 
       // Rebuild adjacent wall meshes to remove connections
       const gateNeighbors = Pathfinder.getHexNeighbors(coord);
@@ -3819,20 +3588,20 @@ class Cubitopia {
   /** Damage a barracks and return true if destroyed (siege weapons only) */
   private damageBarracks(coord: HexCoord, damage: number): boolean {
     const key = `${coord.q},${coord.r}`;
-    const pb = this.getBuildingAt(coord);
+    const pb = this.buildingSystem.getBuildingAt(coord);
     if (!pb || pb.kind !== 'barracks') return false;
 
     pb.health = Math.max(0, pb.health - damage);
 
     if (pb.health <= 0) {
       // Barracks destroyed
-      this.barracksHealth.delete(key);
-      this.wallConnectable.delete(key);
+      this.buildingSystem.barracksHealth.delete(key);
+      this.buildingSystem.wallConnectable.delete(key);
       Pathfinder.blockedTiles.delete(key);
       UnitAI.barracksPositions.delete(pb.owner);
 
       // Remove mesh & unregister
-      this.unregisterBuilding(pb);
+      this.buildingSystem.unregisterBuilding(pb);
 
       // Rebuild adjacent walls
       const bNeighbors = Pathfinder.getHexNeighbors(coord);
@@ -3844,7 +3613,7 @@ class Cubitopia {
       }
       return true;
     } else {
-      this.barracksHealth.set(key, pb.health);
+      this.buildingSystem.barracksHealth.set(key, pb.health);
       // Visual damage feedback — darken the mesh slightly
       const pct = pb.health / pb.maxHealth;
       if (pct < 0.5) {
@@ -3880,7 +3649,7 @@ class Cubitopia {
     const wallGroup = createWallMesh({
       pos, owner,
       tiles: this.currentMap.tiles,
-      wallConnectable: this.wallConnectable,
+      wallConnectable: this.buildingSystem.wallConnectable,
     });
     if (!wallGroup) return;
 
@@ -3911,7 +3680,7 @@ class Cubitopia {
     const gateGroup = createGateMesh({
       pos, owner,
       tiles: this.currentMap.tiles,
-      wallConnectable: this.wallConnectable,
+      wallConnectable: this.buildingSystem.wallConnectable,
       gatesBuilt: this.gatesBuilt,
     });
     if (!gateGroup) return;
@@ -3943,8 +3712,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildBarracksMesh(coord, 0);
-    this.registerBuilding('barracks', 0, coord, mesh, Cubitopia.BARRACKS_MAX_HP);
+    const mesh = this.buildingSystem.buildBarracksMesh(coord, 0);
+    this.buildingSystem.registerBuilding('barracks', 0, coord, mesh, Cubitopia.BARRACKS_MAX_HP);
     UnitAI.barracksPositions.set(0, coord);
 
     this.barracksPlaceMode = false;
@@ -3974,8 +3743,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildForestryMesh(coord, 0);
-    this.registerBuilding('forestry', 0, coord, mesh);
+    const mesh = this.buildingSystem.buildForestryMesh(coord, 0);
+    this.buildingSystem.registerBuilding('forestry', 0, coord, mesh);
 
     this.forestryPlaceMode = false;
     this.hud.setForestryMode(false);
@@ -4004,8 +3773,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildMasonryMesh(coord, 0);
-    this.registerBuilding('masonry', 0, coord, mesh);
+    const mesh = this.buildingSystem.buildMasonryMesh(coord, 0);
+    this.buildingSystem.registerBuilding('masonry', 0, coord, mesh);
 
     this.masonryPlaceMode = false;
     this.hud.setMasonryMode(false);
@@ -4047,8 +3816,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildWorkshopMesh(coord, 0);
-    this.registerBuilding('workshop', 0, coord, mesh);
+    const mesh = this.buildingSystem.buildWorkshopMesh(coord, 0);
+    this.buildingSystem.registerBuilding('workshop', 0, coord, mesh);
 
     this.workshopPlaceMode = false;
     this.hud.setWorkshopMode(false);
@@ -4208,8 +3977,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildFarmhouseMesh(coord, 0);
-    this.registerBuilding('farmhouse', 0, coord, mesh);
+    const mesh = this.buildingSystem.buildFarmhouseMesh(coord, 0);
+    this.buildingSystem.registerBuilding('farmhouse', 0, coord, mesh);
     UnitAI.farmhousePositions.set(0, coord);
 
     this.farmhousePlaceMode = false;
@@ -4238,8 +4007,8 @@ class Cubitopia {
     this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 5);
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    const mesh = this.buildSiloMesh(coord, 0);
-    this.registerBuilding('silo', 0, coord, mesh);
+    const mesh = this.buildingSystem.buildSiloMesh(coord, 0);
+    this.buildingSystem.registerBuilding('silo', 0, coord, mesh);
     UnitAI.siloPositions.set(0, coord);
 
     this.siloPlaceMode = false;
