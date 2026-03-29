@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3060 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces.
+- `src/main.ts` — **Central orchestrator (~3147 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew past 3000-line target during combat visual overhaul — next extraction (CombatEventHandler or InputManager) should bring it back under.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -93,9 +93,9 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~145 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, healer tick.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~155 lines)**. Single `UNIT_CONFIG` table per UnitType (16 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
-- `src/engine/SoundManager.ts` — **Procedural audio (~290 lines)**. Web Audio API synthesized SFX (17 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
-- `src/ui/HUD.ts` — All UI: resource panel, build buttons, help overlay, debug panel, spawn queues
-- `src/engine/UnitRenderer.ts` — 3D unit mesh generation, animations, health bars, labels (16 unit meshes)
+- `src/engine/SoundManager.ts` — **Procedural audio (~593 lines)**. Web Audio API synthesized SFX (20 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
+- `src/ui/HUD.ts` — **All UI (~2157 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
+- `src/engine/UnitRenderer.ts` — **3D unit rendering (~3202 lines)**. Unit mesh generation (16 elaborate models), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
 - `src/engine/Renderer.ts` — Three.js scene setup, lighting
@@ -274,7 +274,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000)
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3147 after combat visual overhaul additions — next extraction should bring it back under.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)

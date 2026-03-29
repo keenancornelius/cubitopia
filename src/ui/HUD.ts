@@ -1473,6 +1473,55 @@ export class HUD {
                 <div class="unit-desc">Heavy siege. 6 rope + 4 stone + 4 wood. Range 6, massive damage. Built at Workshop.</div>
               </div>
             </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#1abc9c;">🗡️</div>
+              <div>
+                <div class="unit-name" style="color:#1abc9c;">Scout</div>
+                <div class="unit-desc">Fast recon. 4 gold. High speed, great vision range. Light dagger attacks.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#2980b9;">🔮</div>
+              <div>
+                <div class="unit-name" style="color:#2980b9;">Mage</div>
+                <div class="unit-desc">Ranged caster. 8 gold. Range 3. Fires magic orbs with sparkle trails.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#27ae60;">💚</div>
+              <div>
+                <div class="unit-name" style="color:#27ae60;">Healer</div>
+                <div class="unit-desc">Support. Auto-heals allies within 2 hexes (2 HP/1.5s). Follows combat units.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#2c3e50;">🗡️</div>
+              <div>
+                <div class="unit-name" style="color:#9b59b6;">Assassin</div>
+                <div class="unit-desc">Burst DPS. +3 attack from full HP (ambush). Fast jump-stab. Dual daggers.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
+              <div>
+                <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
+                <div class="unit-desc">Tank. +2 defense aura to allies within 2 hex. Massive shield. Shield bash + stab combo.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#e74c3c;">🪓</div>
+              <div>
+                <div class="unit-name" style="color:#e74c3c;">Berserker</div>
+                <div class="unit-desc">Melee DPS. Up to +4 attack at low HP (rage). Dual axes. Heavy overhead cleave.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#8e44ad;">⚡</div>
+              <div>
+                <div class="unit-name" style="color:#8e44ad;">Battlemage</div>
+                <div class="unit-desc">AoE caster. Range 3. Splash damage to enemies within 1 hex of target. Firework explosions on impact.</div>
+              </div>
+            </div>
           </div>
         </div>
 
