@@ -70,7 +70,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~4118 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, formation helpers, and input handling. Delegates subsystems via adapter interfaces.
+- `src/main.ts` — **Central orchestrator (~3781 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, formation helpers, and input handling. Delegates subsystems via adapter interfaces.
 - `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -78,6 +78,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~196 lines)**. Standalone functions for all 6 building types.
 - `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
 - `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~144 lines)**. Building click tooltip, queue buttons, demolish. Uses `TooltipOps` slim interface.
+- `src/game/systems/BlueprintSystem.ts` — **Visual markers (~353 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
 - `src/game/entities/UnitFactory.ts` — Unit stats, speeds, attack speeds, colors
@@ -201,7 +202,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently **~4118 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~2157 lines extracted/consolidated so far across 8 modules + data-driven refactors.
+Shrink `src/main.ts` (currently **~3781 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~2494 lines extracted/consolidated so far across 9 modules + data-driven refactors.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -231,13 +232,13 @@ We use two patterns depending on the code being extracted:
 | Placement method consolidation | ~144 | Data-driven config (BUILDING_PLACEMENT_CONFIG) |
 | Toggle method consolidation | ~36 | Generic toggleBuildingPlaceMode |
 | Spawn queue consolidation | ~24 | Data-driven config (SPAWN_QUEUE_CONFIG) |
+| `BlueprintSystem.ts` | ~337 | Stateful subsystem (BlueprintOps interface) |
 
 ### All Pre-Extracted Modules Now Wired
 No remaining files to wire. Future extractions will target new code regions.
 
 ### Next Extraction Targets (priority order)
-1. **BlueprintSystem** — wall/harvest blueprint ghosts, blueprint markers, ghost mesh lifecycle (~100-150 lines)
-2. **CombatResolver** — damage application, unit death, territory capture (~200+ lines)
+1. **CombatResolver** — damage application, unit death, territory capture (~200+ lines)
 3. **GameInitializer** — `startNewGame`, map gen orchestration, `initSystems` wiring (~200+ lines)
 4. **FormationSystem** — formation math, rally points, unit grouping (~150+ lines)
 5. **SpawnQueueSystem** — spawn processing loop, timer management, queue state (~100-150 lines)
@@ -267,6 +268,13 @@ No remaining files to wire. Future extractions will target new code regions.
 - Backward-compat getters (`this.barracks`, `this.forestry`, etc.) still in main.ts, delegate to buildingSystem
 - Building placement uses data-driven `BUILDING_PLACEMENT_CONFIG` in main.ts (one generic method for all 6 types)
 - Spawn queuing uses data-driven `SPAWN_QUEUE_CONFIG` in main.ts (one generic method for barracks/forestry/masonry/farmhouse)
+
+### BlueprintSystem Integration Notes
+- Owns ALL visual markers: wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost
+- Uses `BlueprintOps` slim interface: `isTileOccupied`, `isWaterTerrain`, `getGrassAge`
+- `paintWallBlueprint`/`paintGateBlueprint` do NOT check `wallsBuilt`/`gatesBuilt` counts — callers in main.ts drag handlers must do those checks
+- `paintMineTile` requires `maxMineDepth` parameter (passed from `Cubitopia.MAX_MINE_DEPTH`)
+- `cleanup()` disposes all marker meshes and resets `mineDepthLayers` to 3
 
 ### AIController Integration Notes
 - Uses `AIBuildingOps` slim interface instead of full BuildingSystem dependency
@@ -301,10 +309,11 @@ private buildGameContext(): GameContext {
 Get main.ts under 3000 lines. All systems modular. Data-driven configs for buildings, units, spawning.
 - `[DONE]` Extract AIController, BuildingSystem, WallSystem, ResourceManager
 - `[DONE]` Extract BuildingTooltipController
+- `[DONE]` Extract BlueprintSystem (wall/harvest/mine/farm markers, hover ghost)
 - `[DONE]` Data-driven building placement (BUILDING_PLACEMENT_CONFIG)
 - `[DONE]` Data-driven spawn queuing (SPAWN_QUEUE_CONFIG)
 - `[DONE]` Pure mesh factories (BuildingMeshFactory, DefenseMeshFactory)
-- `[READY]` Extract BlueprintSystem, CombatResolver, GameInitializer, FormationSystem
+- `[READY]` Extract CombatResolver, GameInitializer, FormationSystem, SpawnQueueSystem
 - `[READY]` Convert UnitFactory to data-driven config tables (prerequisite for Phase 1)
 - `[READY]` Remove backward-compat getters once all callers migrated
 - **Phase gate:** main.ts < 3000 lines, UnitFactory is config-driven, no hardcoded switch cases for building/unit types
