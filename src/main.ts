@@ -23,6 +23,8 @@ import WallSystem from './game/systems/WallSystem';
 import type { WallSystemOps } from './game/systems/WallSystem';
 import AIController from './game/systems/AIController';
 import type { AIBuildingOps } from './game/systems/AIController';
+import BuildingTooltipController from './game/systems/BuildingTooltipController';
+import type { TooltipOps } from './game/systems/BuildingTooltipController';
 import {
   EngineConfig,
   CameraConfig,
@@ -102,6 +104,7 @@ class Cubitopia {
   private buildingSystem!: BuildingSystem;
   private wallSystem!: WallSystem;
   private aiController!: AIController;
+  private tooltipController!: BuildingTooltipController;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -454,7 +457,7 @@ class Cubitopia {
             obj = obj.parent;
           }
           if (clickedPB) {
-            this.showBuildingTooltip(clickedPB, e.clientX, e.clientY);
+            this.tooltipController.showTooltip(clickedPB, e.clientX, e.clientY);
             return;
           }
         }
@@ -1572,6 +1575,15 @@ class Cubitopia {
       registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.buildingSystem.registerBuilding(kind, owner, pos, mesh, maxHealth),
     };
     this.aiController = new AIController(ctx, buildOps);
+
+    // Tooltip controller handles building click UI, demolish, and unit queuing
+    const tooltipOps: TooltipOps = {
+      enterRallyPointMode: (key) => this.enterRallyPointModeForBuilding(key),
+      demolishBuilding: (pb) => this.demolishBuilding(pb),
+      queueUnit: (unitType, buildingKind) => this.queueUnitFromTooltip(unitType, buildingKind),
+      getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
+    };
+    this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
   }
 
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
@@ -1814,6 +1826,7 @@ class Cubitopia {
     this.masonryRotation = 0;
     // Remove all placed building meshes from scene
     this.buildingSystem.cleanup();
+    this.tooltipController.cleanup();
     this.spawnQueue = [];
     this.spawnTimer = 0;
     this.forestrySpawnQueue = [];
@@ -2735,103 +2748,7 @@ class Cubitopia {
 
   // Query/registry methods are in BuildingSystem — accessed via this.buildingSystem.*
 
-  /** Show a tooltip for a clicked building with info, actions, and unit queue */
-  private showBuildingTooltip(pb: PlacedBuilding, screenX: number, screenY: number): void {
-    this.buildingSystem.hideBuildingTooltip();
-    this.buildingSystem.selectedBuilding = pb;
-
-    const el = document.createElement('div');
-    el.id = 'building-tooltip';
-    el.style.cssText = `
-      position: fixed; left: ${screenX + 12}px; top: ${screenY - 8}px;
-      background: rgba(20,20,30,0.95); border: 2px solid #f1c40f; border-radius: 8px;
-      padding: 10px 14px; color: #eee; font-family: 'Segoe UI',sans-serif; font-size: 13px;
-      z-index: 9999; min-width: 180px; pointer-events: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
-    `;
-
-    const kindLabel = pb.kind.charAt(0).toUpperCase() + pb.kind.slice(1);
-    const ownerLabel = pb.owner === 0 ? 'Player' : `AI ${pb.owner}`;
-    const hpPct = Math.round((pb.health / pb.maxHealth) * 100);
-    const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
-
-    let html = `
-      <div style="font-size:15px;font-weight:bold;margin-bottom:6px;color:#f1c40f">${kindLabel}</div>
-      <div style="margin-bottom:4px">Owner: <span style="color:#3498db">${ownerLabel}</span></div>
-      <div style="margin-bottom:4px">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
-      <div style="margin-bottom:4px">Position: (${pb.position.q}, ${pb.position.r})</div>
-      <div style="margin-bottom:8px;border-bottom:1px solid #555;padding-bottom:6px"></div>
-    `;
-
-    // Action buttons
-    const btnStyle = `
-      display:inline-block; padding:4px 10px; margin:2px 4px 2px 0; border-radius:4px;
-      cursor:pointer; font-size:12px; border:1px solid #555; color:#eee;
-    `;
-
-    // Rally point button (all buildings)
-    html += `<div style="margin-bottom:6px">
-      <span id="btt-rally" style="${btnStyle} background:#2980b9;">Set Rally</span>`;
-
-    // Demolish button (only player buildings)
-    if (pb.owner === 0) {
-      html += `<span id="btt-demolish" style="${btnStyle} background:#c0392b;">Demolish</span>`;
-    }
-    html += `</div>`;
-
-    // Unit queue buttons based on building kind
-    const queueBtns = this.buildingSystem.getBuildingQueueOptions(pb.kind);
-    if (queueBtns.length > 0 && pb.owner === 0) {
-      html += `<div style="margin-top:4px;font-size:11px;color:#aaa;margin-bottom:4px">Queue Units:</div>`;
-      html += `<div>`;
-      for (const btn of queueBtns) {
-        html += `<span class="btt-queue" data-unit="${btn.type}" data-building="${pb.kind}" style="${btnStyle} background:#27ae60;">${btn.label} (${btn.costLabel})</span>`;
-      }
-      html += `</div>`;
-    }
-
-    el.innerHTML = html;
-    document.body.appendChild(el);
-    this.buildingSystem.buildingTooltipEl = el;
-
-    // Clamp position so tooltip doesn't overflow screen
-    const r = el.getBoundingClientRect();
-    if (r.right > window.innerWidth) el.style.left = `${window.innerWidth - r.width - 8}px`;
-    if (r.bottom > window.innerHeight) el.style.top = `${window.innerHeight - r.height - 8}px`;
-
-    // Wire up button events
-    const rallyBtn = el.querySelector('#btt-rally');
-    if (rallyBtn) {
-      rallyBtn.addEventListener('click', () => {
-        this.buildingSystem.hideBuildingTooltip();
-        this.enterRallyPointModeForBuilding(pb.kind);
-      });
-    }
-
-    const demolishBtn = el.querySelector('#btt-demolish');
-    if (demolishBtn) {
-      demolishBtn.addEventListener('click', () => {
-        this.demolishBuilding(pb);
-        this.buildingSystem.hideBuildingTooltip();
-      });
-    }
-
-    const queueButtons = el.querySelectorAll('.btt-queue');
-    queueButtons.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const unitType = (btn as HTMLElement).dataset.unit as string;
-        const buildingKind = (btn as HTMLElement).dataset.building as string;
-        this.queueUnitFromTooltip(unitType, buildingKind as BuildingKind);
-      });
-    });
-
-    // Close tooltip when clicking elsewhere
-    const closeHandler = (ev: MouseEvent) => {
-      if (el.contains(ev.target as Node)) return;
-      this.buildingSystem.hideBuildingTooltip();
-      document.removeEventListener('mousedown', closeHandler, true);
-    };
-    setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 50);
-  }
+  // showBuildingTooltip → moved to BuildingTooltipController
 
   /** Queue a unit from the building tooltip */
   private queueUnitFromTooltip(unitType: string, buildingKind: BuildingKind): void {
@@ -3574,6 +3491,7 @@ class Cubitopia {
     this.rallyPointBuilding = null;
     this.hud.setRallyPointMode(false);
     this.clearHoverGhost();
+    this.tooltipController.hideTooltip();
     // Reset drag suppression flags
     StrategyCamera.suppressLeftDrag = false;
     SelectionManager.suppressBoxSelect = false;

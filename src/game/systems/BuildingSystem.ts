@@ -18,8 +18,6 @@ class BuildingSystem {
   private ctx: GameContext;
 
   placedBuildings: PlacedBuilding[] = [];
-  selectedBuilding: PlacedBuilding | null = null;
-  buildingTooltipEl: HTMLElement | null = null;
   buildingSpawnIndex: Record<BuildingKind, number> = {
     barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
   };
@@ -108,7 +106,6 @@ class BuildingSystem {
         }
       }
     }
-    if (this.selectedBuilding === pb) this.selectedBuilding = null;
   }
 
   // --- Mesh Builders (delegate to BuildingMeshFactory pure functions) ---
@@ -191,16 +188,6 @@ class BuildingSystem {
     }
   }
 
-  // --- Tooltip UI ---
-
-  hideBuildingTooltip(): void {
-    if (this.buildingTooltipEl) {
-      this.buildingTooltipEl.remove();
-      this.buildingTooltipEl = null;
-    }
-    this.selectedBuilding = null;
-  }
-
   // --- Cleanup ---
 
   cleanup(): void {
@@ -211,14 +198,12 @@ class BuildingSystem {
       this.ctx.scene.remove(pb.mesh);
     }
     this.placedBuildings = [];
-    this.selectedBuilding = null;
     this.wallConnectable.clear();
     this.barracksHealth.clear();
     this.buildingSpawnIndex = {
       barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
     };
     nextBuildingId = 0;
-    this.hideBuildingTooltip();
   }
 }
 
