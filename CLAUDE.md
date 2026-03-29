@@ -150,3 +150,63 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 
 ### 2024-03-29: Workshop Duplicate Fields
 `workshop` and `workshopMesh` were declared as both explicit fields AND getter properties, causing TypeScript duplicate declaration errors. Fixed by removing the old explicit fields.
+
+---
+
+## Current Mission: Reduce main.ts Complexity
+
+### Goal
+Shrink `src/main.ts` from ~6000 lines to a manageable size by extracting self-contained subsystems into dedicated modules.
+
+### Extraction Strategy
+We use two patterns depending on the code being extracted:
+
+1. **Pure mesh factories** (standalone functions, no class state):
+   - Pattern: `export function buildXMesh(pos, owner, scene, getElevation): THREE.Group`
+   - Example: `BuildingMeshFactory.ts` — 6 building mesh functions extracted as pure functions
+   - Best for: code that only creates Three.js geometry and doesn't read/write game state
+
+2. **Stateful subsystems** (classes with GameContext bridge):
+   - Pattern: class receives `GameContext` with live getters, manages own internal state
+   - Example: `ResourceManager.ts` — deposit handlers, crafting, stockpile visuals
+   - **CRITICAL:** GameContext must use JavaScript `get` properties (not snapshot values) because `startNewGame()` and `regenerateMap()` reassign arrays/objects
+   - Best for: code that reads/writes game state and has its own internal data structures
+
+### Completed Extractions
+| Module | Lines Saved | Pattern |
+|--------|-------------|---------|
+| `ResourceManager.ts` | ~120 | Stateful subsystem |
+| `BuildingMeshFactory.ts` | ~200 | Pure mesh factory |
+
+### Next Extraction Targets (priority order)
+1. **Wall+Gate mesh factories** (~343 lines, ~310 saveable) → `DefenseMeshFactory.ts`
+   - `buildAdaptiveWallMesh` (~150 lines) + `buildGateMesh` (~193 lines)
+   - Needs: currentMap, wallConnectable set, gatesBuilt set, mesh registries, scene, Pathfinder
+   - Pattern: Pure functions with config object parameter
+2. **Spawn queue processing** (~180 lines → ~40 lines)
+   - 5 nearly identical spawn loops (barracks, forestry, masonry, farmhouse, workshop)
+   - Pattern: Generic `processSpawnQueue(queue, building, costFn)` helper
+3. **AI Controller wiring** (~712 lines)
+   - Already extracted to `AIController.ts` but not wired in
+   - Needs careful GameContext bridge due to heavy state interaction
+4. **BuildingSystem wiring** (~502 lines)
+   - Already extracted to `BuildingSystem.ts` but not wired in
+5. **WallSystem wiring** (~743 lines)
+   - Already extracted to `WallSystem.ts` but not wired in
+
+### Files Already Extracted (not yet wired)
+- `src/game/systems/BuildingSystem.ts` (502 lines)
+- `src/game/systems/WallSystem.ts` (743 lines)
+- `src/game/systems/AIController.ts` (712 lines)
+
+### Live Getter Pattern (MUST USE)
+```typescript
+private buildGameContext(): GameContext {
+  const self = this;
+  return {
+    get currentMap() { return self.currentMap; },
+    get players() { return self.players; },
+    // ... NOT: currentMap: this.currentMap (stale snapshot!)
+  };
+}
+```
