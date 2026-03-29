@@ -16,6 +16,9 @@ interface UnitMeshGroup {
   label: THREE.Sprite;
   facingAngle: number; // Y-axis rotation angle for movement direction
   lastPosition: THREE.Vector3; // Track previous position for rotation calculations
+  // Trebuchet/catapult single-shot fire animation
+  trebFireStart: number;            // timestamp when fire was triggered (0 = idle)
+  trebPendingTarget: { x: number; y: number; z: number } | null; // queued boulder target
 }
 
 // Player team colors for the base/flag
@@ -105,6 +108,8 @@ export class UnitRenderer {
       label,
       facingAngle: 0,
       lastPosition: pos.clone(),
+      trebFireStart: 0,
+      trebPendingTarget: null,
     });
     this.scene.add(group);
   }
@@ -1586,45 +1591,71 @@ export class UnitRenderer {
         break;
       }
       case UnitType.TREBUCHET: {
-        // Trebuchet firing: arm pivots on X axis. Sling is on -Z (rear/long arm).
-        // Winch: counterweight (+Z) rises → sling (-Z) drops behind.
-        // Fire: counterweight drops → sling whips forward over the top.
-        // Rotation around X: positive = sling drops back, negative = sling swings forward.
+        // Single-shot trebuchet animation synced to actual fire events.
+        // Arm rests at neutral when idle; plays one winch→fire→settle cycle per shot.
         const throwArm = entry.group.getObjectByName('throw-arm');
-        const speed = 0.7;
-        const cycle = (time * speed) % 1;
-        if (throwArm) {
-          if (cycle < 0.45) {
-            // Winching: counterweight pulled up, sling drops back/down
-            const p = cycle / 0.45;
-            throwArm.rotation.x = -0.3 - 0.8 * p; // sling end drops behind (-Z goes down)
-          } else if (cycle < 0.58) {
-            // FIRE! Counterweight drops, sling whips forward over the top
-            const p = (cycle - 0.45) / 0.13;
-            throwArm.rotation.x = -1.1 + 2.2 * p; // swing to +1.1 (sling flings forward)
-          } else if (cycle < 0.68) {
-            // Hold at overswung forward position
-            throwArm.rotation.x = 1.1;
-          } else {
-            // Slowly return to resting
-            const p = (cycle - 0.68) / 0.32;
-            throwArm.rotation.x = 1.1 - 1.4 * p; // back to -0.3
+        const CYCLE_DURATION = 1.4; // seconds for full winch-fire-settle
+
+        if (entry.trebFireStart > 0) {
+          const elapsed = time - entry.trebFireStart;
+          const cycle = Math.min(elapsed / CYCLE_DURATION, 1);
+
+          if (throwArm) {
+            if (cycle < 0.35) {
+              // Winching: sling drops back/down
+              const p = cycle / 0.35;
+              throwArm.rotation.x = -0.3 - 0.8 * p;
+            } else if (cycle < 0.45) {
+              // FIRE! Sling whips forward over the top
+              const p = (cycle - 0.35) / 0.1;
+              throwArm.rotation.x = -1.1 + 2.2 * p;
+            } else if (cycle < 0.55) {
+              // Hold at overswung position
+              throwArm.rotation.x = 1.1;
+            } else {
+              // Settle back to resting
+              const p = (cycle - 0.55) / 0.45;
+              throwArm.rotation.x = 1.1 - 1.4 * p;
+            }
           }
-        }
-        // Whole machine lurches forward on firing, then settles
-        if (cycle >= 0.45 && cycle < 0.7) {
-          const p = (cycle - 0.45) / 0.25;
-          entry.group.rotation.x = 0.08 * Math.sin(p * Math.PI);
-        }
-        // Operator flinches during fire
-        if (armLeft && armRight) {
-          if (cycle >= 0.45 && cycle < 0.65) {
-            armLeft.rotation.x = 0.3; // ducking back
-            armRight.rotation.x = 0.3;
-          } else {
-            armLeft.rotation.x = 0.7; // back to pushing pose
-            armRight.rotation.x = 0.7;
+
+          // Machine lurch on fire
+          if (cycle >= 0.35 && cycle < 0.6) {
+            const p = (cycle - 0.35) / 0.25;
+            entry.group.rotation.x = 0.08 * Math.sin(p * Math.PI);
           }
+
+          // Operator flinch
+          if (armLeft && armRight) {
+            if (cycle >= 0.35 && cycle < 0.55) {
+              armLeft.rotation.x = 0.3;
+              armRight.rotation.x = 0.3;
+            } else {
+              armLeft.rotation.x = 0.7;
+              armRight.rotation.x = 0.7;
+            }
+          }
+
+          // At the release point (~40% through), spawn the actual boulder
+          if (cycle >= 0.42 && entry.trebPendingTarget) {
+            const pos = entry.group.position;
+            this.spawnBoulder(
+              { x: pos.x, y: pos.y, z: pos.z },
+              entry.trebPendingTarget
+            );
+            entry.trebPendingTarget = null;
+          }
+
+          // Animation complete — reset to idle
+          if (cycle >= 1) {
+            entry.trebFireStart = 0;
+            if (throwArm) throwArm.rotation.x = -0.3;
+          }
+        } else {
+          // Idle: arm rests in loaded position
+          if (throwArm) throwArm.rotation.x = -0.3;
+          if (armLeft) armLeft.rotation.x = 0.7;
+          if (armRight) armRight.rotation.x = 0.7;
         }
         break;
       }
@@ -1964,42 +1995,45 @@ export class UnitRenderer {
   }
 
   /**
-   * Fire a boulder (trebuchet/catapult) — bigger projectile, higher arc, slower flight
+   * Fire a boulder (trebuchet/catapult) — queues the shot so it syncs with the throw animation.
+   * The actual boulder spawns when the arm reaches the release point in animateAttacking.
    */
   fireBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }): void {
-    // Boulder group: stone block + trailing rope bits
-    const boulderGroup = new THREE.Group();
+    // Find the siege unit at this position and queue the fire
+    for (const [, entry] of this.unitMeshes) {
+      if ((entry.unitType === UnitType.TREBUCHET || entry.unitType === UnitType.CATAPULT) &&
+          Math.abs(entry.group.position.x - fromPos.x) < 1.5 &&
+          Math.abs(entry.group.position.z - fromPos.z) < 1.5 &&
+          !entry.trebPendingTarget) {
+        entry.trebFireStart = performance.now() / 1000;
+        entry.trebPendingTarget = { ...toPos };
+        return;
+      }
+    }
+    // Fallback: no matching unit found, fire immediately
+    this.spawnBoulder(fromPos, toPos);
+  }
 
-    // Main stone (chunky cube)
+  /** Actually spawn the boulder projectile (called at the animation release point) */
+  private spawnBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }): void {
+    const boulderGroup = new THREE.Group();
     const stoneGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     const stoneMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
-    const stone = new THREE.Mesh(stoneGeo, stoneMat);
-    boulderGroup.add(stone);
-
-    // Smaller trailing debris chunks
+    boulderGroup.add(new THREE.Mesh(stoneGeo, stoneMat));
     for (let i = 0; i < 3; i++) {
-      const debrisGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
-      const debrisMat = new THREE.MeshLambertMaterial({ color: 0x999999 });
-      const debris = new THREE.Mesh(debrisGeo, debrisMat);
-      debris.position.set(
-        (Math.random() - 0.5) * 0.15,
-        (Math.random() - 0.5) * 0.15,
-        -0.1 - Math.random() * 0.1
+      const debris = new THREE.Mesh(
+        new THREE.BoxGeometry(0.08, 0.08, 0.08),
+        new THREE.MeshLambertMaterial({ color: 0x999999 })
       );
+      debris.position.set((Math.random() - 0.5) * 0.15, (Math.random() - 0.5) * 0.15, -0.1 - Math.random() * 0.1);
       boulderGroup.add(debris);
     }
-
-    // Launch from higher up (trebuchet arm tip)
     const launchY = fromPos.y + 1.8;
     boulderGroup.position.set(fromPos.x, launchY, fromPos.z);
     this.scene.add(boulderGroup);
-
     const startPos = new THREE.Vector3(fromPos.x, launchY, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
-    const duration = 0.9; // slower flight for heavy boulder
-    const startTime = performance.now() / 1000;
-
-    this.projectiles.push({ mesh: boulderGroup as any, startPos, endPos, startTime, duration, arcHeight: 5 });
+    this.projectiles.push({ mesh: boulderGroup as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.9, arcHeight: 5 });
   }
 
   /**
