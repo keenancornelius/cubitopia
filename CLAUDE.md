@@ -249,48 +249,69 @@ private buildGameContext(): GameContext {
 
 ## Feature Roadmap (Tentative)
 
-### Phase 1: Expanded Unit Types
-- **Healer** — support unit, restores HP to adjacent allies per turn
-- **Assassin/Rogue** — stealth unit, high burst damage, fragile, can bypass walls
-- **Shieldbearer** — frontline tank, grants armor aura to adjacent allies
-- **Berserker** — melee DPS that gets stronger at low HP
+### Phase 1: Expanded Unit Types + Data-Driven UnitFactory
+Make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry. New units:
+- **Healer** — support, restores HP to adjacent allies per turn
+- **Assassin/Rogue** — stealth, high burst damage, fragile, can bypass walls
+- **Shieldbearer** — frontline tank, grants armor aura to adjacent allies (Stoneguard unique)
+- **Berserker** — melee DPS that gets stronger at low HP (Wildborne unique)
+- **Battlemage** — AoE ranged magic (Arcanists unique)
+- **Sea Raider** — amphibious fighter, land + water (Tidecallers unique)
 - **Siege Tower** — slow, lets melee units attack over walls
-- **Naval units** — see Phase 3
-- Architecture prep: make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry
 
-### Phase 2: Tribes / Factions / Races
-Each tribe gets:
-- **Trait modifiers** — stat bonuses/penalties (e.g., "Forest Tribe" +20% wood gather, -10% stone)
-- **Unique unit** — one exclusive unit type per tribe (e.g., berserker for a barbarian tribe, mage for an arcane tribe)
-- **Visual skin** — distinct voxel color palettes, building styles, unit mesh variants
-- **Tech bias** — preferred build order and AI personality that reflects the tribe's strengths
+### Phase 2: 4 Base Tribes (Free in Base Game)
+Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.
 
-Planned tribes (brainstorm — not final):
-- **Stoneguard** — defensive, strong walls/masonry, unique unit: Shieldbearer
-- **Wildborne** — aggressive, fast units, forest affinity, unique unit: Berserker
-- **Arcanists** — magic-focused, ranged power, unique unit: Battlemage (AoE)
-- **Tidecallers** — naval superiority, coastal bonuses, unique unit: Sea Raider
-- **Ironforge** — siege specialists, workshop bonuses, unique unit: Siege Tower
-- **Nomads** — cavalry/scout focused, movement bonuses, unique unit: Horse Archer
+**Stoneguard** (defensive/builder)
+- Unique unit: Shieldbearer (armor aura to adjacent allies)
+- Unique building: Watchtower (extends detection range over wide area)
+- Modifiers: +30% wall HP, +15% stone gather, -10% unit movement speed
+- Starting bonus: free walls around starting hex
+- Passive: "Fortify" — units that don't move for a turn gain +20% defense
+- AI: turtle, walls up fast, counterattacks on overextension
+
+**Wildborne** (aggressive/nature)
+- Unique unit: Berserker (gains attack as HP drops, rage mechanic)
+- Unique building: Beast Den (spawns wolf companions that auto-patrol)
+- Modifiers: +20% wood gather, +15% melee damage, -15% wall build speed
+- Starting bonus: 2 free warriors + extra wood
+- Passive: "Ferocity" — first strike in any combat does 25% bonus damage
+- AI: rush, early aggression, overwhelm before enemy builds up
+
+**Arcanists** (ranged/magic)
+- Unique unit: Battlemage (AoE damage to hex cluster, expensive)
+- Unique building: Mana Well (generates mana resource for special abilities)
+- Modifiers: +20% ranged damage, +1 range for archers, -15% melee HP
+- Starting bonus: free mage + mana well
+- Passive: "Arcane Shield" — ranged units take 30% less damage from first hit each turn
+- AI: turtles early behind ranged wall, pushes with battlemage deathball
+
+**Tidecallers** (naval/trade — fully realized in Phase 3)
+- Unique unit: Sea Raider (amphibious, fights on land and water)
+- Unique building: Lighthouse (coastal hex, vision + resource bonus from water tiles)
+- Modifiers: +25% movement on coastal tiles, +15% gold from trade, -10% inland gather
+- Starting bonus: starts near coast + extra gold (pre-naval), free fishing boat (post-naval)
+- Passive: "Tidal Knowledge" — reveals all coastal tiles at game start
+- AI: coastal expansion, controls water, flanks from unexpected angles
 
 Architecture prep:
-- Extract a `TribeConfig` data structure: stat modifiers, color palette, unique unit defs, AI personality params
-- Make UnitRenderer skin-aware (color palette lookup from tribe config, not hardcoded)
-- BuildingMeshFactory should accept a tribe style parameter for visual variants
+- `TribeConfig` interface: stat modifiers, color palette, unique unit/building defs, AI personality params, passive ability, starting bonus
+- UnitFactory reads stats from config table — adding a unit = adding a data entry
+- UnitRenderer skin-aware (color palette lookup from tribe config, not hardcoded)
+- BuildingMeshFactory accepts tribe style parameter for visual variants
 - AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
+- Future DLC tribes slot in by adding more TribeConfig entries
 
 ### Phase 3: Naval Combat & Water Tiles
 - **Water hex tiles** — new terrain type, impassable for land units
 - **Port building** — coastal building that spawns naval units
-- **Naval unit types:** Galley (transport, carries land units), Warship (ranged naval combat), Fishing Boat (resource gathering)
-- **Coastal mechanics** — port cities, naval trade routes, amphibious assault (land units can embark/disembark at ports)
+- **Naval unit types:** Galley (transport), Warship (ranged combat), Fishing Boat (gathering)
+- **Coastal mechanics** — amphibious assault via ports, naval trade routes
 - **Bridges/docks** — buildable structures connecting land masses
-
-Architecture prep:
-- Pathfinder needs terrain-type awareness (land vs water vs coastal)
+- Pathfinder needs terrain-type awareness (land/water/coastal)
 - UnitAI needs embark/disembark state machine
 - Map generator needs island/continent modes with water bodies
-- Naval combat could be its own subsystem (NavalSystem.ts)
+- NavalSystem.ts as its own subsystem
 
 ### Phase 4: Polish & Revenue Features
 - **Tech tree** — per-tribe research unlocks (buildings, units, upgrades)
@@ -299,3 +320,4 @@ Architecture prep:
 - **Map editor** — let players create and share maps
 - **Campaign mode** — scripted scenarios with objectives
 - **Steam Workshop** — custom tribes, maps, mods
+- **DLC tribes** — additional paid tribes beyond the 4 base tribes
