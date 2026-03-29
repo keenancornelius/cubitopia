@@ -140,16 +140,16 @@ class Cubitopia {
     this.hud.onForestry(() => this.toggleBuildingPlaceMode('forestry'));
     this.hud.onMasonry(() => this.toggleBuildingPlaceMode('masonry'));
     this.hud.onSellWood(() => this.resourceManager.doSellWood());
-    this.hud.onSpawnWarrior(() => this.doSpawnQueue(UnitType.WARRIOR, 5, 'Warrior'));
-    this.hud.onSpawnArcher(() => this.doSpawnQueue(UnitType.ARCHER, 8, 'Archer'));
-    this.hud.onSpawnRider(() => this.doSpawnQueue(UnitType.RIDER, 10, 'Rider'));
-    this.hud.onSpawnLumberjack(() => this.doSpawnQueueForestry(UnitType.LUMBERJACK, 3, 'Lumberjack'));
-    this.hud.onSpawnBuilder(() => this.doSpawnQueueMasonry(UnitType.BUILDER, 3, 'Builder'));
+    this.hud.onSpawnWarrior(() => this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior'));
+    this.hud.onSpawnArcher(() => this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer'));
+    this.hud.onSpawnRider(() => this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider'));
+    this.hud.onSpawnLumberjack(() => this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack'));
+    this.hud.onSpawnBuilder(() => this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder'));
     this.hud.onFarmhouse(() => this.toggleBuildingPlaceMode('farmhouse'));
     this.hud.onSilo(() => this.toggleBuildingPlaceMode('silo'));
     this.hud.onFarmPatch(() => this.toggleFarmPatchMode());
     this.hud.onPlantTree(() => this.togglePlantTreeMode());
-    this.hud.onSpawnVillager(() => this.doSpawnQueueFarmhouse(UnitType.VILLAGER, 3, 'Villager'));
+    this.hud.onSpawnVillager(() => this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager'));
     this.hud.onHelp(() => this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp());
     this.hud.onPlantCrops(() => this.togglePlantCropsMode());
     this.hud.onWorkshop(() => this.toggleBuildingPlaceMode('workshop'));
@@ -244,12 +244,12 @@ class Cubitopia {
       if (e.key === 't' || e.key === 'T') this.togglePlantTreeMode();
       if (e.key === 'n' || e.key === 'N') this.toggleMineMode();
       if (e.key === 'c' || e.key === 'C') this.togglePlantCropsMode();
-      if (e.key === '1') this.doSpawnQueue(UnitType.WARRIOR, 5, 'Warrior');
-      if (e.key === '2') this.doSpawnQueue(UnitType.ARCHER, 8, 'Archer');
-      if (e.key === '3') this.doSpawnQueue(UnitType.RIDER, 10, 'Rider');
-      if (e.key === '4') this.doSpawnQueueForestry(UnitType.LUMBERJACK, 3, 'Lumberjack');
-      if (e.key === '5') this.doSpawnQueueMasonry(UnitType.BUILDER, 3, 'Builder');
-      if (e.key === '6') this.doSpawnQueueFarmhouse(UnitType.VILLAGER, 3, 'Villager');
+      if (e.key === '1') this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior');
+      if (e.key === '2') this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer');
+      if (e.key === '3') this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider');
+      if (e.key === '4') this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack');
+      if (e.key === '5') this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder');
+      if (e.key === '6') this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager');
       if (e.key === '7') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
       if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
       if (e.key === '`') this.hud.toggleDebugPanel();
@@ -1696,49 +1696,37 @@ class Cubitopia {
     canvasEl.style.cursor = !wasActive ? 'crosshair' : 'default';
   }
 
-  private doSpawnQueue(type: UnitType, cost: number, name: string): void {
-    if (!this.barracks) {
-      this.hud.showNotification(`📍 Place a Barracks first, then press ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('barracks');
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild && this.players[0].resources.gold < cost) {
-      this.hud.showNotification(`⚠️ Need ${cost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
-      return;
-    }
-    this.spawnQueue.push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
-    this.hud.updateSpawnQueue(this.spawnQueue);
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' gold'})`, '#2ecc71');
-  }
+  /** Spawn queue config for simple (single-resource) buildings */
+  private readonly SPAWN_QUEUE_CONFIG: Record<string, {
+    buildingKind: BuildingKind;
+    getBuilding: () => any;
+    resourceType: 'gold' | 'wood';
+    getResource: () => number;
+    getQueue: () => { type: UnitType; cost: number }[];
+    updateHUD?: (q: { type: UnitType; cost: number }[]) => void;
+  }> = {
+    barracks:  { buildingKind: 'barracks',  getBuilding: () => this.barracks,  resourceType: 'gold', getResource: () => this.players[0].resources.gold, getQueue: () => this.spawnQueue,          updateHUD: (q) => this.hud.updateSpawnQueue(q) },
+    forestry:  { buildingKind: 'forestry',  getBuilding: () => this.forestry,  resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.forestrySpawnQueue,  updateHUD: (q) => this.hud.updateForestrySpawnQueue(q) },
+    masonry:   { buildingKind: 'masonry',   getBuilding: () => this.masonry,   resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.masonrySpawnQueue,   updateHUD: (q) => this.hud.updateMasonrySpawnQueue(q) },
+    farmhouse: { buildingKind: 'farmhouse', getBuilding: () => this.farmhouse, resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.farmhouseSpawnQueue },
+  };
 
-  private doSpawnQueueForestry(type: UnitType, cost: number, name: string): void {
-    if (!this.forestry) {
-      this.hud.showNotification(`📍 Place a Forestry first, then press ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('forestry');
+  /** Generic spawn queue for simple (single-resource) buildings */
+  private doSpawnQueueGeneric(buildingKey: string, type: UnitType, cost: number, name: string): void {
+    const cfg = this.SPAWN_QUEUE_CONFIG[buildingKey];
+    if (!cfg) return;
+    if (!cfg.getBuilding()) {
+      this.hud.showNotification(`Place a ${cfg.buildingKind.charAt(0).toUpperCase() + cfg.buildingKind.slice(1)} first, then press ${name} again`, '#e67e22');
+      this.toggleBuildingPlaceMode(cfg.buildingKind);
       return;
     }
-    if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
-      this.hud.showNotification(`⚠️ Need ${cost} wood for ${name}! (have ${this.woodStockpile[0]})`, '#e67e22');
+    if (!this.hud.debugFlags.freeBuild && cfg.getResource() < cost) {
+      this.hud.showNotification(`Need ${cost} ${cfg.resourceType} for ${name}! (have ${cfg.getResource()})`, '#e67e22');
       return;
     }
-    this.forestrySpawnQueue.push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
-    this.hud.updateForestrySpawnQueue(this.forestrySpawnQueue);
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' wood'})`, '#2ecc71');
-  }
-
-  private doSpawnQueueMasonry(type: UnitType, cost: number, name: string): void {
-    if (!this.masonry) {
-      this.hud.showNotification(`📍 Place a Masonry first, then press ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('masonry');
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
-      this.hud.showNotification(`⚠️ Need ${cost} wood for ${name}! (have ${this.woodStockpile[0]})`, '#e67e22');
-      return;
-    }
-    this.masonrySpawnQueue.push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
-    this.hud.updateMasonrySpawnQueue(this.masonrySpawnQueue);
-    this.hud.showNotification(`✅ ${name} queued (${cost} wood)`, '#2ecc71');
+    cfg.getQueue().push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
+    if (cfg.updateHUD) cfg.updateHUD(cfg.getQueue());
+    this.hud.showNotification(`${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' ' + cfg.resourceType})`, '#2ecc71');
   }
 
   regenerateMap(): void {
@@ -3447,19 +3435,7 @@ class Cubitopia {
     this.farmPatchMarkers.clear();
   }
 
-  private doSpawnQueueFarmhouse(type: UnitType, cost: number, name: string): void {
-    if (!this.farmhouse) {
-      this.hud.showNotification(`📍 Place a Farmhouse first, then press ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('farmhouse');
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild && this.woodStockpile[0] < cost) {
-      this.hud.showNotification(`⚠️ Need ${cost} wood for ${name}! (have ${this.woodStockpile[0]})`, '#e67e22');
-      return;
-    }
-    this.farmhouseSpawnQueue.push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' wood'})`, '#2ecc71');
-  }
+  // doSpawnQueueFarmhouse → now handled by doSpawnQueueGeneric('farmhouse', ...)
 
   /** Get base tile positions that units should NOT walk onto */
   getBaseTiles(): Set<string> {
