@@ -2429,14 +2429,41 @@ class Cubitopia {
     }
 
     // Update unified spawn queue HUD with progress bars
-    this.hud.updateAllSpawnQueues(spawnConfigs.map(cfg => ({
+    // Include player 0's queues AND all AI players' queues
+    const allQueueEntries = spawnConfigs.map(cfg => ({
       kind: cfg.kind,
       color: cfg.color,
       items: cfg.queue.map(q => ({ type: q.type })),
       timerProgress: cfg.queue.length > 0
         ? cfg.getTimer() / (this.hud.debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
         : 0,
-    })));
+    }));
+
+    // Add AI queues for all players
+    for (let pid = 0; pid < this.aiState.length; pid++) {
+      const st = this.aiState[pid];
+      const label = this.players.length > 1 ? `P${pid + 1} ` : '';
+      // AI combat queue (barracks)
+      if (st.spawnQueue.length > 0) {
+        allQueueEntries.push({
+          kind: `${label}barracks`,
+          color: pid === 0 ? '#3498db' : '#e74c3c',
+          items: st.spawnQueue.map(q => ({ type: q.type })),
+          timerProgress: st.spawnTimer / 5,
+        });
+      }
+      // AI worker queue (forestry/masonry/farmhouse)
+      if (st.workerSpawnQueue.length > 0) {
+        allQueueEntries.push({
+          kind: `${label}workers`,
+          color: pid === 0 ? '#2ecc71' : '#e67e22',
+          items: st.workerSpawnQueue.map(q => ({ type: q.type })),
+          timerProgress: st.workerSpawnTimer / 4,
+        });
+      }
+    }
+
+    this.hud.updateAllSpawnQueues(allQueueEntries);
 
     // Update occupied tiles for pathfinder (units prefer unoccupied paths)
     Pathfinder.occupiedTiles.clear();
