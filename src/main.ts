@@ -1762,6 +1762,9 @@ class Cubitopia {
     // Initialize grass tracking for map-generated grass
     this.natureSystem.initializeGrassTracking();
 
+    // --- Spawn Units ---
+    const isArena = this.mapType === MapType.ARENA;
+
     // Create players — arena gets abundant resources for testing
     const makeResources = (): PlayerResources => isArena
       ? { food: 999, wood: 999, stone: 999, iron: 999, gold: 999, crystal: 0, grass_fiber: 0, clay: 0, rope: 0 }
@@ -1774,9 +1777,6 @@ class Cubitopia {
       { id: 1, name: 'AI Opponent', color: new THREE.Color(0xe74c3c), cities: [], units: [],
         resources: makeResources(), technology: [], isAI: true, defeated: false },
     ];
-
-    // --- Spawn Units ---
-    const isArena = this.mapType === MapType.ARENA;
 
     if (isArena) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
