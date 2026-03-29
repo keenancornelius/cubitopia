@@ -139,6 +139,7 @@ export class CombatSystem {
       if (dist <= 1) {
         unit.currentHealth = Math.max(0, unit.currentHealth - splashDamage);
         splashed.push(unit.id);
+        CombatLog.logSplash(attacker, unit.id, unit.type);
       }
     }
     return splashed;
@@ -196,6 +197,7 @@ export class CombatSystem {
       // Only knockback if destination is not blocked
       if (!isTileBlocked(newQ, newR)) {
         results.push({ unitId: victim.id, knockQ: newQ, knockR: newR });
+        CombatLog.logKnockback(attacker, victim, newQ, newR);
       }
     }
     return results;
@@ -223,6 +225,7 @@ export class CombatSystem {
     const newQ = target.position.q + kq;
     const newR = target.position.r + kr;
     if (!isTileBlocked(newQ, newR)) {
+      CombatLog.logKnockback(attacker, target, newQ, newR);
       return { unitId: target.id, knockQ: newQ, knockR: newR };
     }
     return null;

@@ -1949,6 +1949,12 @@ class Cubitopia {
     UnitAI.siloPositions.set(0, p1BaseCoord);
     UnitAI.siloPositions.set(1, p2BaseCoord);
 
+    // Auto-enable combat logging in Arena mode so events are captured from frame 1
+    if (isArena) {
+      CombatLog.enable();
+      this.arenaDebugConsole.setUnits(this.allUnits);
+    }
+
     // Block base tiles so pathfinder routes units around them
     Pathfinder.blockedTiles = this.getBaseTiles();
     Pathfinder.gateTiles.clear();
@@ -2184,17 +2190,12 @@ class Cubitopia {
       }
 
       if (event.type === 'unit:killed' && event.unit) {
-        if (event.killer) CombatLog.logKill(event.killer, event.unit);
+        // CombatLog.logKill already called in UnitAI.handleAttacking at the source
         this.removeUnitFromGame(event.unit, event.killer);
         this.sound.play('death');
       }
       if (event.type === 'combat' && event.attacker && event.defender && !this.hud.debugFlags.disableCombat) {
-        // Log damage to arena debug console
-        CombatLog.logDamage(
-          event.attacker, event.defender,
-          event.result?.defenderDamage ?? 0,
-          event.result?.attackerDamage ?? 0
-        );
+        // CombatLog.logDamage already called in UnitAI.handleAttacking at the source
         this.unitRenderer.updateHealthBar(event.attacker);
         this.unitRenderer.updateHealthBar(event.defender);
 

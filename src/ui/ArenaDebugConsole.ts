@@ -34,8 +34,15 @@ export class CombatLog {
   private static maxEvents = 500;
   private static enabled = false;
   private static startTime = 0;
+  // Track last target per unit to avoid repeat TARGET logs
+  private static lastTargets: Map<string, string> = new Map();
+  // Track last peel per tank to avoid repeat PEEL logs (key: tankId, value: "targetId:allyId")
+  private static lastPeels: Map<string, string> = new Map();
+  // Track last kite per unit to avoid repeat KITE logs (key: unitId, value: threatId)
+  private static lastKites: Map<string, string> = new Map();
 
   static enable(): void {
+    if (CombatLog.enabled) return; // Already enabled — don't reset events
     CombatLog.enabled = true;
     CombatLog.startTime = performance.now();
     CombatLog.events = [];
@@ -47,7 +54,7 @@ export class CombatLog {
 
   static isEnabled(): boolean { return CombatLog.enabled; }
 
-  static clear(): void { CombatLog.events = []; }
+  static clear(): void { CombatLog.events = []; CombatLog.lastTargets.clear(); CombatLog.lastPeels.clear(); CombatLog.lastKites.clear(); }
 
   static getEvents(): readonly DebugEvent[] { return CombatLog.events; }
 
@@ -66,6 +73,10 @@ export class CombatLog {
 
   // Convenience methods
   static logTarget(unit: Unit, target: Unit, score: number, dist: number): void {
+    // Only log when the unit's target actually changes (avoid flooding)
+    const lastTarget = CombatLog.lastTargets.get(unit.id);
+    if (lastTarget === target.id) return;
+    CombatLog.lastTargets.set(unit.id, target.id);
     const role = CombatLog.getRole(unit.type);
     CombatLog.log(
       DebugEventType.TARGET, unit.owner,
@@ -75,16 +86,21 @@ export class CombatLog {
   }
 
   static logKite(unit: Unit, threat: Unit, success: boolean, fromQ?: number, fromR?: number, toQ?: number, toR?: number): void {
+    // Dedup: only log when kite situation changes (threat + result), avoid per-tick spam
+    const kiteKey = `${threat.id}:${success ? 'ok' : 'fail'}`;
+    const lastKite = CombatLog.lastKites.get(unit.id);
+    if (lastKite === kiteKey) return;
+    CombatLog.lastKites.set(unit.id, kiteKey);
     if (success && toQ !== undefined && toR !== undefined) {
       CombatLog.log(
         DebugEventType.KITE, unit.owner,
-        `${CombatLog.typeName(unit.type)}${CombatLog.shortId(unit)} KITES from (${fromQ},${fromR})→(${toQ},${toR}) away from ${CombatLog.typeName(threat.type)}`,
+        `${CombatLog.typeName(unit.type)}${CombatLog.shortId(unit)} KITES from (${fromQ},${fromR})→(${toQ},${toR}) away from ${CombatLog.typeName(threat.type)}${CombatLog.shortId(threat)}`,
         unit.type, unit.id
       );
     } else {
       CombatLog.log(
         DebugEventType.KITE, unit.owner,
-        `${CombatLog.typeName(unit.type)}${CombatLog.shortId(unit)} KITE FAILED — no escape from ${CombatLog.typeName(threat.type)}`,
+        `${CombatLog.typeName(unit.type)}${CombatLog.shortId(unit)} KITE FAILED — no escape from ${CombatLog.typeName(threat.type)}${CombatLog.shortId(threat)}`,
         unit.type, unit.id
       );
     }
@@ -113,17 +129,23 @@ export class CombatLog {
   }
 
   static logPeel(tank: Unit, target: Unit, protectedAlly: Unit): void {
+    // Only log when the peel situation changes (avoid flooding every tick)
+    const peelKey = `${target.id}:${protectedAlly.id}`;
+    const lastPeel = CombatLog.lastPeels.get(tank.id);
+    if (lastPeel === peelKey) return;
+    CombatLog.lastPeels.set(tank.id, peelKey);
     CombatLog.log(
       DebugEventType.PEEL, tank.owner,
-      `${CombatLog.typeName(tank.type)}${CombatLog.shortId(tank)} PEELS for ${CombatLog.typeName(protectedAlly.type)} → targets ${CombatLog.typeName(target.type)}`,
+      `${CombatLog.typeName(tank.type)}${CombatLog.shortId(tank)} PEELS for ${CombatLog.typeName(protectedAlly.type)}${CombatLog.shortId(protectedAlly)} → targets ${CombatLog.typeName(target.type)}${CombatLog.shortId(target)}`,
       tank.type, tank.id
     );
   }
 
   static logHeal(healer: Unit, target: Unit, amount: number): void {
+    // No dedup for heals — they're gated by healRate cooldown so they don't fire every tick
     CombatLog.log(
       DebugEventType.HEAL, healer.owner,
-      `${CombatLog.typeName(healer.type)} heals ${CombatLog.typeName(target.type)}${CombatLog.shortId(target)} +${amount}HP (${target.currentHealth}/${target.stats.maxHealth})`,
+      `${CombatLog.typeName(healer.type)}${CombatLog.shortId(healer)} heals ${CombatLog.typeName(target.type)}${CombatLog.shortId(target)} +${amount}HP (${target.currentHealth}/${target.stats.maxHealth})`,
       healer.type, healer.id
     );
   }
@@ -192,11 +214,11 @@ export class ArenaDebugConsole {
     this.visible = !this.visible;
     if (this.visible) {
       this.build();
-      CombatLog.enable();
+      CombatLog.enable(); // Also enable if not already (e.g. non-arena manual toggle)
       this.startAutoUpdate();
     } else {
       this.destroy();
-      CombatLog.disable();
+      // Don't disable CombatLog — keep logging in background so events aren't lost
     }
   }
 
@@ -465,3 +487,6 @@ export class ArenaDebugConsole {
     this.destroy();
   }
 }
+
+// Expose CombatLog globally for debugging
+(window as any).__CombatLog = CombatLog;

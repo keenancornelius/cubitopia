@@ -1727,6 +1727,7 @@ export class UnitAI {
         const result = CombatSystem.resolve(unit, target, allUnits);
         CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
+        CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
         events.push({ type: 'combat', attacker: unit, defender: target, result });
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
@@ -1744,6 +1745,7 @@ export class UnitAI {
         if (bashResult) events.push({ type: 'combat:cleave', unitId: bashResult.unitId, knockQ: bashResult.knockQ, knockR: bashResult.knockR } as any);
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
+          CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
           unit.state = UnitState.IDLE;
           unit.command = null;
@@ -1751,6 +1753,7 @@ export class UnitAI {
         }
         if (!result.attackerSurvived) {
           unit.state = UnitState.DEAD;
+          CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
           return;
         }
@@ -1773,6 +1776,7 @@ export class UnitAI {
         const result = CombatSystem.resolve(unit, target, allUnits);
         CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
+        CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
 
         events.push({ type: 'combat', attacker: unit, defender: target, result });
         // Battlemage AoE splash
@@ -1792,12 +1796,14 @@ export class UnitAI {
 
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
+          CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
           unit.state = UnitState.IDLE;
           unit.command = null;
         }
         if (!result.attackerSurvived) {
           unit.state = UnitState.DEAD;
+          CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
         }
       }
