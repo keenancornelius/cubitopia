@@ -705,9 +705,10 @@ export class HUD {
   private barracksModeIndicator: HTMLElement | null = null;
   private forestryModeIndicator: HTMLElement | null = null;
   private masonryModeIndicator: HTMLElement | null = null;
-  private spawnQueueDisplay: HTMLElement | null = null;
-  private forestrySpawnQueueDisplay: HTMLElement | null = null;
-  private masonrySpawnQueueDisplay: HTMLElement | null = null;
+  private spawnQueueDisplay: HTMLElement | null = null;  // legacy — kept for cleanup
+  private forestrySpawnQueueDisplay: HTMLElement | null = null;  // legacy
+  private masonrySpawnQueueDisplay: HTMLElement | null = null;  // legacy
+  private unifiedQueuePanel: HTMLElement | null = null;
 
   setBarracksMode(active: boolean): void {
     if (!this.barracksModeIndicator) {
@@ -894,24 +895,97 @@ export class HUD {
     if (active) this.hideAllModeIndicators('workshop');
   }
 
-  updateWorkshopSpawnQueue(queue: { type: string; cost: { wood: number; stone: number; rope: number } }[]): void {
-    if (!this.workshopSpawnQueueDisplay) {
-      this.workshopSpawnQueueDisplay = document.createElement('div');
-      this.workshopSpawnQueueDisplay.style.cssText = `
-        position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 8px 16px; border-radius: 8px;
-        font-size: 13px; border: 1px solid rgba(93, 64, 55, 0.6); color: #c9a96e;
-        display: none; text-align: center;
+  /** @deprecated Use updateAllSpawnQueues instead */
+  updateWorkshopSpawnQueue(_queue: { type: string; cost: { wood: number; stone: number; rope: number } }[]): void {}
+
+  // ---- Unified stacking queue display ----
+
+  /** Queue entry for unified display */
+  updateAllSpawnQueues(queues: {
+    kind: string;
+    color: string;
+    items: { type: string }[];
+    timerProgress: number; // 0..1 (fraction of spawn time elapsed for current unit)
+  }[]): void {
+    if (!this.unifiedQueuePanel) {
+      this.unifiedQueuePanel = document.createElement('div');
+      this.unifiedQueuePanel.style.cssText = `
+        position: absolute; bottom: 90px; right: 12px;
+        display: flex; flex-direction: column; gap: 6px;
+        pointer-events: none; z-index: 50;
       `;
-      this.container.appendChild(this.workshopSpawnQueueDisplay);
+      this.container.appendChild(this.unifiedQueuePanel);
     }
-    if (queue.length === 0) {
-      this.workshopSpawnQueueDisplay.style.display = 'none';
+
+    // Hide legacy displays
+    if (this.spawnQueueDisplay) this.spawnQueueDisplay.style.display = 'none';
+    if (this.forestrySpawnQueueDisplay) this.forestrySpawnQueueDisplay.style.display = 'none';
+    if (this.masonrySpawnQueueDisplay) this.masonrySpawnQueueDisplay.style.display = 'none';
+    if (this.workshopSpawnQueueDisplay) this.workshopSpawnQueueDisplay.style.display = 'none';
+
+    // Filter to only queues with items
+    const active = queues.filter(q => q.items.length > 0);
+    if (active.length === 0) {
+      this.unifiedQueuePanel.style.display = 'none';
       return;
     }
-    const queueStr = queue.map(q => `${q.type}`).join(' → ');
-    this.workshopSpawnQueueDisplay.innerHTML = `🔧 Queue: ${queueStr}`;
-    this.workshopSpawnQueueDisplay.style.display = 'block';
+    this.unifiedQueuePanel.style.display = 'flex';
+
+    // Build HTML for stacking modules
+    let html = '';
+    for (const q of active) {
+      const borderColor = q.color;
+      const bgColor = q.color + '18'; // low-alpha version
+      html += `<div style="
+        background: rgba(0,0,0,0.88); border: 1px solid ${borderColor}; border-radius: 6px;
+        padding: 6px 10px; min-width: 140px;
+      ">`;
+      // Header
+      html += `<div style="font-size:10px; color:${borderColor}; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:4px; font-weight:bold;">${q.kind}</div>`;
+
+      // Stacked unit modules
+      for (let i = 0; i < q.items.length; i++) {
+        const item = q.items[i];
+        const isFirst = i === 0;
+        const progress = isFirst ? q.timerProgress : 0;
+        const barWidth = Math.round(progress * 100);
+
+        html += `<div style="
+          display:flex; align-items:center; gap:6px; margin-bottom:${i < q.items.length - 1 ? '3' : '0'}px;
+          background: ${bgColor}; border-radius: 4px; padding: 3px 6px; position: relative; overflow: hidden;
+        ">`;
+
+        // Progress fill (behind text)
+        if (isFirst) {
+          html += `<div style="
+            position:absolute; left:0; top:0; bottom:0; width:${barWidth}%;
+            background: ${borderColor}30; border-radius: 4px; transition: width 0.15s linear;
+          "></div>`;
+        }
+
+        // Unit type label
+        html += `<span style="
+          font-size:11px; color:#ddd; position:relative; z-index:1; flex:1;
+        ">${item.type}</span>`;
+
+        // Side progress bar (thin vertical bar on the right)
+        if (isFirst) {
+          html += `<div style="
+            width:4px; height:16px; background:rgba(255,255,255,0.1); border-radius:2px;
+            position:relative; z-index:1; overflow:hidden;
+          "><div style="
+            position:absolute; bottom:0; left:0; right:0; height:${barWidth}%;
+            background:${borderColor}; border-radius:2px; transition: height 0.15s linear;
+          "></div></div>`;
+        }
+
+        html += `</div>`;
+      }
+
+      html += `</div>`;
+    }
+
+    this.unifiedQueuePanel.innerHTML = html;
   }
 
   setRallyPointMode(active: boolean, buildingKey?: string): void {
@@ -951,71 +1025,14 @@ export class HUD {
     if (except !== 'workshop' && this.workshopModeIndicator) this.workshopModeIndicator.style.display = 'none';
   }
 
-  updateSpawnQueue(queue: { type: string; cost: number }[]): void {
-    if (!this.spawnQueueDisplay) {
-      this.spawnQueueDisplay = document.createElement('div');
-      this.spawnQueueDisplay.style.cssText = `
-        position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 8px 16px; border-radius: 8px;
-        font-size: 13px; border: 1px solid rgba(230, 126, 34, 0.6); color: #e67e22;
-        display: none; text-align: center;
-      `;
-      this.container.appendChild(this.spawnQueueDisplay);
-    }
+  /** @deprecated Use updateAllSpawnQueues instead */
+  updateSpawnQueue(_queue: { type: string; cost: number }[]): void {}
 
-    if (queue.length === 0) {
-      this.spawnQueueDisplay.style.display = 'none';
-      return;
-    }
+  /** @deprecated Use updateAllSpawnQueues instead */
+  updateForestrySpawnQueue(_queue: { type: string; cost: number }[]): void {}
 
-    const queueStr = queue.map(q => `${q.type}(${q.cost}g)`).join(' → ');
-    this.spawnQueueDisplay.innerHTML = `📋 Queue: ${queueStr}`;
-    this.spawnQueueDisplay.style.display = 'block';
-  }
-
-  updateForestrySpawnQueue(queue: { type: string; cost: number }[]): void {
-    if (!this.forestrySpawnQueueDisplay) {
-      this.forestrySpawnQueueDisplay = document.createElement('div');
-      this.forestrySpawnQueueDisplay.style.cssText = `
-        position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 8px 16px; border-radius: 8px;
-        font-size: 13px; border: 1px solid rgba(107, 142, 35, 0.6); color: #6b8e23;
-        display: none; text-align: center;
-      `;
-      this.container.appendChild(this.forestrySpawnQueueDisplay);
-    }
-
-    if (queue.length === 0) {
-      this.forestrySpawnQueueDisplay.style.display = 'none';
-      return;
-    }
-
-    const queueStr = queue.map(q => `${q.type}(${q.cost}w)`).join(' → ');
-    this.forestrySpawnQueueDisplay.innerHTML = `📋 Queue: ${queueStr}`;
-    this.forestrySpawnQueueDisplay.style.display = 'block';
-  }
-
-  updateMasonrySpawnQueue(queue: { type: string; cost: number }[]): void {
-    if (!this.masonrySpawnQueueDisplay) {
-      this.masonrySpawnQueueDisplay = document.createElement('div');
-      this.masonrySpawnQueueDisplay.style.cssText = `
-        position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 8px 16px; border-radius: 8px;
-        font-size: 13px; border: 1px solid rgba(128, 128, 128, 0.6); color: #808080;
-        display: none; text-align: center;
-      `;
-      this.container.appendChild(this.masonrySpawnQueueDisplay);
-    }
-
-    if (queue.length === 0) {
-      this.masonrySpawnQueueDisplay.style.display = 'none';
-      return;
-    }
-
-    const queueStr = queue.map(q => `${q.type}(${q.cost}w)`).join(' → ');
-    this.masonrySpawnQueueDisplay.innerHTML = `📋 Queue: ${queueStr}`;
-    this.masonrySpawnQueueDisplay.style.display = 'block';
-  }
+  /** @deprecated Use updateAllSpawnQueues instead */
+  updateMasonrySpawnQueue(_queue: { type: string; cost: number }[]): void {}
 
   private notificationEl: HTMLElement | null = null;
   private notificationTimeout: number | null = null;

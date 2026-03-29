@@ -2334,21 +2334,81 @@ class Cubitopia {
       this.players[0].resources.rope = 999;
     }
 
-    // Process barracks spawn queue (gold-based)
-    const nextBarracks = this.getNextSpawnBuilding('barracks', 0);
-    if (nextBarracks && this.spawnQueue.length > 0) {
-      this.spawnTimer += delta;
-      const barracksSpawnTime = this.hud.debugFlags.instantSpawn ? 0 : 5;
-      if (this.spawnTimer >= barracksSpawnTime) { // 5 sec per unit (0 if instantSpawn)
-        this.spawnTimer = 0;
-        const next = this.spawnQueue[0];
-        if (this.players[0].resources.gold >= next.cost) {
-          this.players[0].resources.gold -= next.cost;
-          this.spawnQueue.shift();
-          this.hud.updateSpawnQueue(this.spawnQueue);
-          // Spawn unit at barracks position (round-robin across all barracks)
-          const spawnBarracks = this.getNextSpawnBuilding('barracks', 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnBarracks.position.q, spawnBarracks.position.r, true);
+    // --- Generic spawn queue processing ---
+    // Each entry: [kind, queue, timer field, spawn time, canAfford fn, deductCost fn]
+    type SimpleQueueItem = { type: UnitType; cost: number };
+    type WorkshopQueueItem = { type: UnitType; cost: { wood: number; stone: number; rope: number } };
+
+    const spawnConfigs: {
+      kind: string; color: string; spawnTime: number;
+      queue: { type: UnitType }[];
+      getTimer: () => number; setTimer: (v: number) => void;
+      canAfford: (item: any) => boolean; deductCost: (item: any) => void;
+    }[] = [
+      {
+        kind: 'barracks', color: '#e67e22', spawnTime: 5,
+        queue: this.spawnQueue,
+        getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => this.players[0].resources.gold >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { this.players[0].resources.gold -= item.cost; },
+      },
+      {
+        kind: 'forestry', color: '#6b8e23', spawnTime: 5,
+        queue: this.forestrySpawnQueue,
+        getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
+      },
+      {
+        kind: 'masonry', color: '#808080', spawnTime: 5,
+        queue: this.masonrySpawnQueue,
+        getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
+      },
+      {
+        kind: 'farmhouse', color: '#d4a030', spawnTime: 5,
+        queue: this.farmhouseSpawnQueue,
+        getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
+      },
+      {
+        kind: 'workshop', color: '#c9a96e', spawnTime: 8,
+        queue: this.workshopSpawnQueue,
+        getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
+        canAfford: (item: WorkshopQueueItem) =>
+          this.ropeStockpile[0] >= item.cost.rope &&
+          this.stoneStockpile[0] >= item.cost.stone &&
+          this.woodStockpile[0] >= item.cost.wood,
+        deductCost: (item: WorkshopQueueItem) => {
+          this.ropeStockpile[0] -= item.cost.rope; this.players[0].resources.rope -= item.cost.rope;
+          this.stoneStockpile[0] -= item.cost.stone; this.players[0].resources.stone -= item.cost.stone;
+          this.woodStockpile[0] -= item.cost.wood; this.players[0].resources.wood -= item.cost.wood;
+        },
+      },
+    ];
+
+    const isCombatType = (t: UnitType) =>
+      t === UnitType.WARRIOR || t === UnitType.ARCHER || t === UnitType.RIDER ||
+      t === UnitType.PALADIN || t === UnitType.CATAPULT || t === UnitType.TREBUCHET;
+
+    for (const cfg of spawnConfigs) {
+      const building = this.getNextSpawnBuilding(cfg.kind as any, 0);
+      if (!building || cfg.queue.length === 0) continue;
+
+      const timer = cfg.getTimer() + delta;
+      const spawnTime = this.hud.debugFlags.instantSpawn ? 0 : cfg.spawnTime;
+
+      if (timer >= spawnTime) {
+        cfg.setTimer(0);
+        const next = cfg.queue[0];
+        if (cfg.canAfford(next)) {
+          cfg.deductCost(next);
+          cfg.queue.shift();
+          // Spawn unit at building position (round-robin)
+          const spawnBuilding = this.getNextSpawnBuilding(cfg.kind as any, 0)!;
+          const pos = this.findSpawnTile(this.currentMap!, spawnBuilding.position.q, spawnBuilding.position.r, true);
           const unit = UnitFactory.create(next.type, 0, pos);
           const wp = this.hexToWorld(pos);
           unit.worldPosition = { ...wp };
@@ -2357,165 +2417,26 @@ class Cubitopia {
           this.unitRenderer.addUnit(unit, this.getElevation(pos));
           this.selectionManager.setPlayerUnits(this.allUnits, 0);
           this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point: send to formation slot around rally point
-          const rallySlot = this.getRallyFormationSlot('barracks', unit);
+          // Rally point
+          const rallySlot = this.getRallyFormationSlot(cfg.kind as any, unit);
           if (rallySlot) UnitAI.commandMove(unit, rallySlot, this.currentMap!);
-          // Combat units at rally points default to aggressive stance
-          if (unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-              unit.type === UnitType.RIDER || unit.type === UnitType.PALADIN ||
-              unit.type === UnitType.CATAPULT || unit.type === UnitType.TREBUCHET) {
-            unit.stance = UnitStance.AGGRESSIVE;
-          }
+          // Combat units default to aggressive at rally points
+          if (isCombatType(unit.type)) unit.stance = UnitStance.AGGRESSIVE;
         }
+      } else {
+        cfg.setTimer(timer);
       }
     }
 
-    // Process forestry spawn queue (wood-based)
-    const nextForestry = this.getNextSpawnBuilding('forestry', 0);
-    if (nextForestry && this.forestrySpawnQueue.length > 0) {
-      this.forestrySpawnTimer += delta;
-      const forestrySpawnTime = this.hud.debugFlags.instantSpawn ? 0 : 5;
-      if (this.forestrySpawnTimer >= forestrySpawnTime) { // 5 sec per unit (0 if instantSpawn)
-        this.forestrySpawnTimer = 0;
-        const next = this.forestrySpawnQueue[0];
-        if (this.woodStockpile[0] >= next.cost) {
-          this.woodStockpile[0] -= next.cost;
-          this.players[0].resources.wood -= next.cost;
-          this.forestrySpawnQueue.shift();
-          this.hud.updateForestrySpawnQueue(this.forestrySpawnQueue);
-          // Spawn unit at forestry position (round-robin)
-          const spawnForestry = this.getNextSpawnBuilding('forestry', 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnForestry.position.q, spawnForestry.position.r, true);
-          const unit = UnitFactory.create(next.type, 0, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          this.players[0].units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          this.selectionManager.setPlayerUnits(this.allUnits, 0);
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point: send to formation slot around rally point
-          const rallySlotF = this.getRallyFormationSlot('forestry', unit);
-          if (rallySlotF) UnitAI.commandMove(unit, rallySlotF, this.currentMap!);
-          // Combat units at rally points default to aggressive stance
-          if (unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-              unit.type === UnitType.RIDER || unit.type === UnitType.PALADIN ||
-              unit.type === UnitType.CATAPULT || unit.type === UnitType.TREBUCHET) {
-            unit.stance = UnitStance.AGGRESSIVE;
-          }
-        }
-      }
-    }
-
-    // Process masonry spawn queue (wood-based)
-    const nextMasonry = this.getNextSpawnBuilding('masonry', 0);
-    if (nextMasonry && this.masonrySpawnQueue.length > 0) {
-      this.masonrySpawnTimer += delta;
-      const masonrySpawnTime = this.hud.debugFlags.instantSpawn ? 0 : 5;
-      if (this.masonrySpawnTimer >= masonrySpawnTime) { // 5 sec per unit (0 if instantSpawn)
-        this.masonrySpawnTimer = 0;
-        const next = this.masonrySpawnQueue[0];
-        if (this.woodStockpile[0] >= next.cost) {
-          this.woodStockpile[0] -= next.cost;
-          this.players[0].resources.wood -= next.cost;
-          this.masonrySpawnQueue.shift();
-          this.hud.updateMasonrySpawnQueue(this.masonrySpawnQueue);
-          // Spawn unit at masonry position (round-robin)
-          const spawnMasonry = this.getNextSpawnBuilding('masonry', 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnMasonry.position.q, spawnMasonry.position.r, true);
-          const unit = UnitFactory.create(next.type, 0, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          this.players[0].units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          this.selectionManager.setPlayerUnits(this.allUnits, 0);
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point: send to formation slot around rally point
-          const rallySlotM = this.getRallyFormationSlot('masonry', unit);
-          if (rallySlotM) UnitAI.commandMove(unit, rallySlotM, this.currentMap!);
-          // Combat units at rally points default to aggressive stance
-          if (unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-              unit.type === UnitType.RIDER || unit.type === UnitType.PALADIN ||
-              unit.type === UnitType.CATAPULT || unit.type === UnitType.TREBUCHET) {
-            unit.stance = UnitStance.AGGRESSIVE;
-          }
-        }
-      }
-    }
-
-    // Process farmhouse spawn queue (wood-based — villagers cost wood so you can bootstrap farming)
-    const nextFarmhouse = this.getNextSpawnBuilding('farmhouse', 0);
-    if (nextFarmhouse && this.farmhouseSpawnQueue.length > 0) {
-      this.farmhouseSpawnTimer += delta;
-      const farmhouseSpawnTime = this.hud.debugFlags.instantSpawn ? 0 : 5;
-      if (this.farmhouseSpawnTimer >= farmhouseSpawnTime) {
-        this.farmhouseSpawnTimer = 0;
-        const next = this.farmhouseSpawnQueue[0];
-        if (this.woodStockpile[0] >= next.cost) {
-          this.woodStockpile[0] -= next.cost;
-          this.players[0].resources.wood -= next.cost;
-          this.farmhouseSpawnQueue.shift();
-          const spawnFarmhouse = this.getNextSpawnBuilding('farmhouse', 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnFarmhouse.position.q, spawnFarmhouse.position.r, true);
-          const unit = UnitFactory.create(next.type, 0, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          this.players[0].units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          this.selectionManager.setPlayerUnits(this.allUnits, 0);
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point: send to formation slot around rally point
-          const rallySlotFH = this.getRallyFormationSlot('farmhouse', unit);
-          if (rallySlotFH) UnitAI.commandMove(unit, rallySlotFH, this.currentMap!);
-          // Combat units at rally points default to aggressive stance
-          if (unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-              unit.type === UnitType.RIDER || unit.type === UnitType.PALADIN ||
-              unit.type === UnitType.CATAPULT || unit.type === UnitType.TREBUCHET) {
-            unit.stance = UnitStance.AGGRESSIVE;
-          }
-        }
-      }
-    }
-
-    // Process workshop spawn queue (trebuchets — costs rope + stone + wood)
-    const nextWorkshop = this.getNextSpawnBuilding('workshop', 0);
-    if (nextWorkshop && this.workshopSpawnQueue.length > 0) {
-      this.workshopSpawnTimer += delta;
-      const workshopSpawnTime = this.hud.debugFlags.instantSpawn ? 0 : 8;
-      if (this.workshopSpawnTimer >= workshopSpawnTime) { // 8 sec per trebuchet (0 if instantSpawn)
-        this.workshopSpawnTimer = 0;
-        const next = this.workshopSpawnQueue[0];
-        if (this.ropeStockpile[0] >= next.cost.rope &&
-            this.stoneStockpile[0] >= next.cost.stone &&
-            this.woodStockpile[0] >= next.cost.wood) {
-          this.ropeStockpile[0] -= next.cost.rope;
-          this.players[0].resources.rope -= next.cost.rope;
-          this.stoneStockpile[0] -= next.cost.stone;
-          this.players[0].resources.stone -= next.cost.stone;
-          this.woodStockpile[0] -= next.cost.wood;
-          this.players[0].resources.wood -= next.cost.wood;
-          this.workshopSpawnQueue.shift();
-          this.hud.updateWorkshopSpawnQueue(this.workshopSpawnQueue);
-          const spawnWorkshop = this.getNextSpawnBuilding('workshop', 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnWorkshop.position.q, spawnWorkshop.position.r, true);
-          const unit = UnitFactory.create(next.type, 0, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          this.players[0].units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          this.selectionManager.setPlayerUnits(this.allUnits, 0);
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point: send to formation slot around rally point
-          const rallySlotW = this.getRallyFormationSlot('workshop', unit);
-          if (rallySlotW) UnitAI.commandMove(unit, rallySlotW, this.currentMap!);
-          // Trebuchets default to aggressive stance at rally points
-          unit.stance = UnitStance.AGGRESSIVE;
-        }
-      }
-    }
+    // Update unified spawn queue HUD with progress bars
+    this.hud.updateAllSpawnQueues(spawnConfigs.map(cfg => ({
+      kind: cfg.kind,
+      color: cfg.color,
+      items: cfg.queue.map(q => ({ type: q.type })),
+      timerProgress: cfg.queue.length > 0
+        ? cfg.getTimer() / (this.hud.debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
+        : 0,
+    })));
 
     // Update occupied tiles for pathfinder (units prefer unoccupied paths)
     Pathfinder.occupiedTiles.clear();
