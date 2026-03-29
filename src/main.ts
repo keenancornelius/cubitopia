@@ -1857,8 +1857,11 @@ class Cubitopia {
           }
         }
       };
-      spawnArmy(0, arenaCenter - 8, arenaCenter);
-      spawnArmy(1, arenaCenter + 8, arenaCenter);
+      // Spawn armies inward of bases — symmetric offsets from center
+      // Armies at offset 5 (5 hexes from center), bases at offset 7 (behind troops)
+      const arenaSpawnOffset = 5;
+      spawnArmy(0, arenaCenter - arenaSpawnOffset, arenaCenter);
+      spawnArmy(1, arenaCenter + arenaSpawnOffset, arenaCenter);
     } else {
       // Standard mode: workers near base
       const p1Defs = [
@@ -1901,13 +1904,15 @@ class Cubitopia {
     const BASE_MAX_HEALTH = 500;
     const arenaCenter = Math.floor(MAP_SIZE / 2);
 
-    // Arena: bases at edges of arena floor; Standard: bases at map corners
-    const b1Q = isArena ? arenaCenter - 8 : P1_Q;
+    // Arena: bases behind army spawn, symmetric from center; Standard: map corners
+    // Base offset (7) puts bases 1 hex behind armies (offset 6), 4 hexes from wall (radius 11)
+    // Arena uses direct coords (no findSpawnTile) to avoid search-order bias breaking symmetry
+    const b1Q = isArena ? arenaCenter - 7 : P1_Q;
     const b1R = isArena ? arenaCenter : P1_R;
-    const b2Q = isArena ? arenaCenter + 8 : P2_Q;
+    const b2Q = isArena ? arenaCenter + 7 : P2_Q;
     const b2R = isArena ? arenaCenter : P2_R;
 
-    const p1BaseCoord = this.findSpawnTile(map, b1Q, b1R);
+    const p1BaseCoord = isArena ? { q: b1Q, r: b1R } : this.findSpawnTile(map, b1Q, b1R);
     const p1BaseWP = this.hexToWorld(p1BaseCoord);
     const p1Base: Base = {
       id: 'base_0', owner: 0, position: p1BaseCoord,
@@ -1915,7 +1920,7 @@ class Cubitopia {
       health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
     };
 
-    const p2BaseCoord = this.findSpawnTile(map, b2Q, b2R);
+    const p2BaseCoord = isArena ? { q: b2Q, r: b2R } : this.findSpawnTile(map, b2Q, b2R);
     const p2BaseWP = this.hexToWorld(p2BaseCoord);
     const p2Base: Base = {
       id: 'base_1', owner: 1, position: p2BaseCoord,
