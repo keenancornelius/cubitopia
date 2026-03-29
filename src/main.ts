@@ -2277,49 +2277,84 @@ class Cubitopia {
 
       if (event.type === 'unit:killed' && event.unit) {
         // CombatLog.logKill already called in UnitAI.handleAttacking at the source
-        this.removeUnitFromGame(event.unit, event.killer);
-        this.sound.play('death');
+        // If killed by a ranged unit, defer the visual death until projectile lands
+        const killerIsRanged = event.killer && event.killer.stats.range > 1;
+        if (killerIsRanged) {
+          // Defer — the onImpact callback from the projectile will handle visual death
+          // Store pending kill info on the unit for the impact callback to pick up
+          (event.unit as any)._pendingKillVisual = true;
+          (event.unit as any)._killer = event.killer;
+        } else {
+          // Melee kill: slight delay to sync with strike animation frame
+          const unit = event.unit;
+          const killer = event.killer;
+          this.unitRenderer.queueDeferredEffect(180, () => {
+            this.removeUnitFromGame(unit, killer);
+            this.sound.play('death');
+          });
+        }
       }
       if (event.type === 'combat' && event.attacker && event.defender && !this.hud.debugFlags.disableCombat) {
         // CombatLog.logDamage already called in UnitAI.handleAttacking at the source
-        this.unitRenderer.updateHealthBar(event.attacker);
-        this.unitRenderer.updateHealthBar(event.defender);
+        const isRangedAttack = event.attacker.stats.range > 1;
 
-        // Show damage effect at defender position
-        this.unitRenderer.showDamageEffect(event.defender.worldPosition);
-        this.unitRenderer.flashUnit(event.defender.id, 0.15);
-
-        // Sound effects based on attacker type / weapon category
+        // Determine sound to play
+        let hitSound: string = 'hit_melee';
         if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
-          this.sound.play('hit_siege');
+          hitSound = 'hit_siege';
         } else if (event.attacker.stats.range > 1) {
-          this.sound.play('hit_ranged');
+          hitSound = 'hit_ranged';
         } else if (event.attacker.type === UnitType.ASSASSIN) {
-          this.sound.play('assassin_strike');
-          this.sound.play('hit_pierce');
+          hitSound = 'assassin_strike';
         } else if (event.attacker.type === UnitType.RIDER || event.attacker.type === UnitType.SCOUT) {
-          this.sound.play('hit_pierce'); // lance thrust / dagger
+          hitSound = 'hit_pierce';
         } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK
                 || event.attacker.type === UnitType.GREATSWORD) {
-          this.sound.play('hit_cleave'); // axe / heavy weapon / claymore
+          hitSound = 'hit_cleave';
         } else if (event.attacker.type === UnitType.SHIELDBEARER || event.attacker.type === UnitType.PALADIN
                 || event.attacker.type === UnitType.BATTLEMAGE) {
-          this.sound.play('hit_blunt'); // shield bash / staff slam
-        } else {
-          this.sound.play('hit_melee'); // warrior / default
+          hitSound = 'hit_blunt';
         }
 
-        // Projectile VFX by attacker type — pass target ID for live tracking
-        const defId = event.defender.id;
-        if (event.attacker.type === UnitType.ARCHER) {
-          this.unitRenderer.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId);
-        } else if (event.attacker.type === UnitType.MAGE) {
-          this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId, false);
-        } else if (event.attacker.type === UnitType.BATTLEMAGE) {
-          this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId, true);
-          this.sound.play('splash_aoe');
-        } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
-          this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition);
+        // Closure to apply damage visuals (used on impact for ranged, or deferred for melee)
+        const attacker = event.attacker;
+        const defender = event.defender;
+        const applyDamageVisuals = () => {
+          this.unitRenderer.updateHealthBar(attacker);
+          this.unitRenderer.updateHealthBar(defender);
+          this.unitRenderer.showDamageEffect(defender.worldPosition);
+          this.unitRenderer.flashUnit(defender.id, 0.15);
+          this.sound.play(hitSound as any);
+          if (hitSound === 'assassin_strike') this.sound.play('hit_pierce');
+          // If this hit killed the defender and death was deferred, process it now
+          if ((defender as any)._pendingKillVisual) {
+            (defender as any)._pendingKillVisual = false;
+            this.removeUnitFromGame(defender, (defender as any)._killer);
+            this.sound.play('death');
+          }
+        };
+
+        if (isRangedAttack) {
+          // Fire projectile with onImpact callback for damage visuals
+          const defId = event.defender.id;
+          if (event.attacker.type === UnitType.ARCHER) {
+            this.unitRenderer.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
+          } else if (event.attacker.type === UnitType.MAGE) {
+            this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId, false, applyDamageVisuals);
+          } else if (event.attacker.type === UnitType.BATTLEMAGE) {
+            this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId, true, applyDamageVisuals);
+            this.sound.play('splash_aoe');
+          } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
+            this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition, applyDamageVisuals);
+          } else {
+            // Other ranged types — fire generic projectile
+            this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800, defId, applyDamageVisuals);
+          }
+          // Update attacker health bar immediately (counter-damage is instant)
+          this.unitRenderer.updateHealthBar(event.attacker);
+        } else {
+          // Melee: delay visuals slightly to sync with strike animation frame (~200ms)
+          this.unitRenderer.queueDeferredEffect(200, applyDamageVisuals);
         }
       }
       // Greatsword cleave knockback — move units to new hex positions
@@ -2437,8 +2472,9 @@ class Cubitopia {
     // Update swing streak trails (fade out + cleanup)
     this.unitRenderer.updateSwingTrails(gameTime);
 
-    // Update projectiles (arrows in flight) + trail particles (sparks, smoke)
+    // Update projectiles (arrows in flight) + trail particles (sparks, smoke) + deferred effects
     this.unitRenderer.updateProjectiles(delta);
+    this.unitRenderer.updateDeferredEffects();
     this.unitRenderer.updateTrailParticles();
 
     // --- Base damage: units near enemy base deal damage ---

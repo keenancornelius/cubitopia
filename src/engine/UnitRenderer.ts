@@ -11,14 +11,18 @@ interface UnitMeshGroup {
   group: THREE.Group;
   unitId: string;
   unitType: UnitType;
-  healthBar: THREE.Mesh;
-  healthBarBg: THREE.Mesh;
+  healthBar: THREE.Sprite;
+  healthBarCanvas: HTMLCanvasElement;
+  healthBarCtx: CanvasRenderingContext2D;
+  healthBarTexture: THREE.CanvasTexture;
+  lastHealthRatio: number;
   label: THREE.Sprite;
   facingAngle: number; // Y-axis rotation angle for movement direction
   lastPosition: THREE.Vector3; // Track previous position for rotation calculations
   // Trebuchet/catapult single-shot fire animation
   trebFireStart: number;            // timestamp when fire was triggered (0 = idle)
   trebPendingTarget: { x: number; y: number; z: number } | null; // queued boulder target
+  trebOnImpact?: () => void; // callback when boulder lands
 }
 
 // Player team colors for the base/flag
@@ -40,7 +44,10 @@ export class UnitRenderer {
     duration: number;
     arcHeight?: number;
     targetUnitId?: string; // track live target position
+    onImpact?: () => void;  // callback when projectile lands
   }> = [];
+  // Deferred visual effects queue (for syncing damage visuals to animation/projectile hits)
+  private deferredEffects: Array<{ executeAt: number; callback: () => void }> = [];
   // Aggro indicator visuals
   private aggroLines: Map<string, THREE.Line> = new Map(); // unitId → line to target
   private aggroRings: Map<string, THREE.Mesh> = new Map(); // targetId → pulsing ring
@@ -86,24 +93,25 @@ export class UnitRenderer {
     label.position.y = isSiege ? 2.5 : 1.4;
     group.add(label);
 
-    // Health bar background
-    const hbBgGeo = new THREE.PlaneGeometry(isSiege ? 0.9 : 0.6, 0.08);
-    const hbBgMat = new THREE.MeshBasicMaterial({ color: 0x333333, side: THREE.DoubleSide });
-    const healthBarBg = new THREE.Mesh(hbBgGeo, hbBgMat);
-    healthBarBg.position.y = isSiege ? 2.35 : 1.25;
-    group.add(healthBarBg);
-
-    // Health bar fill
-    const healthRatio = unit.currentHealth / unit.stats.maxHealth;
-    const hbWidth = isSiege ? 0.88 : 0.58;
-    const hbGeo = new THREE.PlaneGeometry(hbWidth * healthRatio, 0.06);
-    const hbColor = healthRatio > 0.5 ? 0x2ecc71 : healthRatio > 0.25 ? 0xf39c12 : 0xe74c3c;
-    const hbMat = new THREE.MeshBasicMaterial({ color: hbColor, side: THREE.DoubleSide });
-    const healthBar = new THREE.Mesh(hbGeo, hbMat);
+    // Health bar — canvas-based sprite (always faces camera, no rotation artifacts)
+    const hbCanvas = document.createElement('canvas');
+    hbCanvas.width = 64;
+    hbCanvas.height = 8;
+    const hbCtx = hbCanvas.getContext('2d')!;
+    const hbTexture = new THREE.CanvasTexture(hbCanvas);
+    hbTexture.minFilter = THREE.NearestFilter;
+    hbTexture.magFilter = THREE.NearestFilter;
+    const hbMaterial = new THREE.SpriteMaterial({ map: hbTexture, depthTest: false });
+    const healthBar = new THREE.Sprite(hbMaterial);
+    const hbScale = isSiege ? 1.1 : 0.7;
+    healthBar.scale.set(hbScale, hbScale * (8 / 64), 1);
     healthBar.position.y = isSiege ? 2.35 : 1.25;
-    healthBar.position.z = 0.001;
-    healthBar.position.x = -(hbWidth * (1 - healthRatio)) / 2;
+    healthBar.renderOrder = 999;
     group.add(healthBar);
+
+    const healthRatio = unit.currentHealth / unit.stats.maxHealth;
+    UnitRenderer.drawHealthBar(hbCtx, healthRatio);
+    hbTexture.needsUpdate = true;
 
     // Store reference and add to scene
     this.unitMeshes.set(unit.id, {
@@ -111,7 +119,10 @@ export class UnitRenderer {
       unitId: unit.id,
       unitType: unit.type,
       healthBar,
-      healthBarBg,
+      healthBarCanvas: hbCanvas,
+      healthBarCtx: hbCtx,
+      healthBarTexture: hbTexture,
+      lastHealthRatio: healthRatio,
       label,
       facingAngle: 0,
       lastPosition: pos.clone(),
@@ -1523,30 +1534,47 @@ export class UnitRenderer {
   }
 
   /**
-   * Update health bar for a unit
+   * Draw a health bar onto a canvas context
+   */
+  private static drawHealthBar(ctx: CanvasRenderingContext2D, ratio: number): void {
+    const w = ctx.canvas.width;
+    const h = ctx.canvas.height;
+    // Clear
+    ctx.clearRect(0, 0, w, h);
+    // Dark border/outline
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.fillRect(0, 0, w, h);
+    // Red background — represents missing health (deep saturated red)
+    ctx.fillStyle = '#8B0000';
+    ctx.fillRect(1, 1, w - 2, h - 2);
+    // Slightly lighter red strip on top half for depth
+    ctx.fillStyle = 'rgba(255, 0, 0, 0.15)';
+    ctx.fillRect(1, 1, w - 2, (h - 2) / 2);
+    // Green fill — represents remaining health (deep saturated green)
+    const fillW = Math.max((w - 2) * Math.max(ratio, 0), 0);
+    if (fillW > 0) {
+      ctx.fillStyle = '#006400';
+      ctx.fillRect(1, 1, fillW, h - 2);
+      // Slightly lighter green highlight on top half for gloss
+      ctx.fillStyle = 'rgba(100, 255, 100, 0.15)';
+      ctx.fillRect(1, 1, fillW, (h - 2) / 2);
+    }
+  }
+
+  /**
+   * Update health bar for a unit (just repaints the canvas — no geometry churn)
    */
   updateHealthBar(unit: Unit): void {
     const entry = this.unitMeshes.get(unit.id);
     if (!entry) return;
 
-    // Remove old health bar
-    entry.group.remove(entry.healthBar);
-    entry.healthBar.geometry.dispose();
-    (entry.healthBar.material as THREE.Material).dispose();
+    const healthRatio = Math.max(unit.currentHealth / unit.stats.maxHealth, 0);
+    // Skip if ratio hasn't changed meaningfully
+    if (Math.abs(healthRatio - entry.lastHealthRatio) < 0.005) return;
 
-    // Create new health bar
-    const isSiege = unit.type === UnitType.TREBUCHET || unit.type === UnitType.CATAPULT;
-    const healthRatio = unit.currentHealth / unit.stats.maxHealth;
-    const hbW = isSiege ? 0.88 : 0.58;
-    const hbGeo = new THREE.PlaneGeometry(hbW * Math.max(healthRatio, 0.01), 0.06);
-    const hbColor = healthRatio > 0.5 ? 0x2ecc71 : healthRatio > 0.25 ? 0xf39c12 : 0xe74c3c;
-    const hbMat = new THREE.MeshBasicMaterial({ color: hbColor, side: THREE.DoubleSide });
-    const healthBar = new THREE.Mesh(hbGeo, hbMat);
-    healthBar.position.y = isSiege ? 2.35 : 1.15;
-    healthBar.position.z = 0.001;
-    healthBar.position.x = -(hbW * (1 - healthRatio)) / 2;
-    entry.group.add(healthBar);
-    entry.healthBar = healthBar;
+    entry.lastHealthRatio = healthRatio;
+    UnitRenderer.drawHealthBar(entry.healthBarCtx, healthRatio);
+    entry.healthBarTexture.needsUpdate = true;
   }
 
   /**
@@ -2394,54 +2422,58 @@ export class UnitRenderer {
         break;
       }
       case UnitType.GREATSWORD: {
-        // Massive 360° claymore spin slash — slow wind-up, devastating sweep
-        const speed = 1.2; // very slow, heavy
+        // Massive horizontal claymore sweep — wind-up right, slash left across body
+        const speed = 1.4;
         const cycle = (time * speed) % 1;
-        if (cycle < 0.3) {
-          // Wind-up: raise claymore high overhead, lean back
-          const p = cycle / 0.3;
+        if (cycle < 0.25) {
+          // Wind-up: pull sword to the right, coil body
+          const p = cycle / 0.25;
           if (armRight) {
-            armRight.rotation.x = -1.4 * p; // arms high behind head
-            armRight.rotation.z = -0.3 * p;
+            armRight.rotation.x = 0.3 * p;       // arms slightly forward
+            armRight.rotation.z = -1.2 * p;       // sword cocked far right
           }
           if (armLeft) {
-            armLeft.rotation.x = -1.0 * p;
-            armLeft.rotation.z = 0.2 * p;
+            armLeft.rotation.x = 0.2 * p;
+            armLeft.rotation.z = -0.8 * p;        // left hand follows grip
           }
-          entry.group.rotation.x = -0.12 * p; // lean back
-        } else if (cycle < 0.6) {
-          // SPIN SLASH: full body rotation with claymore extended
-          const p = (cycle - 0.3) / 0.3;
-          const spinAngle = p * Math.PI * 2; // full 360° spin
-          entry.group.rotation.y += 0.22; // continuous spin (adds each frame)
-          // Arms swing down and outward during spin
+          entry.group.rotation.y = entry.facingAngle - 0.25 * p; // coil rightward
+          entry.group.rotation.x = -0.06 * p;     // slight lean back
+        } else if (cycle < 0.5) {
+          // HORIZONTAL SWEEP: slash from right to left across the body
+          const p = (cycle - 0.25) / 0.25;
+          const sweepZ = -1.2 + 2.4 * p;          // -1.2 → +1.2 (full horizontal arc)
           if (armRight) {
-            armRight.rotation.x = -1.4 + 3.0 * p; // sweep from behind to extended
-            armRight.rotation.z = -0.3 + 0.8 * p;
+            armRight.rotation.x = 0.3 + 0.2 * p;  // arms push forward during sweep
+            armRight.rotation.z = sweepZ;
           }
           if (armLeft) {
-            armLeft.rotation.x = -1.0 + 2.2 * p;
-            armLeft.rotation.z = 0.2 - 0.5 * p;
+            armLeft.rotation.x = 0.2 + 0.3 * p;
+            armLeft.rotation.z = sweepZ * 0.7;     // left hand follows slightly behind
           }
-          entry.group.rotation.x = -0.12 + 0.2 * p; // lean into sweep
-          // Smash trail at peak of spin
-          if (cycle >= 0.4 && cycle < 0.48) this.trySpawnTrail(unitId, 'slash', time, 0.45);
-          if (cycle >= 0.52 && cycle < 0.58) this.trySpawnTrail(unitId, 'smash', time, 0.5);
-        } else if (cycle < 0.75) {
-          // Follow-through: arms extended, body settled
-          if (armRight) { armRight.rotation.x = 1.6; armRight.rotation.z = 0.5; }
-          if (armLeft) { armLeft.rotation.x = 1.2; armLeft.rotation.z = -0.3; }
-          entry.group.rotation.x = 0.08;
+          // Body rotates into the sweep (coil → uncoil)
+          entry.group.rotation.y = entry.facingAngle - 0.25 + 0.55 * p;
+          entry.group.rotation.x = -0.06 + 0.16 * p; // lean into slash
+          // Slash trail at the midpoint of sweep
+          if (cycle >= 0.32 && cycle < 0.40) this.trySpawnTrail(unitId, 'slash', time, 0.35);
+          if (cycle >= 0.42 && cycle < 0.48) this.trySpawnTrail(unitId, 'smash', time, 0.45);
+        } else if (cycle < 0.65) {
+          // Follow-through: arms extended left, body rotated
+          const p = (cycle - 0.5) / 0.15;
+          if (armRight) { armRight.rotation.x = 0.5; armRight.rotation.z = 1.2 - 0.3 * p; }
+          if (armLeft) { armLeft.rotation.x = 0.5; armLeft.rotation.z = 0.84 - 0.2 * p; }
+          entry.group.rotation.y = entry.facingAngle + 0.3 - 0.1 * p;
+          entry.group.rotation.x = 0.1;
         } else {
-          // Recovery: return to stance
-          const p = (cycle - 0.75) / 0.25;
-          if (armRight) { armRight.rotation.x = 1.6 * (1 - p); armRight.rotation.z = 0.5 * (1 - p); }
-          if (armLeft) { armLeft.rotation.x = 1.2 * (1 - p); armLeft.rotation.z = -0.3 * (1 - p); }
-          entry.group.rotation.x = 0.08 * (1 - p);
+          // Recovery: return to neutral stance
+          const p = (cycle - 0.65) / 0.35;
+          if (armRight) { armRight.rotation.x = 0.5 * (1 - p); armRight.rotation.z = 0.9 * (1 - p); }
+          if (armLeft) { armLeft.rotation.x = 0.5 * (1 - p); armLeft.rotation.z = 0.64 * (1 - p); }
+          entry.group.rotation.y = entry.facingAngle + 0.2 * (1 - p);
+          entry.group.rotation.x = 0.1 * (1 - p);
         }
-        // Power stance legs
-        if (legLeft) legLeft.rotation.x = cycle >= 0.3 && cycle < 0.65 ? 0.3 : 0;
-        if (legRight) legRight.rotation.x = cycle >= 0.3 && cycle < 0.65 ? -0.15 : 0;
+        // Power stance: wide legs during the sweep
+        if (legLeft) legLeft.rotation.x = cycle >= 0.2 && cycle < 0.6 ? 0.3 : 0;
+        if (legRight) legRight.rotation.x = cycle >= 0.2 && cycle < 0.6 ? -0.2 : 0;
         break;
       }
       default: {
@@ -2506,9 +2538,11 @@ export class UnitRenderer {
             const pos = entry.group.position;
             this.spawnBoulder(
               { x: pos.x, y: pos.y, z: pos.z },
-              entry.trebPendingTarget
+              entry.trebPendingTarget,
+              entry.trebOnImpact
             );
             entry.trebPendingTarget = null;
+            entry.trebOnImpact = undefined;
           }
 
           // Animation complete — reset to idle
@@ -2850,7 +2884,7 @@ export class UnitRenderer {
   /**
    * Fire an arrow projectile — shaft + fletching + arrowhead
    */
-  fireArrow(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string): void {
+  fireArrow(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
     const group = new THREE.Group();
     // Shaft
     const shaft = new THREE.Mesh(
@@ -2879,13 +2913,13 @@ export class UnitRenderer {
     this.scene.add(group);
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId });
+    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId, onImpact });
   }
 
   /**
    * Fire a magic orb — glowing sphere + orbiting sparkles + trail
    */
-  fireMagicOrb(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number, targetUnitId?: string, isAoE = false): void {
+  fireMagicOrb(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number, targetUnitId?: string, isAoE = false, onImpact?: () => void): void {
     const group = new THREE.Group();
     // Core glowing orb
     const core = new THREE.Mesh(
@@ -2917,13 +2951,13 @@ export class UnitRenderer {
     this.scene.add(group);
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.6, targetUnitId });
+    this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.6, targetUnitId, onImpact });
   }
 
   /**
    * Fire a generic projectile (legacy fallback)
    */
-  fireProjectile(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number = 0xFF8800, targetUnitId?: string): void {
+  fireProjectile(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number = 0xFF8800, targetUnitId?: string, onImpact?: () => void): void {
     const arrowGeo = new THREE.BoxGeometry(0.05, 0.05, 0.2);
     const arrowMat = new THREE.MeshBasicMaterial({ color });
     const arrow = new THREE.Mesh(arrowGeo, arrowMat);
@@ -2931,7 +2965,7 @@ export class UnitRenderer {
     this.scene.add(arrow);
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-    this.projectiles.push({ mesh: arrow, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId });
+    this.projectiles.push({ mesh: arrow, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId, onImpact });
   }
 
   /**
@@ -3127,7 +3161,7 @@ export class UnitRenderer {
    * Fire a boulder (trebuchet/catapult) — queues the shot so it syncs with the throw animation.
    * The actual boulder spawns when the arm reaches the release point in animateAttacking.
    */
-  fireBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }): void {
+  fireBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, onImpact?: () => void): void {
     // Find the siege unit at this position and queue the fire
     for (const [, entry] of this.unitMeshes) {
       if ((entry.unitType === UnitType.TREBUCHET || entry.unitType === UnitType.CATAPULT) &&
@@ -3136,15 +3170,16 @@ export class UnitRenderer {
           !entry.trebPendingTarget) {
         entry.trebFireStart = performance.now() / 1000;
         entry.trebPendingTarget = { ...toPos };
+        entry.trebOnImpact = onImpact;
         return;
       }
     }
     // Fallback: no matching unit found, fire immediately
-    this.spawnBoulder(fromPos, toPos);
+    this.spawnBoulder(fromPos, toPos, onImpact);
   }
 
   /** Actually spawn the boulder projectile (called at the animation release point) */
-  private spawnBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }): void {
+  private spawnBoulder(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, onImpact?: () => void): void {
     const boulderGroup = new THREE.Group();
     const stoneGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     const stoneMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
@@ -3162,7 +3197,7 @@ export class UnitRenderer {
     this.scene.add(boulderGroup);
     const startPos = new THREE.Vector3(fromPos.x, launchY, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
-    this.projectiles.push({ mesh: boulderGroup as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.9, arcHeight: 5 });
+    this.projectiles.push({ mesh: boulderGroup as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.9, arcHeight: 5, onImpact });
   }
 
   /**
@@ -3243,6 +3278,8 @@ export class UnitRenderer {
             1, magicCol
           );
         }
+        // Fire impact callback (for deferred damage visuals)
+        if (proj.onImpact) proj.onImpact();
         toRemove.push(i);
       }
     }
@@ -3264,6 +3301,29 @@ export class UnitRenderer {
   /**
    * Show damage effect at target position (red particles bursting outward)
    */
+  /**
+   * Queue a visual effect to execute after a delay (for melee attack sync)
+   */
+  queueDeferredEffect(delayMs: number, callback: () => void): void {
+    this.deferredEffects.push({ executeAt: performance.now() + delayMs, callback });
+  }
+
+  /**
+   * Process deferred visual effects (call in game loop)
+   */
+  updateDeferredEffects(): void {
+    const now = performance.now();
+    const remaining: typeof this.deferredEffects = [];
+    for (const effect of this.deferredEffects) {
+      if (now >= effect.executeAt) {
+        effect.callback();
+      } else {
+        remaining.push(effect);
+      }
+    }
+    this.deferredEffects = remaining;
+  }
+
   showDamageEffect(worldPos: { x: number; y: number; z: number }): void {
     const particleCount = 3 + Math.floor(Math.random() * 3); // 3-5 particles
 
@@ -3344,13 +3404,11 @@ export class UnitRenderer {
   }
 
   /**
-   * Billboard health bars to face camera
+   * Billboard health bars to face camera (sprites auto-billboard, so this is now a no-op
+   * kept for API compatibility in case other elements need billboarding later)
    */
-  updateBillboards(camera: THREE.Camera): void {
-    for (const entry of this.unitMeshes.values()) {
-      entry.healthBar.lookAt(camera.position);
-      entry.healthBarBg.lookAt(camera.position);
-    }
+  updateBillboards(_camera: THREE.Camera): void {
+    // Sprites are inherently camera-facing — no manual lookAt needed
   }
 
   dispose(): void {
@@ -3365,6 +3423,7 @@ export class UnitRenderer {
       });
     }
     this.projectiles = [];
+    this.deferredEffects = [];
 
     // Clean up units
     for (const unitId of this.unitMeshes.keys()) {

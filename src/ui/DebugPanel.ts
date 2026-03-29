@@ -428,38 +428,64 @@ export class DebugPanel {
     mirrorRow.appendChild(mirrorLabel);
     container.appendChild(mirrorRow);
 
-    // Presets row
-    const presetSection = document.createElement('div');
-    presetSection.style.cssText = 'font-size:10px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;';
-    presetSection.textContent = 'Presets';
-    container.appendChild(presetSection);
-
-    const presetRow = document.createElement('div');
-    presetRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px;';
-    for (const preset of ARMY_PRESETS) {
-      const btn = document.createElement('button');
-      btn.style.cssText = `
-        background:#333; color:#ccc; border:1px solid #555; padding:2px 6px;
+    // Helper to build a preset row for a given team
+    const buildPresetRow = (team: 'blue' | 'red' | 'both', color: string): HTMLElement => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;';
+      for (const preset of ARMY_PRESETS) {
+        const btn = document.createElement('button');
+        btn.style.cssText = `
+          background:#333; color:#ccc; border:1px solid ${color}44; padding:2px 6px;
+          font-size:9px; font-family:'Courier New',monospace; border-radius:3px; cursor:pointer;
+        `;
+        btn.textContent = preset.label;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (team === 'both' || team === 'blue') this.armyComp.blue = preset.comp();
+          if (team === 'both' || team === 'red') this.armyComp.red = preset.comp();
+          this.rebuildContent();
+        });
+        btn.addEventListener('mouseenter', () => { btn.style.background = '#555'; });
+        btn.addEventListener('mouseleave', () => { btn.style.background = '#333'; });
+        row.appendChild(btn);
+      }
+      // Clear All button
+      const clearBtn = document.createElement('button');
+      clearBtn.style.cssText = `
+        background:#333; color:#888; border:1px solid #55555544; padding:2px 6px;
         font-size:9px; font-family:'Courier New',monospace; border-radius:3px; cursor:pointer;
       `;
-      btn.textContent = preset.label;
-      btn.addEventListener('click', (e) => {
+      clearBtn.textContent = 'Clear All';
+      clearBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        this.armyComp.blue = preset.comp();
-        if (this.mirrorMode) this.armyComp.red = preset.comp();
+        const empty = COMBAT_UNIT_DEFS.map(d => ({ type: d.type, count: 0 }));
+        if (team === 'both' || team === 'blue') this.armyComp.blue = empty;
+        if (team === 'both' || team === 'red') this.armyComp.red = empty.map(d => ({ ...d }));
         this.rebuildContent();
       });
-      btn.addEventListener('mouseenter', () => { btn.style.background = '#555'; });
-      btn.addEventListener('mouseleave', () => { btn.style.background = '#333'; });
-      presetRow.appendChild(btn);
-    }
-    container.appendChild(presetRow);
+      clearBtn.addEventListener('mouseenter', () => { clearBtn.style.background = '#555'; });
+      clearBtn.addEventListener('mouseleave', () => { clearBtn.style.background = '#333'; });
+      row.appendChild(clearBtn);
+      return row;
+    };
 
-    // Build team editors
-    this.buildTeamEditor(container, 'blue', '#3498db', 'BLUE TEAM');
+    if (this.mirrorMode) {
+      // Single preset row that applies to both teams
+      const presetSection = document.createElement('div');
+      presetSection.style.cssText = 'font-size:10px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;';
+      presetSection.textContent = 'Presets';
+      container.appendChild(presetSection);
+      container.appendChild(buildPresetRow('both', '#ff9800'));
+    }
+
+    // Build team editors (with inline presets when not mirrored)
     if (!this.mirrorMode) {
-      this.buildTeamEditor(container, 'red', '#e74c3c', 'RED TEAM');
+      // Blue presets + editor
+      this.buildTeamEditor(container, 'blue', '#3498db', 'BLUE TEAM', buildPresetRow('blue', '#3498db'));
+      // Red presets + editor
+      this.buildTeamEditor(container, 'red', '#e74c3c', 'RED TEAM', buildPresetRow('red', '#e74c3c'));
     } else {
+      this.buildTeamEditor(container, 'blue', '#3498db', 'BLUE TEAM');
       const note = document.createElement('div');
       note.style.cssText = 'color:#555;font-size:10px;font-style:italic;margin-top:8px;padding:4px;';
       note.textContent = 'Red team mirrors blue (disable Mirror Mode to edit separately)';
@@ -484,13 +510,16 @@ export class DebugPanel {
     container.appendChild(applyNote);
   }
 
-  private buildTeamEditor(container: HTMLElement, team: 'blue' | 'red', color: string, title: string): void {
+  private buildTeamEditor(container: HTMLElement, team: 'blue' | 'red', color: string, title: string, presetRow?: HTMLElement): void {
     const teamComp = team === 'blue' ? this.armyComp.blue : this.armyComp.red;
 
     const header = document.createElement('div');
     header.style.cssText = `font-size:10px;color:${color};text-transform:uppercase;letter-spacing:1px;margin-top:6px;margin-bottom:4px;font-weight:bold;`;
     header.textContent = title;
     container.appendChild(header);
+
+    // Inline preset row for this team (when not mirrored)
+    if (presetRow) container.appendChild(presetRow);
 
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;grid-template-columns:repeat(2,1fr);gap:2px;';

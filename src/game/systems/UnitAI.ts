@@ -520,20 +520,22 @@ export class UnitAI {
           if (enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
 
-            // Ranged kiting: flee from melee enemies that are too close
-            if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
-              // Save post before kiting
-              if (!unit._postPosition) {
-                unit._postPosition = { ...unit.position };
-              }
-              const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
-              if (fleeTile) {
-                CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
-                UnitAI.commandMove(unit, fleeTile, map);
-                unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
-                return;
-              } else {
-                CombatLog.logKite(unit, enemy, false);
+            // Ranged kiting: flee from ANY melee enemy within 2 hexes (not just current target)
+            if (UnitAI.isRangedKiter(unit.type)) {
+              const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+              if (meleeThreat) {
+                if (!unit._postPosition) {
+                  unit._postPosition = { ...unit.position };
+                }
+                const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
+                if (fleeTile) {
+                  CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
+                  UnitAI.commandMove(unit, fleeTile, map);
+                  unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
+                  return;
+                } else {
+                  CombatLog.logKite(unit, meleeThreat, false);
+                }
               }
             }
 
@@ -588,16 +590,17 @@ export class UnitAI {
 
           if (UnitAI.isRangedKiter(unit.type) && enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
-            // Ranged kiters in AGGRESSIVE: engage but still kite melee threats
-            if (dist <= 2 && enemy.stats.range <= 1) {
-              const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
+            // Ranged kiters in AGGRESSIVE: engage but still kite ANY melee threat nearby
+            const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+            if (meleeThreat) {
+              const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
               if (fleeTile) {
-                CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
+                CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
                 UnitAI.commandMove(unit, fleeTile, map);
                 unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
                 return;
               } else {
-                CombatLog.logKite(unit, enemy, false);
+                CombatLog.logKite(unit, meleeThreat, false);
               }
             }
             if (dist <= unit.stats.range) {
@@ -660,16 +663,19 @@ export class UnitAI {
       if (enemy) {
         const dist = Pathfinder.heuristic(unit.position, enemy.position);
 
-        // AI ranged kiters flee melee threats
-        if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
-          const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
-          if (fleeTile) {
-            CombatLog.logKite(unit, enemy, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
-            UnitAI.commandMove(unit, fleeTile, map);
-            unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
-            return;
-          } else {
-            CombatLog.logKite(unit, enemy, false);
+        // AI ranged kiters flee ANY melee threat nearby (not just current target)
+        if (UnitAI.isRangedKiter(unit.type)) {
+          const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+          if (meleeThreat) {
+            const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
+            if (fleeTile) {
+              CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
+              UnitAI.commandMove(unit, fleeTile, map);
+              unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
+              return;
+            } else {
+              CombatLog.logKite(unit, meleeThreat, false);
+            }
           }
         }
 
@@ -1720,8 +1726,9 @@ export class UnitAI {
 
     const dist = Pathfinder.heuristic(unit.position, target.position);
 
-    // Ranged kiting: if a melee enemy is too close, fire then reposition
-    if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && target.stats.range <= 1 && map) {
+    // Ranged kiting: if ANY melee enemy is too close, fire then reposition
+    const meleeThreatAtk = (UnitAI.isRangedKiter(unit.type) && map) ? UnitAI.findNearestMeleeThreat(unit, allUnits, 2) : null;
+    if (meleeThreatAtk) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
         const result = CombatSystem.resolve(unit, target, allUnits);
@@ -1758,15 +1765,15 @@ export class UnitAI {
           return;
         }
       }
-      // Now kite away
-      const fleeTile = UnitAI.findKiteTile(unit, target, map);
+      // Now kite away from the melee threat
+      const fleeTile = UnitAI.findKiteTile(unit, meleeThreatAtk, map!);
       if (fleeTile) {
-        CombatLog.logKite(unit, target, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
-        UnitAI.commandMove(unit, fleeTile, map);
+        CombatLog.logKite(unit, meleeThreatAtk, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
+        UnitAI.commandMove(unit, fleeTile, map!);
         unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
         return;
       } else {
-        CombatLog.logKite(unit, target, false);
+        CombatLog.logKite(unit, meleeThreatAtk, false);
       }
     }
 
@@ -1990,6 +1997,25 @@ export class UnitAI {
       }
     }
     return bestEnemy;
+  }
+
+  /**
+   * Find the nearest melee enemy within kiteRange hexes. Used by ranged kiters to
+   * detect threats independently of findBestTarget (which may pick a ranged target).
+   */
+  private static findNearestMeleeThreat(unit: Unit, allUnits: Unit[], kiteRange: number): Unit | null {
+    let closest: Unit | null = null;
+    let closestDist = Infinity;
+    for (const other of allUnits) {
+      if (other.owner === unit.owner || other.state === UnitState.DEAD) continue;
+      if (other.stats.range > 1) continue; // Only melee threats
+      const dist = Pathfinder.heuristic(unit.position, other.position);
+      if (dist <= kiteRange && dist < closestDist) {
+        closestDist = dist;
+        closest = other;
+      }
+    }
+    return closest;
   }
 
   /**
