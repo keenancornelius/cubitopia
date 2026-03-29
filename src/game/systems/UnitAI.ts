@@ -1534,9 +1534,14 @@ export class UnitAI {
             unit.command = { type: CommandType.ATTACK, targetPosition: threat.position, targetUnitId: threat.id };
             return;
           } else if (isAttackMove || unit.stance === UnitStance.AGGRESSIVE) {
-            // Close enough to chase — redirect
-            UnitAI.commandAttack(unit, threat.position, threat.id, map);
-            return;
+            // Close enough to chase — redirect, but ONLY if switching to a different target.
+            // Re-pathing to the same target every frame resets _pathIndex and freezes the unit.
+            const alreadyChasingThis = unit.command?.targetUnitId === threat.id;
+            if (!alreadyChasingThis) {
+              UnitAI.commandAttack(unit, threat.position, threat.id, map);
+              return;
+            }
+            // Already chasing this target — let movement continue
           }
         }
       }

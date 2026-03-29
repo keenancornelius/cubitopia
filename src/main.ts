@@ -1787,6 +1787,17 @@ class Cubitopia {
       });
     }
     this.wallMeshes = [];
+    // Clear gate meshes from scene
+    for (const gg of this.gateMeshes) {
+      this.renderer.scene.remove(gg);
+      gg.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (child.material instanceof THREE.Material) child.material.dispose();
+        }
+      });
+    }
+    this.gateMeshes = [];
     // Clear rally point flags
     for (const [, flagGroup] of this.rallyFlagMeshes) {
       this.renderer.scene.remove(flagGroup);
@@ -2280,6 +2291,7 @@ class Cubitopia {
 
     // Block base tiles so pathfinder routes units around them
     Pathfinder.blockedTiles = this.getBaseTiles();
+    Pathfinder.gateTiles.clear();
 
     // Generate coordinated keep wall plans for both players' builders
     UnitAI.generateKeepWallPlan(0, p1BaseCoord, map);
