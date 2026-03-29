@@ -27,6 +27,7 @@ import BuildingTooltipController from './game/systems/BuildingTooltipController'
 import type { TooltipOps } from './game/systems/BuildingTooltipController';
 import BlueprintSystem from './game/systems/BlueprintSystem';
 import type { BlueprintOps } from './game/systems/BlueprintSystem';
+import { generateFormation, generateBoxFormation, getUnitFormationPriority, getHexRing } from './game/systems/FormationSystem';
 import {
   EngineConfig,
   CameraConfig,
@@ -1034,10 +1035,10 @@ class Cubitopia {
       // Outermost slots go to tanky units (low priority value)
       // Innermost slots go to ranged/protected units (high priority value)
       const sortedSelected = [...selected].sort((a, b) =>
-        this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
+        getUnitFormationPriority(a) - getUnitFormationPriority(b)
       );
 
-      const formationSlots = this.generateFormationTyped(hexCoord, sortedSelected.length, this.selectedFormation);
+      const formationSlots = generateFormation(hexCoord, sortedSelected.length, this.selectedFormation, this.currentMap!.tiles);
       for (let i = 0; i < sortedSelected.length; i++) {
         const unit = sortedSelected[i];
         (unit as any)._playerCommanded = true;
@@ -1050,52 +1051,6 @@ class Cubitopia {
     const elev = this.getElevation(hexCoord);
     this.tileHighlighter.showMovementRange([hexCoord], () => elev);
     setTimeout(() => this.tileHighlighter.clearMovementRange(), 500);
-  }
-
-  /**
-   * Generate military formation positions around a center hex.
-   * Places the first unit at center, then fills outward in concentric rings.
-   * Prefers a tight rectangular block formation (like real infantry).
-   */
-  private generateFormation(center: HexCoord, count: number): HexCoord[] {
-    const slots: HexCoord[] = [center]; // First unit goes to the exact target
-    if (count <= 1) return slots;
-
-    // Build rings of hex neighbors outward from center
-    for (let radius = 1; slots.length < count && radius <= 5; radius++) {
-      const ring = this.getHexRing(center, radius);
-      // Sort ring tiles by distance to center (tightest packing first)
-      ring.sort((a, b) => {
-        const da = Math.abs(a.q - center.q) + Math.abs(a.r - center.r);
-        const db = Math.abs(b.q - center.q) + Math.abs(b.r - center.r);
-        return da - db;
-      });
-      for (const hex of ring) {
-        if (slots.length >= count) break;
-        const key = `${hex.q},${hex.r}`;
-        const tile = this.currentMap?.tiles.get(key);
-        if (!tile) continue;
-        if (this.isWaterTerrain(tile.terrain) || tile.terrain === TerrainType.FOREST ||
-            tile.elevation >= 10) continue;
-        if (Pathfinder.blockedTiles.has(key)) continue;
-        slots.push(hex);
-      }
-    }
-    return slots;
-  }
-
-  /** Get all hex coordinates on a ring at the given radius from center */
-  private getHexRing(center: HexCoord, radius: number): HexCoord[] {
-    const ring: HexCoord[] = [];
-    for (let dq = -radius; dq <= radius; dq++) {
-      for (let dr = -radius; dr <= radius; dr++) {
-        // Only include tiles on the ring perimeter
-        if (Math.abs(dq) === radius || Math.abs(dr) === radius) {
-          ring.push({ q: center.q + dq, r: center.r + dr });
-        }
-      }
-    }
-    return ring;
   }
 
   /** Find enemy at or very near the target hex (within 1 tile for easier clicking) */
@@ -3186,109 +3141,6 @@ class Cubitopia {
     this.hud.showNotification(`Formation: ${label}`, '#8e44ad');
   }
 
-  /** Generate formation positions based on selected formation type */
-  private generateFormationTyped(center: HexCoord, count: number, formation: FormationType): HexCoord[] {
-    if (count <= 1) return [center];
-
-    switch (formation) {
-      case FormationType.LINE:
-        return this.generateLineFormation(center, count);
-      case FormationType.BOX:
-        return this.generateFormation(center, count); // existing box/ring formation
-      case FormationType.WEDGE:
-        return this.generateWedgeFormation(center, count);
-      case FormationType.CIRCLE:
-        return this.generateCircleFormation(center, count);
-      default:
-        return this.generateFormation(center, count);
-    }
-  }
-
-  private generateLineFormation(center: HexCoord, count: number): HexCoord[] {
-    const slots: HexCoord[] = [];
-    const half = Math.floor(count / 2);
-    for (let i = 0; i < count; i++) {
-      const offset = i - half;
-      const q = center.q;
-      const r = center.r + offset;
-      const key = `${q},${r}`;
-      const tile = this.currentMap?.tiles.get(key);
-      if (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.MOUNTAIN
-          && !Pathfinder.blockedTiles.has(key)) {
-        slots.push({ q, r });
-      } else {
-        slots.push(center); // fallback
-      }
-    }
-    return slots;
-  }
-
-  private generateWedgeFormation(center: HexCoord, count: number): HexCoord[] {
-    const slots: HexCoord[] = [center];
-    let row = 1;
-    while (slots.length < count) {
-      // Each row has (row+1) units, spread diagonally
-      for (let col = -row; col <= row && slots.length < count; col++) {
-        const q = center.q - row;
-        const r = center.r + col;
-        const key = `${q},${r}`;
-        const tile = this.currentMap?.tiles.get(key);
-        if (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.MOUNTAIN
-            && !Pathfinder.blockedTiles.has(key)) {
-          slots.push({ q, r });
-        }
-      }
-      row++;
-      if (row > 6) break;
-    }
-    return slots;
-  }
-
-  private generateCircleFormation(center: HexCoord, count: number): HexCoord[] {
-    const slots: HexCoord[] = [];
-    // Place all units on concentric rings (no center unit)
-    for (let radius = 1; slots.length < count && radius <= 5; radius++) {
-      const ring = this.getHexRing(center, radius);
-      // Distribute evenly around the ring
-      const step = Math.max(1, Math.floor(ring.length / Math.min(count - slots.length, ring.length)));
-      for (let i = 0; i < ring.length && slots.length < count; i += step) {
-        const hex = ring[i];
-        const key = `${hex.q},${hex.r}`;
-        const tile = this.currentMap?.tiles.get(key);
-        if (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.MOUNTAIN
-            && !Pathfinder.blockedTiles.has(key)) {
-          slots.push(hex);
-        }
-      }
-    }
-    return slots.length > 0 ? slots : [center];
-  }
-
-  // ===================== UNIT TYPE PRIORITY FOR FORMATIONS =====================
-
-  /**
-   * Get the priority order for a unit type in formations.
-   * Lower values = outer positions (tanky units like paladins).
-   * Higher values = inner positions (ranged/protected units like archers).
-   * This is used to sort units before assigning formation slots.
-   */
-  private getUnitFormationPriority(unit: Unit): number {
-    switch (unit.type) {
-      case UnitType.PALADIN:       return 0; // Outermost, front line
-      case UnitType.WARRIOR:        return 1; // Melee fighters
-      case UnitType.RIDER:          return 2; // Flankers
-      case UnitType.LUMBERJACK:
-      case UnitType.BUILDER:
-      case UnitType.VILLAGER:       return 3; // Workers, middle
-      case UnitType.ARCHER:
-      case UnitType.MAGE:           return 4; // Ranged, more protected
-      case UnitType.CATAPULT:
-      case UnitType.TREBUCHET:
-      case UnitType.SCOUT:          return 5; // Innermost, center
-      default:                      return 3; // Default to middle
-    }
-  }
-
   // ===================== RESPAWN UNITS =====================
 
   private respawnSelectedUnits(): void {
@@ -3406,10 +3258,10 @@ class Cubitopia {
     const allUnits = [...nearbyUnits, newUnit];
 
     // Sort by type priority (paladins outer, archers inner)
-    allUnits.sort((a, b) => this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b));
+    allUnits.sort((a, b) => getUnitFormationPriority(a) - getUnitFormationPriority(b));
 
     // Generate formation slots for all units around the rally point
-    const formationSlots = this.generateFormationTyped(rally, allUnits.length, FormationType.BOX);
+    const formationSlots = generateFormation(rally, allUnits.length, FormationType.BOX, this.currentMap!.tiles);
 
     // Return the slot for the new unit (it's at the end of the sorted list)
     const newUnitIndex = allUnits.length - 1;
