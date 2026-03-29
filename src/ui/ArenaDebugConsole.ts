@@ -48,6 +48,13 @@ export class CombatLog {
     CombatLog.events = [];
   }
 
+  /** Force-reset all events + dedup maps and (re-)enable logging. Use at new game start. */
+  static reset(): void {
+    CombatLog.clear();
+    CombatLog.enabled = true;
+    CombatLog.startTime = performance.now();
+  }
+
   static disable(): void {
     CombatLog.enabled = false;
   }

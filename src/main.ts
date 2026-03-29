@@ -57,7 +57,8 @@ import {
   MapType,
 } from './types';
 import { getPreset, generateArenaMap, ArenaMap } from './game/MapPresets';
-import { ArenaDebugConsole, CombatLog } from './ui/ArenaDebugConsole';
+import { CombatLog } from './ui/ArenaDebugConsole';
+import { DebugPanel } from './ui/DebugPanel';
 
 // --- Configuration ---
 
@@ -122,7 +123,7 @@ class Cubitopia {
   private menuController!: MenuController;
   private debugController!: DebugController;
   private sound: SoundManager;
-  private arenaDebugConsole: ArenaDebugConsole;
+  private debugPanel: DebugPanel;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -142,7 +143,7 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
     this.sound = new SoundManager();
-    this.arenaDebugConsole = new ArenaDebugConsole();
+    this.debugPanel = new DebugPanel();
     this.menuController = new MenuController({
       onStartGame: (mode, mapType) => { this.gameMode = mode; this.mapType = mapType; this.startNewGame(); },
       onPlayAgain: () => this.regenerateMap(),
@@ -245,7 +246,29 @@ class Cubitopia {
     this.hud.onDebugClearTrees(() => this.debugController.clearTrees());
     this.hud.onDebugClearStones(() => this.debugController.clearStones());
     this.hud.onDebugKillSelected(() => this.respawnSelectedUnits());
-    this.hud.onDebugToggleCombatMonitor(() => { this.arenaDebugConsole.setUnits(this.allUnits); this.arenaDebugConsole.toggle(); });
+    // Old combat monitor toggle removed — now part of unified DebugPanel
+
+    // Wire unified debug panel callbacks
+    this.debugPanel.setCallbacks({
+      getFlag: (key) => (this.hud.debugFlags as any)[key] ?? false,
+      toggleFlag: (key) => { (this.hud.debugFlags as any)[key] = !(this.hud.debugFlags as any)[key]; },
+      getGameSpeed: () => this.hud.gameSpeed,
+      setGameSpeed: (s) => { this.hud.gameSpeed = s; this.gameSpeed = s; this.hud.showNotification(`Speed: ${s}x`, '#00bcd4'); },
+      getSpawnCount: () => (this.hud as any).debugSpawnCount ?? 1,
+      setSpawnCount: (n) => { (this.hud as any).debugSpawnCount = n; },
+      giveResources: () => this.debugController.giveResources(),
+      killAllEnemy: () => this.debugController.killAllEnemy(),
+      damageBase: (owner, amount) => this.debugController.damageBase(owner, amount),
+      healSelected: () => this.debugController.healSelected(),
+      killSelected: () => this.respawnSelectedUnits(),
+      buffSelected: (stat) => this.debugController.buffSelected(stat),
+      clearTrees: () => this.debugController.clearTrees(),
+      clearStones: () => this.debugController.clearStones(),
+      instantWin: () => this.debugController.instantWin(),
+      instantLose: () => this.debugController.instantLose(),
+      spawnUnit: (type, count) => this.debugController.spawnUnit(type, count),
+      spawnEnemy: (type, count) => this.debugController.spawnEnemyUnit(type, count),
+    });
 
     // Selection changed
     this.selectionManager.onSelect((units) => {
@@ -323,8 +346,8 @@ class Cubitopia {
       if (e.key === '6') this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager');
       if (e.key === '7') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
       if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
-      if (e.key === '`') this.hud.toggleDebugPanel();
-      if (e.key === 'F9') { this.arenaDebugConsole.setUnits(this.allUnits); this.arenaDebugConsole.toggle(); }
+      if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
+      if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
     });
 
     // Ghost preview on mousemove (for all placement modes)
@@ -1829,25 +1852,22 @@ class Cubitopia {
     if (isArena) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
       const arenaCenter = Math.floor(MAP_SIZE / 2);
-      // One of each combat unit type — unified roster, no Phase 1 separation
-      const armyDefs: { type: UnitType; count: number }[] = [
-        { type: UnitType.WARRIOR, count: 1 },
-        { type: UnitType.ARCHER, count: 1 },
-        { type: UnitType.RIDER, count: 1 },
-        { type: UnitType.PALADIN, count: 1 },
-        { type: UnitType.MAGE, count: 1 },
-        { type: UnitType.TREBUCHET, count: 1 },
-        { type: UnitType.SCOUT, count: 1 },
-        { type: UnitType.HEALER, count: 1 },
-        { type: UnitType.ASSASSIN, count: 1 },
-        { type: UnitType.SHIELDBEARER, count: 1 },
-        { type: UnitType.BERSERKER, count: 1 },
-        { type: UnitType.BATTLEMAGE, count: 1 },
+      // Army compositions from debug panel (Army tab), defaults to 1 of each
+      const armyComp = this.debugPanel.getArmyComposition();
+      const blueArmyDefs = armyComp.blue.length > 0 ? armyComp.blue : [
+        { type: UnitType.WARRIOR, count: 1 }, { type: UnitType.ARCHER, count: 1 },
+        { type: UnitType.RIDER, count: 1 }, { type: UnitType.PALADIN, count: 1 },
+        { type: UnitType.MAGE, count: 1 }, { type: UnitType.TREBUCHET, count: 1 },
+        { type: UnitType.SCOUT, count: 1 }, { type: UnitType.HEALER, count: 1 },
+        { type: UnitType.ASSASSIN, count: 1 }, { type: UnitType.SHIELDBEARER, count: 1 },
+        { type: UnitType.BERSERKER, count: 1 }, { type: UnitType.BATTLEMAGE, count: 1 },
         { type: UnitType.GREATSWORD, count: 1 },
       ];
+      const redArmyDefs = armyComp.red.length > 0 ? armyComp.red : blueArmyDefs;
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
+        const defs = owner === 0 ? blueArmyDefs : redArmyDefs;
         let idx = 0;
-        for (const def of armyDefs) {
+        for (const def of defs) {
           for (let i = 0; i < def.count; i++) {
             // Spread units INWARD toward center from their base
             // owner 0 (blue, left) spreads +q; owner 1 (red, right) spreads -q
@@ -1950,9 +1970,10 @@ class Cubitopia {
     UnitAI.siloPositions.set(1, p2BaseCoord);
 
     // Auto-enable combat logging in Arena mode so events are captured from frame 1
+    // reset() force-clears old events + dedup maps so new games start clean
     if (isArena) {
-      CombatLog.enable();
-      this.arenaDebugConsole.setUnits(this.allUnits);
+      CombatLog.reset();
+      this.debugPanel.setUnits(this.allUnits);
     }
 
     // Block base tiles so pathfinder routes units around them
