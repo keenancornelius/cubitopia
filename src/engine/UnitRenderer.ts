@@ -643,6 +643,9 @@ export class UnitRenderer {
         tg.add(xbeam);
 
         // ── THROWING ARM (pivots on X axis at crossbeam) ──
+        // Real trebuchet: counterweight on SHORT arm (forward/+Z toward enemy),
+        // sling on LONG arm (behind/-Z). At rest, sling hangs back; when fired,
+        // counterweight drops and sling swings forward over the top.
         const armPivot = new THREE.Group();
         armPivot.name = 'throw-arm';
         armPivot.position.set(0, 1.25, 0.1);
@@ -652,33 +655,33 @@ export class UnitRenderer {
           new THREE.BoxGeometry(0.1, 0.1, 1.5),
           new THREE.MeshLambertMaterial({ color: WL })
         );
-        beam.position.z = 0.2;
+        beam.position.z = -0.15; // center slightly behind pivot (long arm = rear)
         armPivot.add(beam);
 
-        // Counterweight
+        // Counterweight on SHORT arm (forward, toward enemy +Z)
         const cw = new THREE.Mesh(
           new THREE.BoxGeometry(0.24, 0.3, 0.24),
           new THREE.MeshLambertMaterial({ color: 0x3a3a3a })
         );
-        cw.position.set(0, -0.18, -0.55);
+        cw.position.set(0, -0.18, 0.5);
         armPivot.add(cw);
 
-        // Sling basket
+        // Sling basket on LONG arm (behind, -Z rear)
         const sling = new THREE.Mesh(
           new THREE.BoxGeometry(0.2, 0.08, 0.2),
           new THREE.MeshLambertMaterial({ color: RP })
         );
-        sling.position.set(0, -0.08, 0.92);
+        sling.position.set(0, -0.08, -0.88);
         armPivot.add(sling);
 
-        // Boulder in sling
+        // Boulder in sling (at rest, sitting behind the machine)
         armPivot.add((() => {
           const b = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.14), new THREE.MeshLambertMaterial({ color: 0x888888 }));
-          b.position.set(0, 0.02, 0.92);
+          b.position.set(0, 0.02, -0.88);
           return b;
         })());
 
-        // Rope lashings
+        // Rope lashings at pivot
         armPivot.add((() => {
           const r = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.12), new THREE.MeshLambertMaterial({ color: RP }));
           return r;
@@ -1583,26 +1586,29 @@ export class UnitRenderer {
         break;
       }
       case UnitType.TREBUCHET: {
-        // Trebuchet firing: arm pivots on X axis (swings forward along Z)
+        // Trebuchet firing: arm pivots on X axis. Sling is on -Z (rear/long arm).
+        // Winch: counterweight (+Z) rises → sling (-Z) drops behind.
+        // Fire: counterweight drops → sling whips forward over the top.
+        // Rotation around X: positive = sling drops back, negative = sling swings forward.
         const throwArm = entry.group.getObjectByName('throw-arm');
-        const speed = 0.7; // slow, powerful cycle
+        const speed = 0.7;
         const cycle = (time * speed) % 1;
         if (throwArm) {
           if (cycle < 0.45) {
-            // Winching back: counterweight rises, sling end drops
+            // Winching: counterweight pulled up, sling drops back/down
             const p = cycle / 0.45;
-            throwArm.rotation.x = 0.3 + 0.8 * p; // tilt back (sling drops behind)
+            throwArm.rotation.x = -0.3 - 0.8 * p; // sling end drops behind (-Z goes down)
           } else if (cycle < 0.58) {
-            // FIRE! Arm whips forward violently
+            // FIRE! Counterweight drops, sling whips forward over the top
             const p = (cycle - 0.45) / 0.13;
-            throwArm.rotation.x = 1.1 - 2.2 * p; // swing to -1.1 (sling flings forward)
+            throwArm.rotation.x = -1.1 + 2.2 * p; // swing to +1.1 (sling flings forward)
           } else if (cycle < 0.68) {
-            // Hold at forward/down position — arm has overswung
-            throwArm.rotation.x = -1.1;
+            // Hold at overswung forward position
+            throwArm.rotation.x = 1.1;
           } else {
-            // Slowly return to resting position
+            // Slowly return to resting
             const p = (cycle - 0.68) / 0.32;
-            throwArm.rotation.x = -1.1 + 1.4 * p; // back to 0.3
+            throwArm.rotation.x = 1.1 - 1.4 * p; // back to -0.3
           }
         }
         // Whole machine lurches forward on firing, then settles
