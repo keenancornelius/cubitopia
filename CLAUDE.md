@@ -93,7 +93,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~145 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, healer tick.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~155 lines)**. Single `UNIT_CONFIG` table per UnitType (16 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
-- `src/engine/SoundManager.ts` — **Procedural audio (~220 lines)**. Web Audio API synthesized SFX (14 sounds). Zero asset files. Melee/ranged/siege hits, death, heal, AoE splash, UI sounds.
+- `src/engine/SoundManager.ts` — **Procedural audio (~290 lines)**. Web Audio API synthesized SFX (17 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
 - `src/ui/HUD.ts` — All UI: resource panel, build buttons, help overlay, debug panel, spawn queues
 - `src/engine/UnitRenderer.ts` — 3D unit mesh generation, animations, health bars, labels (16 unit meshes)
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
@@ -387,6 +387,16 @@ UnitFactory is fully data-driven. 5 of 7 new units implemented with unique abili
 - `[DONE]` **Battlemage** — AoE splash damage to enemies within 1 hex of target
 - `[READY]` **Sea Raider** — amphibious fighter, land + water (Tidecallers unique, needs Phase 4 water tiles)
 - `[READY]` **Siege Tower** — slow, lets melee units attack over walls
+
+**Combat Visual Overhaul** — Making battles readable and satisfying:
+- `[DONE]` Range-based counter-attack enforcement (CombatSystem.ts) — out-of-range defenders can't counter
+- `[DONE]` Projectile live target tracking — arrows/boulders follow moving targets
+- `[DONE]` Unit facing toward combat targets — smooth lerp rotation during attack/chase
+- `[DONE]` Attack target hover highlight — red pulsing ring + crosshair cursor on enemy hover
+- `[DONE]` Combat strafing for melee units — circle-strafe + lunge around targets
+- `[DONE]` Weapon-specific attack animations — assassin jump-stab, berserker overhead cleave, shieldbearer bash+stab, battlemage staff slam, healer channel sway
+- `[DONE]` Swing streak VFX — slash/stab/smash trail arcs spawn on weapon strikes, fade + scale over 350ms
+- `[DONE]` Weapon-specific impact sounds — hit_pierce (sharp stab), hit_cleave (whoosh+chop), hit_blunt (bass thud) in SoundManager
 
 ### Phase 2: 4 Base Tribes (Free in Base Game) [BLOCKED on Phase 1]
 Each tribe gets: unique unit, unique building, 2-3 stat modifiers, starting bonus, passive ability, visual skin (voxel palette + building style), AI personality.

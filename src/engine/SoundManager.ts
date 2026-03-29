@@ -14,6 +14,7 @@ export interface SoundConfig {
 
 type SoundName =
   | 'hit_melee' | 'hit_ranged' | 'hit_siege'
+  | 'hit_pierce' | 'hit_cleave' | 'hit_blunt'
   | 'death' | 'heal' | 'splash_aoe'
   | 'select' | 'command' | 'build'
   | 'rage' | 'assassin_strike'
@@ -61,6 +62,9 @@ export default class SoundManager {
       case 'hit_melee':    this.synthHitMelee(vol); break;
       case 'hit_ranged':   this.synthHitRanged(vol); break;
       case 'hit_siege':    this.synthHitSiege(vol); break;
+      case 'hit_pierce':   this.synthHitPierce(vol); break;
+      case 'hit_cleave':   this.synthHitCleave(vol); break;
+      case 'hit_blunt':    this.synthHitBlunt(vol); break;
       case 'death':        this.synthDeath(vol); break;
       case 'heal':         this.synthHeal(vol); break;
       case 'splash_aoe':   this.synthSplashAoE(vol); break;
@@ -285,6 +289,66 @@ export default class SoundManager {
     crG.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
     crSrc.connect(crF).connect(crG).connect(ctx.destination);
     crSrc.start(); crSrc.stop(t + 0.7);
+  }
+
+  /** Pierce hit — sharp metallic stab with a "thunk" of penetration */
+  private synthHitPierce(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Sharp high-freq click (blade tip hitting)
+    this.envTone(this.vary(5800), 'sine', vol * 0.3, 0.001, 0.02);
+    // Short metallic scrape (bandpass noise, narrow)
+    this.filteredNoise('bandpass', 3200, 6, vol * 0.2, 0.001, 0.04);
+    // Body thud (low sine = puncture into flesh)
+    this.envTone(this.vary(160), 'sine', vol * 0.25, 0.003, 0.12, {
+      freqEnd: 90,
+    });
+    // Squelch: very brief filtered noise for "wet" texture
+    this.filteredNoise('lowpass', 800, 2, vol * 0.15, 0.005, 0.06);
+  }
+
+  /** Cleave hit — heavy whooshing arc + meaty impact */
+  private synthHitCleave(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Whoosh: wide noise sweep (air displacement)
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer!;
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'bandpass';
+    lpf.frequency.setValueAtTime(2500, t);
+    lpf.frequency.exponentialRampToValueAtTime(500, t + 0.15);
+    lpf.Q.setValueAtTime(1.5, t);
+    const whooshG = this.envGain(vol * 0.3, 0.003, 0.15);
+    src.connect(lpf).connect(whooshG).connect(ctx.destination);
+    src.start(); src.stop(t + 0.2);
+    // Heavy metallic chop (layered: low resonance + mid clang)
+    this.envTone(this.vary(200), 'triangle', vol * 0.35, 0.002, 0.2, {
+      freqEnd: 100,
+    });
+    this.envTone(this.vary(800), 'square', vol * 0.18, 0.002, 0.08, {
+      filterType: 'bandpass', filterFreq: 900, filterQ: 3,
+    });
+    // Noise crunch at impact
+    this.filteredNoise('highpass', 600, 1.5, vol * 0.22, 0.002, 0.06);
+  }
+
+  /** Blunt hit — deep bass thud + rattling overtones (shield bash, mace, staff slam) */
+  private synthHitBlunt(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Deep bass punch (sub-100 Hz)
+    this.envTone(this.vary(65), 'sine', vol * 0.45, 0.002, 0.25, {
+      freqEnd: 40,
+    });
+    // Mid-body resonance (wood/metal thud)
+    this.envTone(this.vary(320), 'triangle', vol * 0.25, 0.003, 0.15);
+    // Rattle overtones (brief inharmonic clatter)
+    this.envTone(this.vary(1800), 'square', vol * 0.1, 0.002, 0.05, {
+      filterType: 'highpass', filterFreq: 1500, filterQ: 2,
+    });
+    // Noise transient (impact crunch)
+    this.filteredNoise('lowpass', 1200, 1, vol * 0.3, 0.002, 0.07);
   }
 
   /** Death: descending harmonics fading out, hollow collapse */

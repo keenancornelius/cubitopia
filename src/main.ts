@@ -427,6 +427,49 @@ class Cubitopia {
       this.blueprintSystem.hoverGhost.rotation.y = rotation;
     });
 
+    // --- Attack target hover detection ---
+    // When player has units selected and hovers over an enemy, show attack cursor + red ring
+    let hoveredEnemyId: string | null = null;
+    canvasEl.addEventListener('mousemove', (e) => {
+      const selected = this.selectionManager.getSelectedUnits();
+      if (selected.length === 0 || !this.currentMap) {
+        if (hoveredEnemyId) {
+          this.unitRenderer.highlightAttackTarget(null);
+          canvasEl.style.cursor = '';
+          hoveredEnemyId = null;
+        }
+        return;
+      }
+
+      const rect = canvasEl.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, this.camera.camera);
+      const hexCoord = this.raycastToHex(raycaster);
+
+      if (hexCoord) {
+        const enemy = this.findEnemyAt(hexCoord, selected[0].owner);
+        if (enemy) {
+          if (hoveredEnemyId !== enemy.id) {
+            hoveredEnemyId = enemy.id;
+            this.unitRenderer.highlightAttackTarget(enemy.id);
+            canvasEl.style.cursor = 'crosshair';
+          }
+          return;
+        }
+      }
+
+      // No enemy under cursor — clear highlight
+      if (hoveredEnemyId) {
+        this.unitRenderer.highlightAttackTarget(null);
+        canvasEl.style.cursor = '';
+        hoveredEnemyId = null;
+      }
+    });
+
     // Build/Harvest/Barracks/Forestry/Masonry/Farm mode: click on tiles to place
     canvasEl.addEventListener('click', (e) => {
       // --- Debug teleport mode ---
@@ -2135,24 +2178,33 @@ class Cubitopia {
         this.unitRenderer.showDamageEffect(event.defender.worldPosition);
         this.unitRenderer.flashUnit(event.defender.id, 0.15);
 
-        // Sound effects based on attacker type
+        // Sound effects based on attacker type / weapon category
         if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
           this.sound.play('hit_siege');
         } else if (event.attacker.stats.range > 1) {
           this.sound.play('hit_ranged');
         } else if (event.attacker.type === UnitType.ASSASSIN) {
           this.sound.play('assassin_strike');
+          this.sound.play('hit_pierce');
+        } else if (event.attacker.type === UnitType.RIDER) {
+          this.sound.play('hit_pierce'); // lance thrust
+        } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK) {
+          this.sound.play('hit_cleave'); // axe / heavy weapon
+        } else if (event.attacker.type === UnitType.SHIELDBEARER || event.attacker.type === UnitType.PALADIN
+                || event.attacker.type === UnitType.BATTLEMAGE) {
+          this.sound.play('hit_blunt'); // shield bash / staff slam
         } else {
-          this.sound.play('hit_melee');
+          this.sound.play('hit_melee'); // warrior / default
         }
 
-        // Projectile VFX by attacker type
+        // Projectile VFX by attacker type — pass target ID for live tracking
+        const defId = event.defender.id;
         if (event.attacker.type === UnitType.ARCHER) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800);
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800, defId);
         } else if (event.attacker.type === UnitType.MAGE) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9);
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId);
         } else if (event.attacker.type === UnitType.BATTLEMAGE) {
-          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff);
+          this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId);
           this.sound.play('splash_aoe');
         } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
           this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition);
@@ -2228,6 +2280,17 @@ class Cubitopia {
           unit.worldPosition.z
         );
         this.unitRenderer.animateUnit(unit.id, unit.state, gameTime, unit.type);
+        // Face combat target during attack/chase + melee strafe
+        if (unit.command?.targetUnitId) {
+          const target = this.allUnits.find(u => u.id === unit.command!.targetUnitId);
+          if (target && target.state !== UnitState.DEAD) {
+            // Apply circle-strafe for melee units in attack range
+            if (unit.state === UnitState.ATTACKING) {
+              this.unitRenderer.applyCombatStrafe(unit.id, target.worldPosition, gameTime);
+            }
+            this.unitRenderer.faceTarget(unit.id, target.worldPosition);
+          }
+        }
       }
     }
 
@@ -2241,6 +2304,12 @@ class Cubitopia {
       }
     }
     this.unitRenderer.updateAggroIndicators(aggroList, gameTime);
+
+    // Update attack target hover ring (pulse + follow)
+    this.unitRenderer.updateAttackTargetRing(gameTime);
+
+    // Update swing streak trails (fade out + cleanup)
+    this.unitRenderer.updateSwingTrails(gameTime);
 
     // Update projectiles (arrows in flight)
     this.unitRenderer.updateProjectiles(delta);

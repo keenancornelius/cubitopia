@@ -56,7 +56,13 @@ export class CombatSystem {
     const defenderRatio = defenseForce / totalForce;
 
     const defenderDamage = Math.round(attackerRatio * atkStat * 4.5);
-    const attackerDamage = Math.round(defenderRatio * defStat * 3.5);
+
+    // Counter-attack: defender can only retaliate if attacker is within defender's range.
+    // Ranged units attacking from outside melee range take zero counter-damage.
+    const dist = Math.abs(attacker.position.q - defender.position.q) +
+                 Math.abs(attacker.position.r - defender.position.r);
+    const canCounter = dist <= defender.stats.range;
+    const attackerDamage = canCounter ? Math.round(defenderRatio * defStat * 3.5) : 0;
 
     const attackerHealth = attacker.currentHealth - attackerDamage;
     const defenderHealth = defender.currentHealth - defenderDamage;

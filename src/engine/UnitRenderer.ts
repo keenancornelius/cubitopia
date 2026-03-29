@@ -39,10 +39,17 @@ export class UnitRenderer {
     startTime: number;
     duration: number;
     arcHeight?: number;
+    targetUnitId?: string; // track live target position
   }> = [];
   // Aggro indicator visuals
   private aggroLines: Map<string, THREE.Line> = new Map(); // unitId → line to target
   private aggroRings: Map<string, THREE.Mesh> = new Map(); // targetId → pulsing ring
+  // Swing streak VFX trails
+  private swingTrails: Array<{
+    mesh: THREE.Mesh;
+    startTime: number;
+    duration: number;
+  }> = [];
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -1322,6 +1329,231 @@ export class UnitRenderer {
     return { z, x };
   }
 
+  private attackTargetRing: THREE.Mesh | null = null;
+  private attackTargetUnitId: string | null = null;
+
+  /** Highlight a unit as an attack target (red pulsing ring) */
+  highlightAttackTarget(unitId: string | null): void {
+    // Remove previous highlight
+    if (this.attackTargetRing) {
+      this.scene.remove(this.attackTargetRing);
+      this.attackTargetRing.geometry?.dispose();
+      this.attackTargetRing = null;
+    }
+    this.attackTargetUnitId = unitId;
+    if (!unitId) return;
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.65, 16),
+      new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide, transparent: true, opacity: 0.7 })
+    );
+    ring.name = 'attack-target-ring';
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(entry.group.position);
+    ring.position.y += 0.05;
+    this.scene.add(ring);
+    this.attackTargetRing = ring;
+  }
+
+  /** Update attack target ring position + pulse each frame */
+  updateAttackTargetRing(time: number): void {
+    if (!this.attackTargetRing || !this.attackTargetUnitId) return;
+    const entry = this.unitMeshes.get(this.attackTargetUnitId);
+    if (!entry) {
+      this.highlightAttackTarget(null);
+      return;
+    }
+    // Follow target position
+    this.attackTargetRing.position.copy(entry.group.position);
+    this.attackTargetRing.position.y += 0.05;
+    // Pulse opacity
+    const mat = this.attackTargetRing.material as THREE.MeshBasicMaterial;
+    mat.opacity = 0.4 + 0.3 * Math.sin(time * 6);
+    // Pulse scale
+    const s = 1.0 + 0.1 * Math.sin(time * 6);
+    this.attackTargetRing.scale.set(s, s, s);
+  }
+
+  /**
+   * Spawn a swing streak arc at a unit's position.
+   * type: 'slash' (wide arc), 'stab' (narrow thrust line), 'smash' (overhead arc)
+   */
+  spawnSwingTrail(unitId: string, trailType: 'slash' | 'stab' | 'smash', time: number): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+
+    let geo: THREE.BufferGeometry;
+    let color: number;
+    const duration = 0.35; // trail fades over 350ms
+
+    if (trailType === 'slash') {
+      // Wide horizontal arc — a thin curved plane
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.absarc(0, 0, 0.6, -0.8, 0.8, false);
+      shape.lineTo(0.45 * Math.cos(0.8), 0.45 * Math.sin(0.8));
+      shape.absarc(0, 0, 0.45, 0.8, -0.8, true);
+      shape.closePath();
+      geo = new THREE.ShapeGeometry(shape, 8);
+      color = 0xffffff;
+    } else if (trailType === 'stab') {
+      // Narrow thrust line — thin elongated triangle
+      geo = new THREE.BufferGeometry();
+      const verts = new Float32Array([
+        0, 0, 0,
+        0.05, 0, 0.7,
+        -0.05, 0, 0.7,
+      ]);
+      geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+      color = 0xccffff;
+    } else {
+      // Smash — vertical overhead arc
+      const shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.absarc(0, 0, 0.55, 0.3, Math.PI - 0.3, false);
+      shape.lineTo(0.4 * Math.cos(Math.PI - 0.3), 0.4 * Math.sin(Math.PI - 0.3));
+      shape.absarc(0, 0, 0.4, Math.PI - 0.3, 0.3, true);
+      shape.closePath();
+      geo = new THREE.ShapeGeometry(shape, 8);
+      color = 0xffcc44;
+    }
+
+    const mat = new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    // Position at unit's arm height, oriented by facing
+    mesh.position.copy(entry.group.position);
+    mesh.position.y += 0.6; // arm height
+    mesh.rotation.y = entry.facingAngle;
+
+    // For slash, rotate to horizontal plane
+    if (trailType === 'slash') {
+      mesh.rotation.x = -Math.PI / 2;
+    }
+
+    this.scene.add(mesh);
+    this.swingTrails.push({ mesh, startTime: time, duration });
+  }
+
+  /** Update and fade out swing trails each frame */
+  updateSwingTrails(time: number): void {
+    for (let i = this.swingTrails.length - 1; i >= 0; i--) {
+      const trail = this.swingTrails[i];
+      const elapsed = time - trail.startTime;
+      const progress = elapsed / trail.duration;
+
+      if (progress >= 1) {
+        // Remove expired trail
+        this.scene.remove(trail.mesh);
+        trail.mesh.geometry?.dispose();
+        (trail.mesh.material as THREE.Material).dispose();
+        this.swingTrails.splice(i, 1);
+      } else {
+        // Fade out + scale up slightly
+        const mat = trail.mesh.material as THREE.MeshBasicMaterial;
+        mat.opacity = 0.8 * (1 - progress);
+        const scale = 1 + progress * 0.3;
+        trail.mesh.scale.set(scale, scale, scale);
+      }
+    }
+  }
+
+  // Melee unit types that should strafe in combat
+  private static MELEE_TYPES: Set<UnitType> = new Set([
+    UnitType.WARRIOR, UnitType.RIDER, UnitType.ASSASSIN,
+    UnitType.SHIELDBEARER, UnitType.BERSERKER, UnitType.PALADIN,
+  ]);
+  // Per-unit strafe state: orbit phase offset (unique per unit)
+  private strafePhases: Map<string, number> = new Map();
+  // Track last swing trail spawn time per unit (prevent spamming)
+  private lastTrailTime: Map<string, number> = new Map();
+
+  /** Spawn a trail if enough time has passed since last one for this unit */
+  private trySpawnTrail(unitId: string, trailType: 'slash' | 'stab' | 'smash', time: number, cooldown: number): void {
+    const last = this.lastTrailTime.get(unitId) ?? 0;
+    if (time - last < cooldown) return;
+    this.lastTrailTime.set(unitId, time);
+    this.spawnSwingTrail(unitId, trailType, time);
+  }
+
+  /**
+   * Apply combat strafing offset for a melee unit attacking a target.
+   * Orbits the unit around its target at a small radius, moving in and out.
+   * Visual-only — does not alter game-state position.
+   */
+  applyCombatStrafe(unitId: string, targetWorldPos: { x: number; y: number; z: number }, time: number): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    if (!UnitRenderer.MELEE_TYPES.has(entry.unitType)) return;
+
+    // Get or create a unique phase offset for this unit (so units don't all orbit in sync)
+    if (!this.strafePhases.has(unitId)) {
+      let hash = 0;
+      for (let i = 0; i < unitId.length; i++) hash = ((hash << 5) - hash + unitId.charCodeAt(i)) | 0;
+      this.strafePhases.set(unitId, (hash % 628) / 100); // 0 to ~6.28
+    }
+    const phaseOffset = this.strafePhases.get(unitId)!;
+
+    // Orbit parameters
+    const orbitSpeed = 1.2; // radians per second
+    const orbitRadius = 0.35; // small circle-strafe radius
+    const lungeFreq = 2.5; // in-out lunge frequency
+    const lungeAmp = 0.2; // lunge depth
+
+    const angle = time * orbitSpeed + phaseOffset;
+    const dx = targetWorldPos.x - entry.group.position.x;
+    const dz = targetWorldPos.z - entry.group.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+
+    if (dist < 0.1) return; // overlapping, skip
+
+    // Tangent direction for orbit (perpendicular to target vector)
+    const nx = dx / dist;
+    const nz = dz / dist;
+    const tangentX = -nz;
+    const tangentZ = nx;
+
+    // Circle-strafe offset (perpendicular to target direction)
+    const strafeX = tangentX * Math.sin(angle) * orbitRadius;
+    const strafeZ = tangentZ * Math.sin(angle) * orbitRadius;
+
+    // Lunge in-out toward target
+    const lunge = Math.sin(time * lungeFreq + phaseOffset) * lungeAmp;
+    const lungeX = nx * lunge;
+    const lungeZ = nz * lunge;
+
+    entry.group.position.x += strafeX + lungeX;
+    entry.group.position.z += strafeZ + lungeZ;
+  }
+
+  /** Clear strafe phase for removed units */
+  clearStrafePhase(unitId: string): void {
+    this.strafePhases.delete(unitId);
+  }
+
+  /**
+   * Rotate a unit to face a target position (for combat orientation).
+   * Smooth lerp so units don't snap instantly.
+   */
+  faceTarget(unitId: string, targetWorldPos: { x: number; y: number; z: number }): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    const dx = targetWorldPos.x - entry.group.position.x;
+    const dz = targetWorldPos.z - entry.group.position.z;
+    if (dx * dx + dz * dz < 0.01) return; // too close, skip
+    const targetAngle = Math.atan2(dx, dz);
+    const angleDiff = Math.atan2(Math.sin(targetAngle - entry.facingAngle), Math.cos(targetAngle - entry.facingAngle));
+    entry.facingAngle += angleDiff * 0.2;
+    entry.group.rotation.y = entry.facingAngle;
+  }
+
   /**
    * Animate a unit based on its state and type — per-unit-type realistic animations.
    * Body stays stable; only arms, legs, and slight leans animate.
@@ -1462,38 +1694,28 @@ export class UnitRenderer {
         const speed = 2.5;
         const cycle = (time * speed) % 1;
         if (cycle < 0.3) {
-          // Cock arm back
           const p = cycle / 0.3;
           if (armRight) {
             armRight.rotation.x = -0.5 * p;
-            armRight.rotation.z = -0.3 * p; // pull to side
+            armRight.rotation.z = -0.3 * p;
           }
         } else if (cycle < 0.5) {
-          // Slash forward
           const p = (cycle - 0.3) / 0.2;
           if (armRight) {
-            armRight.rotation.x = -0.5 + 1.8 * p; // fast swing to 1.3
-            armRight.rotation.z = -0.3 + 0.6 * p; // swing across
+            armRight.rotation.x = -0.5 + 1.8 * p;
+            armRight.rotation.z = -0.3 + 0.6 * p;
           }
-          entry.group.rotation.x = 0.08 * p; // lean into slash
+          entry.group.rotation.x = 0.08 * p;
+          // Spawn slash trail at strike
+          if (cycle >= 0.35 && cycle < 0.42) this.trySpawnTrail(unitId, 'slash', time, 0.35);
         } else if (cycle < 0.65) {
-          // Hold at extended position
-          if (armRight) {
-            armRight.rotation.x = 1.3;
-            armRight.rotation.z = 0.3;
-          }
+          if (armRight) { armRight.rotation.x = 1.3; armRight.rotation.z = 0.3; }
           entry.group.rotation.x = 0.08;
         } else {
-          // Return
           const p = (cycle - 0.65) / 0.35;
-          if (armRight) {
-            armRight.rotation.x = 1.3 * (1 - p);
-            armRight.rotation.z = 0.3 * (1 - p);
-          }
+          if (armRight) { armRight.rotation.x = 1.3 * (1 - p); armRight.rotation.z = 0.3 * (1 - p); }
         }
-        // Left arm stays in guard position
         if (armLeft) armLeft.rotation.x = 0.2;
-        // Feet planted, slight lunge
         if (legLeft) legLeft.rotation.x = cycle < 0.5 ? 0.15 : 0.15 * (1 - (cycle - 0.5) * 2);
         break;
       }
@@ -1534,12 +1756,13 @@ export class UnitRenderer {
         } else if (cycle < 0.55) {
           if (armRight) armRight.rotation.x = 0.9;
           entry.group.rotation.x = 0.1;
+          // Stab trail at lance thrust
+          if (cycle >= 0.4 && cycle < 0.47) this.trySpawnTrail(unitId, 'stab', time, 0.45);
         } else {
           const p = (cycle - 0.55) / 0.45;
           if (armRight) armRight.rotation.x = 0.9 * (1 - p);
         }
-        if (armLeft) armLeft.rotation.x = 0.15; // holding reins
-        // Animate horse legs (gallop bounce)
+        if (armLeft) armLeft.rotation.x = 0.15;
         const legBackLeft = entry.group.getObjectByName('leg-back-left');
         const legBackRight = entry.group.getObjectByName('leg-back-right');
         const gallop = Math.sin(time * 6);
@@ -1555,11 +1778,13 @@ export class UnitRenderer {
         const cycle = (time * speed) % 1;
         if (cycle < 0.35) {
           const p = cycle / 0.35;
-          if (armLeft) armLeft.rotation.x = 0.8 * p; // shield forward
+          if (armLeft) armLeft.rotation.x = 0.8 * p;
           entry.group.rotation.x = 0.06 * p;
         } else if (cycle < 0.5) {
           if (armLeft) armLeft.rotation.x = 0.8;
           entry.group.rotation.x = 0.06;
+          // Slash trail at shield bash
+          if (cycle >= 0.35 && cycle < 0.42) this.trySpawnTrail(unitId, 'slash', time, 0.45);
         } else {
           const p = (cycle - 0.5) / 0.5;
           if (armLeft) armLeft.rotation.x = 0.8 * (1 - p);
@@ -1577,6 +1802,152 @@ export class UnitRenderer {
         }
         if (armLeft) armLeft.rotation.x = 0.2;
         entry.group.rotation.x = 0.05;
+        break;
+      }
+      case UnitType.ASSASSIN: {
+        // Pierce attack: fast jump-stab lunge
+        const speed = 3.0; // faster than others — assassin is quick
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.15) {
+          // Crouch: body dips down, arms pull back
+          const p = cycle / 0.15;
+          entry.group.position.y -= 0.1 * p; // crouch down
+          if (armRight) armRight.rotation.x = -0.8 * p; // pull dagger back
+          if (armLeft) armLeft.rotation.x = -0.3 * p;
+        } else if (cycle < 0.35) {
+          // Lunge forward: body jumps up and arm stabs
+          const p = (cycle - 0.15) / 0.2;
+          entry.group.position.y += 0.15 * Math.sin(p * Math.PI); // jump arc
+          entry.group.rotation.x = 0.15 * p; // lean forward into stab
+          if (armRight) {
+            armRight.rotation.x = -0.8 + 2.2 * p; // fast stab forward to +1.4
+            armRight.rotation.z = 0; // straight ahead
+          }
+          if (armLeft) armLeft.rotation.x = -0.3 + 0.5 * p;
+        } else if (cycle < 0.5) {
+          // Impact hold: arm extended, slight recoil
+          if (armRight) { armRight.rotation.x = 1.4; armRight.rotation.z = 0; }
+          entry.group.rotation.x = 0.15;
+          // Stab trail at impact
+          if (cycle >= 0.35 && cycle < 0.42) this.trySpawnTrail(unitId, 'stab', time, 0.3);
+        } else {
+          const p = (cycle - 0.5) / 0.5;
+          if (armRight) armRight.rotation.x = 1.4 * (1 - p);
+          if (armLeft) armLeft.rotation.x = 0.2 * (1 - p);
+          entry.group.rotation.x = 0.15 * (1 - p);
+        }
+        if (legLeft) legLeft.rotation.x = cycle < 0.35 ? 0.3 : 0.3 * (1 - (cycle - 0.35) / 0.65);
+        if (legRight) legRight.rotation.x = cycle < 0.35 ? -0.15 : -0.15 * (1 - (cycle - 0.35) / 0.65);
+        break;
+      }
+      case UnitType.BERSERKER: {
+        // Cleave attack: wide two-handed overhead axe swing (AoE feel)
+        const speed = 1.8; // slower, heavier
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.35) {
+          // Wind-up: both arms raise high overhead
+          const p = cycle / 0.35;
+          const raise = -1.2 * p; // arms go high behind head
+          if (armRight) {
+            armRight.rotation.x = raise;
+            armRight.rotation.z = -0.2 * p; // spread wide
+          }
+          if (armLeft) {
+            armLeft.rotation.x = raise;
+            armLeft.rotation.z = 0.2 * p;
+          }
+          entry.group.rotation.x = -0.08 * p; // lean back for wind-up
+        } else if (cycle < 0.55) {
+          // CLEAVE: both arms swing down hard in a wide arc
+          const p = (cycle - 0.35) / 0.2;
+          const swingAngle = -1.2 + 2.8 * p; // swing from -1.2 to +1.6
+          if (armRight) {
+            armRight.rotation.x = swingAngle;
+            armRight.rotation.z = -0.2 + 0.5 * p; // sweep inward
+          }
+          if (armLeft) {
+            armLeft.rotation.x = swingAngle;
+            armLeft.rotation.z = 0.2 - 0.5 * p;
+          }
+          entry.group.rotation.x = -0.08 + 0.25 * p; // lean forward into cleave
+        } else if (cycle < 0.7) {
+          // Impact: hold at extended position, body leans forward
+          if (armRight) { armRight.rotation.x = 1.6; armRight.rotation.z = 0.3; }
+          if (armLeft) { armLeft.rotation.x = 1.6; armLeft.rotation.z = -0.3; }
+          entry.group.rotation.x = 0.17;
+          // Smash trail at impact
+          if (cycle >= 0.55 && cycle < 0.62) this.trySpawnTrail(unitId, 'smash', time, 0.5);
+        } else {
+          const p = (cycle - 0.7) / 0.3;
+          if (armRight) { armRight.rotation.x = 1.6 * (1 - p); armRight.rotation.z = 0.3 * (1 - p); }
+          if (armLeft) { armLeft.rotation.x = 1.6 * (1 - p); armLeft.rotation.z = -0.3 * (1 - p); }
+          entry.group.rotation.x = 0.17 * (1 - p);
+        }
+        if (legLeft) legLeft.rotation.x = cycle >= 0.35 && cycle < 0.6 ? 0.25 : 0;
+        if (legRight) legRight.rotation.x = cycle >= 0.35 && cycle < 0.6 ? -0.1 : 0;
+        break;
+      }
+      case UnitType.SHIELDBEARER: {
+        // Shield bash + short sword combo
+        const speed = 2.0;
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.3) {
+          // Shield push: left arm (shield) shoves forward
+          const p = cycle / 0.3;
+          if (armLeft) armLeft.rotation.x = 0.9 * p;
+          if (armRight) armRight.rotation.x = -0.3 * p; // pull sword back
+          entry.group.rotation.x = 0.06 * p;
+        } else if (cycle < 0.5) {
+          // Shield hold, sword stab
+          const p = (cycle - 0.3) / 0.2;
+          if (armLeft) armLeft.rotation.x = 0.9;
+          if (armRight) armRight.rotation.x = -0.3 + 1.3 * p; // stab to +1.0
+        } else if (cycle < 0.65) {
+          // Hold both extended
+          if (armLeft) armLeft.rotation.x = 0.9;
+          if (armRight) armRight.rotation.x = 1.0;
+          entry.group.rotation.x = 0.06;
+          // Slash trail at shield bash + stab
+          if (cycle >= 0.5 && cycle < 0.57) this.trySpawnTrail(unitId, 'slash', time, 0.45);
+        } else {
+          const p = (cycle - 0.65) / 0.35;
+          if (armLeft) armLeft.rotation.x = 0.9 * (1 - p);
+          if (armRight) armRight.rotation.x = 1.0 * (1 - p);
+        }
+        break;
+      }
+      case UnitType.BATTLEMAGE: {
+        // Staff slam: raise staff overhead then slam down (AoE magic)
+        const speed = 1.6;
+        const cycle = (time * speed) % 1;
+        if (cycle < 0.4) {
+          const p = cycle / 0.4;
+          if (armRight) armRight.rotation.x = -1.0 * p;
+          if (armLeft) armLeft.rotation.x = -0.8 * p;
+        } else if (cycle < 0.55) {
+          const p = (cycle - 0.4) / 0.15;
+          if (armRight) armRight.rotation.x = -1.0 + 2.2 * p;
+          if (armLeft) armLeft.rotation.x = -0.8 + 1.8 * p;
+          entry.group.rotation.x = 0.12 * p;
+        } else if (cycle < 0.7) {
+          if (armRight) armRight.rotation.x = 1.2;
+          if (armLeft) armLeft.rotation.x = 1.0;
+          entry.group.rotation.x = 0.12;
+          // Smash trail at staff slam impact
+          if (cycle >= 0.55 && cycle < 0.62) this.trySpawnTrail(unitId, 'smash', time, 0.55);
+        } else {
+          const p = (cycle - 0.7) / 0.3;
+          if (armRight) armRight.rotation.x = 1.2 * (1 - p);
+          if (armLeft) armLeft.rotation.x = 1.0 * (1 - p);
+          entry.group.rotation.x = 0.12 * (1 - p);
+        }
+        break;
+      }
+      case UnitType.HEALER: {
+        // Channeling: arms sway gently side-to-side (healing gesture)
+        const sway = Math.sin(time * 2.5) * 0.35;
+        if (armRight) { armRight.rotation.x = 0.5; armRight.rotation.z = sway; }
+        if (armLeft) { armLeft.rotation.x = 0.5; armLeft.rotation.z = -sway; }
         break;
       }
       default: {
@@ -1977,8 +2348,7 @@ export class UnitRenderer {
   /**
    * Fire a projectile (arrow) from one position to another
    */
-  fireProjectile(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number = 0xFF8800): void {
-    // Create arrow mesh (elongated box)
+  fireProjectile(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number = 0xFF8800, targetUnitId?: string): void {
     const arrowGeo = new THREE.BoxGeometry(0.05, 0.05, 0.2);
     const arrowMat = new THREE.MeshBasicMaterial({ color });
     const arrow = new THREE.Mesh(arrowGeo, arrowMat);
@@ -1988,10 +2358,8 @@ export class UnitRenderer {
 
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-    const duration = 0.5; // seconds
-    const startTime = performance.now() / 1000; // convert to seconds
 
-    this.projectiles.push({ mesh: arrow, startPos, endPos, startTime, duration });
+    this.projectiles.push({ mesh: arrow, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId });
   }
 
   /**
@@ -2045,15 +2413,22 @@ export class UnitRenderer {
 
     for (let i = 0; i < this.projectiles.length; i++) {
       const proj = this.projectiles[i];
+
+      // Track live target position if we have a target unit ID
+      if (proj.targetUnitId) {
+        const targetEntry = this.unitMeshes.get(proj.targetUnitId);
+        if (targetEntry) {
+          proj.endPos.set(targetEntry.group.position.x, targetEntry.group.position.y + 0.5, targetEntry.group.position.z);
+        }
+      }
+
       const elapsed = currentTime - proj.startTime;
       const progress = Math.min(elapsed / proj.duration, 1);
 
       if (progress < 1) {
-        // Parabolic arc: y = start.y + height * sin(t * pi)
         const height = proj.arcHeight ?? 3;
         const arcY = Math.sin(progress * Math.PI) * height;
 
-        // Linear interpolation along x and z
         const pos = proj.startPos.clone().lerp(proj.endPos, progress);
         pos.y = proj.startPos.y + (proj.endPos.y - proj.startPos.y) * progress + arcY;
         proj.mesh.position.copy(pos);
@@ -2064,13 +2439,11 @@ export class UnitRenderer {
         nextPos.y = proj.startPos.y + (proj.endPos.y - proj.startPos.y) * nextProgress + Math.sin(nextProgress * Math.PI) * height;
         proj.mesh.lookAt(nextPos);
 
-        // Spin boulders during flight (adds visual flair)
         if (proj.arcHeight && proj.arcHeight > 3) {
           proj.mesh.rotation.x += 0.15;
           proj.mesh.rotation.z += 0.08;
         }
       } else {
-        // Projectile arrived
         toRemove.push(i);
       }
     }
