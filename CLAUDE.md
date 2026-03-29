@@ -196,6 +196,22 @@ We use two patterns depending on the code being extracted:
 ### All Pre-Extracted Modules Now Wired
 No remaining files to wire. Future extractions will target new code regions.
 
+### Next Extraction Targets (priority order)
+1. **BuildingPlacementSystem** — player-side `handleBuild*()`, blueprint ghosts, placement validation (~300-400 lines)
+2. **TooltipUIController** — `showBuildingTooltip`, `queueUnitFromTooltip`, `demolishBuilding`, upgrade UI (~200-300 lines)
+3. **CombatResolver** — damage application, unit death, territory capture (~200+ lines)
+4. **GameInitializer** — `startNewGame`, map gen orchestration, `initSystems` wiring (~200+ lines)
+5. **FormationSystem** — formation math, rally points, unit grouping (~150+ lines)
+
+### Shrink-Wrap Discipline (ENFORCED)
+**Every feature addition or refactor MUST leave main.ts the same size or smaller.**
+- Before adding new code to main.ts, identify what can be extracted to offset it
+- New features should be built as standalone modules from the start — never inline first
+- If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
+- If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
+- Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
+- Target: get main.ts under 3000 lines within the next 3-4 extraction rounds
+
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
 - Uses `WallSystemOps` interface for callbacks to main.ts (stockpile checks, blueprint removal, voxel rebuild, resource display)
@@ -228,3 +244,58 @@ private buildGameContext(): GameContext {
   };
 }
 ```
+
+---
+
+## Feature Roadmap (Tentative)
+
+### Phase 1: Expanded Unit Types
+- **Healer** — support unit, restores HP to adjacent allies per turn
+- **Assassin/Rogue** — stealth unit, high burst damage, fragile, can bypass walls
+- **Shieldbearer** — frontline tank, grants armor aura to adjacent allies
+- **Berserker** — melee DPS that gets stronger at low HP
+- **Siege Tower** — slow, lets melee units attack over walls
+- **Naval units** — see Phase 3
+- Architecture prep: make UnitFactory fully data-driven (stat tables, not switch cases) so adding a unit type = adding one config entry
+
+### Phase 2: Tribes / Factions / Races
+Each tribe gets:
+- **Trait modifiers** — stat bonuses/penalties (e.g., "Forest Tribe" +20% wood gather, -10% stone)
+- **Unique unit** — one exclusive unit type per tribe (e.g., berserker for a barbarian tribe, mage for an arcane tribe)
+- **Visual skin** — distinct voxel color palettes, building styles, unit mesh variants
+- **Tech bias** — preferred build order and AI personality that reflects the tribe's strengths
+
+Planned tribes (brainstorm — not final):
+- **Stoneguard** — defensive, strong walls/masonry, unique unit: Shieldbearer
+- **Wildborne** — aggressive, fast units, forest affinity, unique unit: Berserker
+- **Arcanists** — magic-focused, ranged power, unique unit: Battlemage (AoE)
+- **Tidecallers** — naval superiority, coastal bonuses, unique unit: Sea Raider
+- **Ironforge** — siege specialists, workshop bonuses, unique unit: Siege Tower
+- **Nomads** — cavalry/scout focused, movement bonuses, unique unit: Horse Archer
+
+Architecture prep:
+- Extract a `TribeConfig` data structure: stat modifiers, color palette, unique unit defs, AI personality params
+- Make UnitRenderer skin-aware (color palette lookup from tribe config, not hardcoded)
+- BuildingMeshFactory should accept a tribe style parameter for visual variants
+- AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
+
+### Phase 3: Naval Combat & Water Tiles
+- **Water hex tiles** — new terrain type, impassable for land units
+- **Port building** — coastal building that spawns naval units
+- **Naval unit types:** Galley (transport, carries land units), Warship (ranged naval combat), Fishing Boat (resource gathering)
+- **Coastal mechanics** — port cities, naval trade routes, amphibious assault (land units can embark/disembark at ports)
+- **Bridges/docks** — buildable structures connecting land masses
+
+Architecture prep:
+- Pathfinder needs terrain-type awareness (land vs water vs coastal)
+- UnitAI needs embark/disembark state machine
+- Map generator needs island/continent modes with water bodies
+- Naval combat could be its own subsystem (NavalSystem.ts)
+
+### Phase 4: Polish & Revenue Features
+- **Tech tree** — per-tribe research unlocks (buildings, units, upgrades)
+- **Fog of war** — tile visibility based on unit sight radius
+- **Multiplayer** — start with hot-seat, then networked (WebSocket)
+- **Map editor** — let players create and share maps
+- **Campaign mode** — scripted scenarios with objectives
+- **Steam Workshop** — custom tribes, maps, mods
