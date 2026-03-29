@@ -142,8 +142,10 @@ export class UnitAI {
       (unit as any)._path = path;
       (unit as any)._pathIndex = 1;
       // For DEFENSIVE stance: the move destination becomes the unit's new "post"
-      // so it returns here after chasing enemies away
-      if (unit.stance === UnitStance.DEFENSIVE) {
+      // so it returns here after chasing enemies away.
+      // Only set if no post exists yet — AI kite/chase moves must not overwrite
+      // the original player-commanded position.
+      if (unit.stance === UnitStance.DEFENSIVE && !(unit as any)._postPosition) {
         (unit as any)._postPosition = { ...target };
       }
     }
@@ -1566,11 +1568,7 @@ export class UnitAI {
 
     // Re-aggro check: combat units on MOVE (not ATTACK) commands react to nearby threats
     // This gives natural "snap to target" behavior when enemies enter range while marching
-    const isCombatUnit = unit.type === UnitType.WARRIOR || unit.type === UnitType.ARCHER ||
-      unit.type === UnitType.RIDER || unit.type === UnitType.PALADIN ||
-      unit.type === UnitType.CATAPULT || unit.type === UnitType.TREBUCHET;
-
-    if (isCombatUnit && !UnitAI.debugFlags.disableCombat) {
+    if (UnitAI.isCombatUnit(unit) && !UnitAI.debugFlags.disableCombat) {
       const isAttackMove = unit.command?.type === CommandType.ATTACK;
       // Aggressive/attack-move units re-aggro on enemies entering weapon range
       // Defensive units only re-aggro if enemy is adjacent (range 1-2)
