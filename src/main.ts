@@ -2694,9 +2694,7 @@ class Cubitopia {
   }
 
   private removeUnitFromGame(unit: Unit, killer?: Unit): void {
-    console.log(`[DEATH] ${unit.type}(${unit.id}, owner=${unit.owner}) killed` +
-      (killer ? ` by ${killer.type}(${killer.id}, owner=${killer.owner})` : '') +
-      ` | hp was ${unit.currentHealth}/${unit.stats.maxHealth}`);
+    console.log(`[DEATH] ${unit.type}(${unit.id}) owner=${unit.owner} hp=${unit.currentHealth}/${unit.stats.maxHealth}${killer ? ` killer=${killer.type}(${killer.id})` : ''}`);
     for (const player of this.players) {
       const idx = player.units.indexOf(unit);
       if (idx !== -1) {
@@ -2951,23 +2949,7 @@ class Cubitopia {
 
     animate();
     this.showMainMenu();
-
-    console.log(`
-    ╔══════════════════════════════════════╗
-    ║          CUBITOPIA (RTS)             ║
-    ║   Real-Time Voxel Strategy Game     ║
-    ║                                      ║
-    ║  Controls:                           ║
-    ║  Left-click: Select unit             ║
-    ║  Left-drag: Box select units         ║
-    ║  Right-click: Move / Attack          ║
-    ║  Shift+click: Add to selection       ║
-    ║  Right-drag: Rotate camera           ║
-    ║  Scroll: Zoom in/out                 ║
-    ║  WASD/Arrows: Pan camera             ║
-    ║  Q/E: Rotate camera                  ║
-    ╚══════════════════════════════════════╝
-    `);
+    console.log('CUBITOPIA v0.1 — Voxel Strategy');
   }
 
   private updateDebugOverlay(): void {
@@ -3009,13 +2991,8 @@ class Cubitopia {
       if (!activeIds.has(id)) { lbl.remove(); this.debugOverlayLabels.delete(id); }
     }
   }
-
-  // Debug methods moved to DebugController
 }
 
-// --- Boot ---
 const game = new Cubitopia();
 game.start();
-
-// Debug access
 (window as any).game = game;
