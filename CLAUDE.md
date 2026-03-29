@@ -34,7 +34,13 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Massive central file (~6000+ lines)**. Contains the `Cubitopia` class with game loop, building system, AI commander, all placement functions. This is where most gameplay logic lives.
+- `src/main.ts` — **Central orchestrator (~4372 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, building placement, unit spawning, tooltip UI, formation helpers, and input handling. Delegates subsystems via adapter interfaces.
+- `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
+- `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
+- `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
+- `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~226 lines)**. Deposit handlers, crafting recipes, stockpile visuals.
+- `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~196 lines)**. Standalone functions for all 6 building types.
+- `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — Damage formula (Polytopia-like attacker vs defender force ratio)
 - `src/game/entities/UnitFactory.ts` — Unit stats, speeds, attack speeds, colors
@@ -51,20 +57,22 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 - `Pathfinder.getHexNeighbors(pos)` returns 6 neighbors accounting for odd/even column offset
 
 ### Multi-Building System
-- `PlacedBuilding` registry in `placedBuildings: PlacedBuilding[]` — tracks ALL buildings (player + AI)
-- Old single-building references (`this.barracks`, `this.forestry`, etc.) are **getter properties** that return the first matching `PlacedBuilding` for backward compatibility
-- `registerBuilding()` / `unregisterBuilding()` manage the array + scene + pathfinder blocked tiles
-- `getNextSpawnBuilding(kind, owner)` does round-robin spawn distribution
+- **Owned by `BuildingSystem`** — `placedBuildings: PlacedBuilding[]` tracks ALL buildings (player + AI)
+- Old single-building references (`this.barracks`, `this.forestry`, etc.) are **getter properties in main.ts** that delegate to `buildingSystem.getFirstBuilding()` for backward compatibility
+- `buildingSystem.registerBuilding()` / `unregisterBuilding()` manage the array + scene + pathfinder blocked tiles
+- `buildingSystem.getNextSpawnBuilding(kind, owner)` does round-robin spawn distribution
 - Building kinds: barracks, forestry, masonry, farmhouse, workshop, silo
 - No limit on how many of each type can be built (constrained only by resources)
 
 ### AI System
+- **Owned by `AIController`** — all AI logic extracted from main.ts
 - `AIBuildState` interface — tracks each AI player's buildings, spawn queues, wave state
 - `updateSmartAIEconomy()` — build phases 0-6, queue workers and combat units
 - `updateSmartAISpawnQueue()` — timer-based unit spawning from buildings
 - `updateSmartAICommander()` — wave mustering, formation attacks, rally behavior
 - `updateSmartAITactics()` — guard assignments at choke points, worker escorts, building defense
 - AI uses `guardAssignments: Map<string, HexCoord>` to track which units are posted where
+- Uses `AIBuildingOps` slim interface to access BuildingSystem (mesh builders, registerBuilding, aiFindBuildTile) without direct dependency
 
 ### Combat & Stances
 - **Stances:** PASSIVE (never attack), DEFENSIVE (zone-defend + return to post), AGGRESSIVE (chase + patrol)
@@ -158,7 +166,7 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ## Current Mission: Reduce main.ts Complexity
 
 ### Goal
-Shrink `src/main.ts` (currently ~4372 lines, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules.
+Shrink `src/main.ts` (currently **~4372 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~1900 lines extracted so far across 7 modules.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
