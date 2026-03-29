@@ -31,6 +31,8 @@ import { generateFormation, generateBoxFormation, getUnitFormationPriority, getH
 import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
 import MenuController from './ui/MenuController';
+import DebugController from './game/systems/DebugController';
+import type { DebugOps } from './game/systems/DebugController';
 import {
   EngineConfig,
   CameraConfig,
@@ -113,6 +115,7 @@ class Cubitopia {
   private blueprintSystem!: BlueprintSystem;
   private natureSystem!: NatureSystem;
   private menuController!: MenuController;
+  private debugController!: DebugController;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -137,8 +140,54 @@ class Cubitopia {
     });
 
     this.initSystems();
+    this.initDebugController();
     this.setupEventHandlers();
     this.setupResizeHandler();
+  }
+
+  private initDebugController(): void {
+    const debugOps: DebugOps = {
+      getAllUnits: () => this.allUnits,
+      getBases: () => this.bases,
+      getPlayers: () => this.players,
+      findSpawnTile: (pq, pr, skip) => this.findSpawnTile(this.currentMap!, pq, pr, skip),
+      addUnitToWorld: (unit) => {
+        this.players[unit.owner].units.push(unit);
+        this.allUnits.push(unit);
+        this.unitRenderer.addUnit(unit, this.getElevation(unit.position));
+        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+      },
+      removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
+      updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
+      setUnitWorldPosition: (id, x, y, z) => this.unitRenderer.setWorldPosition(id, x, y, z),
+      showBaseDestruction: (base) => this.baseRenderer.showDestruction(base),
+      updateBaseHealthBars: () => this.hud.updateBaseHealth(this.bases),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getElevation: (pos) => this.getElevation(pos),
+      getSelectedUnits: () => this.selectionManager.getSelectedUnits(),
+      getWoodStockpile: () => this.woodStockpile[0],
+      setWoodStockpile: (v) => { this.woodStockpile[0] = v; },
+      getStoneStockpile: () => this.stoneStockpile[0],
+      setStoneStockpile: (v) => { this.stoneStockpile[0] = v; },
+      getFoodStockpile: () => this.foodStockpile[0],
+      setFoodStockpile: (v) => { this.foodStockpile[0] = v; },
+      getGrassFiberStockpile: () => this.grassFiberStockpile[0],
+      setGrassFiberStockpile: (v) => { this.grassFiberStockpile[0] = v; },
+      getClayStockpile: () => this.clayStockpile[0],
+      setClayStockpile: (v) => { this.clayStockpile[0] = v; },
+      getRopeStockpile: () => this.ropeStockpile[0],
+      setRopeStockpile: (v) => { this.ropeStockpile[0] = v; },
+      updateResourceDisplay: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
+      updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
+      showNotification: (msg, color) => this.hud.showNotification(msg, color),
+      getCurrentMapTiles: () => this.currentMap?.tiles ?? null,
+      removeDecoration: (pos) => this.terrainDecorator.removeDecoration(pos),
+      rebuildVoxels: () => { if (this.currentMap) this.voxelBuilder.rebuildFromMap(this.currentMap); },
+      deleteTreeAge: (key) => this.natureSystem.treeAge.delete(key),
+      deleteTreeRegrowthTimer: (key) => this.natureSystem.treeRegrowthTimers.delete(key),
+      checkWinCondition: () => this.checkWinCondition(),
+    };
+    this.debugController = new DebugController(debugOps);
   }
 
   private setupEventHandlers(): void {
@@ -173,19 +222,19 @@ class Cubitopia {
 
     // Debug panel callbacks
     this.hud.buildDebugPanel();
-    this.hud.onDebugSpawn((type) => this.debugSpawnUnit(type));
-    this.hud.onDebugGiveResources(() => this.debugGiveResources());
-    this.hud.onDebugKillAllEnemy(() => this.debugKillAllEnemy());
-    this.hud.onDebugDamageBase((owner, amount) => this.debugDamageBase(owner, amount));
+    this.hud.onDebugSpawn((type) => this.debugController.spawnUnit(type));
+    this.hud.onDebugGiveResources(() => this.debugController.giveResources());
+    this.hud.onDebugKillAllEnemy(() => this.debugController.killAllEnemy());
+    this.hud.onDebugDamageBase((owner, amount) => this.debugController.damageBase(owner, amount));
     this.hud.onDebugGameSpeed((speed) => { this.gameSpeed = speed; this.hud.showNotification(`⏩ Speed: ${speed}x`, '#00bcd4'); });
     this.hud.onDebugTeleportMode(() => { this.hud.debugFlags.teleportMode = !this.hud.debugFlags.teleportMode; });
-    this.hud.onDebugHealSelected(() => this.debugHealSelected());
-    this.hud.onDebugSpawnEnemy((type) => this.debugSpawnEnemyUnit(type));
-    this.hud.onDebugBuffSelected((stat) => this.debugBuffSelected(stat));
-    this.hud.onDebugInstantWin(() => this.debugInstantWin());
-    this.hud.onDebugInstantLose(() => this.debugInstantLose());
-    this.hud.onDebugClearTrees(() => this.debugClearTrees());
-    this.hud.onDebugClearStones(() => this.debugClearStones());
+    this.hud.onDebugHealSelected(() => this.debugController.healSelected());
+    this.hud.onDebugSpawnEnemy((type) => this.debugController.spawnEnemyUnit(type));
+    this.hud.onDebugBuffSelected((stat) => this.debugController.buffSelected(stat));
+    this.hud.onDebugInstantWin(() => this.debugController.instantWin());
+    this.hud.onDebugInstantLose(() => this.debugController.instantLose());
+    this.hud.onDebugClearTrees(() => this.debugController.clearTrees());
+    this.hud.onDebugClearStones(() => this.debugController.clearStones());
     this.hud.onDebugKillSelected(() => this.respawnSelectedUnits());
 
     // Selection changed
@@ -385,7 +434,7 @@ class Cubitopia {
         rc2.setFromCamera(mouse2, this.camera.camera);
         const hexTarget = this.raycastToHex(rc2);
         if (hexTarget) {
-          this.debugTeleportSelected(hexTarget);
+          this.debugController.teleportSelected(hexTarget);
           return;
         }
       }
@@ -2921,269 +2970,47 @@ class Cubitopia {
     `);
   }
 
-  // ===================== DEBUG OVERLAY =====================
-
   private updateDebugOverlay(): void {
     if (!this.hud.debugFlags.showUnitOverlay) {
-      // Hide overlay if it exists
-      if (this.debugOverlayContainer) {
-        this.debugOverlayContainer.style.display = 'none';
-      }
+      if (this.debugOverlayContainer) this.debugOverlayContainer.style.display = 'none';
       return;
     }
-
-    // Create container if needed
     if (!this.debugOverlayContainer) {
       this.debugOverlayContainer = document.createElement('div');
       this.debugOverlayContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;';
       document.body.appendChild(this.debugOverlayContainer);
     }
     this.debugOverlayContainer.style.display = 'block';
-
     const cam = this.camera.camera;
-    const canvas = document.getElementById(ENGINE_CONFIG.canvasId)!;
-    const rect = canvas.getBoundingClientRect();
+    const rect = document.getElementById(ENGINE_CONFIG.canvasId)!.getBoundingClientRect();
     const activeIds = new Set<string>();
-
     for (const unit of this.allUnits) {
       if (unit.state === UnitState.DEAD) continue;
       activeIds.add(unit.id);
-
-      // Project world position to screen
       const pos = new THREE.Vector3(unit.worldPosition.x, unit.worldPosition.y + 1.6, unit.worldPosition.z);
       pos.project(cam);
-      const screenX = (pos.x * 0.5 + 0.5) * rect.width + rect.left;
-      const screenY = (-pos.y * 0.5 + 0.5) * rect.height + rect.top;
-
-      // Skip if behind camera
       if (pos.z > 1) continue;
-
-      let label = this.debugOverlayLabels.get(unit.id);
-      if (!label) {
-        label = document.createElement('div');
-        label.style.cssText = `
-          position:fixed; font-size:9px; font-family:'Courier New',monospace;
-          color:#fff; background:rgba(0,0,0,0.75); padding:1px 4px; border-radius:3px;
-          white-space:nowrap; pointer-events:none; transform:translate(-50%,-100%);
-          border:1px solid rgba(255,255,255,0.15);
-        `;
-        this.debugOverlayContainer.appendChild(label);
-        this.debugOverlayLabels.set(unit.id, label);
+      const sx = (pos.x * 0.5 + 0.5) * rect.width + rect.left;
+      const sy = (-pos.y * 0.5 + 0.5) * rect.height + rect.top;
+      let lbl = this.debugOverlayLabels.get(unit.id);
+      if (!lbl) {
+        lbl = document.createElement('div');
+        lbl.style.cssText = 'position:fixed;font-size:9px;font-family:monospace;color:#fff;background:rgba(0,0,0,.75);padding:1px 4px;border-radius:3px;white-space:nowrap;pointer-events:none;transform:translate(-50%,-100%);border:1px solid rgba(255,255,255,.15);';
+        this.debugOverlayContainer.appendChild(lbl);
+        this.debugOverlayLabels.set(unit.id, lbl);
       }
-
-      const ownerColor = unit.owner === 0 ? '#4fc3f7' : '#ef5350';
-      const stateShort = unit.state.substring(0, 4).toUpperCase();
-      label.innerHTML = `<span style="color:${ownerColor}">${unit.type.substring(0,4).toUpperCase()}</span> ` +
-        `<span style="color:#aaa">${stateShort}</span> ` +
-        `<span style="color:#81c784">${unit.currentHealth}/${unit.stats.maxHealth}</span> ` +
-        `<span style="color:#ffb74d">A${unit.stats.attack} D${unit.stats.defense}</span>`;
-      label.style.left = screenX + 'px';
-      label.style.top = screenY + 'px';
-      label.style.display = '';
+      const oc = unit.owner === 0 ? '#4fc3f7' : '#ef5350';
+      lbl.innerHTML = `<span style="color:${oc}">${unit.type.substring(0,4).toUpperCase()}</span> <span style="color:#aaa">${unit.state.substring(0,4).toUpperCase()}</span> <span style="color:#81c784">${unit.currentHealth}/${unit.stats.maxHealth}</span> <span style="color:#ffb74d">A${unit.stats.attack} D${unit.stats.defense}</span>`;
+      lbl.style.left = sx + 'px';
+      lbl.style.top = sy + 'px';
+      lbl.style.display = '';
     }
-
-    // Clean up labels for dead/removed units
-    for (const [id, label] of this.debugOverlayLabels) {
-      if (!activeIds.has(id)) {
-        label.remove();
-        this.debugOverlayLabels.delete(id);
-      }
+    for (const [id, lbl] of this.debugOverlayLabels) {
+      if (!activeIds.has(id)) { lbl.remove(); this.debugOverlayLabels.delete(id); }
     }
   }
 
-  // ===================== DEBUG / PLAYTESTER METHODS =====================
-
-  private debugSpawnUnit(type: UnitType): void {
-    if (!this.currentMap || this.players.length === 0) return;
-    // Spawn near player base
-    const base = this.bases.find(b => b.owner === 0);
-    if (!base) return;
-    const pos = this.findSpawnTile(this.currentMap, base.position.q, base.position.r, true);
-    const unit = UnitFactory.create(type, 0, pos);
-    const wp = this.hexToWorld(pos);
-    unit.worldPosition = { ...wp };
-    this.players[0].units.push(unit);
-    this.allUnits.push(unit);
-    this.unitRenderer.addUnit(unit, this.getElevation(pos));
-    this.selectionManager.setPlayerUnits(this.allUnits, 0);
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    this.hud.showNotification(`🐛 Spawned ${type}`, '#9c27b0');
-  }
-
-  private debugGiveResources(): void {
-    if (this.players.length === 0) return;
-    this.woodStockpile[0] += 999;
-    this.players[0].resources.wood += 999;
-    this.stoneStockpile[0] += 999;
-    this.players[0].resources.stone += 999;
-    this.foodStockpile[0] += 999;
-    this.players[0].resources.food += 999;
-    this.players[0].resources.gold += 999;
-    this.grassFiberStockpile[0] += 999;
-    this.players[0].resources.grass_fiber += 999;
-    this.clayStockpile[0] += 999;
-    this.players[0].resources.clay += 999;
-    this.ropeStockpile[0] += 999;
-    this.players[0].resources.rope += 999;
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-    this.resourceManager.updateStockpileVisual(0);
-    this.hud.showNotification('🐛 +999 all resources', '#4caf50');
-  }
-
-  private debugKillAllEnemy(): void {
-    for (const unit of this.allUnits) {
-      if (unit.owner === 1 && unit.state !== UnitState.DEAD) {
-        unit.currentHealth = 0;
-        unit.state = UnitState.DEAD;
-        this.removeUnitFromGame(unit);
-      }
-    }
-    this.hud.showNotification('🐛 All enemies killed', '#e74c3c');
-  }
-
-  private debugDamageBase(owner: number, amount: number): void {
-    const base = this.bases.find(b => b.owner === owner);
-    if (!base) return;
-    base.health = Math.max(0, base.health - amount);
-    this.hud.updateBaseHealth(this.bases);
-    this.hud.showNotification(`🐛 Base ${owner} -${amount} hp (${base.health}/${base.maxHealth})`, '#ff5722');
-  }
-
-  private debugSpawnEnemyUnit(type: UnitType): void {
-    if (!this.currentMap || this.players.length < 2) return;
-    const base = this.bases.find(b => b.owner === 1);
-    if (!base) return;
-    const pos = this.findSpawnTile(this.currentMap, base.position.q, base.position.r, true);
-    const unit = UnitFactory.create(type, 1, pos);
-    const wp = this.hexToWorld(pos);
-    unit.worldPosition = { ...wp };
-    this.players[1].units.push(unit);
-    this.allUnits.push(unit);
-    this.unitRenderer.addUnit(unit, this.getElevation(pos));
-    this.selectionManager.setPlayerUnits(this.allUnits, 0);
-    this.hud.showNotification(`🐛 Spawned enemy ${type}`, '#b71c1c');
-  }
-
-  private debugHealSelected(): void {
-    const selected = this.selectionManager.getSelectedUnits();
-    if (selected.length === 0) {
-      this.hud.showNotification('No units selected', '#999');
-      return;
-    }
-    let healed = 0;
-    for (const unit of selected) {
-      if (unit.currentHealth < unit.stats.maxHealth) {
-        unit.currentHealth = unit.stats.maxHealth;
-        this.unitRenderer.updateHealthBar(unit);
-        healed++;
-      }
-    }
-    this.hud.showNotification(`💚 Healed ${healed} unit(s) to full`, '#27ae60');
-  }
-
-  private debugBuffSelected(stat: string): void {
-    const selected = this.selectionManager.getSelectedUnits();
-    if (selected.length === 0) {
-      this.hud.showNotification('No units selected', '#999');
-      return;
-    }
-    for (const unit of selected) {
-      switch (stat) {
-        case 'attack':
-          unit.stats.attack += 3;
-          break;
-        case 'defense':
-          unit.stats.defense += 3;
-          break;
-        case 'maxHealth':
-          unit.stats.maxHealth += 5;
-          unit.currentHealth += 5;
-          this.unitRenderer.updateHealthBar(unit);
-          break;
-        case 'moveSpeed':
-          unit.moveSpeed = Math.min(unit.moveSpeed + 0.2, 3.0);
-          break;
-        case 'range':
-          unit.stats.range += 1;
-          break;
-      }
-    }
-    const labels: Record<string, string> = {
-      attack: '+3 ATK', defense: '+3 DEF', maxHealth: '+5 HP',
-      moveSpeed: '+0.2 SPD', range: '+1 RNG',
-    };
-    this.hud.showNotification(`⚡ ${selected.length} unit(s) ${labels[stat] || stat}`, '#e91e63');
-  }
-
-  private debugTeleportSelected(target: HexCoord): void {
-    const selected = this.selectionManager.getSelectedUnits();
-    if (selected.length === 0) return;
-    for (const unit of selected) {
-      unit.position = { ...target };
-      const wp = this.hexToWorld(target);
-      unit.worldPosition = { ...wp };
-      unit.targetPosition = null;
-      unit.command = null;
-      this.unitRenderer.setWorldPosition(unit.id, wp.x, wp.y + this.getElevation(target), wp.z);
-    }
-    this.hud.showNotification(`🌀 Teleported ${selected.length} unit(s)`, '#e91e63');
-  }
-
-  private debugInstantWin(): void {
-    const enemyBase = this.bases.find(b => b.owner === 1);
-    if (!enemyBase) return;
-    enemyBase.health = 0;
-    enemyBase.destroyed = true;
-    this.baseRenderer.showDestruction(enemyBase);
-    this.hud.updateBaseHealth(this.bases);
-    this.checkWinCondition();
-  }
-
-  private debugInstantLose(): void {
-    const playerBase = this.bases.find(b => b.owner === 0);
-    if (!playerBase) return;
-    playerBase.health = 0;
-    playerBase.destroyed = true;
-    this.baseRenderer.showDestruction(playerBase);
-    this.hud.updateBaseHealth(this.bases);
-    this.checkWinCondition();
-  }
-
-  private debugClearTrees(): void {
-    if (!this.currentMap) return;
-    let count = 0;
-    for (const [key, tile] of this.currentMap.tiles) {
-      if (tile.terrain === TerrainType.FOREST) {
-        tile.terrain = TerrainType.PLAINS;
-        const [q, r] = key.split(',').map(Number);
-        this.terrainDecorator.removeDecoration({ q, r });
-        this.natureSystem.treeAge.delete(key);
-        this.natureSystem.treeRegrowthTimers.delete(key);
-        count++;
-      }
-    }
-    this.hud.showNotification(`🌲 Cleared ${count} trees`, '#6d4c41');
-  }
-
-  private debugClearStones(): void {
-    if (!this.currentMap) return;
-    let count = 0;
-    for (const [key, tile] of this.currentMap.tiles) {
-      if (tile.terrain === TerrainType.MOUNTAIN) {
-        // Lower elevation and convert to plains
-        tile.terrain = TerrainType.PLAINS;
-        if (tile.elevation > 4) tile.elevation = 4;
-        const [q, r] = key.split(',').map(Number);
-        this.terrainDecorator.removeDecoration({ q, r });
-        count++;
-      }
-    }
-    // Rebuild terrain visuals
-    if (count > 0 && this.currentMap) {
-      this.voxelBuilder.rebuildFromMap(this.currentMap);
-    }
-    this.hud.showNotification(`🪨 Cleared ${count} stone tiles`, '#78909c');
-  }
+  // Debug methods moved to DebugController
 }
 
 // --- Boot ---
