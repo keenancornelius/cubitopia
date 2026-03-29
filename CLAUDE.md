@@ -94,9 +94,9 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~593 lines)**. Web Audio API synthesized SFX (20 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
-- `src/ui/HUD.ts` — **All UI (~2175 lines)**. Resource panel, build buttons, help overlay, debug panel, spawn queues, stance panel. `HUD.isCombatType()` static method for combat unit detection.
-- `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~550 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
-- `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~490 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Also contains the old `ArenaDebugConsole` UI class (superseded by DebugPanel COMBAT tab — see Technical Debt #5).
+- `src/ui/HUD.ts` — **All UI (~1908 lines, down from ~2175)**. Resource panel, build buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
+- `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
@@ -206,19 +206,23 @@ These are separate from weapon range — detection range is how far units "see" 
 - **Gold** — universal advanced resource (Phase 3). Earned from neutral city income + trade routes. Spent on city upgrades, mercenaries, tech research, army upkeep. When adding new resource types, extend the Player.resources interface and SPAWN_QUEUE_CONFIG to support multi-resource costs generically (workshop already does this as a one-off).
 
 ### Technical Debt — Cleanup Queue
-These are known issues that should be addressed during the next cleanup pass:
+Resolved items are struck through. Remaining items should be addressed during the next cleanup pass:
 
-1. **Dead debug panel code in HUD.ts (~320 lines, ~lines 1847-2168)**: The old debug panel built inside `HUD.ts` (toggled by backtick) has been fully replaced by the unified tabbed `DebugPanel` class in `src/ui/DebugPanel.ts`. The old code still gets built (display:none) but is never shown. Safe to delete the old debug panel builder, associated DOM creation, and the private `_onDebugGameSpeed` callback.
+1. ~~**Dead debug panel code in HUD.ts**~~ — RESOLVED: Removed ~280 lines of old debug UI (buildDebugPanel, toggleDebugPanel, rebuildDebugContent, 15 callback fields/setters). debugFlags, gameSpeed, debugSpawnCount remain in HUD.ts as they're referenced throughout main.ts game logic.
 
-2. **`_onDebugGameSpeed` is private in HUD.ts**: The game-speed callback was marked private but needed by external callers (DebugPanel). Current workaround sets `this.gameSpeed` directly and calls `hud.showNotification()`. Should be made public or replaced with an event/interface.
+2. ~~**`_onDebugGameSpeed` is private**~~ — RESOLVED: Removed along with all old callback fields.
 
-3. **`(unit as any)._path` pattern**: Unit pathfinding stores `_path`, `_pathIndex`, `_postPosition`, `_patrolRoute`, `_patrolIdx` via `as any` casts. These should be added to the `Unit` interface in `types/index.ts`.
+3. ~~**`(unit as any)._path` pattern**~~ — RESOLVED: Added `_path`, `_pathIndex`, `_postPosition`, `_patrolRoute`, `_patrolIdx`, `_planIsGate`, `_playerCommanded` as optional fields on `Unit` interface. Removed all `as any` casts in UnitAI.ts, main.ts, AIController.ts.
 
-4. **`barracksHealth` legacy Map**: Still exists alongside `PlacedBuilding.health`. The `damageBarracks` method uses both. The legacy map should be removed and all health reads should go through `PlacedBuilding.health`.
+4. ~~**`barracksHealth` legacy Map**~~ — RESOLVED: Removed from BuildingSystem. Building-at-tile checks now use `getBuildingAt()` method.
 
-5. **ArenaDebugConsole.ts UI code (~lines 160-490)**: The old standalone `ArenaDebugConsole` UI class at the bottom of the file is now superseded by the COMBAT tab in `DebugPanel`. The static `CombatLog` class at the top of the file is still actively used and must stay. The `ArenaDebugConsole` class below it can be removed once confirmed no references remain.
+5. ~~**ArenaDebugConsole.ts UI class**~~ — RESOLVED: Removed the old `ArenaDebugConsole` class (~310 lines). File now only contains the `CombatLog` static class + global exposure.
 
-6. **Menu selections don't persist across game restarts**: When returning to the main menu, the mode (Player vs AI / AI vs AI) and map type selections reset to defaults. The army composition in DebugPanel DOES persist, but the user must re-select AI vs AI + Arena each time.
+6. ~~**Menu selections don't persist**~~ — RESOLVED: Added "Restart Arena" button to debug panel TOOLS tab that bypasses the menu entirely, using `restartGame()` method for proper scene cleanup + arena restart.
+
+7. **`regenerateMap()` and `restartGame()` share ~90% code**: The cleanup logic is duplicated between these two methods. Should extract a shared `cleanupGameState()` method and have both call it.
+
+8. **HUD.ts still ~1900 lines**: With old debug UI removed, HUD is smaller but still large. The help overlay (~200 lines), stance panel, spawn queue display, and selection panel could be extracted into separate files.
 
 ---
 

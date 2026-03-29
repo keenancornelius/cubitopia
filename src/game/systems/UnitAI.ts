@@ -140,14 +140,14 @@ export class UnitAI {
       unit.command = { type: CommandType.MOVE, targetPosition: target, targetUnitId: null };
       unit.targetPosition = path[1]; // Next step
       unit.state = UnitState.MOVING;
-      (unit as any)._path = path;
-      (unit as any)._pathIndex = 1;
+      unit._path = path;
+      unit._pathIndex = 1;
       // For DEFENSIVE stance: the move destination becomes the unit's new "post"
       // so it returns here after chasing enemies away.
       // Only set if no post exists yet — AI kite/chase moves must not overwrite
       // the original player-commanded position.
-      if (unit.stance === UnitStance.DEFENSIVE && !(unit as any)._postPosition) {
-        (unit as any)._postPosition = { ...target };
+      if (unit.stance === UnitStance.DEFENSIVE && !unit._postPosition) {
+        unit._postPosition = { ...target };
       }
     }
   }
@@ -164,8 +164,8 @@ export class UnitAI {
       if (path.length > 1) {
         unit.targetPosition = path[1];
         unit.state = UnitState.MOVING;
-        (unit as any)._path = path;
-        (unit as any)._pathIndex = 1;
+        unit._path = path;
+        unit._pathIndex = 1;
       }
     } else {
       // Attack-move: move to position, attack anything on the way
@@ -181,8 +181,8 @@ export class UnitAI {
     unit.command = null;
     unit.targetPosition = null;
     unit.state = UnitState.IDLE;
-    (unit as any)._path = null;
-    (unit as any)._pathIndex = 0;
+    unit._path = null;
+    unit._pathIndex = 0;
   }
 
   // --- State Handlers ---
@@ -302,7 +302,7 @@ export class UnitAI {
       // AI: if there are wall spots AND they have stone, go build
       if (wallSpot && unit.owner !== 0) {
         // Check if we have enough stone (gates cost 2, walls cost 1)
-        const isGate = (unit as any)._planIsGate === true;
+        const isGate = unit._planIsGate === true;
         const enoughStone = isGate ? hasGateStone : hasStone;
 
         if (enoughStone) {
@@ -523,8 +523,8 @@ export class UnitAI {
             // Ranged kiting: flee from melee enemies that are too close
             if (UnitAI.isRangedKiter(unit.type) && dist <= 2 && enemy.stats.range <= 1) {
               // Save post before kiting
-              if (!(unit as any)._postPosition) {
-                (unit as any)._postPosition = { ...unit.position };
+              if (!unit._postPosition) {
+                unit._postPosition = { ...unit.position };
               }
               const fleeTile = UnitAI.findKiteTile(unit, enemy, map);
               if (fleeTile) {
@@ -540,8 +540,8 @@ export class UnitAI {
             if (dist <= detectionRange) {
               // Enemy within our defend zone — engage
               // Remember where we were posted so we can return later
-              if (!(unit as any)._postPosition) {
-                (unit as any)._postPosition = { ...unit.position };
+              if (!unit._postPosition) {
+                unit._postPosition = { ...unit.position };
               }
               if (dist <= unit.stats.range) {
                 // In weapon range — attack
@@ -560,7 +560,7 @@ export class UnitAI {
           }
 
           // No enemy in defend zone — return to post if we have one
-          const post = (unit as any)._postPosition as HexCoord | undefined;
+          const post = unit._postPosition;
           if (post) {
             const distToPost = Pathfinder.heuristic(unit.position, post);
             if (distToPost > 1) {
@@ -568,7 +568,7 @@ export class UnitAI {
               return;
             }
             // Back at post — clear it
-            (unit as any)._postPosition = null;
+            unit._postPosition = null;
           }
 
           // Siege units can attack walls while holding position
@@ -639,11 +639,11 @@ export class UnitAI {
             return;
           }
           // Patrol: if unit has a patrol route, walk it
-          const patrolRoute = (unit as any)._patrolRoute as HexCoord[] | undefined;
+          const patrolRoute = unit._patrolRoute;
           if (patrolRoute && patrolRoute.length > 0) {
-            const patrolIdx = ((unit as any)._patrolIdx as number) || 0;
+            const patrolIdx = (unit._patrolIdx ?? 0) || 0;
             const target = patrolRoute[patrolIdx % patrolRoute.length];
-            (unit as any)._patrolIdx = (patrolIdx + 1) % patrolRoute.length;
+            unit._patrolIdx = (patrolIdx + 1) % patrolRoute.length;
             UnitAI.commandMove(unit, target, map);
             return;
           }
@@ -745,7 +745,7 @@ export class UnitAI {
     // Find a suitable wall placement tile near the unit
     const wallTarget = UnitAI.findWallSpot(unit, map);
     if (wallTarget) {
-      const isGate = (unit as any)._planIsGate === true;
+      const isGate = unit._planIsGate === true;
       events.push({
         type: isGate ? 'builder:place_gate' : 'builder:place_wall',
         unit,
@@ -927,8 +927,8 @@ export class UnitAI {
       unit.worldPosition.z = targetWorld.z;
       unit.worldPosition.y = targetWorld.y;
 
-      const path = (unit as any)._path as HexCoord[] | null;
-      const pathIndex = ((unit as any)._pathIndex as number) || 0;
+      const path = unit._path as HexCoord[] | null;
+      const pathIndex = (unit._pathIndex ?? 0) || 0;
 
       if (path && pathIndex < path.length - 1) {
         const nextWp = path[pathIndex + 1];
@@ -938,17 +938,17 @@ export class UnitAI {
           const finalGoal = path[path.length - 1];
           const newPath = Pathfinder.findPath(unit.position, finalGoal, map, unit.type === UnitType.LUMBERJACK, unit.owner);
           if (newPath.length > 1) {
-            (unit as any)._path = newPath;
-            (unit as any)._pathIndex = 1;
+            unit._path = newPath;
+            unit._pathIndex = 1;
             unit.targetPosition = newPath[1];
           } else {
             // Can't reach destination anymore — stop
             unit.targetPosition = null;
             unit.state = UnitState.IDLE;
-            (unit as any)._path = null;
+            unit._path = null;
           }
         } else {
-          (unit as any)._pathIndex = pathIndex + 1;
+          unit._pathIndex = pathIndex + 1;
           unit.targetPosition = nextWp;
         }
       } else {
@@ -967,7 +967,7 @@ export class UnitAI {
         }
         unit.state = UnitState.IDLE;
         unit.command = null;
-        (unit as any)._path = null;
+        unit._path = null;
       }
     } else {
       const speed = unit.moveSpeed * delta;
@@ -1361,7 +1361,7 @@ export class UnitAI {
         if (dist < nearestDist) {
           nearestDist = dist;
           nearest = spot;
-          (unit as any)._planIsGate = false;
+          unit._planIsGate = false;
         }
       }
     }
@@ -1384,7 +1384,7 @@ export class UnitAI {
           if (dist < nearestDist) {
             nearestDist = dist;
             nearest = spot;
-            (unit as any)._planIsGate = true;
+            unit._planIsGate = true;
           }
         }
       }
@@ -1594,7 +1594,7 @@ export class UnitAI {
             // Can fire right now — switch to attacking
             unit.state = UnitState.ATTACKING;
             unit.targetPosition = null;
-            (unit as any)._path = null;
+            unit._path = null;
             unit.command = { type: CommandType.ATTACK, targetPosition: threat.position, targetUnitId: threat.id };
             return;
           } else if (isAttackMove || unit.stance === UnitStance.AGGRESSIVE) {
@@ -1633,15 +1633,15 @@ export class UnitAI {
             // In range — switch to attacking
             unit.state = UnitState.ATTACKING;
             unit.targetPosition = null;
-            (unit as any)._path = null;
+            unit._path = null;
             return;
           }
         }
       }
 
       // Advance along path
-      const path = (unit as any)._path as HexCoord[] | null;
-      const pathIndex = ((unit as any)._pathIndex as number) || 0;
+      const path = unit._path as HexCoord[] | null;
+      const pathIndex = (unit._pathIndex ?? 0) || 0;
 
       if (path && pathIndex < path.length - 1) {
         const nextWp = path[pathIndex + 1];
@@ -1652,26 +1652,26 @@ export class UnitAI {
           const canForest = unit.type === UnitType.LUMBERJACK;
           const newPath = Pathfinder.findPath(unit.position, finalGoal, map, canForest, unit.owner);
           if (newPath.length > 1) {
-            (unit as any)._path = newPath;
-            (unit as any)._pathIndex = 1;
+            unit._path = newPath;
+            unit._pathIndex = 1;
             unit.targetPosition = newPath[1];
           } else {
             // No path — stop moving
             unit.targetPosition = null;
             unit.state = UnitState.IDLE;
             unit.command = null;
-            (unit as any)._path = null;
+            unit._path = null;
             events.push({ type: 'unit:arrived', unit });
           }
         } else {
-          (unit as any)._pathIndex = pathIndex + 1;
+          unit._pathIndex = pathIndex + 1;
           unit.targetPosition = nextWp;
         }
       } else {
         // Reached final destination
         unit.targetPosition = null;
         unit.state = UnitState.IDLE;
-        (unit as any)._path = null;
+        unit._path = null;
         events.push({ type: 'unit:arrived', unit });
       }
     } else {
@@ -1843,8 +1843,8 @@ export class UnitAI {
         if (meleePath.length > 1) {
           unit.targetPosition = meleePath[1];
           unit.state = UnitState.MOVING;
-          (unit as any)._path = meleePath;
-          (unit as any)._pathIndex = 1;
+          unit._path = meleePath;
+          unit._pathIndex = 1;
           // Preserve the attack command so we resume attacking once in range
           unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
         } else {

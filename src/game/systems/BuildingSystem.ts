@@ -22,7 +22,6 @@ class BuildingSystem {
     barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
   };
   wallConnectable: Set<string> = new Set();
-  barracksHealth: Map<string, number> = new Map();
 
   /** Optional callback invoked on neighboring wall tiles when a building is unregistered */
   private wallRebuildCb: WallRebuildCallback | null = null;
@@ -84,7 +83,6 @@ class BuildingSystem {
     this.placedBuildings.push(pb);
     const key = `${pos.q},${pos.r}`;
     this.wallConnectable.add(key);
-    this.barracksHealth.set(key, maxHealth);
     return pb;
   }
 
@@ -93,7 +91,6 @@ class BuildingSystem {
     if (idx >= 0) this.placedBuildings.splice(idx, 1);
     const key = `${pb.position.q},${pb.position.r}`;
     this.wallConnectable.delete(key);
-    this.barracksHealth.delete(key);
     Pathfinder.blockedTiles.delete(key);
     this.ctx.scene.remove(pb.mesh);
     // Rebuild adjacent walls if wall system is connected
@@ -199,7 +196,6 @@ class BuildingSystem {
     }
     this.placedBuildings = [];
     this.wallConnectable.clear();
-    this.barracksHealth.clear();
     this.buildingSpawnIndex = {
       barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
     };

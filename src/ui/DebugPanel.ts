@@ -273,6 +273,15 @@ export class DebugPanel {
       return btn;
     };
 
+    // Arena Quick Restart
+    mkSection('Arena', '#00e676');
+    const arenaRow = document.createElement('div');
+    arenaRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
+    const restartBtn = mkBtn('⚔ Restart Arena', '#00c853', () => { cb.restartArena(); this.rebuildContent(); });
+    restartBtn.style.cssText += 'padding:5px 12px;font-size:11px;';
+    arenaRow.appendChild(restartBtn);
+    container.appendChild(arenaRow);
+
     // Economy Cheats
     mkSection('Economy Cheats', '#f0c040');
     mkToggle('Free Spawn (no cost)', () => cb.getFlag('freeBuild'), () => cb.toggleFlag('freeBuild'), '#f0c040');
@@ -763,4 +772,6 @@ export interface DebugPanelCallbacks {
   instantLose(): void;
   spawnUnit(type: UnitType, count: number): void;
   spawnEnemy(type: UnitType, count: number): void;
+  restartArena(): void;
+  getMapType(): string;
 }

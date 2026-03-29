@@ -165,6 +165,15 @@ export interface Unit {
   carryType: ResourceType | null;
   stance: UnitStance;
   isSiege: boolean;
+
+  // Pathfinding state (set at runtime by UnitAI)
+  _path?: HexCoord[] | null;
+  _pathIndex?: number;
+  _postPosition?: HexCoord | null;  // Defensive stance return point
+  _patrolRoute?: HexCoord[];
+  _patrolIdx?: number;
+  _planIsGate?: boolean;            // Builder: planned build is a gate
+  _playerCommanded?: boolean;       // Player issued a direct command
 }
 
 export enum UnitType {

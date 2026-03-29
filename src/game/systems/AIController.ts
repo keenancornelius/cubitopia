@@ -347,7 +347,7 @@ export default class AIController {
 
       for (let i = 0; i < sortedCombat.length; i++) {
         sortedCombat[i].stance = UnitStance.AGGRESSIVE;
-        (sortedCombat[i] as any)._postPosition = null;
+        sortedCombat[i]._postPosition = null;
         st.guardAssignments.delete(sortedCombat[i].id);
         UnitAI.commandMove(sortedCombat[i], formationSlots[i] || targetCenter, this.ctx.currentMap!);
       }

@@ -230,32 +230,14 @@ class Cubitopia {
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
 
-    // Debug panel callbacks
-    this.hud.buildDebugPanel();
-    this.hud.onDebugSpawn((type, count) => this.debugController.spawnUnit(type, count));
-    this.hud.onDebugGiveResources(() => this.debugController.giveResources());
-    this.hud.onDebugKillAllEnemy(() => this.debugController.killAllEnemy());
-    this.hud.onDebugDamageBase((owner, amount) => this.debugController.damageBase(owner, amount));
-    this.hud.onDebugGameSpeed((speed) => { this.gameSpeed = speed; this.hud.showNotification(`⏩ Speed: ${speed}x`, '#00bcd4'); });
-    this.hud.onDebugTeleportMode(() => { this.hud.debugFlags.teleportMode = !this.hud.debugFlags.teleportMode; });
-    this.hud.onDebugHealSelected(() => this.debugController.healSelected());
-    this.hud.onDebugSpawnEnemy((type, count) => this.debugController.spawnEnemyUnit(type, count));
-    this.hud.onDebugBuffSelected((stat) => this.debugController.buffSelected(stat));
-    this.hud.onDebugInstantWin(() => this.debugController.instantWin());
-    this.hud.onDebugInstantLose(() => this.debugController.instantLose());
-    this.hud.onDebugClearTrees(() => this.debugController.clearTrees());
-    this.hud.onDebugClearStones(() => this.debugController.clearStones());
-    this.hud.onDebugKillSelected(() => this.respawnSelectedUnits());
-    // Old combat monitor toggle removed — now part of unified DebugPanel
-
     // Wire unified debug panel callbacks
     this.debugPanel.setCallbacks({
       getFlag: (key) => (this.hud.debugFlags as any)[key] ?? false,
       toggleFlag: (key) => { (this.hud.debugFlags as any)[key] = !(this.hud.debugFlags as any)[key]; },
       getGameSpeed: () => this.hud.gameSpeed,
       setGameSpeed: (s) => { this.hud.gameSpeed = s; this.gameSpeed = s; this.hud.showNotification(`Speed: ${s}x`, '#00bcd4'); },
-      getSpawnCount: () => (this.hud as any).debugSpawnCount ?? 1,
-      setSpawnCount: (n) => { (this.hud as any).debugSpawnCount = n; },
+      getSpawnCount: () => this.hud.debugSpawnCount,
+      setSpawnCount: (n) => { this.hud.debugSpawnCount = n; },
       giveResources: () => this.debugController.giveResources(),
       killAllEnemy: () => this.debugController.killAllEnemy(),
       damageBase: (owner, amount) => this.debugController.damageBase(owner, amount),
@@ -268,6 +250,8 @@ class Cubitopia {
       instantLose: () => this.debugController.instantLose(),
       spawnUnit: (type, count) => this.debugController.spawnUnit(type, count),
       spawnEnemy: (type, count) => this.debugController.spawnEnemyUnit(type, count),
+      restartArena: () => { this.gameMode = 'aivai'; this.mapType = MapType.ARENA; this.restartGame(); },
+      getMapType: () => this.mapType,
     });
 
     // Selection changed
@@ -1157,12 +1141,12 @@ class Cubitopia {
     if (enemyAtTarget) {
       // Attack command: all units converge on the enemy
       for (const unit of selected) {
-        (unit as any)._playerCommanded = true;
+        unit._playerCommanded = true;
         UnitAI.commandAttack(unit, hexCoord, enemyAtTarget.id, this.currentMap!);
       }
     } else if (selected.length === 1) {
       // Single unit: move directly to the target hex
-      (selected[0] as any)._playerCommanded = true;
+      selected[0]._playerCommanded = true;
       UnitAI.commandMove(selected[0], hexCoord, this.currentMap!);
     } else {
       // Group move: sort by unit type priority, then spread into formation
@@ -1175,7 +1159,7 @@ class Cubitopia {
       const formationSlots = generateFormation(hexCoord, sortedSelected.length, this.selectedFormation, this.currentMap!.tiles);
       for (let i = 0; i < sortedSelected.length; i++) {
         const unit = sortedSelected[i];
-        (unit as any)._playerCommanded = true;
+        unit._playerCommanded = true;
         const slot = formationSlots[i] || hexCoord;
         UnitAI.commandMove(unit, slot, this.currentMap!);
       }
@@ -1668,6 +1652,87 @@ class Cubitopia {
     this.menuController.removeGameOverOverlay();
     this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
     this.showMainMenu();
+  }
+
+  /** Clean up old game state and start a new game without showing the main menu. */
+  restartGame(): void {
+    this.voxelBuilder.clearAll();
+    this.terrainDecorator.dispose();
+    this.unitRenderer.dispose();
+    this.baseRenderer.dispose();
+    this.tileHighlighter.clearAll();
+
+    const oldOcean = this.renderer.scene.getObjectByName('ocean-plane');
+    if (oldOcean) {
+      this.renderer.scene.remove(oldOcean);
+      if (oldOcean instanceof THREE.Mesh) {
+        oldOcean.geometry.dispose();
+        (oldOcean.material as THREE.Material).dispose();
+      }
+    }
+
+    this.allUnits = [];
+    this.players = [];
+    this.bases = [];
+    this.gameOver = false;
+    this.wallSystem.cleanup();
+    UnitAI.wallsBuilt.clear();
+    UnitAI.wallOwners.clear();
+    for (const [, flagGroup] of this.rallyFlagMeshes) {
+      this.renderer.scene.remove(flagGroup);
+      flagGroup.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (child.material instanceof THREE.Material) child.material.dispose();
+        }
+      });
+    }
+    this.rallyFlagMeshes.clear();
+    for (const [, line] of this.rallyLineMeshes) {
+      this.renderer.scene.remove(line);
+      line.geometry.dispose();
+      if (line.material instanceof THREE.Material) line.material.dispose();
+    }
+    this.rallyLineMeshes.clear();
+    this.rallyPoints.clear();
+    this.blueprintSystem.clearAllBlueprintGhosts();
+    this.blueprintSystem.clearHoverGhost();
+    UnitAI.clearBlueprints();
+    UnitAI.clearHarvestBlueprints();
+    UnitAI.barracksPositions.clear();
+    this.blueprintSystem.clearAllHarvestMarkers();
+    this.blueprintSystem.clearAllMineMarkers();
+    this.buildingSystem.cleanup();
+    this.tooltipController.cleanup();
+    UnitAI.farmPatches.clear();
+    UnitAI.playerGrassBlueprint.clear();
+    UnitAI.claimedFarms.clear();
+    UnitAI.claimedTrees.clear();
+    UnitAI.clearUnreachableCache();
+    UnitAI.siloPositions.clear();
+    UnitAI.farmhousePositions.clear();
+    UnitAI.grassTiles.clear();
+    this.natureSystem.cleanup();
+    for (const st of this.aiController.aiState) {
+      for (const mesh of st.meshes) {
+        this.renderer.scene.remove(mesh);
+        mesh.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (child.material instanceof THREE.Material) child.material.dispose();
+          }
+        });
+      }
+    }
+    this.aiController.cleanup();
+    if (this.resourceManager) {
+      this.resourceManager.cleanup();
+    }
+    this.initSystems();
+    this.menuController.removeGameOverOverlay();
+    this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
+    // Skip menu — go directly to new game
+    this.startNewGame();
   }
 
   private setupResizeHandler(): void {
@@ -2320,7 +2385,7 @@ class Cubitopia {
         const isSiege = event.unit.isSiege === true; // Trebuchets/siege engines
         // ALL structures (walls, gates, buildings) require siege weapons to destroy
         if (!isSiege) continue; // Non-siege units cannot damage structures
-        if (this.buildingSystem.barracksHealth.has(key)) {
+        if (this.buildingSystem.getBuildingAt(event.result.position)) {
           this.wallSystem.damageBarracks(event.result.position, event.unit.stats.attack);
         } else if (this.wallSystem.gatesBuilt.has(key)) {
           this.wallSystem.damageGate(event.result.position, event.unit.stats.attack);

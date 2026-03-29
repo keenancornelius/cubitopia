@@ -1844,10 +1844,10 @@ export class HUD {
     }
   }
 
-  // ===================== DEBUG PANEL =====================
+  // ===================== DEBUG FLAGS =====================
+  // These flags are read by main.ts game logic. The debug UI that toggles
+  // them now lives in DebugPanel.ts (unified tabbed panel).
 
-  private debugPanel: HTMLElement | null = null;
-  private debugVisible = false;
   debugFlags: {
     freeBuild: boolean;       // Spawn units without resource costs
     freePlace: boolean;       // Place buildings without resource costs
@@ -1887,288 +1887,22 @@ export class HUD {
   };
   gameSpeed = 1;
 
-  private debugSpawnCount = 1;
-  private _onDebugSpawn: ((type: UnitType, count: number) => void) | null = null;
-  private _onDebugGiveResources: (() => void) | null = null;
-  private _onDebugKillAllEnemy: (() => void) | null = null;
-  private _onDebugDamageBase: ((owner: number, amount: number) => void) | null = null;
-  private _onDebugGameSpeed: ((speed: number) => void) | null = null;
-  private _onDebugTeleportMode: (() => void) | null = null;
-  private _onDebugHealSelected: (() => void) | null = null;
-  private _onDebugSpawnEnemy: ((type: UnitType, count: number) => void) | null = null;
-  private _onDebugBuffSelected: ((stat: string) => void) | null = null;
-  private _onDebugInstantWin: (() => void) | null = null;
-  private _onDebugInstantLose: (() => void) | null = null;
-  private _onDebugClearTrees: (() => void) | null = null;
-  private _onDebugClearStones: (() => void) | null = null;
-  private _onDebugKillSelected: (() => void) | null = null;
-  private _onDebugToggleCombatMonitor: (() => void) | null = null;
+  debugSpawnCount = 1;
 
-  onDebugSpawn(cb: (type: UnitType, count: number) => void) { this._onDebugSpawn = cb; }
-  onDebugGiveResources(cb: () => void) { this._onDebugGiveResources = cb; }
-  onDebugKillAllEnemy(cb: () => void) { this._onDebugKillAllEnemy = cb; }
-  onDebugDamageBase(cb: (owner: number, amount: number) => void) { this._onDebugDamageBase = cb; }
-  onDebugGameSpeed(cb: (speed: number) => void) { this._onDebugGameSpeed = cb; }
-  onDebugTeleportMode(cb: () => void) { this._onDebugTeleportMode = cb; }
-  onDebugHealSelected(cb: () => void) { this._onDebugHealSelected = cb; }
-  onDebugSpawnEnemy(cb: (type: UnitType, count: number) => void) { this._onDebugSpawnEnemy = cb; }
-  onDebugBuffSelected(cb: (stat: string) => void) { this._onDebugBuffSelected = cb; }
-  onDebugInstantWin(cb: () => void) { this._onDebugInstantWin = cb; }
-  onDebugInstantLose(cb: () => void) { this._onDebugInstantLose = cb; }
-  onDebugClearTrees(cb: () => void) { this._onDebugClearTrees = cb; }
-  onDebugClearStones(cb: () => void) { this._onDebugClearStones = cb; }
-  onDebugKillSelected(cb: () => void) { this._onDebugKillSelected = cb; }
-  onDebugToggleCombatMonitor(cb: () => void) { this._onDebugToggleCombatMonitor = cb; }
-
-  buildDebugPanel(): void {
-    if (this.debugPanel) return;
-
-    const panel = document.createElement('div');
-    panel.style.cssText = `
-      position: fixed; top: 56px; left: 16px;
-      background: rgba(10, 10, 18, 0.92); padding: 10px 12px; border-radius: 8px;
-      font-size: 11px; border: 2px solid rgba(255, 50, 50, 0.4);
-      pointer-events: auto; z-index: 10001;
-      font-family: 'Courier New', monospace; color: #ccc;
-      max-height: calc(100vh - 80px); overflow-y: auto;
-      backdrop-filter: blur(8px); min-width: 220px;
-      display: none;
-    `;
-
-    // Prevent game interaction through panel
-    panel.addEventListener('mousedown', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
-    panel.addEventListener('mouseup', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
-    panel.addEventListener('click', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
-
-    document.body.appendChild(panel);
-    this.debugPanel = panel;
-    this.rebuildDebugContent();
-  }
-
-  toggleDebugPanel(): void {
-    if (!this.debugPanel) this.buildDebugPanel();
-    this.debugVisible = !this.debugVisible;
-    if (this.debugPanel) {
-      this.debugPanel.style.display = this.debugVisible ? 'block' : 'none';
-    }
-  }
-
-  private rebuildDebugContent(): void {
-    if (!this.debugPanel) return;
-    this.debugPanel.innerHTML = '';
-
-    // Header
-    const header = document.createElement('div');
-    header.style.cssText = 'font-size:13px;font-weight:bold;color:#ff4444;margin-bottom:8px;border-bottom:1px solid rgba(255,50,50,0.3);padding-bottom:4px;';
-    header.textContent = '🐛 DEBUG / PLAYTESTER';
-    this.debugPanel.appendChild(header);
-
-    // --- TOGGLES ---
-    const mkSection = (title: string, color: string) => {
-      const s = document.createElement('div');
-      s.style.cssText = `font-size:10px;color:${color};text-transform:uppercase;letter-spacing:1px;margin-top:8px;margin-bottom:4px;`;
-      s.textContent = title;
-      this.debugPanel!.appendChild(s);
-    };
-
-    const mkToggle = (label: string, key: keyof typeof this.debugFlags, color?: string) => {
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:2px 0;cursor:pointer;';
-      const box = document.createElement('span');
-      const active = this.debugFlags[key];
-      box.style.cssText = `
-        display:inline-block; width:14px; height:14px; border-radius:3px;
-        border:1px solid ${active ? (color || '#4caf50') : '#555'};
-        background:${active ? (color || '#4caf50') : 'transparent'};
-        font-size:10px; text-align:center; line-height:14px; color:white; flex-shrink:0;
-      `;
-      box.textContent = active ? '✓' : '';
-      const lbl = document.createElement('span');
-      lbl.style.cssText = `color:${active ? '#fff' : '#999'};font-size:11px;`;
-      lbl.textContent = label;
-      row.appendChild(box);
-      row.appendChild(lbl);
-      row.addEventListener('click', () => {
-        (this.debugFlags as any)[key] = !this.debugFlags[key];
-        this.rebuildDebugContent();
-      });
-      this.debugPanel!.appendChild(row);
-    };
-
-    mkSection('Economy Cheats', '#f0c040');
-    mkToggle('Free Spawn (no cost)', 'freeBuild', '#f0c040');
-    mkToggle('Free Build (no building cost)', 'freePlace', '#f0c040');
-    mkToggle('Infinite Resources', 'infiniteResources', '#f0c040');
-    mkToggle('Instant Spawn (no timer)', 'instantSpawn', '#f0c040');
-
-    mkSection('Worker Actions', '#8bc34a');
-    mkToggle('Disable Auto-Chop (Lumberjacks)', 'disableChop', '#e67e22');
-    mkToggle('Disable Auto-Mine (Builders)', 'disableMine', '#e67e22');
-    mkToggle('Disable Auto-Harvest (Villagers)', 'disableHarvest', '#e67e22');
-    mkToggle('Disable Auto-Build Walls', 'disableBuild', '#e67e22');
-    mkToggle('Disable Resource Deposit', 'disableDeposit', '#e67e22');
-    mkToggle('Disable Auto-Return', 'disableAutoReturn', '#e67e22');
-
-    mkSection('Combat & AI', '#e74c3c');
-    mkToggle('Disable All Combat', 'disableCombat', '#e74c3c');
-    mkToggle('Disable AI Commander', 'disableAI', '#e74c3c');
-    mkToggle('God Mode (no damage)', 'godMode', '#9b59b6');
-
-    mkSection('World', '#3498db');
-    mkToggle('Disable Grass Growth', 'disableGrassGrowth', '#3498db');
-    mkToggle('Disable Tree Regrowth', 'disableTreeGrowth', '#3498db');
-
-    mkSection('Visuals & Tools', '#9b59b6');
-    mkToggle('Show Unit Overlay (HP/State)', 'showUnitOverlay', '#9b59b6');
-    mkToggle('Teleport Mode (click to warp)', 'teleportMode', '#e91e63');
-
-    // --- GAME SPEED ---
-    mkSection('Game Speed', '#00bcd4');
-    const speedRow = document.createElement('div');
-    speedRow.style.cssText = 'display:flex;gap:3px;margin-bottom:6px;align-items:center;';
-    const speeds = [0.25, 0.5, 1, 2, 4, 8];
-    for (const s of speeds) {
-      const btn = document.createElement('button');
-      const isActive = Math.abs(this.gameSpeed - s) < 0.01;
-      btn.style.cssText = `
-        background:${isActive ? '#00bcd4' : '#333'}; color:${isActive ? '#000' : '#aaa'};
-        border:1px solid ${isActive ? '#00bcd4' : '#555'}; padding:2px 6px; font-size:10px;
-        font-family:'Courier New',monospace; border-radius:3px; cursor:pointer; font-weight:bold;
-      `;
-      btn.textContent = s + 'x';
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.gameSpeed = s;
-        this._onDebugGameSpeed?.(s);
-        this.rebuildDebugContent();
-      });
-      speedRow.appendChild(btn);
-    }
-    this.debugPanel.appendChild(speedRow);
-
-    // --- QUICK ACTIONS ---
-    mkSection('Quick Actions', '#ff9800');
-
-    const mkBtn = (label: string, color: string, cb: () => void) => {
-      const btn = document.createElement('button');
-      btn.style.cssText = `
-        background:${color}; color:white; border:none; padding:3px 8px; font-size:10px;
-        font-family:'Courier New',monospace; border-radius:4px; cursor:pointer;
-        margin:2px 2px; font-weight:bold;
-      `;
-      btn.textContent = label;
-      btn.addEventListener('click', (e) => { e.stopPropagation(); cb(); });
-      btn.addEventListener('mouseenter', () => { btn.style.filter = 'brightness(1.3)'; });
-      btn.addEventListener('mouseleave', () => { btn.style.filter = 'none'; });
-      return btn;
-    };
-
-    const giveRow = document.createElement('div');
-    giveRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
-    giveRow.appendChild(mkBtn('+999 All Resources', '#4caf50', () => this._onDebugGiveResources?.()));
-    giveRow.appendChild(mkBtn('Kill All Enemies', '#e74c3c', () => this._onDebugKillAllEnemy?.()));
-    this.debugPanel.appendChild(giveRow);
-
-    const dmgRow = document.createElement('div');
-    dmgRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
-    dmgRow.appendChild(mkBtn('Dmg Enemy Base -50', '#ff5722', () => this._onDebugDamageBase?.(1, 50)));
-    dmgRow.appendChild(mkBtn('Dmg My Base -50', '#795548', () => this._onDebugDamageBase?.(0, 50)));
-    this.debugPanel.appendChild(dmgRow);
-
-    // --- SELECTED UNIT ACTIONS ---
-    mkSection('Selected Unit Actions', '#e91e63');
-    const selRow = document.createElement('div');
-    selRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
-    selRow.appendChild(mkBtn('Heal Full', '#27ae60', () => this._onDebugHealSelected?.()));
-    selRow.appendChild(mkBtn('Kill Selected', '#e74c3c', () => this._onDebugKillSelected?.()));
-    selRow.appendChild(mkBtn('+ATK', '#ff5722', () => this._onDebugBuffSelected?.('attack')));
-    selRow.appendChild(mkBtn('+DEF', '#3498db', () => this._onDebugBuffSelected?.('defense')));
-    selRow.appendChild(mkBtn('+HP', '#27ae60', () => this._onDebugBuffSelected?.('maxHealth')));
-    selRow.appendChild(mkBtn('+SPD', '#00bcd4', () => this._onDebugBuffSelected?.('moveSpeed')));
-    selRow.appendChild(mkBtn('+RNG', '#9b59b6', () => this._onDebugBuffSelected?.('range')));
-    this.debugPanel.appendChild(selRow);
-
-    // --- ARENA COMBAT MONITOR ---
-    mkSection('Arena Combat Monitor', '#00d4ff');
-    const monitorRow = document.createElement('div');
-    monitorRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
-    monitorRow.appendChild(mkBtn('Toggle Combat Monitor (~)', '#00838f', () => this._onDebugToggleCombatMonitor?.()));
-    this.debugPanel.appendChild(monitorRow);
-
-    // --- WORLD ACTIONS ---
-    mkSection('World Actions', '#795548');
-    const worldRow = document.createElement('div');
-    worldRow.style.cssText = 'display:flex;flex-wrap:wrap;margin-bottom:4px;';
-    worldRow.appendChild(mkBtn('Clear All Trees', '#6d4c41', () => this._onDebugClearTrees?.()));
-    worldRow.appendChild(mkBtn('Clear All Stones', '#78909c', () => this._onDebugClearStones?.()));
-    worldRow.appendChild(mkBtn('Instant Win', '#ffd700', () => this._onDebugInstantWin?.()));
-    worldRow.appendChild(mkBtn('Instant Lose', '#b71c1c', () => this._onDebugInstantLose?.()));
-    this.debugPanel.appendChild(worldRow);
-
-    // --- SPAWN COUNT SELECTOR ---
-    mkSection('Spawn Count', '#ff9800');
-    const countRow = document.createElement('div');
-    countRow.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;margin-bottom:4px;';
-    const countLabel = document.createElement('span');
-    countLabel.style.cssText = 'color:#fff;font-size:11px;margin-right:6px;';
-    countLabel.textContent = 'Count:';
-    countRow.appendChild(countLabel);
-    const countBtns: HTMLButtonElement[] = [];
-    for (const n of [1, 3, 5, 10, 20]) {
-      const cb = document.createElement('button');
-      cb.textContent = `${n}`;
-      cb.style.cssText = `padding:2px 8px;margin:1px;border:none;border-radius:3px;cursor:pointer;font-size:11px;font-weight:bold;color:#fff;background:${n === 1 ? '#ff9800' : '#555'};`;
-      cb.onclick = () => {
-        this.debugSpawnCount = n;
-        countBtns.forEach(b => b.style.background = '#555');
-        cb.style.background = '#ff9800';
-      };
-      countBtns.push(cb);
-      countRow.appendChild(cb);
-    }
-    this.debugPanel.appendChild(countRow);
-
-    // --- SPAWN PLAYER UNITS ---
-    mkSection('Spawn Player Units', '#9c27b0');
-
-    const unitDefs: { type: UnitType; label: string; color: string }[] = [
-      { type: UnitType.WARRIOR, label: 'Warrior', color: '#c0392b' },
-      { type: UnitType.ARCHER, label: 'Archer', color: '#8e44ad' },
-      { type: UnitType.RIDER, label: 'Rider', color: '#d35400' },
-      { type: UnitType.PALADIN, label: 'Paladin', color: '#3498db' },
-      { type: UnitType.TREBUCHET, label: 'Trebuchet', color: '#5d4037' },
-      { type: UnitType.SCOUT, label: 'Scout', color: '#1abc9c' },
-      { type: UnitType.MAGE, label: 'Mage', color: '#2980b9' },
-      { type: UnitType.HEALER, label: 'Healer', color: '#27ae60' },
-      { type: UnitType.ASSASSIN, label: 'Assassin', color: '#2c3e50' },
-      { type: UnitType.SHIELDBEARER, label: 'Shield', color: '#7f8c8d' },
-      { type: UnitType.BERSERKER, label: 'Berserker', color: '#e74c3c' },
-      { type: UnitType.BATTLEMAGE, label: 'Battlemage', color: '#8e44ad' },
-      { type: UnitType.GREATSWORD, label: 'Greatsword', color: '#546e7a' },
-      { type: UnitType.LUMBERJACK, label: 'Lumberjack', color: '#6d4c41' },
-      { type: UnitType.BUILDER, label: 'Builder', color: '#b8860b' },
-      { type: UnitType.VILLAGER, label: 'Villager', color: '#daa520' },
-    ];
-
-    const spawnRow = document.createElement('div');
-    spawnRow.style.cssText = 'display:flex;flex-wrap:wrap;';
-    for (const ud of unitDefs) {
-      spawnRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawn?.(ud.type, this.debugSpawnCount)));
-    }
-    this.debugPanel.appendChild(spawnRow);
-
-    // --- SPAWN ENEMY UNITS ---
-    mkSection('Spawn Enemy Units', '#b71c1c');
-    const enemyRow = document.createElement('div');
-    enemyRow.style.cssText = 'display:flex;flex-wrap:wrap;';
-    for (const ud of unitDefs) {
-      enemyRow.appendChild(mkBtn(ud.label, ud.color, () => this._onDebugSpawnEnemy?.(ud.type, this.debugSpawnCount)));
-    }
-    this.debugPanel.appendChild(enemyRow);
-  }
+  // NOTE: Old debug panel UI (buildDebugPanel, toggleDebugPanel, rebuildDebugContent)
+  // has been removed. All debug UI is now handled by DebugPanel.ts (unified tabbed panel).
+  // The debugFlags, gameSpeed, and debugSpawnCount properties remain here because
+  // they are referenced throughout main.ts game logic.
 
   dispose(): void {
     this.container.remove();
-    if (this.debugPanel) this.debugPanel.remove();
   }
-}
+} // END OF HUD CLASS — everything below this line was removed during cleanup
+
+// Dead code removed:
+// - buildDebugPanel(): void — old DOM builder for debug panel overlay
+// - toggleDebugPanel(): void — show/hide the old debug panel
+// - rebuildDebugContent(): void — ~210 lines of DOM generation for checkboxes, speed buttons,
+//   spawn buttons, etc. All replaced by DebugPanel.ts TOOLS tab.
+// - 15 private _onDebug* callback fields and their setter methods
+// - Old dispose() that cleaned up debugPanel DOM
