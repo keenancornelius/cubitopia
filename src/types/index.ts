@@ -314,3 +314,90 @@ export interface GameEvent {
 }
 
 export type EventCallback = (event: GameEvent) => void;
+
+// --- Building System Types ---
+
+export type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo';
+
+export interface PlacedBuilding {
+  id: string;
+  kind: BuildingKind;
+  owner: number;
+  position: HexCoord;
+  worldPosition: { x: number; y: number; z: number };
+  mesh: THREE.Group;
+  health: number;
+  maxHealth: number;
+}
+
+// --- AI State Types ---
+
+export interface AIBuildState {
+  barracks: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  forestry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  masonry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  farmhouse: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  workshop: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  silo: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  meshes: THREE.Group[];
+  spawnQueue: { type: UnitType; cost: number }[];
+  workerSpawnQueue: { type: UnitType; building: string }[];
+  spawnTimer: number;
+  workerSpawnTimer: number;
+  econTimer: number;
+  cmdTimer: number;
+  autoMarchTimer: number;
+  battleStarted: boolean;
+  armySize: number;
+  waveNumber: number;
+  mustering: boolean;
+  rallyTimer: number;
+  buildPhase: number;
+  tacticsTimer: number;
+  guardAssignments: Map<string, HexCoord>;
+}
+
+export function createAIBuildState(): AIBuildState {
+  return {
+    barracks: null, forestry: null, masonry: null, farmhouse: null, workshop: null, silo: null,
+    meshes: [], spawnQueue: [], workerSpawnQueue: [], spawnTimer: 0, workerSpawnTimer: 0,
+    econTimer: -10, cmdTimer: 0, autoMarchTimer: 0, battleStarted: false,
+    armySize: 0, waveNumber: 0, mustering: true, rallyTimer: 0, buildPhase: 0,
+    tacticsTimer: 0, guardAssignments: new Map(),
+  };
+}
+
+// --- Game Context (shared state for all systems) ---
+
+export interface GameContext {
+  currentMap: GameMap | null;
+  players: Player[];
+  allUnits: Unit[];
+  bases: Base[];
+  scene: THREE.Scene;
+  hud: HUD;
+  unitRenderer: UnitRenderer;
+  selectionManager: SelectionManager;
+  terrainDecorator: TerrainDecorator;
+  voxelBuilder: VoxelBuilder;
+
+  woodStockpile: number[];
+  stoneStockpile: number[];
+  foodStockpile: number[];
+  grassFiberStockpile: number[];
+  clayStockpile: number[];
+  ropeStockpile: number[];
+
+  hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
+  getElevation(pos: HexCoord): number;
+  isTileOccupied(key: string): boolean;
+  findSpawnTile(map: GameMap, q: number, r: number, allowOccupied?: boolean): HexCoord;
+  isWaterTerrain(terrain: TerrainType): boolean;
+}
+
+// Forward-declare imported types used in GameContext
+import type { HUD } from '../ui/HUD';
+import type { UnitRenderer } from '../engine/UnitRenderer';
+import type { SelectionManager } from '../game/systems/SelectionManager';
+import type { TerrainDecorator } from '../engine/TerrainDecorator';
+import type { VoxelBuilder } from '../engine/VoxelBuilder';
