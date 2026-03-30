@@ -1167,6 +1167,27 @@ export class MapGenerator {
         // walkableFloor defaults to elevation (overridden later for tunnel tiles)
         tile.walkableFloor = tile.elevation;
       }
+
+      // Water tiles: fill up to max neighbor elevation with underground blocks.
+      // This seals the cliff face gap visible from the water side — without
+      // changing the tile's elevation (water surface stays low).
+      const isWaterTile = tile.terrain === TerrainType.RIVER || tile.terrain === TerrainType.LAKE
+                       || tile.terrain === TerrainType.WATERFALL;
+      if (isWaterTile && maxNeighborElev > tile.elevation) {
+        const offsets = [-0.5, 0, 0.5];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = tile.elevation; y < maxNeighborElev; y++) {
+              tile.voxelData.blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: y < 3 ? BlockType.STONE : BlockType.DIRT,
+                health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+        // NOTE: Do NOT recalculate elevation here — water surface stays at original level
+      }
     });
   }
 
@@ -1460,6 +1481,10 @@ export class MapGenerator {
         const tKey = `${tq},${tr}`;
         const tile = map.tiles.get(tKey);
         if (!tile) continue;
+
+        // Never carve water tiles — their thin columns create visible voids
+        if (tile.terrain === TerrainType.RIVER || tile.terrain === TerrainType.LAKE
+            || tile.terrain === TerrainType.WATERFALL || tile.terrain === TerrainType.WATER) continue;
 
         const tileSurfaceY = tile.elevation - 1;
         // At entrance/exit, allow ceiling to break surface for cave mouth
