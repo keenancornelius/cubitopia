@@ -722,7 +722,13 @@ class Cubitopia {
           if (mineEraseMode) {
             this.blueprintSystem.unpaintMineTile(hex);
           } else {
-            this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
+            // Use lastMineHit to determine vertical vs horizontal mining
+            const hit = this.lastMineHit;
+            if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
+              this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
+            } else {
+              this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
+            }
           }
         }
       }
@@ -767,7 +773,12 @@ class Cubitopia {
           if (mineEraseMode) {
             this.blueprintSystem.unpaintMineTile(hex);
           } else {
-            this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
+            const hit = this.lastMineHit;
+            if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
+              this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
+            } else {
+              this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
+            }
           }
         }
       }
@@ -813,6 +824,9 @@ class Cubitopia {
    *   nearest HIGHER-elevation neighbor in the direction you clicked (offset from tile center).
    *   This works even though the camera can't physically raycast to side faces.
    */
+  /** Result from mine mode raycasting — includes which block face was hit */
+  private lastMineHit: { coord: HexCoord; mode: 'vertical' | 'horizontal'; targetY?: number } | null = null;
+
   private mouseToMineHex(e: MouseEvent, canvasEl: HTMLCanvasElement): HexCoord | null {
     const rect = canvasEl.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -822,18 +836,45 @@ class Cubitopia {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, this.camera.camera);
 
-    if (!this.currentMap) return this.raycastToHex(raycaster);
+    if (!this.currentMap) {
+      this.lastMineHit = null;
+      return this.raycastToHex(raycaster);
+    }
 
     // --- Minecraft-style: raycast directly against voxel blocks ---
-    // This correctly hits ridge tips, snow caps, and any visible block face.
     const voxelHit = this.voxelBuilder.raycastBlock(raycaster);
     if (voxelHit) {
       const [q, r] = voxelHit.tileKey.split(',').map(Number);
-      return { q, r };
+      const coord = { q, r };
+
+      // Determine if this is a side-face hit (horizontal mining) or top-face (vertical)
+      const isTopFace = Math.abs(voxelHit.faceNormal.y) > 0.5;
+
+      if (isTopFace) {
+        // Top face → vertical mine (dig down from the top)
+        this.lastMineHit = { coord, mode: 'vertical' };
+      } else {
+        // Side face → horizontal mine at the block's Y level
+        // Get the block's Y position from the tile's voxel data
+        const tile = this.currentMap.tiles.get(voxelHit.tileKey);
+        if (tile && tile.voxelData.blocks[voxelHit.blockIndex]) {
+          const blockY = tile.voxelData.blocks[voxelHit.blockIndex].localPosition.y;
+          this.lastMineHit = { coord, mode: 'horizontal', targetY: Math.floor(blockY) };
+        } else {
+          this.lastMineHit = { coord, mode: 'vertical' };
+        }
+      }
+
+      return coord;
     }
 
-    // Fallback to ground-plane raycast if no voxel block was hit
-    return this.raycastToHex(raycaster);
+    // Fallback to ground-plane raycast
+    this.lastMineHit = null;
+    const fallback = this.raycastToHex(raycaster);
+    if (fallback) {
+      this.lastMineHit = { coord: fallback, mode: 'vertical' };
+    }
+    return fallback;
   }
 
   // paintHarvestTile → moved to BlueprintSystem
@@ -876,31 +917,53 @@ class Cubitopia {
     }
   }
 
-  /** Per-block mining: remove topmost blocks from a tile, yield resources based on block type */
+  /** Per-block mining: remove blocks from a tile based on mine mode, yield resources */
   private handleMineTerrain(unit: Unit, minePos: HexCoord): void {
     if (!this.currentMap) return;
     const key = `${minePos.q},${minePos.r}`;
     const tile = this.currentMap.tiles.get(key);
     if (!tile || tile.voxelData.blocks.length === 0) return;
 
-    // --- Find and remove the topmost blocks ---
-    const BLOCKS_PER_TICK = 3; // Remove 3 blocks per mine tick (a small cluster)
+    const BLOCKS_PER_TICK = 3;
     const blocks = tile.voxelData.blocks;
 
-    // Sort by y descending to find the highest blocks
-    const sorted = blocks
-      .map((b, i) => ({ block: b, index: i }))
-      .sort((a, b) => b.block.localPosition.y - a.block.localPosition.y);
+    // Check if this is a horizontal or vertical mine
+    const mineTarget = UnitAI.getMineTarget(key);
+    const isHorizontal = mineTarget?.mode === 'horizontal' && mineTarget.targetY !== undefined;
 
-    // Take the topmost N blocks
-    const toRemove = sorted.slice(0, Math.min(BLOCKS_PER_TICK, sorted.length));
+    let toRemove: { block: typeof blocks[0]; index: number }[];
+
+    if (isHorizontal) {
+      // --- HORIZONTAL MINING: remove blocks at the target Y level ---
+      // This creates tunnels, overhangs, and cave-outs
+      const targetY = Math.floor(mineTarget!.targetY!);
+      const atLevel = blocks
+        .map((b, i) => ({ block: b, index: i }))
+        .filter(({ block }) => Math.floor(block.localPosition.y) === targetY);
+      toRemove = atLevel.slice(0, Math.min(BLOCKS_PER_TICK, atLevel.length));
+
+      // If no blocks left at target Y, try one level above (erode upward)
+      if (toRemove.length === 0) {
+        const above = blocks
+          .map((b, i) => ({ block: b, index: i }))
+          .filter(({ block }) => Math.floor(block.localPosition.y) === targetY + 1);
+        toRemove = above.slice(0, Math.min(BLOCKS_PER_TICK, above.length));
+      }
+    } else {
+      // --- VERTICAL MINING: remove topmost blocks (dig down) ---
+      const sorted = blocks
+        .map((b, i) => ({ block: b, index: i }))
+        .sort((a, b) => b.block.localPosition.y - a.block.localPosition.y);
+      toRemove = sorted.slice(0, Math.min(BLOCKS_PER_TICK, sorted.length));
+    }
+
     if (toRemove.length === 0) return;
 
-    // Determine resource from the primary (highest) block being mined
+    // Determine resource from the primary block being mined
     const primaryBlock = toRemove[0].block;
     const resource = this.blockToResource(primaryBlock.type);
 
-    // Remove blocks from the array (remove by index, highest first to avoid shifting)
+    // Remove blocks from the array
     const indicesToRemove = new Set(toRemove.map(t => t.index));
     tile.voxelData.blocks = blocks.filter((_, i) => !indicesToRemove.has(i));
 
@@ -912,7 +975,7 @@ class Cubitopia {
       for (const b of tile.voxelData.blocks) {
         if (b.localPosition.y > maxY) maxY = b.localPosition.y;
       }
-      tile.elevation = maxY + 1; // elevation = 1 above the highest block
+      tile.elevation = maxY + 1;
     }
     tile.voxelData.heightMap = [[tile.elevation]];
 
@@ -930,25 +993,34 @@ class Cubitopia {
     this.natureSystem.grassAge.delete(key);
     this.natureSystem.grassGrowthTimers.delete(key);
 
-    // Add pit wall blocks to neighbors where the mined tile exposed underground faces.
-    // We do NOT call rebuildTileShell — that would regenerate ridges/snow decorations and
-    // cause visual spikes. Instead, only append missing wall blocks.
+    // Add pit wall blocks to neighbors where needed
     this.addNeighborPitWalls(minePos);
 
-    // Check if mine blueprint target depth has been reached
-    if (UnitAI.isMineComplete(key, tile.elevation)) {
+    // Check if mine blueprint is complete
+    let complete = false;
+    if (isHorizontal) {
+      // Horizontal: done when no blocks remain at target Y level
+      const targetY = Math.floor(mineTarget!.targetY!);
+      const remaining = tile.voxelData.blocks.filter(
+        b => Math.floor(b.localPosition.y) === targetY
+      );
+      complete = remaining.length === 0;
+    } else {
+      complete = UnitAI.isMineComplete(key, tile.elevation);
+    }
+
+    if (complete) {
       UnitAI.playerMineBlueprint.delete(key);
       UnitAI.claimedMines.delete(key);
       this.blueprintSystem.removeMineMarker(minePos);
     } else {
-      // Release claim so the worker re-acquires it next idle tick (keeps mining)
       UnitAI.claimedMines.delete(key);
     }
 
     // Rebuild the voxel mesh
     this.voxelBuilder.rebuildFromMap(this.currentMap);
 
-    // Load resource onto the worker — type determined by what block was destroyed
+    // Load resource onto the worker
     const totalYield = toRemove.length * resource.yield;
     unit.carryAmount = Math.min(totalYield, unit.carryCapacity);
     unit.carryType = resource.type;

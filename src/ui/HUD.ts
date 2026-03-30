@@ -1043,7 +1043,7 @@ export class HUD {
       this.container.appendChild(this.mineModeIndicator);
     }
     const depth = depthLayers ?? 3;
-    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to mark · [Tab] to close`;
+    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click top to dig down · Click side to tunnel · [Tab] to close`;
     this.mineModeIndicator.style.display = active ? 'block' : 'none';
     if (active) this.hideAllModeIndicators('mine');
   }

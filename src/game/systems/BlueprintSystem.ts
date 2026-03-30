@@ -213,8 +213,25 @@ export default class BlueprintSystem {
     if (tile.elevation <= maxMineDepth) return;
     if (UnitAI.playerMineBlueprint.has(key)) return;
     const targetElev = Math.max(maxMineDepth, tile.elevation - this.mineDepthLayers);
-    UnitAI.playerMineBlueprint.set(key, targetElev);
+    UnitAI.playerMineBlueprint.set(key, { targetElevation: targetElev, mode: 'vertical' });
     this.addMineMarker(coord, this.mineDepthLayers);
+  }
+
+  /** Paint a horizontal mine blueprint — miners will carve a tunnel at the given Y level */
+  paintMineTileHorizontal(coord: HexCoord, targetY: number): void {
+    if (!this.ctx.currentMap) return;
+    const key = `${coord.q},${coord.r}`;
+    const tile = this.ctx.currentMap.tiles.get(key);
+    if (!tile) return;
+    if (this.ops.isWaterTerrain(tile.terrain)) return;
+    if (UnitAI.playerMineBlueprint.has(key)) return;
+    // Check that the tile actually has blocks at this Y level
+    const hasBlocks = tile.voxelData.blocks.some(
+      b => Math.floor(b.localPosition.y) === Math.floor(targetY)
+    );
+    if (!hasBlocks) return;
+    UnitAI.playerMineBlueprint.set(key, { targetElevation: targetY, mode: 'horizontal', targetY });
+    this.addMineMarkerHorizontal(coord, targetY);
   }
 
   unpaintMineTile(coord: HexCoord): void {
@@ -249,6 +266,32 @@ export default class BlueprintSystem {
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
     ring.position.set(worldX, baseY + 0.05, worldZ);
+    ring.name = `mine_${key}`;
+    this.ctx.scene.add(ring);
+    this.mineMarkers.set(key, ring);
+  }
+
+  /** Horizontal mine marker — a cyan arrow/ring at the target Y level (side of tile) */
+  addMineMarkerHorizontal(coord: HexCoord, targetY: number): void {
+    const key = `${coord.q},${coord.r}`;
+    if (this.mineMarkers.has(key)) this.removeMineMarker(coord);
+
+    const worldX = coord.q * 1.5;
+    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
+    const VOXEL_SCALE = 0.52;
+
+    // Place the ring at the target Y level, standing upright (vertical ring)
+    const ringGeo = new THREE.RingGeometry(0.3, 0.55, 6);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0.0, 0.8, 1.0), // cyan for horizontal
+      transparent: true,
+      opacity: 0.75,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    // Horizontal ring sits flat on the Y level being mined
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(worldX, targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5, worldZ);
     ring.name = `mine_${key}`;
     this.ctx.scene.add(ring);
     this.mineMarkers.set(key, ring);

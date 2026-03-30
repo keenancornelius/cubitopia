@@ -9,6 +9,13 @@ import { Pathfinder } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 
+/** Mine target: vertical (top-down dig) or horizontal (tunnel at a specific Y level) */
+export interface MineTarget {
+  targetElevation: number;
+  mode: 'vertical' | 'horizontal';
+  targetY?: number; // Y level to mine at (horizontal mode)
+}
+
 export interface UnitAIDebugFlags {
   disableChop?: boolean;
   disableMine?: boolean;
@@ -1030,27 +1037,36 @@ export class UnitAI {
     UnitAI.grassTiles.clear();
   }
 
-  /** Player's mine blueprint queue — tiles the player wants mined, value = target elevation */
-  static playerMineBlueprint: Map<string, number> = new Map(); // "q,r" → target elevation
+  /** Mine target: vertical (top-down) or horizontal (tunnel at a specific Y level) */
+  static playerMineBlueprint: Map<string, MineTarget> = new Map(); // "q,r" → MineTarget
   /** Track which mine tile each worker is targeting */
   static claimedMines: Map<string, string> = new Map(); // "q,r" → unitId
 
-  /** Add a tile to the player's mine blueprint with a target elevation */
-  static addMineBlueprint(coord: HexCoord, targetElevation: number): boolean {
+  /** Add a tile to the player's mine blueprint */
+  static addMineBlueprint(coord: HexCoord, targetElevation: number, mode: 'vertical' | 'horizontal' = 'vertical', targetY?: number): boolean {
     const key = `${coord.q},${coord.r}`;
     if (UnitAI.playerMineBlueprint.has(key)) {
       UnitAI.playerMineBlueprint.delete(key);
       return false;
     }
-    UnitAI.playerMineBlueprint.set(key, targetElevation);
+    UnitAI.playerMineBlueprint.set(key, { targetElevation, mode, targetY });
     return true;
   }
 
-  /** Check if a mine blueprint has reached its target depth */
+  /** Check if a mine blueprint has reached its target */
   static isMineComplete(key: string, currentElevation: number): boolean {
     const target = UnitAI.playerMineBlueprint.get(key);
     if (target === undefined) return true;
-    return currentElevation <= target;
+    if (target.mode === 'horizontal') {
+      // Horizontal mine is complete when no blocks remain at the target Y level
+      return false; // Checked separately by handleMineTerrain via block count
+    }
+    return currentElevation <= target.targetElevation;
+  }
+
+  /** Get the mine target info for a tile */
+  static getMineTarget(key: string): MineTarget | undefined {
+    return UnitAI.playerMineBlueprint.get(key);
   }
 
   /** Find nearest minable tile from the player's mine blueprint */
@@ -1058,16 +1074,26 @@ export class UnitAI {
     let nearest: HexCoord | null = null;
     let nearestDist = Infinity;
 
-    for (const [key, targetElev] of UnitAI.playerMineBlueprint) {
+    for (const [key, target] of UnitAI.playerMineBlueprint) {
       const tile = map.tiles.get(key);
       if (!tile || tile.terrain === TerrainType.WATER || tile.elevation <= -39) {
-        UnitAI.playerMineBlueprint.delete(key); // Fully excavated or water
-        continue;
-      }
-      // Skip tiles that have reached their target depth
-      if (tile.elevation <= targetElev) {
         UnitAI.playerMineBlueprint.delete(key);
         continue;
+      }
+      // Vertical: skip tiles that have reached target depth
+      if (target.mode === 'vertical' && tile.elevation <= target.targetElevation) {
+        UnitAI.playerMineBlueprint.delete(key);
+        continue;
+      }
+      // Horizontal: skip if no blocks remain at target Y
+      if (target.mode === 'horizontal' && target.targetY !== undefined) {
+        const hasBlocksAtY = tile.voxelData.blocks.some(
+          b => Math.floor(b.localPosition.y) === Math.floor(target.targetY!)
+        );
+        if (!hasBlocksAtY) {
+          UnitAI.playerMineBlueprint.delete(key);
+          continue;
+        }
       }
       // Skip tiles claimed by other workers
       const claimer = UnitAI.claimedMines.get(key);
