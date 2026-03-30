@@ -310,10 +310,9 @@ export class UnitAI {
         // Fall through to mining if no stone
       }
 
-      // Auto-mine: AI mines when it needs stone for walls or has nothing else to do
-      // Player: auto-mine only if no wall blueprints pending
-      const shouldAutoMine = !UnitAI.debugFlags.disableMine
-        && (unit.owner !== 0 || UnitAI.playerWallBlueprint.size === 0);
+      // Auto-mine: AI builders auto-mine for resources. Player builders only mine
+      // player-placed blueprints (handled above), never auto-mine on their own.
+      const shouldAutoMine = !UnitAI.debugFlags.disableMine && unit.owner !== 0;
       if (shouldAutoMine) {
         const autoMineTile = UnitAI.findNearestMineSite(unit, map);
         if (autoMineTile) {
