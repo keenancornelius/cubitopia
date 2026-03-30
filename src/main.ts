@@ -797,6 +797,7 @@ class Cubitopia {
             ? Math.max(-40, Math.min(25, currentSlice + delta))
             : 25; // first Shift+scroll activates slicer at max
           this.voxelBuilder.setSliceY(newY);
+          this.terrainDecorator.setWaterClipPlane(this.voxelBuilder.getClipPlane());
           this.hud.setSlicerValue(newY);
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, newY);
         } else {
@@ -871,6 +872,7 @@ class Cubitopia {
       this.hud.showElevationSlicer(true);
       this.hud.onSliceChange = (y) => {
         this.voxelBuilder.setSliceY(y);
+        this.terrainDecorator.setWaterClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
         // Update HUD to show current slice Y
         if (y !== null) {
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, y);
@@ -880,6 +882,7 @@ class Cubitopia {
       this.hud.showElevationSlicer(false);
       this.hud.onSliceChange = null;
       this.voxelBuilder.setSliceY(null);
+      this.terrainDecorator.setWaterClipPlane(null);
     }
   }
 
@@ -1915,8 +1918,9 @@ class Cubitopia {
         const nElev = nTile.elevation;
         const elevDrop = myElev - nElev;
         // Only add curtain if there's a meaningful drop (2+ block difference)
+        // Cap drop height to prevent water curtains from extending deep underground
         if (elevDrop >= 2) {
-          const dropHeight = elevDrop * 0.5; // scale to world units
+          const dropHeight = Math.min(elevDrop * 0.5, 4); // max 4 world units deep
           // Simplify direction to cardinal (nearest axis)
           const dir = nDirs[i];
           const absDx = Math.abs(dir.dx);
@@ -3369,6 +3373,7 @@ class Cubitopia {
     this.hud.setMineMode(false);
     this.hud.showElevationSlicer(false);
     this.voxelBuilder.setSliceY(null);
+    this.terrainDecorator.setWaterClipPlane(null);
     this.plantCropsMode = false;
     this.hud.setPlantCropsMode(false);
     this.workshopPlaceMode = false;

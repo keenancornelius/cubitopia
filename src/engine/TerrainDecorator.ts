@@ -33,6 +33,17 @@ export class TerrainDecorator {
     this.scene = scene;
   }
 
+  /** Apply Y-level clipping to all water decoration meshes (curtains, surfaces).
+   *  Pass null to remove clipping. */
+  setWaterClipPlane(clipPlane: THREE.Plane | null): void {
+    const planes = clipPlane ? [clipPlane] : null;
+    for (const mesh of this.waterMeshes) {
+      if (mesh.material instanceof THREE.Material) {
+        (mesh.material as THREE.MeshPhongMaterial).clippingPlanes = planes as THREE.Plane[] | null;
+      }
+    }
+  }
+
   /** Remove all decorations on a specific tile (e.g. when a tree is chopped) */
   removeDecoration(coord: HexCoord): void {
     const key = `${coord.q},${coord.r}`;
@@ -651,7 +662,7 @@ export class TerrainDecorator {
     const tileWidth = 1.5;
     const halfW = tileWidth / 2;
     const outset = halfW + 0.20; // push in front of blocks
-    const curtainH = dropHeight + 0.3;
+    const curtainH = Math.min(dropHeight + 0.3, 5); // cap depth to prevent underground bleed
 
     // Determine face position and rotation based on direction
     let px: number, pz: number, ry: number;
@@ -740,7 +751,7 @@ export class TerrainDecorator {
     const group = new THREE.Group();
     const tileWidth = 1.5;
     const halfW = tileWidth / 2;
-    const fallHeight = Math.max(1.5, elevation - 0.5);
+    const fallHeight = Math.min(Math.max(1.5, elevation - 0.5), 5); // cap to prevent deep underground bleed
 
     // Outward offset so curtains render IN FRONT of the block faces
     // Blocks extend to ~0.76 from center (offset 0.5 + voxelSize/2=0.26)

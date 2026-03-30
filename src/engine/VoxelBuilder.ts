@@ -98,6 +98,11 @@ export class VoxelBuilder {
     return this.sliceY;
   }
 
+  /** Get the clipping plane (for sharing with other renderers like TerrainDecorator) */
+  getClipPlane(): THREE.Plane {
+    return this.clipPlane;
+  }
+
   private initMaterials(): void {
     for (const [type, color] of Object.entries(BLOCK_COLORS)) {
       const material = new THREE.MeshLambertMaterial({
