@@ -933,53 +933,9 @@ class Cubitopia {
 
     if (isHorizontal) {
       // --- HORIZONTAL MINING: remove blocks at the target Y level ---
-      // This creates tunnels, overhangs, and cave-outs
+      // Terrain is solid, so blocks exist at every Y level from DEPTH to surface.
       const targetY = Math.floor(mineTarget!.targetY!);
-
-      // Shell columns are hollow inside — if no blocks at targetY but tile is tall enough,
-      // fill in blocks at this Y level so mining can create a visible tunnel
-      const atLevelCount = blocks.filter(b => Math.floor(b.localPosition.y) === targetY).length;
-      if (atLevelCount === 0 && tile.elevation > targetY) {
-        const offsets = [-0.5, 0, 0.5];
-        const fillType = targetY < 0 ? BlockType.STONE
-          : targetY < tile.elevation - 2 ? BlockType.DIRT
-          : BlockType.STONE;
-        for (const lx of offsets) {
-          for (const lz of offsets) {
-            tile.voxelData.blocks.push({
-              localPosition: { x: lx, y: targetY, z: lz },
-              type: fillType,
-              health: 100,
-              maxHealth: 100,
-            });
-          }
-        }
-        // Also fill one layer above and below for wall visibility
-        for (const adjY of [targetY - 1, targetY + 1]) {
-          if (adjY >= -40 && adjY < tile.elevation) {
-            const adjCount = tile.voxelData.blocks.filter(
-              b => Math.floor(b.localPosition.y) === adjY
-            ).length;
-            if (adjCount === 0) {
-              for (const lx of offsets) {
-                for (const lz of offsets) {
-                  tile.voxelData.blocks.push({
-                    localPosition: { x: lx, y: adjY, z: lz },
-                    type: fillType,
-                    health: 100,
-                    maxHealth: 100,
-                  });
-                }
-              }
-            }
-          }
-        }
-        this.voxelBuilder.rebuildFromMap(this.currentMap);
-      }
-
-      // Now find blocks at the target level to remove
-      const updatedBlocks = tile.voxelData.blocks;
-      const atLevel = updatedBlocks
+      const atLevel = blocks
         .map((b, i) => ({ block: b, index: i }))
         .filter(({ block }) => Math.floor(block.localPosition.y) === targetY);
       toRemove = atLevel.slice(0, Math.min(BLOCKS_PER_TICK, atLevel.length));

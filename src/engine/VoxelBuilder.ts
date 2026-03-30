@@ -54,7 +54,7 @@ export class VoxelBuilder {
   /** Current slice Y level (null = no slicing, show everything) */
   private sliceY: number | null = null;
 
-  constructor(scene: THREE.Scene, maxInstancesPerType: number = 500000) {
+  constructor(scene: THREE.Scene, maxInstancesPerType: number = 2000000) {
     this.scene = scene;
     this.maxInstancesPerType = maxInstancesPerType;
     this.geometry = new THREE.BoxGeometry(VOXEL_SIZE, VOXEL_SIZE, VOXEL_SIZE);

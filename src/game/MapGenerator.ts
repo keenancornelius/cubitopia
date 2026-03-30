@@ -1164,8 +1164,8 @@ export class MapGenerator {
   private generateShellColumn(
     terrain: TerrainType,
     height: number,
-    isEdgeTile: boolean,
-    minNeighborElevation: number,
+    _isEdgeTile: boolean,
+    _minNeighborElevation: number,
   ): VoxelBlock[] {
     const blocks: VoxelBlock[] = [];
     const DEPTH = MapGenerator.UNDERGROUND_DEPTH;
@@ -1180,90 +1180,33 @@ export class MapGenerator {
 
     const offsets = [-0.5, 0, 0.5];
 
-    // Shell thickness: at least 6 layers, or enough to cover neighbor height difference + 2
-    const heightDiff = height - minNeighborElevation;
-    const shellThickness = Math.max(6, heightDiff + 2);
-
-    // === SURFACE BLOCKS (top of column) ===
+    // === SOLID FILL: every Y level from DEPTH to surface ===
+    // This creates real mineable terrain all the way down through the world.
+    // Block types change with depth: surface → sub-surface → dirt → stone → gold → iron
     for (const lx of offsets) {
       for (const lz of offsets) {
-        for (let y = Math.max(DEPTH, height - shellThickness); y < height; y++) {
+        for (let y = DEPTH; y < height; y++) {
           let blockType: BlockType;
           if (y === height - 1) {
-            blockType = topBlock;
+            blockType = topBlock;            // surface layer
           } else if (y >= height - 2) {
-            blockType = subBlock;
+            blockType = subBlock;            // sub-surface
           } else if (y >= height - 4 && isHighEnoughForStone) {
-            blockType = BlockType.STONE;
+            blockType = BlockType.STONE;     // mountain stone cap
+          } else if (y < -20) {
+            blockType = BlockType.IRON;      // deep iron veins
           } else if (y < -10) {
-            blockType = BlockType.IRON;
-          } else if (y < -5) {
-            blockType = BlockType.GOLD;
+            blockType = BlockType.GOLD;      // gold layer
           } else if (y < 0) {
-            blockType = BlockType.STONE;
+            blockType = BlockType.STONE;     // underground stone
           } else {
-            blockType = y < 2 ? BlockType.STONE : BlockType.DIRT;
+            blockType = y < 3 ? BlockType.STONE : BlockType.DIRT;  // shallow layers
           }
           blocks.push({
             localPosition: { x: lx, y, z: lz },
             type: blockType,
             health: 100, maxHealth: 100,
           });
-        }
-      }
-    }
-
-    // === BOTTOM FACE (1 layer at y=DEPTH) — terrain on the underside ===
-    for (const lx of offsets) {
-      for (const lz of offsets) {
-        blocks.push({
-          localPosition: { x: lx, y: DEPTH, z: lz },
-          type: BlockType.GRASS,
-          health: 100, maxHealth: 100,
-        });
-      }
-    }
-
-    // === EDGE BLOCKS (side faces of the cube) ===
-    if (isEdgeTile) {
-      // Full column from DEPTH+1 to surface for edge tiles
-      for (const lx of offsets) {
-        for (const lz of offsets) {
-          for (let y = DEPTH + 1; y < Math.max(DEPTH + 1, height - shellThickness); y++) {
-            let blockType: BlockType;
-            if (y < -10) blockType = BlockType.IRON;
-            else if (y < -5) blockType = BlockType.GOLD;
-            else if (y < 0) blockType = BlockType.STONE;
-            else blockType = y < 2 ? BlockType.STONE : BlockType.DIRT;
-            blocks.push({
-              localPosition: { x: lx, y, z: lz },
-              type: blockType,
-              health: 100, maxHealth: 100,
-            });
-          }
-        }
-      }
-    }
-
-    // === PIT WALL BLOCKS (where neighbors are lower) ===
-    if (minNeighborElevation < height - shellThickness) {
-      // Fill from minNeighborElevation to surface shell bottom (connecting surface to exposed wall)
-      const wallTop = Math.max(DEPTH + 1, height - shellThickness);
-      const wallBottom = Math.max(DEPTH + 1, minNeighborElevation);
-      for (const lx of offsets) {
-        for (const lz of offsets) {
-          for (let y = wallBottom; y < wallTop; y++) {
-            let blockType: BlockType;
-            if (y < -10) blockType = BlockType.IRON;
-            else if (y < -5) blockType = BlockType.GOLD;
-            else if (y < 0) blockType = BlockType.STONE;
-            else blockType = y < 2 ? BlockType.STONE : BlockType.DIRT;
-            blocks.push({
-              localPosition: { x: lx, y, z: lz },
-              type: blockType,
-              health: 100, maxHealth: 100,
-            });
-          }
         }
       }
     }
