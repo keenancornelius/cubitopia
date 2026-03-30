@@ -235,7 +235,6 @@ export default class BlueprintSystem {
       // Sort descending — miners work from top (exposed surface) down
       levels.sort((a, b) => b - a);
       existing.yLevels = levels;
-      // Miners always start at the highest (most exposed) level
       existing.targetY = levels[0];
     } else {
       // New horizontal blueprint (or replacing a vertical one)
@@ -250,8 +249,10 @@ export default class BlueprintSystem {
         yLevels: [targetY],
       });
     }
-    // Add a marker at this specific Y level
-    this.addMineMarkerHorizontal(coord, targetY);
+    // Use standard yellow marker — slicer context makes the Y level obvious
+    if (!this.mineMarkers.has(key)) {
+      this.addMineMarker(coord, 1);
+    }
   }
 
   unpaintMineTile(coord: HexCoord): void {

@@ -720,22 +720,13 @@ class Cubitopia {
           const sliceY = this.voxelBuilder.getSliceY();
 
           if (sliceY !== null) {
-            // Slicer active — paint/unpaint this specific Y level
-            mineEraseMode = false;
-            const existing = UnitAI.playerMineBlueprint.get(key);
-            if (existing?.mode === 'horizontal' && existing.yLevels?.includes(sliceY)) {
-              // This Y level is already queued — remove just this level
-              existing.yLevels = existing.yLevels.filter(y => y !== sliceY);
-              this.blueprintSystem.removeMineMarkerAtY(hex, sliceY);
-              if (existing.yLevels.length === 0) {
-                // No levels left — remove entire blueprint
-                this.blueprintSystem.unpaintMineTile(hex);
-                mineEraseMode = true;
-              } else {
-                existing.targetY = existing.yLevels[0];
-              }
+            // Slicer active — toggle tile at this Y level
+            mineEraseMode = UnitAI.playerMineBlueprint.has(key);
+            if (mineEraseMode) {
+              // Remove entire blueprint (all Y levels) for this tile
+              this.blueprintSystem.unpaintMineTile(hex);
             } else {
-              // Add this Y level
+              // Paint horizontal mine at slice Y
               this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
             }
           } else {
