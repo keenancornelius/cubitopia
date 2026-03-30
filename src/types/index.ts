@@ -94,6 +94,11 @@ export enum BlockType {
   WALL = 'wall',
   JUNGLE = 'jungle',
   CLAY = 'clay',
+  // Gem-infused stone — found only in lava tube tunnel walls
+  GEM_RUBY = 'gem_ruby',
+  GEM_EMERALD = 'gem_emerald',
+  GEM_SAPPHIRE = 'gem_sapphire',
+  GEM_AMETHYST = 'gem_amethyst',
 }
 
 export enum ImprovementType {
@@ -186,6 +191,8 @@ export interface Unit {
   _patrolIdx?: number;
   _planIsGate?: boolean;            // Builder: planned build is a gate
   _playerCommanded?: boolean;       // Player issued a direct command
+  _underground?: boolean;           // Unit is currently underground (on a tunnel tile)
+  _undergroundCommand?: boolean;    // Unit was given an underground move command
 }
 
 export enum UnitType {
@@ -321,6 +328,7 @@ export enum MapType {
   HIGHLAND = 'highland',
   ARCHIPELAGO = 'archipelago',
   FLATLAND = 'flatland',
+  DESERT_TUNNELS = 'desert_tunnels',
 }
 
 export interface MapPreset {
@@ -442,6 +450,7 @@ export interface GameContext {
   charcoalStockpile: number[];
   steelStockpile: number[];
   crystalStockpile: number[];
+  goldStockpile: number[];
 
   hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
   getElevation(pos: HexCoord): number;

@@ -2,7 +2,7 @@
 // CUBITOPIA - RTS HUD / UI Overlay
 // ============================================
 
-import { Unit, Player, Base, Tile, TerrainType, ResourceType, UnitStance, UnitType, FormationType } from '../types';
+import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType } from '../types';
 import { StrategyCamera } from '../engine/Camera';
 
 export class HUD {
@@ -14,7 +14,6 @@ export class HUD {
     enemyResourceBar: HTMLElement;
     selectionInfo: HTMLElement;
     newMapButton: HTMLElement;
-    baseHealthBar: HTMLElement;
   };
 
   private _onNewMap: (() => void) | null = null;
@@ -81,6 +80,9 @@ export class HUD {
   onSetStance(cb: (stance: UnitStance) => void) { this._onSetStance = cb; }
   onSetFormation(cb: (formation: FormationType) => void) { this._onSetFormation = cb; }
   onRespawnUnits(cb: () => void) { this._onRespawnUnits = cb; }
+
+  private _onCaptureNearestZone: (() => void) | null = null;
+  onCaptureNearestZone(cb: () => void) { this._onCaptureNearestZone = cb; }
 
   constructor() {
     this.container = this.createHUDContainer();
@@ -359,48 +361,9 @@ export class HUD {
     });
     this.container.appendChild(newMapButton);
 
-    // Base health bar (top center-left area, below title)
-    const baseHealthBar = document.createElement('div');
-    baseHealthBar.style.cssText = `
-      position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7); padding: 10px 20px; border-radius: 8px;
-      font-size: 12px; border: 2px solid rgba(255,255,255,0.2);
-      display: flex; gap: 24px; align-items: center;
-    `;
-    this.container.appendChild(baseHealthBar);
-
-    return { titleBar, resourceBar, enemyResourceBar, selectionInfo, newMapButton, baseHealthBar };
+    return { titleBar, resourceBar, enemyResourceBar, selectionInfo, newMapButton };
   }
 
-  updateBaseHealth(bases: Base[]): void {
-    const playerBase = bases.find(b => b.owner === 0);
-    const enemyBase = bases.find(b => b.owner === 1);
-    if (!playerBase || !enemyBase) return;
-
-    const pPct = Math.max(0, Math.round((playerBase.health / playerBase.maxHealth) * 100));
-    const ePct = Math.max(0, Math.round((enemyBase.health / enemyBase.maxHealth) * 100));
-
-    const pColor = pPct > 50 ? '#3498db' : pPct > 25 ? '#f39c12' : '#e74c3c';
-    const eColor = ePct > 50 ? '#e74c3c' : ePct > 25 ? '#f39c12' : '#2ecc71';
-
-    this.elements.baseHealthBar.innerHTML = `
-      <div style="text-align: center;">
-        <div style="margin-bottom: 4px; color: #3498db; font-weight: bold;">YOUR BASE</div>
-        <div style="background: #333; border-radius: 4px; width: 120px; height: 10px;">
-          <div style="background: ${pColor}; height: 100%; width: ${pPct}%; border-radius: 4px; transition: width 0.3s;"></div>
-        </div>
-        <div style="font-size: 11px; margin-top: 2px;">${playerBase.health}/${playerBase.maxHealth}</div>
-      </div>
-      <div style="font-size: 16px; font-weight: bold; color: #888;">VS</div>
-      <div style="text-align: center;">
-        <div style="margin-bottom: 4px; color: #e74c3c; font-weight: bold;">ENEMY BASE</div>
-        <div style="background: #333; border-radius: 4px; width: 120px; height: 10px;">
-          <div style="background: ${eColor}; height: 100%; width: ${ePct}%; border-radius: 4px; transition: width 0.3s;"></div>
-        </div>
-        <div style="font-size: 11px; margin-top: 2px;">${enemyBase.health}/${enemyBase.maxHealth}</div>
-      </div>
-    `;
-  }
 
   // --- Persistent resource bar DOM refs ---
   // Earth group dropdown
@@ -493,15 +456,16 @@ export class HUD {
       return { wrapper: w, val: v };
     };
 
-    // ===== EARTH GROUP (dropdown) =====
+    // ===== MATERIALS GROUP (dropdown) =====
+    const earthContainer = document.createElement('span');
+    earthContainer.style.cssText = 'position:relative; display:inline-block;';
     this.earthGroupBtn = document.createElement('span');
     this.earthGroupBtn.style.cssText = `
-      cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
+      cursor:pointer; padding:3px 8px; border-radius:4px;
       transition:background 0.15s; white-space:nowrap; user-select:none;
     `;
-    this.earthGroupBtn.textContent = '⛏️ Earth ▾';
-    row.appendChild(this.earthGroupBtn);
-    row.appendChild(this.makeDot());
+    this.earthGroupBtn.textContent = '🪨 Materials ▾';
+    earthContainer.appendChild(this.earthGroupBtn);
 
     const earthDropdown = document.createElement('div');
     earthDropdown.style.cssText = `
@@ -514,7 +478,7 @@ export class HUD {
     `;
     this.earthGroupDropdown = earthDropdown;
 
-    // Earth resources inside dropdown
+    // Materials resources inside dropdown
     const earthContent = document.createElement('div');
     earthContent.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
 
@@ -543,17 +507,20 @@ export class HUD {
     earthContent.appendChild(clay.wrapper);
 
     earthDropdown.appendChild(earthContent);
-    bar.appendChild(earthDropdown);
+    earthContainer.appendChild(earthDropdown);
+    row.appendChild(earthContainer);
+    row.appendChild(this.makeDot());
 
     // ===== CRAFTED GROUP (dropdown) =====
+    const craftedContainer = document.createElement('span');
+    craftedContainer.style.cssText = 'position:relative; display:inline-block;';
     this.craftedGroupBtn = document.createElement('span');
     this.craftedGroupBtn.style.cssText = `
-      cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
+      cursor:pointer; padding:3px 8px; border-radius:4px;
       transition:background 0.15s; white-space:nowrap; user-select:none;
     `;
     this.craftedGroupBtn.textContent = '⚒️ Crafted ▾';
-    row.appendChild(this.craftedGroupBtn);
-    row.appendChild(this.makeDot());
+    craftedContainer.appendChild(this.craftedGroupBtn);
 
     const craftedDropdown = document.createElement('div');
     craftedDropdown.style.cssText = `
@@ -583,7 +550,9 @@ export class HUD {
     craftedContent.appendChild(steel.wrapper);
 
     craftedDropdown.appendChild(craftedContent);
-    bar.appendChild(craftedDropdown);
+    craftedContainer.appendChild(craftedDropdown);
+    row.appendChild(craftedContainer);
+    row.appendChild(this.makeDot());
 
     // ===== FOOD (standalone) =====
     const food = mkRes('🌾', '#8bc34a');
@@ -598,9 +567,11 @@ export class HUD {
     row.appendChild(this.makeDot());
 
     // ===== UNITS (standalone with dropdown) =====
+    const unitContainer = document.createElement('span');
+    unitContainer.style.cssText = 'position:relative; display:inline-block;';
     const unitBtn = document.createElement('span');
     unitBtn.style.cssText = `
-      cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
+      cursor:pointer; padding:3px 8px; border-radius:4px;
       transition:background 0.15s; white-space:nowrap; user-select:none;
     `;
     const unitValSpan = document.createElement('span');
@@ -610,9 +581,7 @@ export class HUD {
     const arrow = document.createTextNode(' units ▾');
     unitBtn.appendChild(arrow);
     this.resUnitVal = unitValSpan;
-    row.appendChild(unitBtn);
-
-    bar.appendChild(row);
+    unitContainer.appendChild(unitBtn);
 
     // --- Unit dropdown panel (hidden by default) ---
     const dropdown = document.createElement('div');
@@ -626,8 +595,11 @@ export class HUD {
     `;
     this.unitDropdownContent = document.createElement('div');
     dropdown.appendChild(this.unitDropdownContent);
-    bar.appendChild(dropdown);
+    unitContainer.appendChild(dropdown);
     this.unitDropdown = dropdown;
+    row.appendChild(unitContainer);
+
+    bar.appendChild(row);
 
     // ===== EVENT LISTENERS =====
     // Earth group toggle
@@ -638,14 +610,30 @@ export class HUD {
       if (!this.earthGroupVisible) this.earthGroupBtn!.style.background = 'none';
     });
 
-    const toggleEarthGroup = (e: Event) => {
-      e.stopPropagation();
-      e.preventDefault();
+    /** Close all resource dropdowns */
+    const closeAllDropdowns = () => {
       if (this.earthGroupVisible) {
         this.earthGroupDropdown!.style.display = 'none';
         this.earthGroupVisible = false;
         this.earthGroupBtn!.style.background = 'none';
-      } else {
+      }
+      if (this.craftedGroupVisible) {
+        this.craftedGroupDropdown!.style.display = 'none';
+        this.craftedGroupVisible = false;
+        this.craftedGroupBtn!.style.background = 'none';
+      }
+      if (this.unitDropdownVisible) {
+        this.hideUnitDropdown();
+        unitBtn.style.background = 'none';
+      }
+    };
+
+    const toggleEarthGroup = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const wasVisible = this.earthGroupVisible;
+      closeAllDropdowns();
+      if (!wasVisible) {
         this.earthGroupDropdown!.style.display = 'block';
         this.earthGroupVisible = true;
         this.earthGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
@@ -667,11 +655,9 @@ export class HUD {
     const toggleCraftedGroup = (e: Event) => {
       e.stopPropagation();
       e.preventDefault();
-      if (this.craftedGroupVisible) {
-        this.craftedGroupDropdown!.style.display = 'none';
-        this.craftedGroupVisible = false;
-        this.craftedGroupBtn!.style.background = 'none';
-      } else {
+      const wasVisible = this.craftedGroupVisible;
+      closeAllDropdowns();
+      if (!wasVisible) {
         this.craftedGroupDropdown!.style.display = 'block';
         this.craftedGroupVisible = true;
         this.craftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
@@ -693,10 +679,9 @@ export class HUD {
     const toggleUnitDropdown = (e: Event) => {
       e.stopPropagation();
       e.preventDefault();
-      if (this.unitDropdownVisible) {
-        this.hideUnitDropdown();
-        unitBtn.style.background = 'none';
-      } else {
+      const wasVisible = this.unitDropdownVisible;
+      closeAllDropdowns();
+      if (!wasVisible) {
         this.refreshDropdownContent();
         dropdown.style.display = 'block';
         this.unitDropdownVisible = true;
@@ -709,20 +694,7 @@ export class HUD {
 
     // Close dropdowns when clicking anywhere else
     document.addEventListener('click', () => {
-      if (this.earthGroupVisible) {
-        this.earthGroupDropdown!.style.display = 'none';
-        this.earthGroupVisible = false;
-        this.earthGroupBtn!.style.background = 'none';
-      }
-      if (this.craftedGroupVisible) {
-        this.craftedGroupDropdown!.style.display = 'none';
-        this.craftedGroupVisible = false;
-        this.craftedGroupBtn!.style.background = 'none';
-      }
-      if (this.unitDropdownVisible) {
-        this.hideUnitDropdown();
-        unitBtn.style.background = 'none';
-      }
+      closeAllDropdowns();
     });
 
     // Prevent clicks inside dropdowns from closing them
@@ -1288,6 +1260,159 @@ export class HUD {
   /** @deprecated Use updateAllSpawnQueues instead */
   updateMasonrySpawnQueue(_queue: { type: string; cost: number }[]): void {}
 
+  // === Capture Zone HUD ===
+  private captureZoneContainer: HTMLElement | null = null;
+  private _czStyle: HTMLStyleElement | null = null;
+
+  /** Inject capture-zone CSS animations once */
+  private ensureCaptureZoneStyles(): void {
+    if (this._czStyle) return;
+    this._czStyle = document.createElement('style');
+    this._czStyle.textContent = `
+      @keyframes cz-pulse { 0%,100%{box-shadow:0 0 6px var(--cz-glow)} 50%{box-shadow:0 0 14px var(--cz-glow)} }
+      @keyframes cz-contested { 0%{background-position:0 0} 100%{background-position:16px 0} }
+      @keyframes cz-fill-glow { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.35)} }
+      .cz-card{
+        position:relative;overflow:hidden;
+        background:linear-gradient(135deg,rgba(10,10,20,0.92),rgba(20,20,35,0.88));
+        padding:5px 10px;border-radius:8px;
+        border:1px solid rgba(255,255,255,0.12);
+        font-family:'Segoe UI',system-ui,sans-serif;font-size:12px;color:#ddd;
+        min-width:200px;max-width:240px;
+        backdrop-filter:blur(8px);
+        transition:border-color 0.4s,box-shadow 0.4s;
+      }
+      .cz-card.cz-active{animation:cz-pulse 2s ease-in-out infinite;}
+      .cz-card::before{
+        content:'';position:absolute;top:0;left:0;right:0;height:2px;
+        background:var(--cz-accent,#888);border-radius:8px 8px 0 0;
+        transition:background 0.4s;
+      }
+      .cz-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
+      .cz-label{font-weight:700;font-size:12px;letter-spacing:0.3px;text-transform:uppercase;}
+      .cz-status{font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;background:rgba(255,255,255,0.08);}
+      .cz-troops{display:flex;gap:12px;font-size:11px;margin-bottom:3px;}
+      .cz-troop{display:flex;align-items:center;gap:3px;}
+      .cz-dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
+      .cz-bar-wrap{height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;position:relative;}
+      .cz-bar-fill{height:100%;border-radius:3px;transition:width 0.2s ease-out;position:relative;z-index:1;}
+      .cz-bar-fill.cz-animating{animation:cz-fill-glow 1.5s ease-in-out infinite;}
+      .cz-contested-stripe{
+        position:absolute;top:0;left:0;right:0;bottom:0;z-index:2;border-radius:3px;
+        background:repeating-linear-gradient(45deg,transparent,transparent 3px,rgba(255,170,0,0.35) 3px,rgba(255,170,0,0.35) 6px);
+        background-size:16px 16px;
+        animation:cz-contested 0.6s linear infinite;
+      }
+    `;
+    document.head.appendChild(this._czStyle);
+  }
+
+  /** Update capture zone HUD indicators — call every frame */
+  updateCaptureZones(zones: readonly { base: { id: string; owner: number; position: { q: number; r: number } }; controller: number; capturer: number; progress: number; unitCounts: number[]; contested: boolean; isMainBase: boolean }[]): void {
+    this.ensureCaptureZoneStyles();
+
+    // Show ALL zones (owned, neutral, enemy) so the player always has a strategic overview
+    const allZones = [...zones].sort((a, b) => {
+      // Player bases first, then neutral, then enemy
+      const order = (c: number) => c === 0 ? 0 : c === 2 ? 1 : 2;
+      return order(a.controller) - order(b.controller);
+    });
+
+    if (allZones.length === 0) {
+      if (this.captureZoneContainer) this.captureZoneContainer.style.display = 'none';
+      return;
+    }
+
+    if (!this.captureZoneContainer) {
+      this.captureZoneContainer = document.createElement('div');
+      this.captureZoneContainer.style.cssText = `
+        position:absolute; top:50px; right:10px;
+        display:flex; flex-direction:column; gap:4px; align-items:flex-end;
+        pointer-events:none; z-index:500;
+      `;
+      this.container.appendChild(this.captureZoneContainer);
+    }
+
+    this.captureZoneContainer.style.display = 'flex';
+
+    // Reuse existing cards where possible to avoid DOM thrashing
+    const existing = this.captureZoneContainer.children;
+    while (existing.length > allZones.length) {
+      this.captureZoneContainer.removeChild(existing[existing.length - 1]);
+    }
+    while (existing.length < allZones.length) {
+      const card = document.createElement('div');
+      card.className = 'cz-card';
+      this.captureZoneContainer.appendChild(card);
+    }
+
+    const teamColors: Record<number, string> = { 0: '#3498db', 1: '#e74c3c', 2: '#d4af37' };
+    const teamNames: Record<number, string> = { 0: 'Your', 1: 'Enemy', 2: 'Neutral' };
+
+    for (let i = 0; i < allZones.length; i++) {
+      const zone = allZones[i];
+      const card = existing[i] as HTMLElement;
+
+      const controlColor = teamColors[zone.controller] ?? '#888';
+      const capColor = zone.capturer >= 0 ? (teamColors[zone.capturer] ?? '#888') : controlColor;
+      const isCapturing = zone.progress > 0;
+      const hasUnits = zone.unitCounts[0] > 0 || zone.unitCounts[1] > 0;
+
+      // Card glow
+      card.style.setProperty('--cz-glow', isCapturing ? capColor + '66' : 'transparent');
+      card.style.setProperty('--cz-accent', controlColor);
+      card.style.borderColor = isCapturing ? capColor + 'aa' : 'rgba(255,255,255,0.12)';
+      card.className = isCapturing ? 'cz-card cz-active' : 'cz-card';
+
+      // Labels
+      const typeStr = zone.isMainBase ? 'Capital' : 'Outpost';
+      const ownerStr = teamNames[zone.controller] ?? 'Neutral';
+      const label = `${ownerStr} ${typeStr}`;
+      const icon = zone.isMainBase ? '&#9813;' : '&#9823;'; // chess king / pawn
+
+      // Status badge
+      let statusHTML = '';
+      if (isCapturing && zone.contested) {
+        statusHTML = `<span class="cz-status" style="color:#ffaa00;">CONTESTED</span>`;
+      } else if (isCapturing) {
+        statusHTML = `<span class="cz-status" style="color:${capColor};">${Math.round(zone.progress * 100)}%</span>`;
+      } else if (hasUnits) {
+        statusHTML = `<span class="cz-status" style="color:#8f8;">ACTIVE</span>`;
+      } else {
+        statusHTML = `<span class="cz-status" style="color:#666;">QUIET</span>`;
+      }
+
+      // Troop counts
+      const p0 = zone.unitCounts[0];
+      const p1 = zone.unitCounts[1];
+
+      // Progress bar (only when capturing or contested)
+      let barHTML = '';
+      if (isCapturing) {
+        const pct = Math.max(1, Math.round(zone.progress * 100));
+        barHTML = `
+          <div class="cz-bar-wrap">
+            <div class="cz-bar-fill ${zone.progress > 0 && zone.progress < 1 ? 'cz-animating' : ''}"
+                 style="width:${pct}%;background:${capColor};"></div>
+            ${zone.contested ? '<div class="cz-contested-stripe"></div>' : ''}
+          </div>
+        `;
+      }
+
+      card.innerHTML = `
+        <div class="cz-header">
+          <span class="cz-label" style="color:${controlColor};">${icon} ${label}</span>
+          ${statusHTML}
+        </div>
+        <div class="cz-troops">
+          <span class="cz-troop"><span class="cz-dot" style="background:#3498db;${p0 > 0 ? 'box-shadow:0 0 4px #3498db;' : ''}"></span>${p0}</span>
+          <span class="cz-troop"><span class="cz-dot" style="background:#e74c3c;${p1 > 0 ? 'box-shadow:0 0 4px #e74c3c;' : ''}"></span>${p1}</span>
+        </div>
+        ${barHTML}
+      `;
+    }
+  }
+
   private notificationEl: HTMLElement | null = null;
   private notificationTimeout: number | null = null;
 
@@ -1484,7 +1609,13 @@ export class HUD {
     // ACTIONS section (always show for selected units)
     this.selectionCommandPanel.appendChild(makeHeader('⚡ Actions'));
     const actionRow = document.createElement('div');
-    actionRow.style.cssText = 'display: flex; gap: 3px;';
+    actionRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    if (hasCombat) {
+      const captureBtn = makeSmallBtn('Capture Zone', '#27ae60', false,
+        () => this._onCaptureNearestZone?.());
+      captureBtn.title = 'Send selected units to capture the nearest non-owned zone (defensive stance).';
+      actionRow.appendChild(captureBtn);
+    }
     const killBtn = makeSmallBtn('Kill', '#e74c3c', false,
       () => this._onRespawnUnits?.());
     killBtn.title = 'Kill the selected units (permanently removes them).';
@@ -1693,7 +1824,7 @@ export class HUD {
               <div class="unit-icon" style="background:#b8860b; font-weight:bold; color:white;">B</div>
               <div>
                 <div class="unit-name" style="color:#b8860b;">Builder</div>
-                <div class="unit-desc">Miner & mason. 4 wood. Mines stone/clay <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
+                <div class="unit-desc">Miner & mason. 4 wood. Mines stone/clay/iron/gold/crystal <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
               </div>
             </div>
             <div class="unit-row">
@@ -1811,7 +1942,7 @@ export class HUD {
           <div class="section-title" style="color: #2980b9;">🎯 Global Actions (always available)</div>
           <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Use slicer (Shift+scroll or slider) to set a Y level for tunnels. Paint = depth-deep tunnel at that Y.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Y-slicer (Shift+scroll) is always available to view underground layers and right-click resources.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
         </div>
@@ -1823,14 +1954,15 @@ export class HUD {
             <div class="tip"><span class="tip-bullet" style="color:#f0c040;">🪵</span> <span><strong style="color:#f0c040;">Wood</strong> — Harvested from forests by Lumberjacks. Used to build structures and train workers.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#aaa;">🪨</span> <span><strong style="color:#aaa;">Stone</strong> — Mined from mountains/terrain by Builders. Used for advanced buildings.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">🌾</span> <span><strong style="color:#8bc34a;">Food</strong> — Harvested from farms/grass by Villagers. Feeds your population.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span> or killing enemies (3g/kill, 5g for siege). Used to train combat units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span>, killing enemies (3g/kill, 5g siege), or mining gold ore. Used to train combat units.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#66bb6a;">🌿</span> <span><strong style="color:#66bb6a;">Grass Fiber</strong> — Gathered by Villagers when harvesting grass. Used to craft Rope.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#bf8040;">🧱</span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope & Charcoal.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from 3 fiber + 2 clay. Required for Trebuchets.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#c0652a;">⛏</span> <span><strong style="color:#c0652a;">Iron</strong> — Mined from iron ore veins on mountains (orange rocks). Foundation of the steel chain.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#444;">⚫</span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from 3 wood + 2 clay. Carbon needed for smelting steel.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#71797e;">🔨</span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from 2 iron + 1 charcoal (requires Smelter). Used for Armory units.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Found on snow terrain. Used for Wizard Tower units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Mined from gem ores (ruby, emerald, sapphire, amethyst) found in tunnel walls. Yields 3 per block. Used for Wizard Tower units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#ffd700;">⛏</span> <span><strong style="color:#ffd700;">Gold (mined)</strong> — Found in desert terrain and mountain gold veins. Builders mine gold blocks and deposit them at base.</span></div>
           </div>
         </div>
 
@@ -1867,11 +1999,18 @@ export class HUD {
           <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Lava tubes are natural underground tunnels connecting mountains to hill bases and waterfalls. Units path through them automatically!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Lava tubes are natural underground tunnels connecting mountains. Mine gem veins (ruby, emerald, sapphire, amethyst) for crystal — found only in tunnel walls!</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Y-Slicer:</strong> Always available! Use Shift+scroll or the slider to cut through terrain layers. Right-click underground tiles to see block resources. Works without selecting a unit.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Underground Combat:</strong> Units auto-enter tunnels when walking through an entrance and auto-surface when exiting. AI commanders route armies through tunnels for long-distance flanks.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Desert Tunnels Map:</strong> Features 3-4 surface openings, a deep underground network, and a central battle cavern with a capturable neutral outpost.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish. Enemy buildings show an <strong style="color:#e74c3c;">Attack</strong> button; bases show a <strong style="color:#27ae60;">Capture Zone</strong> button.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Your units spread their attacks across multiple enemies instead of all targeting one — fewer wasted hits!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Archers automatically flee from melee threats and reposition to maintain range advantage.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Destroy the enemy base to win!</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Zone Control:</strong> Every base has a 5-hex capture zone. Hold more units in the zone than the enemy to capture it. A progress bar shows capture advancement. Contested zones stall when both sides are present. The zone HUD on the right shows all zones at a glance.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture = Victory:</strong> Capturing the enemy's main base wins the game instantly. Neutral outposts flip to your team and you inherit all buildings in the zone. Use Defensive stance to hold zones without getting lured out!</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Catapult, Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
         </div>
 
         <!-- Footer -->
@@ -1985,23 +2124,40 @@ export class HUD {
     if (atkBonus !== 0) modifiers += `<div style="color:#e67e22;">⚔ Attack modifier: ${atkBonus > 0 ? '+' : ''}${atkBonus}</div>`;
     if (tile.terrain === TerrainType.WATER) modifiers += `<div style="color:#e74c3c;">✗ Impassable</div>`;
     if (tile.terrain === TerrainType.FOREST) modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
-    if ((tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.SNOW) && tile.elevation >= 13) {
-      modifiers += `<div style="color:#9b59b6;">💎 Snow blocks yield crystal</div>`;
-      modifiers += `<div style="color:#95a5a6;">⛏ Stone blocks yield stone</div>`;
-    } else if (tile.terrain === TerrainType.SNOW) {
-      modifiers += `<div style="color:#9b59b6;">💎 Snow blocks yield crystal</div>`;
-    } else if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
-      modifiers += `<div style="color:#c0652a;">⛏ Contains iron ore blocks</div>`;
+    if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
+      modifiers += `<div style="color:#c0652a;">⛏ Iron ore deposits</div>`;
     } else if (tile.terrain === TerrainType.MOUNTAIN) {
+      modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone, iron)</div>`;
+    } else if (tile.terrain === TerrainType.SNOW) {
       modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
     }
-    if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand → stone)</div>`;
+    if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand→clay, stone)</div>`;
     if (tile.terrain === TerrainType.JUNGLE) modifiers += `<div style="color:#2d6b30;">🌿 Dense jungle (wood)</div>`;
     if (tile.terrain === TerrainType.RIVER) modifiers += `<div style="color:#1e88e5;">🏊 Swimmable river</div>`;
     if (tile.terrain === TerrainType.LAKE) modifiers += `<div style="color:#1565c0;">🏊 Swimmable lake</div>`;
     if (tile.terrain === TerrainType.WATERFALL) modifiers += `<div style="color:#42a5f5;">💧 Waterfall</div>`;
-    if (tile.hasTunnel) modifiers += `<div style="color:#ff6600;">🕳 Lava tube (floor Y: ${tile.tunnelFloorY})</div>`;
     if (tile.elevation >= 4 && tile.terrain !== TerrainType.MOUNTAIN && tile.terrain !== TerrainType.SNOW && tile.terrain !== TerrainType.DESERT && tile.terrain !== TerrainType.JUNGLE) modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
+
+    // Tunnel info with block breakdown
+    if (tile.hasTunnel) {
+      modifiers += `<div style="color:#ff6600; margin-top:4px;">🕳 Underground tunnel (floor Y: ${tile.tunnelFloorY})</div>`;
+      // Scan blocks for resource summary
+      const blockCounts: Record<string, number> = {};
+      for (const b of tile.voxelData.blocks) {
+        const label = this.getBlockLabel(b.type);
+        blockCounts[label] = (blockCounts[label] || 0) + 1;
+      }
+      const gemKeys = Object.keys(blockCounts).filter(k => k.includes('Gem'));
+      if (gemKeys.length > 0) {
+        for (const gk of gemKeys) {
+          modifiers += `<div style="color:#9b59b6;">💎 ${gk} x${blockCounts[gk]} (yields crystal)</div>`;
+        }
+      }
+      const stoneCount = blockCounts['Stone'] || 0;
+      const ironCount = blockCounts['Iron'] || 0;
+      if (ironCount > 0) modifiers += `<div style="color:#c0652a;">⛏ Iron blocks x${ironCount}</div>`;
+      if (stoneCount > 0) modifiers += `<div style="color:#95a5a6;">⛏ Stone blocks x${stoneCount}</div>`;
+    }
 
     this.terrainInfoPanel.innerHTML = `
       <div style="font-weight:bold; font-size:15px; color:${terrainColor}; margin-bottom:6px;">${terrainName}</div>
@@ -2033,6 +2189,28 @@ export class HUD {
     if (this.terrainInfoTimeout) {
       clearTimeout(this.terrainInfoTimeout);
       this.terrainInfoTimeout = null;
+    }
+  }
+
+  private getBlockLabel(type: string): string {
+    switch (type) {
+      case BlockType.GRASS: return 'Grass';
+      case BlockType.DIRT: return 'Dirt';
+      case BlockType.STONE: return 'Stone';
+      case BlockType.SAND: return 'Sand';
+      case BlockType.SNOW: return 'Snow';
+      case BlockType.WOOD: return 'Wood';
+      case BlockType.JUNGLE: return 'Jungle Wood';
+      case BlockType.IRON: return 'Iron';
+      case BlockType.GOLD: return 'Gold';
+      case BlockType.WATER: return 'Water';
+      case BlockType.CLAY: return 'Clay';
+      case BlockType.WALL: return 'Wall';
+      case BlockType.GEM_RUBY: return 'Gem (Ruby)';
+      case BlockType.GEM_EMERALD: return 'Gem (Emerald)';
+      case BlockType.GEM_SAPPHIRE: return 'Gem (Sapphire)';
+      case BlockType.GEM_AMETHYST: return 'Gem (Amethyst)';
+      default: return type;
     }
   }
 
@@ -2171,21 +2349,63 @@ export class HUD {
   // The debugFlags, gameSpeed, and debugSpawnCount properties remain here because
   // they are referenced throughout main.ts game logic.
 
-  // === ELEVATION SLICER ===
+  // === ELEVATION SLICER (custom click-and-drag track) ===
   private slicerContainer: HTMLElement | null = null;
-  private slicerSlider: HTMLInputElement | null = null;
+  private slicerTrack: HTMLElement | null = null;
+  private slicerThumb: HTMLElement | null = null;
   private slicerLabel: HTMLElement | null = null;
   private _onSliceChange: ((y: number | null) => void) | null = null;
+  private _slicerMinY = -40;
+  private _slicerMaxY = 25;
+  private _slicerValue: number | null = null; // null = ALL
+  private _slicerDragging = false;
 
   set onSliceChange(cb: ((y: number | null) => void) | null) { this._onSliceChange = cb; }
 
+  private slicerYFromMouseY(clientY: number): number | null {
+    if (!this.slicerTrack) return null;
+    const rect = this.slicerTrack.getBoundingClientRect();
+    // top of track = maxY+1 (ALL), bottom = minY
+    const fraction = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    // fraction 0 = top (ALL/maxY), fraction 1 = bottom (minY)
+    const totalSteps = this._slicerMaxY + 1 - this._slicerMinY; // +1 for ALL slot
+    const step = Math.round(fraction * totalSteps);
+    const y = this._slicerMaxY + 1 - step; // invert: top=max, bottom=min
+    if (y > this._slicerMaxY) return null; // ALL
+    return Math.max(this._slicerMinY, Math.min(this._slicerMaxY, y));
+  }
+
+  private applySlicerValue(y: number | null): void {
+    if (y === this._slicerValue) return;
+    this._slicerValue = y;
+    this.updateSlicerVisuals();
+    this._onSliceChange?.(y);
+  }
+
+  private updateSlicerVisuals(): void {
+    if (!this.slicerLabel || !this.slicerThumb || !this.slicerTrack) return;
+    const y = this._slicerValue;
+    if (y === null) {
+      this.slicerLabel.textContent = 'ALL';
+      this.slicerLabel.style.color = '#ff8c00';
+      this.slicerThumb.style.top = '0%';
+    } else {
+      this.slicerLabel.textContent = `Y:${y}`;
+      this.slicerLabel.style.color = '#00ccff';
+      const totalSteps = this._slicerMaxY + 1 - this._slicerMinY;
+      const pct = ((this._slicerMaxY + 1 - y) / totalSteps) * 100;
+      this.slicerThumb.style.top = `${pct}%`;
+    }
+  }
+
   showElevationSlicer(show: boolean, maxY = 25, minY = -40): void {
     if (!show) {
-      if (this.slicerContainer) {
-        this.slicerContainer.style.display = 'none';
-      }
+      if (this.slicerContainer) this.slicerContainer.style.display = 'none';
       return;
     }
+
+    this._slicerMinY = minY;
+    this._slicerMaxY = maxY;
 
     if (!this.slicerContainer) {
       this.slicerContainer = document.createElement('div');
@@ -2193,10 +2413,18 @@ export class HUD {
         position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
         display: flex; flex-direction: column; align-items: center; gap: 6px;
         background: rgba(0,0,0,0.75); padding: 10px 8px; border-radius: 8px;
-        border: 2px solid #ff8c00; z-index: 100;
+        border: 2px solid #ff8c00; z-index: 100; user-select: none;
+        pointer-events: auto;
       `;
 
-      // Label at top
+      // Block mouse events from propagating through to the game canvas.
+      // NOTE: mousemove/mouseup are NOT blocked — they must bubble to window
+      // so the drag listener works when scrubbing the slider.
+      for (const evt of ['mousedown', 'click', 'dblclick', 'contextmenu', 'wheel'] as const) {
+        this.slicerContainer.addEventListener(evt, (e) => { e.stopPropagation(); });
+      }
+
+      // "SLICE" label
       const topLabel = document.createElement('div');
       topLabel.style.cssText = 'color: #ff8c00; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;';
       topLabel.textContent = 'SLICE';
@@ -2204,70 +2432,77 @@ export class HUD {
 
       // Current Y label
       this.slicerLabel = document.createElement('div');
-      this.slicerLabel.style.cssText = 'color: #00ccff; font-size: 16px; font-weight: bold; min-width: 30px; text-align: center;';
+      this.slicerLabel.style.cssText = 'color: #ff8c00; font-size: 16px; font-weight: bold; min-width: 36px; text-align: center;';
       this.slicerLabel.textContent = 'ALL';
       this.slicerContainer.appendChild(this.slicerLabel);
 
-      // Vertical slider
-      this.slicerSlider = document.createElement('input');
-      this.slicerSlider.type = 'range';
-      this.slicerSlider.min = String(minY);
-      this.slicerSlider.max = String(maxY + 1); // +1 for "ALL" position
-      this.slicerSlider.value = String(maxY + 1);
-      this.slicerSlider.style.cssText = `
-        writing-mode: vertical-lr; direction: rtl;
-        width: 28px; height: 200px;
-        accent-color: #00ccff; cursor: pointer;
+      // Custom vertical track
+      this.slicerTrack = document.createElement('div');
+      this.slicerTrack.style.cssText = `
+        position: relative; width: 24px; height: 240px; cursor: pointer;
+        border-radius: 12px; border: 1px solid #555;
+        background: linear-gradient(to bottom, #4a90d9 0%, #5cb85c 15%, #8b6e4e 40%, #8a8278 60%, #9aabb8 80%, #ffc107 100%);
       `;
-      this.slicerSlider.addEventListener('input', () => {
-        const val = parseInt(this.slicerSlider!.value);
-        if (val > maxY) {
-          // Top position = show all
-          this.slicerLabel!.textContent = 'ALL';
-          this.slicerLabel!.style.color = '#ff8c00';
-          this._onSliceChange?.(null);
-        } else {
-          this.slicerLabel!.textContent = `Y:${val}`;
-          this.slicerLabel!.style.color = '#00ccff';
-          this._onSliceChange?.(val);
-        }
-      });
-      this.slicerContainer.appendChild(this.slicerSlider);
 
-      // Bottom label
-      const botLabel = document.createElement('div');
-      botLabel.style.cssText = 'color: #666; font-size: 10px;';
-      botLabel.textContent = `${minY}`;
-      this.slicerContainer.appendChild(botLabel);
+      // Thumb indicator
+      this.slicerThumb = document.createElement('div');
+      this.slicerThumb.style.cssText = `
+        position: absolute; left: -4px; width: 32px; height: 6px;
+        background: #00ccff; border-radius: 3px; pointer-events: none;
+        transform: translateY(-50%); top: 0%;
+        box-shadow: 0 0 6px rgba(0, 204, 255, 0.6);
+        transition: top 0.05s linear;
+      `;
+      this.slicerTrack.appendChild(this.slicerThumb);
+
+      // Click-and-drag handlers on the track
+      const onDrag = (e: MouseEvent) => {
+        if (!this._slicerDragging) return;
+        e.preventDefault();
+        this.applySlicerValue(this.slicerYFromMouseY(e.clientY));
+      };
+      const onUp = () => {
+        this._slicerDragging = false;
+        window.removeEventListener('mousemove', onDrag);
+        window.removeEventListener('mouseup', onUp);
+      };
+      this.slicerTrack.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._slicerDragging = true;
+        this.applySlicerValue(this.slicerYFromMouseY(e.clientY));
+        window.addEventListener('mousemove', onDrag);
+        window.addEventListener('mouseup', onUp);
+      });
+
+      this.slicerContainer.appendChild(this.slicerTrack);
+
+      // Depth labels along the side
+      const labelBar = document.createElement('div');
+      labelBar.style.cssText = 'display: flex; justify-content: space-between; width: 100%; padding: 0 2px;';
+      const topNum = document.createElement('span');
+      topNum.style.cssText = 'color: #666; font-size: 9px;';
+      topNum.textContent = `${maxY}`;
+      const botNum = document.createElement('span');
+      botNum.style.cssText = 'color: #666; font-size: 9px;';
+      botNum.textContent = `${minY}`;
+      labelBar.appendChild(topNum);
+      labelBar.appendChild(botNum);
+      this.slicerContainer.appendChild(labelBar);
 
       this.container.appendChild(this.slicerContainer);
     }
 
     this.slicerContainer.style.display = 'flex';
     // Reset to "ALL"
-    if (this.slicerSlider) {
-      this.slicerSlider.min = String(minY);
-      this.slicerSlider.max = String(maxY + 1);
-      this.slicerSlider.value = String(maxY + 1);
-    }
-    if (this.slicerLabel) {
-      this.slicerLabel.textContent = 'ALL';
-      this.slicerLabel.style.color = '#ff8c00';
-    }
+    this._slicerValue = null;
+    this.updateSlicerVisuals();
   }
 
-  /** Programmatically set the slicer value (e.g. from scroll) */
-  setSlicerValue(y: number | null, maxY = 25): void {
-    if (!this.slicerSlider || !this.slicerLabel) return;
-    if (y === null) {
-      this.slicerSlider.value = String(maxY + 1);
-      this.slicerLabel.textContent = 'ALL';
-      this.slicerLabel.style.color = '#ff8c00';
-    } else {
-      this.slicerSlider.value = String(y);
-      this.slicerLabel.textContent = `Y:${y}`;
-      this.slicerLabel.style.color = '#00ccff';
-    }
+  /** Programmatically set the slicer value (e.g. from Shift+scroll) */
+  setSlicerValue(y: number | null, _maxY = 25): void {
+    this._slicerValue = y;
+    this.updateSlicerVisuals();
   }
 
   dispose(): void {

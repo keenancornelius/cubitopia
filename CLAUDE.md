@@ -29,7 +29,7 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 - Before experimental changes the user wants to try
 - After updating project architecture in CLAUDE.md or Instructions
 - After updating the CLAUDE.md and instruction files on quirks and discoveries about the code base
-- After updating the help menu with new or missing info
+- After updating the help menu with new or missing info, always make sure to update the help menu and check that it all makes sense with the game  code flow.
 
 ### Introspective Review Protocol (run on every commit)
 After each commit, pause and run through these checks before moving on. This is how the project stays coherent as it grows.
@@ -91,6 +91,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
 - `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~210 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
+- `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~310 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Handles underground layer checks. Emits CaptureEvent on flip.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~905 lines)**. Web Audio API synthesized SFX (25 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, level_up (triumphant brass fanfare), AoE splash, UI sounds, queue_confirm/queue_error/craft_confirm feedback, unit_spawn pop.
@@ -485,13 +486,27 @@ Architecture prep (check these on every commit touching these systems):
 - `[READY]` AIController personality params (aggression, expansion rate, preferred unit mix) driven by tribe config
 - Future DLC tribes slot in by adding more TribeConfig entries
 
-### Phase 3: Neutral Cities & Gold Economy [BLOCKED on Phase 2 gate]
+### Phase 3: Neutral Cities & Gold Economy [PARTIALLY DONE — zone capture implemented]
 Capturable map objectives that create contested territory and drive strategic decisions. Introduces the gold resource.
 
-**Neutral City Mechanics:**
+**Zone Control Capture System [DONE]:**
+- `CaptureZoneSystem.ts` — standalone system managing zone state, progress, and visuals
+- All bases (main + neutral) have a 5-hex radius capture zone
+- Capture works via unit majority: the team with more units in the zone makes progress
+- Uncontested capture takes ~20 seconds; contested zones see tug-of-war progress bar
+- Visual feedback: zone boundary ring in team color, glowing light column, floating progress bar
+- Underground layer check: underground bases only count underground units
+- **Main base capture = instant defeat** (replaces old damage-to-zero system)
+- **Neutral/outpost capture = flip ownership + inherit all buildings/walls in zone**
+- Bases are never destroyed — they change flags/teams when captured
+- Units with `_playerCommanded` hold position inside enemy zones (5-hex radius check in UnitAI idle)
+- `BaseRenderer` still renders castles; health bars are cosmetic (bases no longer take damage)
+- Capture events flow through `handleCaptureEvent()` in main.ts
+
+**Neutral City Mechanics (remaining work):**
 - Cities spawn at map generation on strategic hexes (crossroads, hilltops, resource-rich areas)
-- Start neutral with NPC garrison (scaled to city tier). Must destroy garrison + hold for 2 turns to capture
-- Can be recaptured by any player — ownership flips on hold timer
+- Start neutral. Must hold zone majority to capture (zone capture system already supports this)
+- Can be recaptured by any player — zone control handles this natively
 - **City tiers:** Village (1 hex) → Town (3 hex cluster) → City (7 hex cluster). Upgrade by spending gold + building infrastructure in the city's influence radius (3 hexes)
 - Each tier upgrade increases gold income, unlocks new recruit options, and grants passive bonuses
 
@@ -509,7 +524,8 @@ Capturable map objectives that create contested territory and drive strategic de
 - **Strategic tension:** spread thin to hold more cities for income, or consolidate and push with fewer
 
 **Architecture:**
-- `CitySystem.ts` — city state, garrison, ownership, tier, income calculation, influence radius
+- `CaptureZoneSystem.ts` — [DONE] zone state, progress tracking, visuals, capture events
+- `CitySystem.ts` — [TODO] city tiers, garrison, income calculation, influence radius
 - `CityConfig` data table — city types, tier thresholds, bonus tables, garrison compositions
 - `GoldEconomy` module — income/expense tracking, upkeep calculation, trade route detection
 - Map generator places cities using strategic value heuristic (distance from bases, terrain, resources)

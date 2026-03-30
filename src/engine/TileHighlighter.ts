@@ -108,6 +108,38 @@ export class TileHighlighter {
     }
   }
 
+  /** Flash a red attack indicator on a single tile (auto-clears after 600ms) */
+  showAttackIndicator(coord: HexCoord, elevation: number): void {
+    const geo = new THREE.PlaneGeometry(1.4, 1.4);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff2222,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    const pos = this.hexToWorld(coord, elevation + 0.08);
+    mesh.position.copy(pos);
+    this.scene.add(mesh);
+
+    // Fade out and remove
+    let opacity = 0.55;
+    const fade = () => {
+      opacity -= 0.02;
+      if (opacity <= 0) {
+        this.scene.remove(mesh);
+        mesh.geometry.dispose();
+        mat.dispose();
+        return;
+      }
+      mat.opacity = opacity;
+      requestAnimationFrame(fade);
+    };
+    setTimeout(fade, 300);
+  }
+
   clearSelection(): void {
     if (this.selectionMesh) {
       this.scene.remove(this.selectionMesh);

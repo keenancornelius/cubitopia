@@ -22,6 +22,7 @@ export interface DebugOps {
   updateHealthBar(unit: Unit): void;
   setUnitWorldPosition(id: string, x: number, y: number, z: number): void;
   showBaseDestruction(base: any): void;
+  /** @deprecated No-op — zone capture replaced base health bars */
   updateBaseHealthBars(): void;
 
   // World helpers

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType } from '../../types';
 import { Pathfinder } from './Pathfinder';
+import { UnitAI } from './UnitAI';
 import {
   buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
   buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh,
@@ -74,7 +75,7 @@ class BuildingSystem {
 
   // --- Registry Methods ---
 
-  registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth = 40): PlacedBuilding {
+  registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth = 200): PlacedBuilding {
     const pb: PlacedBuilding = {
       id: `bld_${nextBuildingId++}`,
       kind, owner, position: pos,
@@ -84,6 +85,9 @@ class BuildingSystem {
     this.placedBuildings.push(pb);
     const key = `${pos.q},${pos.r}`;
     this.wallConnectable.add(key);
+    // Track in UnitAI so all units can auto-attack enemy buildings
+    UnitAI.buildingPositions.add(key);
+    UnitAI.buildingOwners.set(key, owner);
     return pb;
   }
 
@@ -93,6 +97,8 @@ class BuildingSystem {
     const key = `${pb.position.q},${pb.position.r}`;
     this.wallConnectable.delete(key);
     Pathfinder.blockedTiles.delete(key);
+    UnitAI.buildingPositions.delete(key);
+    UnitAI.buildingOwners.delete(key);
     this.ctx.scene.remove(pb.mesh);
     // Rebuild adjacent walls if wall system is connected
     if (this.wallRebuildCb && this.wallsBuiltRef && this.wallOwnersRef) {
@@ -134,6 +140,39 @@ class BuildingSystem {
   }
   buildWizardTowerMesh(pos: HexCoord, owner: number): THREE.Group {
     return buildWizardTowerMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
+
+  /** Rebuild a building's mesh with its current owner (e.g. after zone capture) */
+  refreshBuildingMesh(pb: PlacedBuilding): void {
+    // Remove old mesh
+    this.ctx.scene.remove(pb.mesh);
+    pb.mesh.traverse((child: THREE.Object3D) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach((m: THREE.Material) => m.dispose());
+        } else {
+          (child.material as THREE.Material).dispose();
+        }
+      }
+    });
+
+    // Rebuild mesh with the building's current owner
+    const meshBuilders: Record<string, (pos: HexCoord, owner: number) => THREE.Group> = {
+      forestry: (p, o) => this.buildForestryMesh(p, o),
+      barracks: (p, o) => this.buildBarracksMesh(p, o),
+      masonry: (p, o) => this.buildMasonryMesh(p, o),
+      farmhouse: (p, o) => this.buildFarmhouseMesh(p, o),
+      workshop: (p, o) => this.buildWorkshopMesh(p, o),
+      silo: (p, o) => this.buildSiloMesh(p, o),
+      smelter: (p, o) => this.buildSmelterMesh(p, o),
+      armory: (p, o) => this.buildArmoryMesh(p, o),
+      wizard_tower: (p, o) => this.buildWizardTowerMesh(p, o),
+    };
+    const builder = meshBuilders[pb.kind];
+    if (builder) {
+      pb.mesh = builder(pb.position, pb.owner);
+    }
   }
 
   // --- Static Helpers ---

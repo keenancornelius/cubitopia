@@ -26,7 +26,7 @@ export class Pathfinder {
   /** Set of tile keys occupied by units. Updated each tick from main game loop. */
   static occupiedTiles: Set<string> = new Set();
 
-  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number, canTraverseRidge = false): HexCoord[] {
+  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number, canTraverseRidge = false, tunnelMode = false): HexCoord[] {
     const startKey = `${start.q},${start.r}`;
     const goalKey = `${goal.q},${goal.r}`;
 
@@ -34,14 +34,18 @@ export class Pathfinder {
 
     // Check goal is valid — water and ridge-height tiles are impassable
     const goalTile = map.tiles.get(goalKey);
-    if (!goalTile || goalTile.terrain === TerrainType.WATER) {
-      return [];
-    }
-    // Ridge tiles (elevation >= 10) are impassable rocky crags — builders can traverse them
-    // Tunnel tiles bypass this check (walkableFloor is underground, always < 10)
-    const goalWalkable = goalTile.walkableFloor ?? goalTile.elevation;
-    if (goalWalkable >= 10 && !canTraverseRidge) {
-      return [];
+    if (!goalTile) return [];
+    // In tunnel mode, tunnel tiles are always valid goals regardless of surface terrain
+    if (!tunnelMode || !goalTile.hasTunnel) {
+      if (goalTile.terrain === TerrainType.WATER) {
+        return [];
+      }
+      // Ridge tiles (elevation >= 10) are impassable rocky crags — builders can traverse them
+      // Tunnel tiles bypass this check (walkableFloor is underground, always < 10)
+      const goalWalkable = goalTile.walkableFloor ?? goalTile.elevation;
+      if (goalWalkable >= 10 && !canTraverseRidge) {
+        return [];
+      }
     }
     // If goal is forest, path to an adjacent clear tile instead
     const goalIsForest = goalTile.terrain === TerrainType.FOREST;
@@ -103,20 +107,26 @@ export class Pathfinder {
         if (closed.has(nKey)) continue;
 
         const tile = map.tiles.get(nKey);
-        // Block water and ridge-height tiles; forest blocks everyone except lumberjacks; ridges block everyone except builders
-        if (!tile || tile.terrain === TerrainType.WATER) {
-          continue;
-        }
-        // Tunnel tiles bypass ridge check (walkableFloor is underground)
+        if (!tile) continue;
         const nWalkable = tile.walkableFloor ?? tile.elevation;
-        if (nWalkable >= 10 && !canTraverseRidge) {
-          continue;
-        }
-        if (tile.terrain === TerrainType.FOREST && !canTraverseForest) {
-          continue;
+        // In tunnel mode, tunnel tiles bypass all surface terrain checks
+        const isTunnelTile = tunnelMode && tile.hasTunnel;
+        if (!isTunnelTile) {
+          // Block water and ridge-height tiles; forest blocks everyone except lumberjacks; ridges block everyone except builders
+          if (tile.terrain === TerrainType.WATER) {
+            continue;
+          }
+          // Ridge tiles (elevation >= 10) are impassable rocky crags
+          if (nWalkable >= 10 && !canTraverseRidge) {
+            continue;
+          }
+          if (tile.terrain === TerrainType.FOREST && !canTraverseForest) {
+            continue;
+          }
         }
         // Skip base-blocked and wall-blocked tiles, but allow friendly units through friendly gates
-        if (Pathfinder.blockedTiles.has(nKey) && nKey !== effectiveGoalKey) {
+        // In tunnel mode, tunnel tiles bypass blocked tile checks too (tunnels go under buildings)
+        if (Pathfinder.blockedTiles.has(nKey) && nKey !== effectiveGoalKey && !isTunnelTile) {
           // Check if this is a friendly gate (owned by the pathfinding unit)
           const gateOwner = Pathfinder.gateTiles.get(nKey);
           if (gateOwner === undefined || (unitOwner !== undefined && gateOwner !== unitOwner)) {
@@ -126,12 +136,12 @@ export class Pathfinder {
           // It's a friendly gate — allow passage
         }
 
-        let moveCost = Pathfinder.getMoveCost(tile.terrain);
-        // Ridge tiles are slow to traverse — steep climbing cost
-        // Tunnel tiles with low walkableFloor bypass this
-        if (nWalkable >= 10) moveCost += 4;
-        // Tunnel shortcut: slightly reduce cost to encourage pathfinder to use tunnels
-        if (tile.hasTunnel) moveCost = Math.max(0.5, moveCost - 0.5);
+        let moveCost = isTunnelTile ? 0.5 : Pathfinder.getMoveCost(tile.terrain);
+        // Ridge tiles are slow to traverse — steep climbing cost (not in tunnel mode)
+        if (!isTunnelTile && nWalkable >= 10) moveCost += 4;
+        // Tunnel shortcut: reduce cost to encourage pathfinder to use tunnels (ONLY in tunnel mode)
+        // In surface mode, tunnel tiles use normal terrain cost — no bonus for cutting through ground
+        if (tunnelMode && tile.hasTunnel) moveCost = Math.max(0.1, moveCost - 0.5);
         // Add heavy penalty for tiles occupied by other units (strong anti-collision)
         if (Pathfinder.occupiedTiles.has(nKey) && nKey !== effectiveGoalKey) {
           moveCost += 8;

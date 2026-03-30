@@ -865,7 +865,7 @@ export class MapGenerator {
   private _waterfallElevations: Map<string, number> = new Map();
   private _riverElevations: Map<string, number> = new Map();
 
-  private hexNeighbors(q: number, r: number): [number, number][] {
+  public hexNeighbors(q: number, r: number): [number, number][] {
     // Offset hex grid neighbors
     if (q % 2 === 0) {
       return [
@@ -1192,9 +1192,8 @@ export class MapGenerator {
     const offsets = [-0.5, 0, 0.5];
 
     // === SOLID FILL: every Y level from DEPTH to surface ===
-    // This creates real mineable terrain all the way down through the world.
-    // Block types change with depth: surface → sub-surface → dirt → stone → gold → iron
-    // Water tiles use the same underground layers as regular terrain.
+    // Underground is plain stone. Surface gets terrain-appropriate blocks.
+    // Gem veins are placed separately along lava tube tunnel paths.
     for (const lx of offsets) {
       for (const lz of offsets) {
         for (let y = DEPTH; y < height; y++) {
@@ -1202,17 +1201,9 @@ export class MapGenerator {
           if (y === height - 1) {
             blockType = topBlock;            // surface layer
           } else if (y >= height - 2) {
-            blockType = subBlock;            // sub-surface
-          } else if (y >= height - 4 && isHighEnoughForStone) {
-            blockType = BlockType.STONE;     // mountain stone cap
-          } else if (y < -20) {
-            blockType = BlockType.IRON;      // deep iron veins
-          } else if (y < -10) {
-            blockType = BlockType.GOLD;      // gold layer
-          } else if (y < 0) {
-            blockType = BlockType.STONE;     // underground stone
+            blockType = subBlock;            // sub-surface (1-2 blocks)
           } else {
-            blockType = y < 3 ? BlockType.STONE : BlockType.DIRT;  // shallow layers
+            blockType = BlockType.STONE;     // all underground = stone
           }
           blocks.push({
             localPosition: { x: lx, y, z: lz },
@@ -1363,8 +1354,9 @@ export class MapGenerator {
     }
   }
 
-  /** Trace a winding path for a lava tube using noise-biased stepping */
-  private traceTubePath(
+  /** Trace a winding path for a lava tube using noise-biased stepping.
+   *  GUARANTEED to connect start→end: uses increasing goal pull as steps approach limit. */
+  public traceTubePath(
     start: { q: number; r: number },
     end: { q: number; r: number },
     map: GameMap,
@@ -1374,28 +1366,56 @@ export class MapGenerator {
     const visited = new Set<string>();
     let cq = start.q;
     let cr = start.r;
-    // Allow plenty of steps — tubes should be able to cross the entire map with winding
     const straightDist = Math.sqrt((end.q - start.q) ** 2 + (end.r - start.r) ** 2);
-    const maxSteps = Math.floor(straightDist * 3) + 20;
+    // Generous step budget for winding, but finite
+    const maxSteps = Math.floor(straightDist * 3) + 30;
 
     for (let step = 0; step < maxSteps; step++) {
       const key = `${cq},${cr}`;
-      if (visited.has(key)) break;
+      if (visited.has(key)) {
+        // Stuck in a loop — force toward goal
+        const neighbors = this.hexNeighbors(cq, cr);
+        let closest = Infinity;
+        let fallbackQ = end.q, fallbackR = end.r;
+        for (const [nq, nr] of neighbors) {
+          if (nq < 1 || nq >= w - 1 || nr < 1 || nr >= h - 1) continue;
+          const d = Math.abs(end.q - nq) + Math.abs(end.r - nr);
+          if (d < closest && !visited.has(`${nq},${nr}`)) {
+            closest = d;
+            fallbackQ = nq;
+            fallbackR = nr;
+          }
+        }
+        if (closest === Infinity) break; // truly stuck
+        cq = fallbackQ;
+        cr = fallbackR;
+        continue;
+      }
       visited.add(key);
 
       const tile = map.tiles.get(key);
       if (!tile) break;
-      // Tubes are underground — they can pass under any terrain including water
 
       path.push({ q: cq, r: cr });
 
-      // Check if we're close enough to the end
+      // Reached the end?
+      if (cq === end.q && cr === end.r) break;
       const dq = end.q - cq;
       const dr = end.r - cr;
       if (Math.abs(dq) <= 1 && Math.abs(dr) <= 1) {
-        path.push({ q: end.q, r: end.r });
+        // Add end tile and stop
+        if (!visited.has(`${end.q},${end.r}`)) {
+          path.push({ q: end.q, r: end.r });
+        }
         break;
       }
+
+      // Urgency: as we use more of our step budget, pull harder toward goal
+      const remainingDist = Math.sqrt(dq * dq + dr * dr);
+      const stepsLeft = maxSteps - step;
+      const urgency = Math.max(0, Math.min(1, (remainingDist * 1.5) / stepsLeft));
+      // Wander strength: high when far from deadline, low near deadline
+      const wanderStrength = 8 * (1 - urgency);
 
       // Get hex neighbors and score them
       const neighbors = this.hexNeighbors(cq, cr);
@@ -1404,17 +1424,16 @@ export class MapGenerator {
       let bestNr = cr;
 
       for (const [nq, nr] of neighbors) {
-        if (nq < 2 || nq >= w - 2 || nr < 2 || nr >= h - 2) continue;
+        if (nq < 1 || nq >= w - 1 || nr < 1 || nr >= h - 1) continue;
         const nKey = `${nq},${nr}`;
         if (visited.has(nKey)) continue;
+        if (!map.tiles.get(nKey)) continue;
 
-        const nTile = map.tiles.get(nKey);
-        if (!nTile) continue;
-
-        // Score: direction toward goal + strong noise for organic winding
-        const dirScore = -(Math.abs(end.q - nq) + Math.abs(end.r - nr)); // closer to goal = higher
-        const noiseWander = this.noise.fbm(nq * 0.25 + step * 0.05, nr * 0.25, 3) * 10; // strong winding
-        const score = dirScore + noiseWander;
+        // Direction score: closer to goal = higher
+        const dirScore = -(Math.abs(end.q - nq) + Math.abs(end.r - nr));
+        // Noise wander for organic curves
+        const noiseWander = this.noise.fbm(nq * 0.25 + step * 0.05, nr * 0.25, 3) * wanderStrength;
+        const score = dirScore * (1 + urgency * 2) + noiseWander;
 
         if (score > bestScore) {
           bestScore = score;
@@ -1428,33 +1447,74 @@ export class MapGenerator {
       cr = bestNr;
     }
 
+    // Safety: if path didn't reach end, extend straight toward it
+    const last = path[path.length - 1];
+    if (last && (last.q !== end.q || last.r !== end.r)) {
+      let fq = last.q, fr = last.r;
+      for (let emergency = 0; emergency < 50; emergency++) {
+        const neighbors = this.hexNeighbors(fq, fr);
+        let closest = Infinity;
+        let nextQ = end.q, nextR = end.r;
+        for (const [nq, nr] of neighbors) {
+          if (nq < 1 || nq >= w - 1 || nr < 1 || nr >= h - 1) continue;
+          const d = Math.abs(end.q - nq) + Math.abs(end.r - nr);
+          if (d < closest) { closest = d; nextQ = nq; nextR = nr; }
+        }
+        path.push({ q: nextQ, r: nextR });
+        if (nextQ === end.q && nextR === end.r) break;
+        fq = nextQ;
+        fr = nextR;
+      }
+    }
+
     return path;
   }
 
   /** Carve tunnel blocks out of the shell column for each tile on the tube path.
-   *  Sandworm-scale: carves a 3-hex-wide, 8-block-tall bore that swoops deep underground. */
-  private carveTunnelBlocks(path: { q: number; r: number }[], map: GameMap): void {
+   *  Sandworm-scale: carves a 3-hex-wide, 8-block-tall bore that swoops deep underground.
+   *  Builds structured cave mouths at entrances/exits.
+   *  Places gem vein pockets in tunnel walls. */
+  public carveTunnelBlocks(path: { q: number; r: number }[], map: GameMap, deepOnly = false, mouthStartOnly = false): void {
     const BORE_HEIGHT = 8;  // vertical clearance — massive sandworm bore
+    const GEM_TYPES = [BlockType.GEM_RUBY, BlockType.GEM_EMERALD, BlockType.GEM_SAPPHIRE, BlockType.GEM_AMETHYST];
+    // Each tube gets a primary gem type with occasional secondary
+    const primaryGem = GEM_TYPES[Math.floor(this.rng.next() * GEM_TYPES.length)];
+    const secondaryGem = GEM_TYPES[Math.floor(this.rng.next() * GEM_TYPES.length)];
 
     for (let i = 0; i < path.length; i++) {
       const { q, r } = path[i];
-
-      // Tunnel floor Y: starts near surface at entrances, swoops deep in middle
       const t = path.length > 1 ? i / (path.length - 1) : 0; // 0..1 along path
       const depthCurve = Math.sin(t * Math.PI); // 0 at ends, 1 in middle
 
-      // Get surface Y from center tile
       const centerTile = map.tiles.get(`${q},${r}`);
       if (!centerTile) continue;
       const surfaceY = centerTile.elevation - 1;
 
-      // Entrance/exit: 8 below surface. Middle: deep at Y=-18
-      const entranceFloor = Math.max(-5, surfaceY - 8);
-      const deepFloor = -18; // deep underground swoop
-      const tunnelFloorY = Math.round(entranceFloor + (deepFloor - entranceFloor) * depthCurve);
-      const tunnelCeilingY = tunnelFloorY + BORE_HEIGHT;
+      let tunnelFloorY: number;
+      let tunnelCeilingY: number;
 
-      // Carve the center tile AND all 6 neighbors (3-hex-wide bore)
+      if (deepOnly) {
+        // Deep-only tunnels stay at constant underground depth — no surface openings
+        const deepFloor = -14;
+        // Slight variation along path for natural feel
+        const variation = Math.sin(t * Math.PI * 3) * 2;
+        tunnelFloorY = Math.round(deepFloor + variation);
+        tunnelCeilingY = tunnelFloorY + BORE_HEIGHT;
+      } else {
+        // Standard depth profile: entrance at surfaceY-6, deep middle at Y=-18
+        const entranceFloor = Math.max(-5, surfaceY - 6);
+        const deepFloor = -18;
+        tunnelFloorY = Math.round(entranceFloor + (deepFloor - entranceFloor) * depthCurve);
+        tunnelCeilingY = tunnelFloorY + BORE_HEIGHT;
+      }
+
+      // Cave mouth zone: first/last 15% of path (disabled for deepOnly tunnels)
+      // mouthStartOnly: only create a mouth at the start (t < 0.15), not the end
+      const isCaveMouth = !deepOnly && (t < 0.15 || (!mouthStartOnly && t > 0.85));
+      // Transition zone: gradual narrowing at mouth edges
+      const mouthProgress = t < 0.15 ? t / 0.15 : t > 0.85 ? (1 - t) / 0.15 : 1;
+
+      // Carve center tile + all 6 neighbors (3-hex-wide bore)
       const tilesToCarve: [number, number][] = [[q, r], ...this.hexNeighbors(q, r)];
 
       for (const [tq, tr] of tilesToCarve) {
@@ -1462,22 +1522,60 @@ export class MapGenerator {
         const tile = map.tiles.get(tKey);
         if (!tile) continue;
 
-        // Never carve water tiles — their thin columns create visible voids
+        // Never carve water tiles
         if (tile.terrain === TerrainType.RIVER || tile.terrain === TerrainType.LAKE
             || tile.terrain === TerrainType.WATERFALL || tile.terrain === TerrainType.WATER) continue;
 
         const tileSurfaceY = tile.elevation - 1;
-        // At entrance/exit, allow ceiling to break surface for cave mouth
-        const nearEnd = t < 0.12 || t > 0.88;
-        if (!nearEnd && tunnelCeilingY >= tileSurfaceY) continue;
+        // Skip if bore is above surface (except at cave mouth)
+        if (!isCaveMouth && tunnelCeilingY >= tileSurfaceY) continue;
         if (tunnelFloorY >= tileSurfaceY) continue;
 
-        // Remove ALL blocks in the tunnel bore
+        // Effective ceiling: at cave mouth, break through to surface for open entry
+        const effectiveCeiling = isCaveMouth
+          ? Math.max(tunnelCeilingY, tileSurfaceY + 1) // open to sky at mouth
+          : tunnelCeilingY;
+
+        // Remove blocks in the tunnel bore
+        // At cave mouths, also strip any ridge/peak blocks above the base surface
+        // to prevent spire artifacts at entrances
         tile.voxelData.blocks = tile.voxelData.blocks.filter(block => {
           const by = block.localPosition.y;
-          if (by < tunnelFloorY || by >= tunnelCeilingY) return true;
-          return false; // remove everything in bore range
+          // Standard bore carving
+          if (by >= tunnelFloorY && by < effectiveCeiling) return false;
+          // At cave mouths, aggressively remove blocks above effective ceiling too
+          // (ridge peaks, arch remnants, etc.) — keep only blocks below floor
+          if (isCaveMouth && by >= tunnelFloorY) return false;
+          return true;
         });
+
+        // === Gem vein placement: small pockets on tunnel walls ===
+        if (!isCaveMouth && this.rng.next() < 0.12) {
+          // Place a small cluster of gem blocks on the floor or ceiling edge
+          const gemType = this.rng.next() < 0.75 ? primaryGem : secondaryGem;
+          const isFloor = this.rng.next() < 0.5;
+          const gemY = isFloor ? tunnelFloorY - 1 : tunnelCeilingY;
+          // 1-3 gem blocks per vein pocket
+          const veinSize = 1 + Math.floor(this.rng.next() * 3);
+          const subOffsets = [[-0.5, -0.5], [0, 0], [0.5, 0.5], [-0.5, 0.5], [0.5, -0.5]];
+          for (let g = 0; g < veinSize && g < subOffsets.length; g++) {
+            const [gx, gz] = subOffsets[Math.floor(this.rng.next() * subOffsets.length)];
+            tile.voxelData.blocks.push({
+              localPosition: { x: gx, y: gemY, z: gz },
+              type: gemType,
+              health: 100, maxHealth: 100,
+            });
+          }
+          // Also replace some adjacent wall blocks with gem blocks
+          if (this.rng.next() < 0.5) {
+            const wallY = isFloor ? tunnelFloorY - 2 : tunnelCeilingY + 1;
+            tile.voxelData.blocks.push({
+              localPosition: { x: 0, y: wallY, z: 0 },
+              type: gemType,
+              health: 100, maxHealth: 100,
+            });
+          }
+        }
 
         // Mark tile as tunnel
         tile.hasTunnel = true;
@@ -1491,6 +1589,44 @@ export class MapGenerator {
         console.log(`[LavaTubes] ${label} (${q},${r}): surfaceY=${surfaceY}, floorY=${tunnelFloorY}, ceilingY=${tunnelCeilingY}`);
       }
     }
+  }
+
+  /** Carve a large underground cavern — an open space at a fixed depth.
+   *  Returns the center coord and floor Y for placing structures. */
+  public carveCavern(
+    center: { q: number; r: number },
+    radius: number,
+    floorY: number,
+    ceilingHeight: number,
+    map: GameMap,
+  ): { centerQ: number; centerR: number; floorY: number } {
+    const ceilingY = floorY + ceilingHeight;
+
+    // Carve all tiles within radius
+    map.tiles.forEach((tile, key) => {
+      const [tq, tr] = key.split(',').map(Number);
+      const dist = Math.sqrt((tq - center.q) ** 2 + (tr - center.r) ** 2);
+      if (dist > radius) return;
+
+      // Soft edge: ceiling tapers near edge
+      const edgeFactor = Math.min(1, (radius - dist) / 3);
+      const effectiveCeiling = floorY + Math.round(ceilingHeight * edgeFactor);
+      if (effectiveCeiling <= floorY) return;
+
+      // Remove blocks in the cavern volume
+      tile.voxelData.blocks = tile.voxelData.blocks.filter(block => {
+        const by = block.localPosition.y;
+        return by < floorY || by >= effectiveCeiling;
+      });
+
+      // Mark as tunnel tile
+      tile.hasTunnel = true;
+      tile.tunnelFloorY = floorY;
+      tile.tunnelCeilingY = effectiveCeiling;
+      tile.walkableFloor = floorY;
+    });
+
+    return { centerQ: center.q, centerR: center.r, floorY };
   }
 
   private terrainToBlockType(terrain: TerrainType): BlockType {

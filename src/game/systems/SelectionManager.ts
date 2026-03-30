@@ -16,6 +16,8 @@ export class SelectionManager {
 
   /** When true, suppress box-selection (harvest/farm paint mode active) */
   static suppressBoxSelect = false;
+  /** When true, suppress right-click commands (mine mode — right-click rotates camera) */
+  static suppressRightClick = false;
 
   // Box selection state
   private isBoxSelecting = false;
@@ -132,9 +134,10 @@ export class SelectionManager {
       }
     });
 
-    // Right-click for commands
+    // Right-click for commands (suppressed during mine mode so camera rotation works)
     this.canvas.addEventListener('contextmenu', (e: MouseEvent) => {
       e.preventDefault();
+      if (SelectionManager.suppressRightClick) return;
       if (this.selectedUnits.length > 0) {
         const worldPos = this.screenToWorld(e.clientX, e.clientY);
         if (worldPos) {

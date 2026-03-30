@@ -9,6 +9,7 @@ import { Base, HexCoord } from '../types';
 const PLAYER_BASE_COLORS = [
   { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0x3498db, accent: 0xd4cfc0, ring: 0x3498db }, // Off-white + Blue flag
   { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0xe74c3c, accent: 0xd4cfc0, ring: 0xe74c3c }, // Off-white + Red flag
+  { wall: 0x8a8a8a, tower: 0x6a6a6a, flag: 0xd4af37, accent: 0x555555, ring: 0xd4af37 }, // Dark stone + Gold flag (neutral)
 ];
 
 interface BaseMeshGroup {
@@ -227,6 +228,15 @@ export class BaseRenderer {
       });
       this.baseMeshes.delete(baseId);
     }
+  }
+
+  /** Get all base mesh groups for raycasting — returns [baseId, THREE.Group][] */
+  getAllBaseMeshGroups(): { baseId: string; group: THREE.Group }[] {
+    const result: { baseId: string; group: THREE.Group }[] = [];
+    for (const [id, mg] of this.baseMeshes) {
+      result.push({ baseId: id, group: mg.group });
+    }
+    return result;
   }
 
   dispose(): void {

@@ -20,6 +20,19 @@ const BLOCK_COLORS: Record<BlockType, number> = {
   [BlockType.WALL]:  0xd4a373,  // warm brick/clay — distinct from terrain stone
   [BlockType.JUNGLE]: 0x2d6b30,  // dark rich jungle green
   [BlockType.CLAY]:   0xc2703e,  // warm terracotta clay
+  // Gem-infused stone: dark stone base with bright gem sparkles
+  [BlockType.GEM_RUBY]:     0x6b3040,  // dark crimson stone
+  [BlockType.GEM_EMERALD]:  0x2a5a3a,  // dark emerald stone
+  [BlockType.GEM_SAPPHIRE]: 0x2a3a6b,  // dark sapphire stone
+  [BlockType.GEM_AMETHYST]: 0x4a2a6b,  // dark amethyst stone
+};
+
+/** Gem types get special bright sparkle colors overlaid on their dark stone base */
+const GEM_SPARKLE_COLORS: Partial<Record<BlockType, number[]>> = {
+  [BlockType.GEM_RUBY]:     [0xff1744, 0xff5252, 0xffcdd2],  // bright red → pink → white-pink
+  [BlockType.GEM_EMERALD]:  [0x00e676, 0x69f0ae, 0xb9f6ca],  // bright green → mint → white-green
+  [BlockType.GEM_SAPPHIRE]: [0x2979ff, 0x448aff, 0xbbdefb],  // bright blue → light blue → white-blue
+  [BlockType.GEM_AMETHYST]: [0xd500f9, 0xea80fc, 0xf3e5f5],  // bright purple → lavender → white-purple
 };
 
 // Slightly oversized to seal hairline gaps between adjacent tiles
@@ -113,6 +126,18 @@ export class VoxelBuilder {
       if (type === BlockType.WATER) {
         material.transparent = true;
         material.opacity = 0.6;
+      }
+
+      // Gem blocks glow with emissive light
+      const gemEmissive: Partial<Record<string, number>> = {
+        [BlockType.GEM_RUBY]:     0xff2040,
+        [BlockType.GEM_EMERALD]:  0x00ff60,
+        [BlockType.GEM_SAPPHIRE]: 0x2060ff,
+        [BlockType.GEM_AMETHYST]: 0xaa00ff,
+      };
+      if (gemEmissive[type]) {
+        material.emissive = new THREE.Color(gemEmissive[type]!);
+        material.emissiveIntensity = 0.6;
       }
 
       this.materials.set(type as BlockType, material);
@@ -212,12 +237,32 @@ export class VoxelBuilder {
         satShift = (hash2 - 0.5) * 0.15;
         lightShift = (hash - 0.5) * 0.12;
         break;
-      default:
-        // Other block types: moderate variation
-        hueShift = (hash - 0.5) * 0.04;
-        satShift = (hash2 - 0.5) * 0.1;
-        lightShift = (hash - 0.5) * 0.1;
+      default: {
+        // Gem blocks: dark stone base with bright sparkle highlights
+        const sparkleColors = GEM_SPARKLE_COLORS[type];
+        if (sparkleColors) {
+          // Some blocks get bright gem sparkles, others stay dark stone
+          const sparkleChance = hash;
+          if (sparkleChance < 0.35) {
+            // Bright gem crystal — pick a sparkle color
+            const colorIdx = Math.floor(hash2 * sparkleColors.length) % sparkleColors.length;
+            base.set(sparkleColors[colorIdx]);
+            // Add extra brightness variation for "glinting" effect
+            lightShift = hash * 0.15;
+          } else {
+            // Dark stone base with subtle color tint
+            hueShift = (hash - 0.5) * 0.03;
+            satShift = (hash2 - 0.5) * 0.06;
+            lightShift = (hash - 0.5) * 0.08;
+          }
+        } else {
+          // Other block types: moderate variation
+          hueShift = (hash - 0.5) * 0.04;
+          satShift = (hash2 - 0.5) * 0.1;
+          lightShift = (hash - 0.5) * 0.1;
+        }
         break;
+      }
     }
 
     // Apply height-based darkening: lower blocks are slightly darker (depth shading)
@@ -295,10 +340,6 @@ export class VoxelBuilder {
         );
       }
     });
-    console.log(`[VoxelBuilder] Total blocks: ${totalBlocks}`);
-    for (const [type, count] of this.blockCounts.entries()) {
-      if (count > 100000) console.log(`[VoxelBuilder] ${type}: ${count} instances (max: ${this.maxInstancesPerType})`);
-    }
   }
 
   /** Same as addBlock but also records the tile/block mapping for raycast lookups */

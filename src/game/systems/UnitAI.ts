@@ -4,7 +4,7 @@
 // ============================================
 
 import * as THREE from 'three';
-import { Unit, UnitType, UnitState, UnitStance, CommandType, HexCoord, GameMap, TerrainType, Player } from '../../types';
+import { Unit, UnitType, UnitState, UnitStance, CommandType, HexCoord, GameMap, TerrainType, ResourceType, BlockType, Player, Base } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
@@ -43,7 +43,10 @@ export class UnitAI {
   /** Track which farm patch each villager is targeting */
   static claimedFarms: Map<string, string> = new Map(); // "q,r" → unitId
   /** Track built walls (set by main.ts) */
-  static wallsBuilt: Set<string> = new Set(); // "q,r" keys
+  static wallsBuilt: Set<string> = new Set(); // "q,r" keys (walls, gates, buildings)
+  /** Building positions (non-wall structures) — all units can attack these */
+  static buildingPositions: Set<string> = new Set(); // "q,r" keys
+  static buildingOwners: Map<string, number> = new Map(); // "q,r" → owner
   /** Track wall owners (set by main.ts) */
   static wallOwners: Map<string, number> = new Map(); // "q,r" → owner
   /** Stockpile references (synced from main.ts each frame) */
@@ -53,6 +56,18 @@ export class UnitAI {
   static crystalStockpile: number[] = [0, 0];
   static charcoalStockpile: number[] = [0, 0];
   static steelStockpile: number[] = [0, 0];
+  static goldStockpile: number[] = [0, 0];
+
+  /** Reference to all bases for proximity checks (set by main.ts) */
+  static bases: Base[] = [];
+
+  /** Check if a position is an underground base — used to force tunnel pathing */
+  static isUndergroundBase(pos: HexCoord, map: GameMap): boolean {
+    const base = UnitAI.bases.find(b => b.position.q === pos.q && b.position.r === pos.r && !b.destroyed);
+    if (!base) return false;
+    const tile = map.tiles.get(`${pos.q},${pos.r}`);
+    return !!tile?.hasTunnel && base.worldPosition.y < (tile.elevation ?? 0) * 0.5;
+  }
 
   /** Per-unit blacklist of tiles that failed pathfinding — avoids retrying same unreachable target every frame.
    *  Key: unitId, Value: Map of "q,r" → expiry timestamp */
@@ -145,16 +160,52 @@ export class UnitAI {
   /**
    * Issue a move command to a unit
    */
-  static commandMove(unit: Unit, target: HexCoord, map: GameMap): void {
+  static commandMove(unit: Unit, target: HexCoord, map: GameMap, preferUnderground = false): void {
     const canTraverseForest = unit.type === UnitType.LUMBERJACK;
     const canTraverseRidge = unit.type === UnitType.BUILDER;
-    const path = Pathfinder.findPath(unit.position, target, map, canTraverseForest, unit.owner, canTraverseRidge);
+
+    // Auto-detect underground bases — always route through tunnels
+    if (!preferUnderground && UnitAI.isUndergroundBase(target, map)) {
+      preferUnderground = true;
+    }
+
+    let path: HexCoord[];
+
+    if (preferUnderground) {
+      // Build a multi-segment path: surface → tunnel entrance → tunnel exit → surface
+      path = UnitAI.buildUndergroundPath(unit.position, target, map, canTraverseForest, unit.owner, canTraverseRidge);
+    } else {
+      path = Pathfinder.findPath(unit.position, target, map, canTraverseForest, unit.owner, canTraverseRidge);
+    }
+
     if (path.length > 1) {
       unit.command = { type: CommandType.MOVE, targetPosition: target, targetUnitId: null };
       unit.targetPosition = path[1]; // Next step
       unit.state = UnitState.MOVING;
       unit._path = path;
       unit._pathIndex = 1;
+      // Mark as underground command — _underground is set dynamically per-tile in handleMoving
+      unit._undergroundCommand = preferUnderground;
+      // If not an explicit underground command, check if unit is currently underground
+      // AI may re-task underground units (e.g., builder goes to mine, combat unit chases)
+      // Keep them underground if they're on a tunnel tile and the path goes through tunnels
+      if (!preferUnderground && unit._underground) {
+        const curTile = map.tiles.get(`${unit.position.q},${unit.position.r}`);
+        if (curTile?.hasTunnel) {
+          // Check if the target or any early path tile is also a tunnel
+          const targetTile = map.tiles.get(`${target.q},${target.r}`);
+          if (targetTile?.hasTunnel) {
+            unit._undergroundCommand = true;
+          } else {
+            // Target is on surface — unit will emerge naturally via dynamic _underground toggle
+            unit._undergroundCommand = true; // Keep underground until they leave tunnel tiles
+          }
+        } else {
+          unit._underground = false;
+        }
+      } else if (!preferUnderground) {
+        unit._underground = false;
+      }
       // For DEFENSIVE stance: the move destination becomes the unit's new "post"
       // so it returns here after chasing enemies away.
       // Only set if no post exists yet — AI kite/chase moves must not overwrite
@@ -166,23 +217,152 @@ export class UnitAI {
   }
 
   /**
+   * Build a multi-segment path that routes through underground tunnels.
+   * 1. Find nearest tunnel entrance to the unit
+   * 2. Find nearest tunnel tile to the destination
+   * 3. Chain: unit→entrance (surface), entrance→exit (through tunnels), exit→destination (surface)
+   */
+  private static buildUndergroundPath(
+    start: HexCoord, goal: HexCoord, map: GameMap,
+    canTraverseForest: boolean, unitOwner: number, canTraverseRidge: boolean
+  ): HexCoord[] {
+    // Find tunnel entrances: tunnel tiles that have at least one non-tunnel walkable neighbor
+    const entrances: HexCoord[] = [];
+    for (const [key, tile] of map.tiles) {
+      if (!tile.hasTunnel) continue;
+      const [q, r] = key.split(',').map(Number);
+      const coord = { q, r };
+      const neighbors = Pathfinder.getHexNeighbors(coord);
+      for (const n of neighbors) {
+        const nTile = map.tiles.get(`${n.q},${n.r}`);
+        if (nTile && !nTile.hasTunnel && nTile.terrain !== TerrainType.WATER) {
+          entrances.push(coord);
+          break;
+        }
+      }
+    }
+    if (entrances.length === 0) {
+      return Pathfinder.findPath(start, goal, map, canTraverseForest, unitOwner, canTraverseRidge);
+    }
+
+    // Check if the goal itself is a tunnel tile — if so, we stay underground at the end
+    const goalTile = map.tiles.get(`${goal.q},${goal.r}`);
+    const goalIsTunnel = !!(goalTile?.hasTunnel);
+
+    // Sort entrances by hex distance to start, try the closest ones first
+    // (the nearest by hex distance might be unreachable due to terrain, so try several)
+    const entrancesByDistToStart = [...entrances].sort(
+      (a, b) => Pathfinder.heuristic(start, a) - Pathfinder.heuristic(start, b)
+    );
+
+    // Sort entrances by hex distance to goal for the exit
+    const entrancesByDistToGoal = [...entrances].sort(
+      (a, b) => Pathfinder.heuristic(goal, a) - Pathfinder.heuristic(goal, b)
+    );
+
+    // Try up to 3 closest entrances for each end to find a working path
+    let bestPath: HexCoord[] = [];
+    let foundPath = false;
+    const maxTries = Math.min(3, entrancesByDistToStart.length);
+    const maxExitTries = Math.min(3, entrancesByDistToGoal.length);
+
+    for (let ei = 0; ei < maxTries; ei++) {
+      const entrance = entrancesByDistToStart[ei];
+
+      // Segment 1: unit → tunnel entrance (surface pathfinding)
+      const seg1 = Pathfinder.findPath(start, entrance, map, canTraverseForest, unitOwner, canTraverseRidge);
+      if (seg1.length === 0) continue; // Can't reach this entrance, try next
+
+      for (let xi = 0; xi < maxExitTries; xi++) {
+        const exit = entrancesByDistToGoal[xi];
+        const entranceKey = `${entrance.q},${entrance.r}`;
+        const exitKey = `${exit.q},${exit.r}`;
+
+        // Segment 2: entrance → exit (through tunnel network — tunnelMode bypasses surface terrain)
+        let seg2: HexCoord[];
+        if (entranceKey === exitKey) {
+          seg2 = [entrance];
+        } else {
+          seg2 = Pathfinder.findPath(entrance, exit, map, canTraverseForest, unitOwner, canTraverseRidge, true);
+          if (seg2.length === 0) continue;
+        }
+
+        // Segment 3: exit → destination
+        // If destination is a tunnel tile, path through tunnels (tunnelMode)
+        let seg3: HexCoord[];
+        const goalKey = `${goal.q},${goal.r}`;
+        if (exitKey === goalKey) {
+          seg3 = [exit];
+        } else if (goalIsTunnel) {
+          // Goal is underground — path from exit to goal through the tunnel
+          seg3 = Pathfinder.findPath(exit, goal, map, canTraverseForest, unitOwner, canTraverseRidge, true);
+          if (seg3.length === 0) continue;
+        } else {
+          // Goal is on surface — path from exit to goal (normal surface pathfinding)
+          seg3 = Pathfinder.findPath(exit, goal, map, canTraverseForest, unitOwner, canTraverseRidge);
+          if (seg3.length === 0) continue;
+        }
+
+        // Concatenate segments, removing duplicates at junctions
+        const fullPath: HexCoord[] = [...seg1];
+        for (let i = 1; i < seg2.length; i++) fullPath.push(seg2[i]);
+        for (let i = 1; i < seg3.length; i++) fullPath.push(seg3[i]);
+
+        if (!foundPath || fullPath.length < bestPath.length) {
+          bestPath = fullPath;
+          foundPath = true;
+        }
+        break; // Found a working exit, move on
+      }
+      if (foundPath) break; // Found a working path
+    }
+
+    if (!foundPath) {
+      // No tunnel path found — fall back to normal pathfinding
+      return Pathfinder.findPath(start, goal, map, canTraverseForest, unitOwner, canTraverseRidge);
+    }
+
+    return bestPath;
+  }
+
+  /**
    * Issue an attack-move command
    */
-  static commandAttack(unit: Unit, target: HexCoord, targetUnitId: string | null, map: GameMap): void {
+  static commandAttack(unit: Unit, target: HexCoord, targetUnitId: string | null, map: GameMap, preferUnderground = false): void {
     unit.command = { type: CommandType.ATTACK, targetPosition: target, targetUnitId };
+
+    // Determine if we should route underground:
+    // - explicit preferUnderground flag, OR
+    // - unit is already underground, OR
+    // - the target is an underground base (MUST use tunnels, not clip through)
+    const shouldGoUnderground = preferUnderground || !!unit._underground || UnitAI.isUndergroundBase(target, map);
 
     if (targetUnitId) {
       // Direct attack - move toward target
-      const path = Pathfinder.findPath(unit.position, target, map, false, unit.owner);
+      let path: HexCoord[];
+      if (shouldGoUnderground) {
+        path = UnitAI.buildUndergroundPath(unit.position, target, map, false, unit.owner, false);
+        if (path.length <= 1) {
+          // Fallback to surface path
+          path = Pathfinder.findPath(unit.position, target, map, false, unit.owner);
+        }
+      } else {
+        path = Pathfinder.findPath(unit.position, target, map, false, unit.owner);
+      }
       if (path.length > 1) {
         unit.targetPosition = path[1];
         unit.state = UnitState.MOVING;
         unit._path = path;
         unit._pathIndex = 1;
+        if (shouldGoUnderground) {
+          unit._undergroundCommand = true;
+        } else if (!unit._underground) {
+          unit._undergroundCommand = false;
+        }
       }
     } else {
       // Attack-move: move to position, attack anything on the way
-      UnitAI.commandMove(unit, target, map);
+      UnitAI.commandMove(unit, target, map, shouldGoUnderground);
       unit.command!.type = CommandType.ATTACK;
     }
   }
@@ -484,6 +664,19 @@ export class UnitAI {
           return;
         }
 
+        // Zone control: if player-commanded and inside an enemy/neutral base capture zone,
+        // hold position to maintain zone control presence
+        if (unit._playerCommanded) {
+          for (const base of UnitAI.bases) {
+            if (base.destroyed || base.owner === unit.owner) continue;
+            const distToBase = Pathfinder.heuristic(unit.position, base.position);
+            if (distToBase <= 5) { // 5-hex capture zone radius
+              // Stay put — we're contesting this capture zone
+              return;
+            }
+          }
+        }
+
         // DEFENSIVE stance: zone-defend behavior for ALL combat units
         // Units chase enemies that enter detection range, then return to their
         // command position when no enemies remain in range.
@@ -547,11 +740,17 @@ export class UnitAI {
             unit._postPosition = null;
           }
 
-          // Siege units can attack walls while holding position
+          // Siege: attack walls/buildings; non-siege: attack buildings while holding position
           if (unit.isSiege) {
             const adjacentWall = UnitAI.findAdjacentEnemyWall(unit, player.id);
             if (adjacentWall) {
               events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentWall } });
+              return;
+            }
+          } else {
+            const adjacentBuilding = UnitAI.findAdjacentEnemyBuilding(unit, player.id);
+            if (adjacentBuilding) {
+              events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentBuilding } });
               return;
             }
           }
@@ -599,11 +798,17 @@ export class UnitAI {
               return;
             }
           }
-          // Siege: attack adjacent enemy walls
+          // Siege: attack adjacent enemy walls/buildings; non-siege: attack adjacent enemy buildings only
           if (unit.isSiege) {
             const adjacentWall = UnitAI.findAdjacentEnemyWall(unit, player.id);
             if (adjacentWall) {
               events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentWall } });
+              return;
+            }
+          } else {
+            const adjacentBuilding = UnitAI.findAdjacentEnemyBuilding(unit, player.id);
+            if (adjacentBuilding) {
+              events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentBuilding } });
               return;
             }
           }
@@ -664,11 +869,17 @@ export class UnitAI {
         }
       }
 
-      // AI: only siege units attack walls/structures
+      // AI: siege attacks walls/buildings; non-siege attacks buildings only
       if (unit.isSiege) {
         const adjacentWall = UnitAI.findAdjacentEnemyWall(unit, player.id);
         if (adjacentWall) {
           events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentWall } });
+          return;
+        }
+      } else {
+        const adjacentBuilding = UnitAI.findAdjacentEnemyBuilding(unit, player.id);
+        if (adjacentBuilding) {
+          events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentBuilding } });
           return;
         }
       }
@@ -895,7 +1106,7 @@ export class UnitAI {
     }
 
     // Move toward stockpile (same movement logic as handleMoving)
-    const targetWorld = UnitAI.hexToWorld(unit.targetPosition, map);
+    const targetWorld = UnitAI.hexToWorld(unit.targetPosition, map, unit._underground);
     const dx = targetWorld.x - unit.worldPosition.x;
     const dz = targetWorld.z - unit.worldPosition.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
@@ -1496,6 +1707,7 @@ export class UnitAI {
     const crystal = UnitAI.crystalStockpile[owner];
     const charcoal = UnitAI.charcoalStockpile[owner];
     const steel = UnitAI.steelStockpile[owner];
+    const gold = UnitAI.goldStockpile[owner];
 
     // Crystal: needed for wizard tower (3) and mage units (1 each)
     // High priority if we have none and need it for buildings/units
@@ -1504,6 +1716,10 @@ export class UnitAI {
     // Iron: needed for steel (2 iron + 1 charcoal → 1 steel)
     // Steel needed for armory (3), armored units (1 each)
     if (iron < 4 && steel < 3) priorities.push({ resource: 'iron', urgency: iron < 1 ? 18 : 10 });
+
+    // Gold: needed for training combat units (5-12g each)
+    // Moderate priority — combat units are gold-hungry
+    if (gold < 8) priorities.push({ resource: 'gold', urgency: gold < 2 ? 16 : 9 });
 
     // Clay: needed for charcoal (3 wood + 2 clay → 2 charcoal)
     // Charcoal needed for steel smelting
@@ -1562,15 +1778,30 @@ export class UnitAI {
 
       const unitDist = Pathfinder.heuristic(unit.position, coord);
 
-      // Classify what this tile yields
+      // Classify what this tile yields — check gem blocks in tunnels, tile.resource, then terrain
       let tileResource = 'stone'; // default
-      if (tile.terrain === TerrainType.SNOW || tile.elevation >= 18) {
+
+      // Tunnel tiles with gem ore blocks → crystal (high value, all maps)
+      const hasGemBlock = tile.hasTunnel && tile.voxelData.blocks.some(b =>
+        b.type === BlockType.GEM_RUBY || b.type === BlockType.GEM_EMERALD ||
+        b.type === BlockType.GEM_SAPPHIRE || b.type === BlockType.GEM_AMETHYST
+      );
+      if (hasGemBlock) {
         tileResource = 'crystal';
-      } else if (tile.terrain === TerrainType.DESERT) {
-        tileResource = 'clay';
-      } else if (tile.terrain === TerrainType.MOUNTAIN && tile.elevation >= 10) {
-        // Deep mountains have iron blocks underground — mine down to get them
+      } else if (tile.resource === ResourceType.CRYSTAL) {
+        tileResource = 'crystal';
+      } else if (tile.resource === ResourceType.IRON) {
         tileResource = 'iron';
+      } else if (tile.resource === ResourceType.GOLD) {
+        tileResource = 'gold';
+      } else if (tile.resource === ResourceType.CLAY) {
+        tileResource = 'clay';
+      } else if (tile.terrain === TerrainType.MOUNTAIN) {
+        // Any mountain terrain has iron potential (plateaus, mesas, peaks)
+        tileResource = 'iron';
+      } else if (tile.terrain === TerrainType.DESERT) {
+        // Desert sand yields clay when mined
+        tileResource = 'clay';
       }
 
       // Apply range limits: stone is close, rare resources can be further
@@ -1656,8 +1887,12 @@ export class UnitAI {
       }
     }
 
-    // Compute target world position
-    const targetWorld = UnitAI.hexToWorld(unit.targetPosition, map);
+    // Compute target world position (underground units use tunnel floor Y)
+    // Only use underground Y when unit IS already underground — not speculatively.
+    // Units walk on the surface until they physically arrive at a tunnel entrance tile,
+    // at which point the arrival logic sets _underground = true and snaps Y.
+    const useUndergroundY = unit._underground;
+    const targetWorld = UnitAI.hexToWorld(unit.targetPosition, map, useUndergroundY);
     const dx = targetWorld.x - unit.worldPosition.x;
     const dz = targetWorld.z - unit.worldPosition.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
@@ -1668,6 +1903,26 @@ export class UnitAI {
       unit.worldPosition.x = targetWorld.x;
       unit.worldPosition.z = targetWorld.z;
       unit.worldPosition.y = targetWorld.y;
+
+      // Dynamic underground state: transition at tunnel entrances
+      // Only units with an underground command auto-transition when entering tunnel tiles.
+      // Units on surface-only commands (lumberjack chopping, builder mining surface, etc.)
+      // walk OVER tunnel tiles without dropping underground.
+      const curTile = map.tiles.get(`${unit.position.q},${unit.position.r}`);
+      if (curTile?.hasTunnel && unit._undergroundCommand) {
+        if (!unit._underground) {
+          // Entering tunnel — transition underground and snap Y to tunnel floor
+          unit._underground = true;
+          const undergroundWorld = UnitAI.hexToWorld(unit.position, map, true);
+          unit.worldPosition.y = undergroundWorld.y;
+        }
+      } else if (unit._underground && !curTile?.hasTunnel) {
+        // Left tunnel tile — back to surface
+        unit._underground = false;
+        unit._undergroundCommand = false;
+        const surfaceWorld = UnitAI.hexToWorld(unit.position, map, false);
+        unit.worldPosition.y = surfaceWorld.y;
+      }
 
       // Ranged units with attack command: check if we're now in range to stop early
       if (unit.stats.range > 1 && unit.command?.type === CommandType.ATTACK && unit.command.targetUnitId) {
@@ -1939,9 +2194,12 @@ export class UnitAI {
   static findNearestEnemy(unit: Unit, allUnits: Unit[], playerId: number): Unit | null {
     let nearest: Unit | null = null;
     let nearestDist = Infinity;
+    const isUnderground = !!unit._underground;
 
     for (const other of allUnits) {
       if (other.owner === playerId || other.state === UnitState.DEAD) continue;
+      // Underground units only see underground enemies, surface only sees surface
+      if (!!other._underground !== isUnderground) continue;
       const dist = Pathfinder.heuristic(unit.position, other.position);
       if (dist < nearestDist) {
         nearestDist = dist;
@@ -1952,7 +2210,7 @@ export class UnitAI {
   }
 
   /** Is this unit a combat unit? Exclusion-based — new combat types auto-included */
-  private static isCombatUnit(unit: Unit): boolean {
+  static isCombatUnit(unit: Unit): boolean {
     return unit.type !== UnitType.BUILDER
       && unit.type !== UnitType.LUMBERJACK
       && unit.type !== UnitType.VILLAGER;
@@ -1999,6 +2257,8 @@ export class UnitAI {
    * Within the given maxRange, picks the enemy with the lowest effective score.
    */
   static findBestTarget(unit: Unit, allUnits: Unit[], playerId: number, maxRange: number): Unit | null {
+    const isUnderground = !!unit._underground;
+
     // Count how many friendly units are already targeting each enemy
     const focusCount: Map<string, number> = new Map();
     for (const ally of allUnits) {
@@ -2032,6 +2292,8 @@ export class UnitAI {
 
     for (const other of allUnits) {
       if (other.owner === playerId || other.state === UnitState.DEAD) continue;
+      // Underground units only fight underground enemies, surface only fights surface
+      if (!!other._underground !== isUnderground) continue;
       const dist = Pathfinder.heuristic(unit.position, other.position);
       if (dist > maxRange) continue;
 
@@ -2130,11 +2392,16 @@ export class UnitAI {
     return bestTile;
   }
 
-  static hexToWorld(coord: HexCoord, map: GameMap): { x: number; y: number; z: number } {
+  static hexToWorld(coord: HexCoord, map: GameMap, underground = false): { x: number; y: number; z: number } {
     const x = coord.q * 1.5;
     const z = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
     const tile = map.tiles.get(`${coord.q},${coord.r}`);
-    const y = tile ? tile.elevation * 0.5 + 0.25 : 0.5;
+    let elev = tile ? tile.elevation : 0;
+    // If unit is traveling underground and this tile has a tunnel, use the tunnel floor
+    if (underground && tile?.hasTunnel) {
+      elev = tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation;
+    }
+    const y = elev * 0.5 + 0.25;
     return { x, y, z };
   }
 
@@ -2176,6 +2443,24 @@ export class UnitAI {
     // Only move there if we're not already there
     if (unit.position.q === slot.q && unit.position.r === slot.r) return null;
     return slot;
+  }
+
+  /**
+   * Find an adjacent enemy building (non-wall structure) to attack.
+   * All units can attack buildings (at reduced damage); only siege can attack walls.
+   */
+  static findAdjacentEnemyBuilding(unit: Unit, playerOwnerId: number): HexCoord | null {
+    const neighbors = Pathfinder.getHexNeighbors(unit.position);
+    for (const neighbor of neighbors) {
+      const nKey = `${neighbor.q},${neighbor.r}`;
+      if (UnitAI.buildingPositions.has(nKey)) {
+        const bOwner = UnitAI.buildingOwners.get(nKey);
+        if (bOwner !== undefined && bOwner !== playerOwnerId) {
+          return neighbor;
+        }
+      }
+    }
+    return null;
   }
 
   /**

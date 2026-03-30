@@ -17,6 +17,8 @@ import { UnitAI } from './game/systems/UnitAI';
 import { Pathfinder } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
+import { CaptureZoneSystem } from './game/systems/CaptureZoneSystem';
+import type { CaptureEvent } from './game/systems/CaptureZoneSystem';
 import ResourceManager from './game/systems/ResourceManager';
 import BuildingSystem from './game/systems/BuildingSystem';
 import WallSystem from './game/systems/WallSystem';
@@ -56,7 +58,7 @@ import {
   BuildingKind,
   MapType,
 } from './types';
-import { getPreset, generateArenaMap, ArenaMap } from './game/MapPresets';
+import { getPreset, generateArenaMap, generateDesertTunnelsMap, ArenaMap, DesertTunnelsMap } from './game/MapPresets';
 import { CombatLog } from './ui/ArenaDebugConsole';
 import { DebugPanel } from './ui/DebugPanel';
 
@@ -97,6 +99,7 @@ class Cubitopia {
   private unitRenderer: UnitRenderer;
   private tileHighlighter: TileHighlighter;
   private terrainDecorator: TerrainDecorator;
+  // Torches removed for performance
   private selectionManager: SelectionManager;
   private hud: HUD;
   private clock: THREE.Clock;
@@ -106,6 +109,7 @@ class Cubitopia {
   private allUnits: Unit[] = [];
   private bases: Base[] = [];
   private baseRenderer: BaseRenderer;
+  private captureZoneSystem!: CaptureZoneSystem;
   private gameOver = false;
   // gameOverOverlay and mainMenuOverlay moved to MenuController
   private gameSpeed = 1;
@@ -134,6 +138,7 @@ class Cubitopia {
     this.voxelBuilder = new VoxelBuilder(this.renderer.scene);
     this.unitRenderer = new UnitRenderer(this.renderer.scene);
     this.baseRenderer = new BaseRenderer(this.renderer.scene);
+    this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene);
     this.tileHighlighter = new TileHighlighter(this.renderer.scene);
     this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
 
@@ -171,7 +176,7 @@ class Cubitopia {
       updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
       setUnitWorldPosition: (id, x, y, z) => this.unitRenderer.setWorldPosition(id, x, y, z),
       showBaseDestruction: (base) => this.baseRenderer.showDestruction(base),
-      updateBaseHealthBars: () => this.hud.updateBaseHealth(this.bases),
+      updateBaseHealthBars: () => { /* removed — zone capture replaced health bars */ },
       hexToWorld: (pos) => this.hexToWorld(pos),
       getElevation: (pos) => this.getElevation(pos),
       getSelectedUnits: () => this.selectionManager.getSelectedUnits(),
@@ -203,7 +208,7 @@ class Cubitopia {
       rebuildVoxels: () => { if (this.currentMap) this.voxelBuilder.rebuildFromMap(this.currentMap); },
       deleteTreeAge: (key) => this.natureSystem.treeAge.delete(key),
       deleteTreeRegrowthTimer: (key) => this.natureSystem.treeRegrowthTimers.delete(key),
-      checkWinCondition: () => this.checkWinCondition(),
+      checkWinCondition: () => this.debugCheckWinCondition(),
     };
     this.debugController = new DebugController(debugOps);
   }
@@ -238,6 +243,7 @@ class Cubitopia {
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
+    this.hud.onCaptureNearestZone(() => this.captureNearestZoneWithSelected());
 
     // Wire unified debug panel callbacks
     this.debugPanel.setCallbacks({
@@ -282,6 +288,22 @@ class Cubitopia {
 
       // When units are selected, right-click should issue commands, not rotate camera
       StrategyCamera.suppressRightClick = units.length > 0;
+
+      // When units are selected, slicer also sets commandYLevel for underground troop commands
+      if (units.length > 0 && !this.mineMode) {
+        this.hud.onSliceChange = (y) => {
+          this.commandYLevel = y;
+          this.voxelBuilder.setSliceY(y);
+          this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+        };
+      } else if (units.length === 0 && !this.mineMode) {
+        // No units selected — slicer still visible but only controls visual slicing
+        this.hud.onSliceChange = (y) => {
+          this.voxelBuilder.setSliceY(y);
+          this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+        };
+        this.commandYLevel = null;
+      }
     });
 
     // Right-click command
@@ -486,19 +508,12 @@ class Cubitopia {
       this.blueprintSystem.hoverGhost.rotation.y = rotation;
     });
 
-    // --- Attack target hover detection ---
+    // --- Hover detection: attack targets + building inspection ---
     // When player has units selected and hovers over an enemy, show attack cursor + red ring
+    // When hovering over ANY building/base (even with no selection), show pointer cursor for inspection
     let hoveredEnemyId: string | null = null;
     canvasEl.addEventListener('mousemove', (e) => {
-      const selected = this.selectionManager.getSelectedUnits();
-      if (selected.length === 0 || !this.currentMap) {
-        if (hoveredEnemyId) {
-          this.unitRenderer.highlightAttackTarget(null);
-          canvasEl.style.cursor = '';
-          hoveredEnemyId = null;
-        }
-        return;
-      }
+      if (!this.currentMap) return;
 
       const rect = canvasEl.getBoundingClientRect();
       const mouse = new THREE.Vector2(
@@ -507,25 +522,82 @@ class Cubitopia {
       );
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, this.camera.camera);
-      const hexCoord = this.raycastToHex(raycaster);
 
-      if (hexCoord) {
-        const enemy = this.findEnemyAt(hexCoord, selected[0].owner);
-        if (enemy) {
-          if (hoveredEnemyId !== enemy.id) {
-            hoveredEnemyId = enemy.id;
-            this.unitRenderer.highlightAttackTarget(enemy.id);
-            canvasEl.style.cursor = 'crosshair';
+      const selected = this.selectionManager.getSelectedUnits();
+
+      // Check if hovering over any building mesh — show pointer for inspection
+      const allBuildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
+      if (allBuildingMeshes.length > 0) {
+        const buildHits = raycaster.intersectObjects(allBuildingMeshes, true);
+        if (buildHits.length > 0) {
+          let foundPB: PlacedBuilding | null = null;
+          let obj: THREE.Object3D | null = buildHits[0].object;
+          while (obj) {
+            const pb = this.buildingSystem.placedBuildings.find(p => p.mesh === obj);
+            if (pb) { foundPB = pb; break; }
+            obj = obj.parent;
           }
-          return;
+          if (foundPB) {
+            // Enemy building with units selected = crosshair, otherwise pointer for info
+            canvasEl.style.cursor = (selected.length > 0 && foundPB.owner !== 0) ? 'crosshair' : 'pointer';
+            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
+            return;
+          }
         }
       }
 
-      // No enemy under cursor — clear highlight
+      // Check if hovering over base mesh — pointer for info, crosshair if selected + enemy
+      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
+      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
+      if (baseMeshObjects.length > 0) {
+        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
+        if (baseHits.length > 0) {
+          let foundBase: Base | null = null;
+          let hitObj: THREE.Object3D | null = baseHits[0].object;
+          while (hitObj) {
+            const found = baseMeshGroups.find(bg => bg.group === hitObj);
+            if (found) { foundBase = this.bases.find(b => b.id === found.baseId) ?? null; break; }
+            hitObj = hitObj.parent;
+          }
+          if (foundBase && !foundBase.destroyed) {
+            canvasEl.style.cursor = (selected.length > 0 && foundBase.owner !== 0) ? 'crosshair' : 'pointer';
+            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
+            return;
+          }
+        }
+      }
+
+      // Combat hover detection (enemy units) — requires units to be selected
+      if (selected.length > 0) {
+        const hexCoord = this.raycastToHex(raycaster);
+        if (hexCoord) {
+          const enemy = this.findEnemyAt(hexCoord, selected[0].owner);
+          if (enemy) {
+            if (hoveredEnemyId !== enemy.id) {
+              hoveredEnemyId = enemy.id;
+              this.unitRenderer.highlightAttackTarget(enemy.id);
+              canvasEl.style.cursor = 'crosshair';
+            }
+            return;
+          }
+
+          // Check for enemy/neutral base hover via hex proximity
+          const base = this.findBaseAt(hexCoord, selected[0].owner);
+          if (base) {
+            canvasEl.style.cursor = 'crosshair';
+            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
+            return;
+          }
+        }
+      }
+
+      // No target under cursor — clear highlight
       if (hoveredEnemyId) {
         this.unitRenderer.highlightAttackTarget(null);
         canvasEl.style.cursor = '';
         hoveredEnemyId = null;
+      } else {
+        canvasEl.style.cursor = '';
       }
     });
 
@@ -619,13 +691,12 @@ class Cubitopia {
       const raycaster = new THREE.Raycaster();
       raycaster.setFromCamera(mouse, this.camera.camera);
 
-      // Check all placed building meshes
+      // Check all placed building meshes (friendly AND enemy)
       const buildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
 
       if (buildingMeshes.length > 0) {
         const hits = raycaster.intersectObjects(buildingMeshes, true);
         if (hits.length > 0) {
-          // Find which PlacedBuilding was clicked by traversing up to a registered mesh
           let clickedPB: PlacedBuilding | null = null;
           let obj: THREE.Object3D | null = hits[0].object;
           while (obj) {
@@ -634,7 +705,37 @@ class Cubitopia {
             obj = obj.parent;
           }
           if (clickedPB) {
-            this.tooltipController.showTooltip(clickedPB, e.clientX, e.clientY);
+            if (clickedPB.owner === 0) {
+              // Friendly building — show full tooltip with queue/demolish
+              this.tooltipController.showTooltip(clickedPB, e.clientX, e.clientY);
+            } else {
+              // Enemy/neutral building — show enemy tooltip with attack/rally
+              this.tooltipController.showEnemyBuildingTooltip(clickedPB, e.clientX, e.clientY);
+            }
+            return;
+          }
+        }
+      }
+
+      // Check base meshes (friendly, enemy, neutral)
+      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
+      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
+      if (baseMeshObjects.length > 0) {
+        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
+        if (baseHits.length > 0) {
+          let clickedBase: Base | null = null;
+          let hitObj: THREE.Object3D | null = baseHits[0].object;
+          while (hitObj) {
+            const found = baseMeshGroups.find(bg => bg.group === hitObj);
+            if (found) {
+              clickedBase = this.bases.find(b => b.id === found.baseId) ?? null;
+              break;
+            }
+            hitObj = hitObj.parent;
+          }
+          if (clickedBase && !clickedBase.destroyed) {
+            const isOwn = clickedBase.owner === 0;
+            this.tooltipController.showBaseTooltip(clickedBase, isOwn, e.clientX, e.clientY);
             return;
           }
         }
@@ -797,7 +898,7 @@ class Cubitopia {
             ? Math.max(-40, Math.min(25, currentSlice + delta))
             : 25; // first Shift+scroll activates slicer at max
           this.voxelBuilder.setSliceY(newY);
-          this.terrainDecorator.setWaterClipPlane(this.voxelBuilder.getClipPlane());
+          this.terrainDecorator.setDecorationClipPlane(this.voxelBuilder.getClipPlane());
           this.hud.setSlicerValue(newY);
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, newY);
         } else {
@@ -866,23 +967,30 @@ class Cubitopia {
     canvasEl.style.cursor = this.mineMode ? 'crosshair' : 'default';
     StrategyCamera.suppressLeftDrag = this.mineMode;
     SelectionManager.suppressBoxSelect = this.mineMode;
-
-    // Show/hide elevation slicer
+    SelectionManager.suppressRightClick = this.mineMode;
+    // In mine mode, right-click should always rotate camera (not issue unit commands)
     if (this.mineMode) {
-      this.hud.showElevationSlicer(true);
+      StrategyCamera.suppressRightClick = false;
+    }
+
+    // Swap slicer callback for mine mode (adds mine depth HUD update)
+    if (this.mineMode) {
       this.hud.onSliceChange = (y) => {
         this.voxelBuilder.setSliceY(y);
-        this.terrainDecorator.setWaterClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+        this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
         // Update HUD to show current slice Y
         if (y !== null) {
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, y);
         }
       };
     } else {
-      this.hud.showElevationSlicer(false);
-      this.hud.onSliceChange = null;
+      // Exiting mine mode — restore default slicer callback (visual only)
+      this.hud.onSliceChange = (y) => {
+        this.voxelBuilder.setSliceY(y);
+        this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+      };
       this.voxelBuilder.setSliceY(null);
-      this.terrainDecorator.setWaterClipPlane(null);
+      this.terrainDecorator.setDecorationClipPlane(null);
     }
   }
 
@@ -890,16 +998,21 @@ class Cubitopia {
   /** Map block type → resource type for per-block mining */
   private blockToResource(blockType: BlockType): { type: ResourceType; yield: number } {
     switch (blockType) {
-      case BlockType.SNOW:   return { type: ResourceType.CRYSTAL, yield: 1 };
-      case BlockType.STONE:  return { type: ResourceType.STONE,   yield: 1 };
-      case BlockType.IRON:   return { type: ResourceType.IRON,    yield: 1 };
-      case BlockType.GOLD:   return { type: ResourceType.GOLD,    yield: 1 };
-      case BlockType.SAND:   return { type: ResourceType.CLAY,    yield: 1 };
-      case BlockType.DIRT:   return { type: ResourceType.STONE,   yield: 1 };
-      case BlockType.GRASS:  return { type: ResourceType.FOOD,    yield: 1 };
-      case BlockType.WOOD:   return { type: ResourceType.WOOD,    yield: 1 };
-      case BlockType.JUNGLE: return { type: ResourceType.WOOD,    yield: 1 };
-      default:               return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.SNOW:          return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.STONE:         return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.IRON:          return { type: ResourceType.IRON,    yield: 1 };
+      case BlockType.GOLD:          return { type: ResourceType.GOLD,    yield: 1 };
+      case BlockType.SAND:          return { type: ResourceType.CLAY,    yield: 1 };
+      case BlockType.DIRT:          return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.GRASS:         return { type: ResourceType.FOOD,    yield: 1 };
+      case BlockType.WOOD:          return { type: ResourceType.WOOD,    yield: 1 };
+      case BlockType.JUNGLE:        return { type: ResourceType.WOOD,    yield: 1 };
+      case BlockType.CLAY:          return { type: ResourceType.CLAY,    yield: 1 };
+      case BlockType.GEM_RUBY:      return { type: ResourceType.CRYSTAL, yield: 3 };
+      case BlockType.GEM_EMERALD:   return { type: ResourceType.CRYSTAL, yield: 3 };
+      case BlockType.GEM_SAPPHIRE:  return { type: ResourceType.CRYSTAL, yield: 3 };
+      case BlockType.GEM_AMETHYST:  return { type: ResourceType.CRYSTAL, yield: 3 };
+      default:                      return { type: ResourceType.STONE,   yield: 1 };
     }
   }
 
@@ -914,8 +1027,21 @@ class Cubitopia {
     const blocks = tile.voxelData.blocks;
 
     // Get the mine blueprint — determines the Y range to excavate
-    const target = UnitAI.getMineTarget(key);
-    if (!target) return;
+    // If no blueprint exists (AI auto-mine), create a temporary one with sensible defaults
+    let target = UnitAI.getMineTarget(key);
+    if (!target) {
+      // AI auto-mine: mine top 3 layers of surface blocks (or tunnel floor blocks if underground)
+      const autoDepth = 3;
+      let autoStartY: number;
+      if (unit._underground && tile.hasTunnel) {
+        // Underground: mine from tunnel floor area
+        const floorY = tile.tunnelFloorY ?? (tile.walkableFloor ?? tile.elevation);
+        autoStartY = floorY + 1; // Just above the walkable floor
+      } else {
+        autoStartY = tile.elevation - 1; // Surface mining
+      }
+      target = { startY: autoStartY, depth: autoDepth };
+    }
 
     const bottomY = target.startY - target.depth + 1;
 
@@ -1016,18 +1142,14 @@ class Cubitopia {
       }
     }
 
-    // Helper: get block type for a given y level
+    // Helper: get block type for a given y level (matches generateShellColumn)
+    const subBlock = terrain === TerrainType.DESERT ? BlockType.SAND :
+      terrain === TerrainType.SNOW ? BlockType.SNOW :
+      terrain === TerrainType.MOUNTAIN ? BlockType.STONE : BlockType.DIRT;
     const blockTypeAt = (y: number): BlockType => {
-      if (y >= 0 && y === height - 1) return topBlock;
-      if (y >= 0 && y >= height - 2) {
-        return terrain === TerrainType.DESERT ? BlockType.SAND :
-          terrain === TerrainType.SNOW ? BlockType.SNOW :
-          terrain === TerrainType.MOUNTAIN ? BlockType.STONE : BlockType.DIRT;
-      }
-      if (y < -10) return BlockType.IRON;
-      if (y < -5) return BlockType.GOLD;
-      if (y < 0) return BlockType.STONE;
-      return y < 2 ? BlockType.STONE : BlockType.DIRT;
+      if (y === height - 1) return topBlock;
+      if (y >= height - 2) return subBlock;
+      return BlockType.STONE; // all underground = stone
     };
 
     // SOLID FILL: every Y level from DEPTH to surface (matches generateShellColumn)
@@ -1084,17 +1206,13 @@ class Cubitopia {
 
       // Block type helper (simplified — matches rebuildTileShell logic)
       const terrain = nElev <= 2 ? TerrainType.PLAINS : nTile.terrain;
+      const nSubBlock = terrain === TerrainType.DESERT ? BlockType.SAND :
+        terrain === TerrainType.SNOW ? BlockType.SNOW :
+        terrain === TerrainType.MOUNTAIN ? BlockType.STONE : BlockType.DIRT;
       const blockTypeAt = (y: number): BlockType => {
-        if (y >= 0 && y === nElev - 1) return this.terrainToBlock(terrain);
-        if (y >= 0 && y >= nElev - 2) {
-          return terrain === TerrainType.DESERT ? BlockType.SAND :
-            terrain === TerrainType.SNOW ? BlockType.SNOW :
-            terrain === TerrainType.MOUNTAIN ? BlockType.STONE : BlockType.DIRT;
-        }
-        if (y < -10) return BlockType.IRON;
-        if (y < -5) return BlockType.GOLD;
-        if (y < 0) return BlockType.STONE;
-        return y < 2 ? BlockType.STONE : BlockType.DIRT;
+        if (y === nElev - 1) return this.terrainToBlock(terrain);
+        if (y >= nElev - 2) return nSubBlock;
+        return BlockType.STONE;
       };
 
       // Append only the missing wall blocks
@@ -1139,6 +1257,9 @@ class Cubitopia {
     const hexCoord = this.worldToHex(worldPos);
     if (!hexCoord) return;
 
+    // Underground command: if slicer is set below surface level, prefer tunnel routing
+    const preferUnderground = this.commandYLevel !== null && this.commandYLevel < 0;
+
     const enemyAtTarget = this.findEnemyAt(hexCoord, selected[0].owner);
 
     if (enemyAtTarget) {
@@ -1147,14 +1268,43 @@ class Cubitopia {
         unit._playerCommanded = true;
         UnitAI.commandAttack(unit, hexCoord, enemyAtTarget.id, this.currentMap!);
       }
-    } else if (selected.length === 1) {
+      return;
+    }
+
+    // Check for enemy/neutral base at click target — send units to capture its zone
+    const baseAtTarget = this.findBaseAt(hexCoord, selected[0].owner);
+    if (baseAtTarget) {
+      // commandMove auto-detects underground bases via UnitAI.isUndergroundBase
+      for (const unit of selected) {
+        unit._playerCommanded = true;
+        unit.stance = UnitStance.DEFENSIVE; // Hold the zone, don't get lured out
+        UnitAI.commandMove(unit, baseAtTarget.position, this.currentMap!, preferUnderground);
+      }
+      this.hud.showNotification(`Capturing zone — hold position!`, '#3498db');
+      const baseElev = this.getElevation(baseAtTarget.position, baseAtTarget.id === 'base_neutral');
+      this.tileHighlighter.showAttackIndicator(baseAtTarget.position, baseElev);
+      return;
+    }
+
+    // Check for enemy building or wall at click target — attack-move to it
+    const enemyStructure = this.findEnemyStructureAt(hexCoord, selected[0].owner);
+    if (enemyStructure) {
+      for (const unit of selected) {
+        unit._playerCommanded = true;
+        UnitAI.commandAttack(unit, enemyStructure, null, this.currentMap!, preferUnderground);
+      }
+      this.hud.showNotification(`Attacking structure!`, '#e74c3c');
+      const structElev = this.getElevation(enemyStructure);
+      this.tileHighlighter.showAttackIndicator(enemyStructure, structElev);
+      return;
+    }
+
+    if (selected.length === 1) {
       // Single unit: move directly to the target hex
       selected[0]._playerCommanded = true;
-      UnitAI.commandMove(selected[0], hexCoord, this.currentMap!);
+      UnitAI.commandMove(selected[0], hexCoord, this.currentMap!, preferUnderground);
     } else {
       // Group move: sort by unit type priority, then spread into formation
-      // Outermost slots go to tanky units (low priority value)
-      // Innermost slots go to ranged/protected units (high priority value)
       const sortedSelected = [...selected].sort((a, b) =>
         getUnitFormationPriority(a) - getUnitFormationPriority(b)
       );
@@ -1164,7 +1314,7 @@ class Cubitopia {
         const unit = sortedSelected[i];
         unit._playerCommanded = true;
         const slot = formationSlots[i] || hexCoord;
-        UnitAI.commandMove(unit, slot, this.currentMap!);
+        UnitAI.commandMove(unit, slot, this.currentMap!, preferUnderground);
       }
     }
 
@@ -1172,6 +1322,23 @@ class Cubitopia {
     const elev = this.getElevation(hexCoord);
     this.tileHighlighter.showMovementRange([hexCoord], () => elev);
     setTimeout(() => this.tileHighlighter.clearMovementRange(), 500);
+  }
+
+  /** Find an enemy or neutral base near the target hex (within 2 tiles for easier clicking) */
+  private findBaseAt(coord: HexCoord, playerId: number): Base | null {
+    let closest: Base | null = null;
+    let closestDist = 3; // within 2 tiles
+    for (const base of this.bases) {
+      if (base.owner === playerId || base.destroyed) continue;
+      const dq = Math.abs(base.position.q - coord.q);
+      const dr = Math.abs(base.position.r - coord.r);
+      const dist = dq + dr;
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = base;
+      }
+    }
+    return closest;
   }
 
   /** Find enemy at or very near the target hex (within 1 tile for easier clicking) */
@@ -1190,6 +1357,32 @@ class Cubitopia {
       }
     }
     return closest;
+  }
+
+  /** Find an enemy building or wall at/near a hex coordinate */
+  private findEnemyStructureAt(coord: HexCoord, playerId: number): HexCoord | null {
+    const key = `${coord.q},${coord.r}`;
+    // Check exact tile first
+    if (UnitAI.wallsBuilt.has(key)) {
+      const owner = UnitAI.wallOwners.get(key);
+      if (owner !== undefined && owner !== playerId) return coord;
+    }
+    // Check neighbors (within 1 hex for easier clicking)
+    const neighbors = Pathfinder.getHexNeighbors(coord);
+    for (const n of neighbors) {
+      const nk = `${n.q},${n.r}`;
+      if (UnitAI.wallsBuilt.has(nk)) {
+        const owner = UnitAI.wallOwners.get(nk);
+        if (owner !== undefined && owner !== playerId) return n;
+      }
+      // Also check buildings
+      const pb = this.buildingSystem.getBuildingAt(n);
+      if (pb && pb.owner !== playerId) return n;
+    }
+    // Check building on exact tile
+    const pb = this.buildingSystem.getBuildingAt(coord);
+    if (pb && pb.owner !== playerId) return coord;
+    return null;
   }
 
   /** Check if a tile is occupied by any structure */
@@ -1255,12 +1448,15 @@ class Cubitopia {
     return bestCoord;
   }
 
-  private getElevation(coord: HexCoord): number {
+  private getElevation(coord: HexCoord, underground = false): number {
     if (!this.currentMap) return 1;
     const tile = this.currentMap.tiles.get(`${coord.q},${coord.r}`);
     if (!tile) return 0.5;
-    // Use walkableFloor for unit positioning — tunnel tiles walk at floor level
-    return (tile.walkableFloor ?? tile.elevation) * 0.5;
+    // Surface units use tile.elevation; underground units use walkableFloor/tunnelFloorY
+    if (underground && tile.hasTunnel) {
+      return (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5;
+    }
+    return tile.elevation * 0.5;
   }
 
   private hexToWorld(coord: HexCoord): { x: number; y: number; z: number } {
@@ -1306,6 +1502,8 @@ class Cubitopia {
       set steelStockpile(v) { self.steelStockpile = v; },
       get crystalStockpile() { return self.crystalStockpile; },
       set crystalStockpile(v) { self.crystalStockpile = v; },
+      get goldStockpile() { return self.goldStockpile; },
+      set goldStockpile(v) { self.goldStockpile = v; },
       hexToWorld: (pos: HexCoord) => this.hexToWorld(pos),
       getElevation: (pos: HexCoord) => this.getElevation(pos),
       isTileOccupied: (key: string) => this.isTileOccupied(key),
@@ -1382,6 +1580,9 @@ class Cubitopia {
       demolishBuilding: (pb) => this.demolishBuilding(pb),
       queueUnit: (unitType, buildingKind) => this.queueUnitFromTooltip(unitType, buildingKind),
       getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
+      captureZone: (position) => this.captureZoneFromTooltip(position),
+      attackTarget: (position) => this.attackTargetFromTooltip(position),
+      setRallyToPosition: (position) => this.setRallyToPositionFromTooltip(position),
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
 
@@ -1469,6 +1670,58 @@ class Cubitopia {
           this.rebuildTileShell(n);
         }
       }
+    }
+  }
+
+  /**
+   * Guarantee forest tiles in a ring around a base (radius 3-6).
+   * Converts PLAINS tiles to FOREST and adds WOOD resources.
+   * Ensures at least 6 forest tiles exist near each base.
+   */
+  private seedBaseForest(map: GameMap, baseQ: number, baseR: number): void {
+    const MIN_FOREST = 6;
+    const INNER_RADIUS = 3;
+    const OUTER_RADIUS = 7;
+
+    // Count existing forest tiles in the zone
+    const candidates: { q: number; r: number; dist: number }[] = [];
+    let existingForest = 0;
+
+    for (let dq = -OUTER_RADIUS; dq <= OUTER_RADIUS; dq++) {
+      for (let dr = -OUTER_RADIUS; dr <= OUTER_RADIUS; dr++) {
+        const q = baseQ + dq;
+        const r = baseR + dr;
+        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
+        if (hexDist < INNER_RADIUS || hexDist > OUTER_RADIUS) continue;
+
+        const key = `${q},${r}`;
+        const tile = map.tiles.get(key);
+        if (!tile) continue;
+
+        if (tile.terrain === TerrainType.FOREST) {
+          existingForest++;
+        } else if (tile.terrain === TerrainType.PLAINS || tile.terrain === TerrainType.DESERT) {
+          candidates.push({ q, r, dist: hexDist });
+        }
+      }
+    }
+
+    if (existingForest >= MIN_FOREST) return; // Already enough trees
+
+    // Sort candidates: prefer closer tiles, add some variety
+    candidates.sort((a, b) => a.dist - b.dist);
+
+    const needed = MIN_FOREST - existingForest;
+    for (let i = 0; i < Math.min(needed, candidates.length); i++) {
+      const c = candidates[i];
+      const key = `${c.q},${c.r}`;
+      const tile = map.tiles.get(key);
+      if (!tile) continue;
+      tile.terrain = TerrainType.FOREST;
+      if (!tile.resource) {
+        tile.resource = ResourceType.WOOD;
+      }
+      this.rebuildTileShell({ q: c.q, r: c.r });
     }
   }
 
@@ -1582,6 +1835,15 @@ class Cubitopia {
     this.gameOver = false;
     this.woodStockpile = [30, 30]; // Start with some wood so players can build immediately
     this.stoneStockpile = [0, 0];
+    this.goldStockpile = [0, 0];
+    this.foodStockpile = [0, 0];
+    this.grassFiberStockpile = [0, 0];
+    this.clayStockpile = [0, 0];
+    this.ropeStockpile = [0, 0];
+    this.ironStockpile = [0, 0];
+    this.charcoalStockpile = [0, 0];
+    this.steelStockpile = [0, 0];
+    this.crystalStockpile = [0, 0];
     this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
@@ -1833,6 +2095,8 @@ class Cubitopia {
     let map: GameMap;
     if (this.mapType === MapType.ARENA) {
       map = generateArenaMap(MAP_SIZE);
+    } else if (this.mapType === MapType.DESERT_TUNNELS) {
+      map = generateDesertTunnelsMap(MAP_SIZE);
     } else {
       const mapGen = new MapGenerator();
       map = mapGen.generate(MAP_SIZE, MAP_SIZE);
@@ -1852,6 +2116,11 @@ class Cubitopia {
       const FLATTEN_RADIUS = 4;
       this.flattenBaseArea(map, P1_Q, P1_R, FLATTEN_RADIUS);
       this.flattenBaseArea(map, P2_Q, P2_R, FLATTEN_RADIUS);
+
+      // Guarantee forest tiles near both bases so players always have wood access.
+      // Seeds a ring of forest at radius 3-6 from each base (outside the flat core).
+      this.seedBaseForest(map, P1_Q, P1_R);
+      this.seedBaseForest(map, P2_Q, P2_R);
     }
 
     // Build terrain
@@ -1860,7 +2129,22 @@ class Cubitopia {
       const worldX = q * 1.5;
       const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
 
-      if (!this.isWaterTerrain(tile.terrain)) {
+      if (this.isWaterTerrain(tile.terrain)) {
+        // Water tiles: render underground blocks (dirt/stone/iron/gold) but skip
+        // surface water blocks — water surface is handled by decorative planes.
+        // Without this, water tiles leave visible void cavities underground.
+        for (const block of tile.voxelData.blocks) {
+          if (block.type === BlockType.WATER) continue; // surface water handled by decorator
+          this.voxelBuilder.addBlock(
+            {
+              x: worldX + block.localPosition.x,
+              y: block.localPosition.y,
+              z: worldZ + block.localPosition.z,
+            },
+            block.type
+          );
+        }
+      } else {
         for (const block of tile.voxelData.blocks) {
           this.voxelBuilder.addBlock(
             {
@@ -1889,8 +2173,16 @@ class Cubitopia {
 
       // Arena: no trees, grass, or decorations — bare colosseum floor
       if (this.mapType !== MapType.ARENA) {
+        this.terrainDecorator.desertMode = this.mapType === MapType.DESERT_TUNNELS;
         this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev, tile.resource);
       }
+    });
+
+    // Remove decorations (trees, grass, flowers) from tunnel tiles — they'd float over cave mouths
+    map.tiles.forEach((tile, key) => {
+      if (!tile.hasTunnel) return;
+      const [q, r] = key.split(',').map(Number);
+      this.terrainDecorator.removeDecoration({ q, r });
     });
 
     // Add water curtains on river/lake tiles where they drop to a lower water neighbor
@@ -2070,11 +2362,46 @@ class Cubitopia {
     this.baseRenderer.addBase(p1Base, this.getElevation(p1BaseCoord));
     this.baseRenderer.addBase(p2Base, this.getElevation(p2BaseCoord));
 
+    // --- Neutral underdark city (Desert Tunnels only) ---
+    if (this.mapType === MapType.DESERT_TUNNELS) {
+      const dtMap = map as DesertTunnelsMap;
+      if (dtMap.cavernCenter) {
+        const neutralCoord = { q: dtMap.cavernCenter.q, r: dtMap.cavernCenter.r };
+        const neutralY = (dtMap.cavernFloorY ?? -16) * 0.5;
+        const neutralBase: Base = {
+          id: 'base_neutral', owner: 2, position: neutralCoord,
+          worldPosition: {
+            x: neutralCoord.q * 1.5,
+            y: neutralY + 0.25,
+            z: neutralCoord.r * 1.5 + (neutralCoord.q % 2 === 1 ? 0.75 : 0),
+          },
+          health: 300, maxHealth: 300, destroyed: false,
+        };
+        this.bases.push(neutralBase);
+        this.baseRenderer.addBase(neutralBase, neutralY);
+        console.log(`[DesertTunnels] Neutral underdark city at (${neutralCoord.q},${neutralCoord.r}), Y=${neutralY}`);
+      }
+    }
+
     this.buildingSystem.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
     this.buildingSystem.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
 
+    // Register capture zones for all bases
+    this.captureZoneSystem.dispose(); // Clean up from previous game
+    this.captureZoneSystem.addZone(p1Base, true, false);  // Main base, surface
+    this.captureZoneSystem.addZone(p2Base, true, false);  // Main base, surface
+    for (const b of this.bases) {
+      if (b.id !== 'base_0' && b.id !== 'base_1') {
+        // Neutral/extra bases
+        const bTile = map.tiles.get(`${b.position.q},${b.position.r}`);
+        const bUnderground = !!bTile?.hasTunnel && b.worldPosition.y < (bTile.elevation ?? 0) * 0.5;
+        this.captureZoneSystem.addZone(b, false, bUnderground);
+      }
+    }
+
     UnitAI.basePositions.set(0, p1BaseCoord);
     UnitAI.basePositions.set(1, p2BaseCoord);
+    UnitAI.bases = this.bases;
     UnitAI.arenaMode = isArena;
     UnitAI.siloPositions.set(0, p1BaseCoord);
     UnitAI.siloPositions.set(1, p2BaseCoord);
@@ -2124,6 +2451,13 @@ class Cubitopia {
 
     // Update HUD mode indicator
     this.hud.setGameMode(this.gameMode);
+
+    // Always show Y-slicer — works globally, no mode prerequisite
+    this.hud.showElevationSlicer(true);
+    this.hud.onSliceChange = (y) => {
+      this.voxelBuilder.setSliceY(y);
+      this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+    };
   }
 
   // --- RTS Game Loop ---
@@ -2150,6 +2484,7 @@ class Cubitopia {
       this.charcoalStockpile[0] = 999;
       this.steelStockpile[0] = 999;
       this.crystalStockpile[0] = 999;
+      this.goldStockpile[0] = 999;
       this.players[0].resources.iron = 999;
       this.players[0].resources.charcoal = 999;
       this.players[0].resources.steel = 999;
@@ -2337,6 +2672,7 @@ class Cubitopia {
     UnitAI.ironStockpile = this.ironStockpile;
     UnitAI.clayStockpile = this.clayStockpile;
     UnitAI.crystalStockpile = this.crystalStockpile;
+    UnitAI.goldStockpile = this.goldStockpile;
     UnitAI.charcoalStockpile = this.charcoalStockpile;
     UnitAI.steelStockpile = this.steelStockpile;
 
@@ -2525,7 +2861,7 @@ class Cubitopia {
         this.handleMineTerrain(event.unit!, event.result.position);
       }
       if (event.type === 'builder:deposit_stone' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        // Route by carryType — builders can carry stone, clay, grass fiber, iron, or crystal
+        // Route by carryType — builders can carry stone, clay, grass fiber, iron, gold, or crystal
         if (event.unit!.carryType === ResourceType.CLAY) {
           this.resourceManager.handleClayDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.GRASS_FIBER) {
@@ -2534,6 +2870,8 @@ class Cubitopia {
           this.resourceManager.handleIronDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.CRYSTAL) {
           this.resourceManager.handleCrystalDeposit(event.unit!);
+        } else if (event.unit!.carryType === ResourceType.GOLD) {
+          this.resourceManager.handleGoldDeposit(event.unit!);
         } else {
           this.resourceManager.handleStoneDeposit(event.unit!);
         }
@@ -2549,15 +2887,21 @@ class Cubitopia {
       }
       if (event.type === 'unit:attack_wall' && event.unit && event.result) {
         const key = `${event.result.position.q},${event.result.position.r}`;
-        const isSiege = event.unit.isSiege === true; // Trebuchets/siege engines
-        // ALL structures (walls, gates, buildings) require siege weapons to destroy
-        if (!isSiege) continue; // Non-siege units cannot damage structures
-        if (this.buildingSystem.getBuildingAt(event.result.position)) {
-          this.wallSystem.damageBarracks(event.result.position, event.unit.stats.attack);
+        const isSiege = event.unit.isSiege === true;
+        // Siege units deal full damage; regular units deal 15% damage to buildings (very tanky)
+        // Walls/gates still require siege — regular units can only damage buildings
+        const baseDmg = event.unit.stats.attack;
+        const pb = this.buildingSystem.getBuildingAt(event.result.position);
+        if (pb) {
+          // Buildings: all units can damage, but non-siege deal heavily reduced damage
+          const dmg = isSiege ? baseDmg : Math.max(1, Math.floor(baseDmg * 0.15));
+          this.wallSystem.damageBarracks(event.result.position, dmg);
         } else if (this.wallSystem.gatesBuilt.has(key)) {
-          this.wallSystem.damageGate(event.result.position, event.unit.stats.attack);
+          // Gates: siege only
+          if (isSiege) this.wallSystem.damageGate(event.result.position, baseDmg);
         } else {
-          this.wallSystem.damageWall(event.result.position, event.unit.stats.attack);
+          // Walls: siege only
+          if (isSiege) this.wallSystem.damageWall(event.result.position, baseDmg);
         }
       }
     }
@@ -2609,11 +2953,13 @@ class Cubitopia {
     this.unitRenderer.updateDeferredEffects();
     this.unitRenderer.updateTrailParticles();
 
-    // --- Base damage: units near enemy base deal damage ---
-    this.updateBaseDamage(delta);
-
-    // --- Win condition check ---
-    this.checkWinCondition();
+    // --- Zone control capture system ---
+    const captureEvents = this.captureZoneSystem.update(this.allUnits, delta);
+    for (const evt of captureEvents) {
+      this.handleCaptureEvent(evt);
+    }
+    this.captureZoneSystem.updateBillboards(this.camera.camera);
+    this.hud.updateCaptureZones(this.captureZoneSystem.getZones());
 
     // AI commander: periodically issue orders (skip if disableAI)
     if (!this.hud.debugFlags.disableAI) {
@@ -2653,65 +2999,87 @@ class Cubitopia {
     }
   }
 
-  private baseDmgTimer = 0;
-  private updateBaseDamage(delta: number): void {
-    this.baseDmgTimer += delta;
-    if (this.baseDmgTimer < 1.0) return; // Check every 1 second
-    this.baseDmgTimer = 0;
+  /** Handle a zone capture event — flip base ownership, inherit buildings, or trigger defeat */
+  private handleCaptureEvent(evt: CaptureEvent): void {
+    const base = this.bases.find(b => b.id === evt.baseId);
+    if (!base) return;
 
-    for (const base of this.bases) {
-      if (base.destroyed) continue;
+    console.log(`[CaptureZone] Base ${evt.baseId} captured by player ${evt.newOwner} (was ${evt.previousOwner})`);
 
-      // Count enemy units within 2 tiles of the base
-      let damageThisTick = 0;
-      for (const unit of this.allUnits) {
-        if (unit.owner === base.owner || unit.state === UnitState.DEAD) continue;
+    // Re-render base with new team colors and flag — preserve original Y for underground bases
+    const zone = this.captureZoneSystem.getZoneForBase(evt.baseId);
+    const elev = zone?.isUnderground ? base.worldPosition.y - 0.25 : this.getElevation(base.position);
+    this.baseRenderer.addBase(base, elev);
+    this.captureZoneSystem.refreshZoneVisuals(evt.baseId);
 
-        const dq = Math.abs(unit.position.q - base.position.q);
-        const dr = Math.abs(unit.position.r - base.position.r);
-        if (dq + dr <= 2) {
-          // Each nearby enemy deals damage based on their attack stat
-          damageThisTick += unit.stats.attack;
-        }
-      }
+    // Register as new base position for the capturer
+    UnitAI.basePositions.set(evt.newOwner, base.position);
 
-      if (damageThisTick > 0) {
-        base.health = Math.max(0, base.health - damageThisTick);
-        this.baseRenderer.updateHealthBar(base);
-
-        if (base.health <= 0) {
-          base.destroyed = true;
-          this.baseRenderer.showDestruction(base);
-          // Remove base from wall-connectable registry and rebuild adjacent walls
-          const baseKey = `${base.position.q},${base.position.r}`;
-          this.buildingSystem.wallConnectable.delete(baseKey);
-          const baseNeighbors = Pathfinder.getHexNeighbors(base.position);
-          for (const n of baseNeighbors) {
-            const nKey = `${n.q},${n.r}`;
-            if (this.wallSystem.wallsBuilt.has(nKey)) {
-              const nOwner = this.wallSystem.wallOwners.get(nKey) ?? 0;
-              this.wallSystem.buildAdaptiveWallMesh(n, nOwner);
-            }
-          }
+    // Transfer buildings in the zone to the new owner
+    const ZONE_RADIUS = 5;
+    for (const pb of this.buildingSystem.placedBuildings) {
+      if (pb.owner === evt.previousOwner) {
+        const dist = Pathfinder.heuristic(pb.position, base.position);
+        if (dist <= ZONE_RADIUS) {
+          pb.owner = evt.newOwner;
+          // Re-render building with new team colors
+          this.buildingSystem.refreshBuildingMesh(pb);
+          console.log(`  Transferred ${pb.kind} at (${pb.position.q},${pb.position.r}) to player ${evt.newOwner}`);
         }
       }
     }
+
+    // Transfer walls in the zone
+    for (const [wallKey, wallOwner] of this.wallSystem.wallOwners) {
+      if (wallOwner === evt.previousOwner) {
+        const [wq, wr] = wallKey.split(',').map(Number);
+        const dist = Pathfinder.heuristic({ q: wq, r: wr }, base.position);
+        if (dist <= ZONE_RADIUS) {
+          this.wallSystem.wallOwners.set(wallKey, evt.newOwner);
+          UnitAI.wallOwners.set(wallKey, evt.newOwner);
+          this.wallSystem.buildAdaptiveWallMesh({ q: wq, r: wr }, evt.newOwner);
+        }
+      }
+    }
+
+    // Notification
+    const capturerName = evt.newOwner === 0
+      ? (this.gameMode === 'aivai' ? 'Blue' : 'You')
+      : (this.gameMode === 'aivai' ? 'Red' : 'Enemy');
+    const baseLabel = evt.isMainBase ? 'main base' : 'outpost';
+
+    if (evt.isMainBase) {
+      // Main base captured = instant defeat for the previous owner
+      this.hud.showNotification(`${capturerName} captured the enemy ${baseLabel}!`, evt.newOwner === 0 ? '#3498db' : '#e74c3c');
+      this.gameOver = true;
+      let winner: string;
+      let isVictory: boolean;
+      if (this.gameMode === 'aivai') {
+        winner = evt.newOwner === 0 ? 'AI BLUE' : 'AI RED';
+        isVictory = evt.newOwner === 0;
+      } else {
+        winner = evt.newOwner === 0 ? 'PLAYER' : 'AI OPPONENT';
+        isVictory = evt.newOwner === 0;
+      }
+      this.showGameOverScreen(winner, isVictory);
+    } else {
+      this.hud.showNotification(`${capturerName} captured an ${baseLabel}!`, evt.newOwner === 0 ? '#3498db' : '#e74c3c');
+    }
   }
 
-  private checkWinCondition(): void {
+  /** Debug: check for destroyed bases (from instant win/lose debug commands) */
+  private debugCheckWinCondition(): void {
     for (const base of this.bases) {
+      if (base.id === 'base_neutral') continue;
       if (base.destroyed) {
-        this.gameOver = true;
-        let winner: string;
-        let isVictory: boolean;
-        if (this.gameMode === 'aivai') {
-          winner = base.owner === 0 ? 'AI RED' : 'AI BLUE';
-          isVictory = base.owner !== 0; // Blue "wins" if red base destroyed
-        } else {
-          winner = base.owner === 0 ? 'AI OPPONENT' : 'PLAYER';
-          isVictory = base.owner !== 0;
-        }
-        this.showGameOverScreen(winner, isVictory);
+        // Determine the new owner (the other player)
+        const newOwner = base.owner === 0 ? 1 : 0;
+        this.handleCaptureEvent({
+          baseId: base.id,
+          newOwner,
+          previousOwner: base.owner,
+          isMainBase: true,
+        });
         return;
       }
     }
@@ -2730,6 +3098,8 @@ class Cubitopia {
   private wallRotation = 0; // 0 or Math.PI/2
   private harvestMode = false;
   private mineMode = false;
+  /** Y-level from slicer for troop commands — null means surface, number means underground */
+  private commandYLevel: number | null = null;
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
 
   // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
@@ -2807,6 +3177,114 @@ class Cubitopia {
     this.hud.showNotification(`${pb.kind.charAt(0).toUpperCase() + pb.kind.slice(1)} demolished. Refunded ${refund} wood.`);
   }
 
+  /** Send selected units to the nearest non-owned zone (from selection panel button) */
+  private captureNearestZoneWithSelected(): void {
+    if (!this.currentMap) return;
+    const selected = this.selectionManager.getSelectedUnits().filter(
+      u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
+    );
+    if (selected.length === 0) {
+      this.hud.showNotification('No combat units selected!', '#e74c3c');
+      return;
+    }
+
+    // Find nearest non-owned base from the centroid of selected units
+    const avgQ = Math.round(selected.reduce((s, u) => s + u.position.q, 0) / selected.length);
+    const avgR = Math.round(selected.reduce((s, u) => s + u.position.r, 0) / selected.length);
+    const from: HexCoord = { q: avgQ, r: avgR };
+
+    const targets = this.bases
+      .filter(b => b.owner !== 0 && !b.destroyed)
+      .sort((a, b) => {
+        // Neutral first, then by distance
+        const aN = a.owner === 2 ? 0 : 1;
+        const bN = b.owner === 2 ? 0 : 1;
+        if (aN !== bN) return aN - bN;
+        return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+      });
+
+    if (targets.length === 0) {
+      this.hud.showNotification('No zones to capture!', '#e67e22');
+      return;
+    }
+
+    const target = targets[0];
+    for (const unit of selected) {
+      unit._playerCommanded = true;
+      unit.stance = UnitStance.DEFENSIVE;
+      UnitAI.commandMove(unit, target.position, this.currentMap!);
+    }
+
+    const label = target.owner === 2 ? 'neutral outpost' : 'enemy zone';
+    this.hud.showNotification(`${selected.length} units capturing ${label}!`, '#27ae60');
+    const elev = this.getElevation(target.position);
+    this.tileHighlighter.showAttackIndicator(target.position, elev);
+  }
+
+  /** Order selected/all combat units to attack-move to a structure (from tooltip) */
+  private attackTargetFromTooltip(position: HexCoord): void {
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const units = selected.length > 0
+      ? selected
+      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+
+    if (units.length === 0) {
+      this.hud.showNotification('No combat units available!', '#e74c3c');
+      return;
+    }
+
+    for (const unit of units) {
+      unit._playerCommanded = true;
+      UnitAI.commandAttack(unit, position, null, this.currentMap!);
+    }
+    this.hud.showNotification(`${units.length} units attacking!`, '#e74c3c');
+
+    const elev = this.getElevation(position);
+    this.tileHighlighter.showAttackIndicator(position, elev);
+  }
+
+  /** Order selected/all combat units to capture a zone (move + defensive stance) */
+  private captureZoneFromTooltip(position: HexCoord): void {
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const units = selected.length > 0
+      ? selected
+      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+
+    if (units.length === 0) {
+      this.hud.showNotification('No combat units available!', '#e74c3c');
+      return;
+    }
+
+    // commandMove auto-detects underground bases via UnitAI.isUndergroundBase
+    for (const unit of units) {
+      unit._playerCommanded = true;
+      unit.stance = UnitStance.DEFENSIVE;
+      UnitAI.commandMove(unit, position, this.currentMap!);
+    }
+    this.hud.showNotification(`${units.length} units moving to capture zone!`, '#27ae60');
+
+    const elev = this.getElevation(position);
+    this.tileHighlighter.showAttackIndicator(position, elev);
+  }
+
+  /** Set rally point for all combat buildings to a target position (from tooltip) */
+  private setRallyToPositionFromTooltip(position: HexCoord): void {
+    // Set rally for all player combat buildings (barracks, armory, wizard_tower)
+    const combatKinds: BuildingKind[] = ['barracks', 'armory', 'wizard_tower'];
+    let count = 0;
+    for (const pb of this.buildingSystem.placedBuildings) {
+      if (pb.owner === 0 && combatKinds.includes(pb.kind)) {
+        this.setRallyPoint(pb.kind, position);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this.hud.showNotification(`Rally point set for ${count} buildings`, '#2980b9');
+    } else {
+      this.hud.showNotification('No combat buildings to rally!', '#e67e22');
+    }
+  }
+
   // --- Placement mode flags & rotation ---
   private barracksPlaceMode = false;
   private barracksRotation = 0;
@@ -2865,6 +3343,7 @@ class Cubitopia {
   private charcoalStockpile: number[] = [0, 0];
   private steelStockpile: number[] = [0, 0];
   private crystalStockpile: number[] = [0, 0];
+  private goldStockpile: number[] = [0, 0];
 
   // --- Nested Menu System ---
   // Category 0 = none, 1 = combat, 2 = economy, 3 = crafting
@@ -3371,9 +3850,14 @@ class Cubitopia {
     this.hud.setPlantTreeMode(false);
     this.mineMode = false;
     this.hud.setMineMode(false);
-    this.hud.showElevationSlicer(false);
+    // Reset slicer to default visual-only callback (slicer stays visible)
+    this.hud.onSliceChange = (y) => {
+      this.voxelBuilder.setSliceY(y);
+      this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+    };
+    this.commandYLevel = null;
     this.voxelBuilder.setSliceY(null);
-    this.terrainDecorator.setWaterClipPlane(null);
+    this.terrainDecorator.setDecorationClipPlane(null);
     this.plantCropsMode = false;
     this.hud.setPlantCropsMode(false);
     this.workshopPlaceMode = false;
@@ -3392,6 +3876,7 @@ class Cubitopia {
     // Reset drag suppression flags
     StrategyCamera.suppressLeftDrag = false;
     SelectionManager.suppressBoxSelect = false;
+    SelectionManager.suppressRightClick = false;
   }
 
   // placeFarmhouse, placeSilo → now handled by placeGenericBuilding
@@ -3665,9 +4150,6 @@ class Cubitopia {
       this.terrainDecorator.updateGrass(rawDelta);
       this.unitRenderer.updateBillboards(this.camera.camera);
       this.hud.update();
-      if (this.bases.length > 0) {
-        this.hud.updateBaseHealth(this.bases);
-      }
       this.updateDebugOverlay();
       this.renderer.render(this.camera.camera);
     };

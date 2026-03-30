@@ -59,7 +59,7 @@ export default class WallSystem {
   // Constants
   static readonly WALL_MAX_HP = 20;
   static readonly GATE_MAX_HP = 20;
-  static readonly BARRACKS_MAX_HP = 40;
+  static readonly BARRACKS_MAX_HP = 250;
 
   constructor(ctx: GameContext, ops: WallSystemOps) {
     this.ctx = ctx;

@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import {
+  Base,
   HexCoord,
   GameContext,
   TerrainType,
@@ -92,7 +93,7 @@ export default class AIController {
           this.ctx.woodStockpile[ownerId] -= 10;
           player.resources.wood -= 10;
           const mesh = this.buildOps.buildBarracksMesh(pos, ownerId);
-          const pb = this.buildOps.registerBuilding('barracks', ownerId, pos, mesh, 40);
+          const pb = this.buildOps.registerBuilding('barracks', ownerId, pos, mesh, 250);
           st.barracks = { position: pos, worldPosition: pb.worldPosition };
           UnitAI.barracksPositions.set(ownerId, pos);
           st.meshes.push(mesh);
@@ -522,13 +523,68 @@ export default class AIController {
     const player = this.ctx.players[ownerId];
     if (!player) return;
 
-    const enemyBase = this.ctx.bases.find(b => b.owner !== ownerId && !b.destroyed);
+    // ===== Categorize all bases =====
+    const ownBase = this.ctx.bases.find(b => b.owner === ownerId && !b.destroyed);
+    if (!ownBase) return;
 
+    const ownOutposts = this.ctx.bases.filter(b => b.owner === ownerId && !b.destroyed && b !== ownBase);
+    const neutralBases = this.ctx.bases.filter(b => b.owner === 2 && !b.destroyed);
+    const enemyCapitalId = ownerId === 0 ? 'base_1' : 'base_0';
+    const enemyCapital = this.ctx.bases.find(b => b.id === enemyCapitalId && !b.destroyed);
+    const enemyOutposts = this.ctx.bases.filter(b => b.owner !== ownerId && b.owner !== 2 && !b.destroyed && b.id !== enemyCapitalId);
+
+    // All capture targets sorted by distance from own base
+    const captureTargets = [...neutralBases, ...enemyOutposts].sort((a, b) =>
+      Pathfinder.heuristic(ownBase.position, a.position) - Pathfinder.heuristic(ownBase.position, b.position)
+    );
+    const allNonOwnBases = [...captureTargets, ...(enemyCapital ? [enemyCapital] : [])];
+    const hasUnclaimedTerritory = captureTargets.length > 0;
+
+    // ===== Combat unit census =====
     const combatUnits = player.units.filter(u =>
       u.type !== UnitType.BUILDER && u.type !== UnitType.LUMBERJACK && u.type !== UnitType.VILLAGER
+      && u.state !== UnitState.DEAD
     );
     const idleCombat = combatUnits.filter(u => u.state === UnitState.IDLE);
+    const totalAlive = combatUnits.length;
     st.armySize = idleCombat.length;
+
+    // ===== Count how many units are already in each zone (within 6 hex) =====
+    const unitsInZone = new Map<string, number>();
+    for (const base of this.ctx.bases) {
+      if (base.destroyed) continue;
+      let count = 0;
+      for (const u of combatUnits) {
+        if (Pathfinder.heuristic(u.position, base.position) <= 6) count++;
+      }
+      unitsInZone.set(base.id, count);
+    }
+
+    // ===== PHASE 1: Reinforce under-defended owned outposts (garrison 2 units each) =====
+    const GARRISON_SIZE = 2;
+    for (const outpost of ownOutposts) {
+      const garrisoned = unitsInZone.get(outpost.id) ?? 0;
+      if (garrisoned >= GARRISON_SIZE) continue;
+      const needed = GARRISON_SIZE - garrisoned;
+      // Send nearest idle units to garrison
+      const nearest = [...idleCombat]
+        .sort((a, b) => Pathfinder.heuristic(a.position, outpost.position) - Pathfinder.heuristic(b.position, outpost.position));
+      for (let i = 0; i < Math.min(needed, nearest.length); i++) {
+        const unit = nearest[i];
+        unit.stance = UnitStance.DEFENSIVE;
+        unit._playerCommanded = true;
+        unit._postPosition = null;
+        st.guardAssignments.delete(unit.id);
+        UnitAI.commandMove(unit, outpost.position, this.ctx.currentMap!);
+        // Remove from idle pool
+        const idx = idleCombat.indexOf(unit);
+        if (idx >= 0) idleCombat.splice(idx, 1);
+      }
+    }
+
+    // ===== PHASE 2: Territory capture — prioritize neutral/enemy outposts over capital =====
+    // Strategy: while unclaimed territory exists, send waves to capture those FIRST.
+    // Only attack enemy capital once all outposts are secured or army is large enough to split.
 
     const minArmySize = Math.min(3 + st.waveNumber, 6);
 
@@ -536,55 +592,108 @@ export default class AIController {
       st.mustering = false;
       st.waveNumber++;
 
-      const archerCount = idleCombat.filter(u => u.type === UnitType.ARCHER).length;
-      const totalCount = idleCombat.length;
-      let formation: FormationType;
-      if (archerCount > totalCount * 0.5) formation = FormationType.LINE;
-      else if (totalCount >= 5) formation = FormationType.WEDGE;
-      else formation = FormationType.BOX;
+      if (hasUnclaimedTerritory) {
+        // ---- TERRITORY MODE: send army to capture nearest unclaimed zones ----
+        // Distribute units across up to 2 capture targets (spread the army)
+        const targets = captureTargets.slice(0, 2);
+        const unitsPerTarget = Math.max(2, Math.ceil(idleCombat.length / targets.length));
 
-      let targetCenter: HexCoord;
-      if (enemyBase) {
-        const approachQ = enemyBase.position.q + (enemyBase.position.q < centerQ ? 3 : -3);
-        targetCenter = { q: approachQ, r: enemyBase.position.r };
+        let unitIdx = 0;
+        for (const target of targets) {
+          const alreadyThere = unitsInZone.get(target.id) ?? 0;
+          const toSend = Math.max(0, unitsPerTarget - alreadyThere);
+          for (let i = 0; i < toSend && unitIdx < idleCombat.length; i++, unitIdx++) {
+            const unit = idleCombat[unitIdx];
+            unit.stance = UnitStance.DEFENSIVE;
+            unit._playerCommanded = true;
+            unit._postPosition = null;
+            st.guardAssignments.delete(unit.id);
+            UnitAI.commandMove(unit, target.position, this.ctx.currentMap!);
+          }
+        }
+
+        // Any remaining idle units: send scouts toward enemy capital for pressure
+        if (enemyCapital) {
+          for (let i = unitIdx; i < idleCombat.length; i++) {
+            const unit = idleCombat[i];
+            // Fast units (riders/scouts) go harass; slow units stay for captures
+            if (unit.type === UnitType.RIDER || unit.type === UnitType.SCOUT) {
+              unit.stance = UnitStance.AGGRESSIVE;
+              unit._postPosition = null;
+              UnitAI.commandMove(unit, enemyCapital.position, this.ctx.currentMap!);
+            } else if (targets.length > 0) {
+              // Send extra infantry to reinforce capture targets
+              const t = targets[i % targets.length];
+              unit.stance = UnitStance.DEFENSIVE;
+              unit._playerCommanded = true;
+              UnitAI.commandMove(unit, t.position, this.ctx.currentMap!);
+            }
+          }
+        }
+
       } else {
-        targetCenter = { q: centerQ, r: centerR };
-      }
+        // ---- ALL TERRITORY SECURED: full assault on enemy capital ----
+        const mainTarget = enemyCapital || allNonOwnBases[0];
+        if (mainTarget) {
+          const archerCount = idleCombat.filter(u => u.type === UnitType.ARCHER).length;
+          let formation: FormationType;
+          if (archerCount > idleCombat.length * 0.5) formation = FormationType.LINE;
+          else if (idleCombat.length >= 5) formation = FormationType.WEDGE;
+          else formation = FormationType.BOX;
 
-      const sortedCombat = [...idleCombat].sort((a, b) =>
-        this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
-      );
-      const formationSlots = this.generateFormationTyped(targetCenter, sortedCombat.length, formation);
+          const sortedCombat = [...idleCombat].sort((a, b) =>
+            this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
+          );
+          const formationSlots = this.generateFormationTyped(mainTarget.position, sortedCombat.length, formation);
 
-      for (let i = 0; i < sortedCombat.length; i++) {
-        sortedCombat[i].stance = UnitStance.AGGRESSIVE;
-        sortedCombat[i]._postPosition = null;
-        st.guardAssignments.delete(sortedCombat[i].id);
-        UnitAI.commandMove(sortedCombat[i], formationSlots[i] || targetCenter, this.ctx.currentMap!);
+          for (let i = 0; i < sortedCombat.length; i++) {
+            sortedCombat[i].stance = UnitStance.AGGRESSIVE;
+            sortedCombat[i]._postPosition = null;
+            st.guardAssignments.delete(sortedCombat[i].id);
+            const dest = formationSlots[i] || mainTarget.position;
+            UnitAI.commandMove(sortedCombat[i], dest, this.ctx.currentMap!);
+          }
+        }
       }
 
     } else if (!st.mustering) {
-      const totalCombat = combatUnits.length;
+      // Not mustering — check if we should start mustering or redirect idle units
+      const totalCombat = totalAlive;
       const idleRatio = totalCombat > 0 ? idleCombat.length / totalCombat : 1;
       if (idleRatio > 0.6 || totalCombat <= 2) st.mustering = true;
 
+      // Meanwhile, redirect idle units to useful tasks
       for (const unit of idleCombat) {
         const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
         if (enemy) {
           UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
-        } else if (enemyBase) {
-          const surroundTile = this.findSurroundTile(enemyBase, unit);
-          UnitAI.commandMove(unit, surroundTile, this.ctx.currentMap!);
+        } else {
+          // No nearby enemies — head to nearest non-owned zone
+          const zoneTarget = this.findNearestCaptureTarget(unit.position, ownerId);
+          if (zoneTarget) {
+            unit.stance = UnitStance.DEFENSIVE;
+            unit._playerCommanded = true;
+            UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
+          }
         }
       }
     } else {
-      st.rallyTimer += 3;
-      if (st.rallyTimer >= 8) {
-        st.rallyTimer = 0;
-        if (st.barracks) {
-          const rallyQ = st.barracks.position.q + (st.barracks.position.q > centerQ ? -2 : 2);
-          const rallyPos: HexCoord = { q: rallyQ, r: st.barracks.position.r };
-          for (const unit of idleCombat) {
+      // Mustering phase — don't just sit at barracks; send idle units to capture zones while waiting
+      // This fires every commander tick (3s) so units stay productive while the army builds up
+      for (const unit of idleCombat) {
+        const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
+        if (enemy && Pathfinder.heuristic(unit.position, enemy.position) <= 8) {
+          UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
+        } else {
+          // While mustering, send units to capture nearby zones — don't waste time sitting idle
+          const zoneTarget = this.findNearestCaptureTarget(unit.position, ownerId);
+          if (zoneTarget) {
+            unit.stance = UnitStance.DEFENSIVE;
+            unit._playerCommanded = true;
+            UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
+          } else if (st.barracks) {
+            const rallyQ = st.barracks.position.q + (st.barracks.position.q > centerQ ? -2 : 2);
+            const rallyPos: HexCoord = { q: rallyQ, r: st.barracks.position.r };
             if (Pathfinder.heuristic(unit.position, rallyPos) > 3) {
               unit.stance = UnitStance.DEFENSIVE;
               UnitAI.commandMove(unit, rallyPos, this.ctx.currentMap!);
@@ -593,6 +702,52 @@ export default class AIController {
         }
       }
     }
+  }
+
+  /** Find the nearest non-owned base for an AI unit to capture */
+  private findNearestCaptureTarget(from: HexCoord, ownerId: number): Base | null {
+    const targets = this.ctx.bases.filter(b => b.owner !== ownerId && !b.destroyed);
+    if (targets.length === 0) return null;
+    // Sort: neutral first (easier to capture), then by distance
+    targets.sort((a, b) => {
+      const aNeutral = a.owner === 2 ? 0 : 1;
+      const bNeutral = b.owner === 2 ? 0 : 1;
+      if (aNeutral !== bNeutral) return aNeutral - bNeutral;
+      return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+    });
+    return targets[0];
+  }
+
+  /** Check if the target is an underground base (reliable check via capture zone or worldPosition). */
+  isTargetBaseUnderground(pos: HexCoord): boolean {
+    const base = this.ctx.bases.find(b => b.position.q === pos.q && b.position.r === pos.r && !b.destroyed);
+    if (!base) return false;
+    const tile = this.ctx.currentMap?.tiles.get(`${pos.q},${pos.r}`);
+    return !!tile?.hasTunnel && base.worldPosition.y < (tile.elevation ?? 0) * 0.5;
+  }
+
+  /** Check if underground movement is beneficial between two points.
+   *  Always returns true if the destination is an underground base.
+   *  Otherwise returns true if the path is long enough and there are tunnel tiles near both endpoints. */
+  private shouldUseUnderground(from: HexCoord, to: HexCoord): boolean {
+    const map = this.ctx.currentMap;
+    if (!map) return false;
+
+    // Always route underground if targeting an underground base
+    if (this.isTargetBaseUnderground(to)) return true;
+
+    const dist = Pathfinder.heuristic(from, to);
+    if (dist < 8) return false; // Too short to bother with tunnels
+
+    // Check if there are tunnel tiles within 5 hexes of both endpoints
+    let nearFrom = false, nearTo = false;
+    map.tiles.forEach((tile, key) => {
+      if (!tile.hasTunnel) return;
+      const [tq, tr] = key.split(',').map(Number);
+      if (Pathfinder.heuristic(from, { q: tq, r: tr }) <= 5) nearFrom = true;
+      if (Pathfinder.heuristic(to, { q: tq, r: tr }) <= 5) nearTo = true;
+    });
+    return nearFrom && nearTo;
   }
 
   // ===================== AI TACTICS =====================

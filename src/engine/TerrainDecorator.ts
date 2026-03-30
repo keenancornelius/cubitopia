@@ -28,6 +28,8 @@ export class TerrainDecorator {
   /** Grass clump meshes keyed by tile "q,r" for removal/regrowth */
   grassClumpsByTile: Map<string, THREE.Object3D> = new Map();
   private grassTime: number = 0;
+  /** When true, MOUNTAIN tiles get desert decorations (cacti/rocks) instead of trees */
+  desertMode = false;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -40,6 +42,38 @@ export class TerrainDecorator {
     for (const mesh of this.waterMeshes) {
       if (mesh.material instanceof THREE.Material) {
         (mesh.material as THREE.MeshPhongMaterial).clippingPlanes = planes as THREE.Plane[] | null;
+      }
+    }
+  }
+
+  /** Apply Y-level clipping to ALL decoration meshes (trees, rocks, grass, flowers, water).
+   *  Hides decorations above the slice level. Pass null to remove clipping. */
+  setDecorationClipPlane(clipPlane: THREE.Plane | null): void {
+    const planes = clipPlane ? [clipPlane] : null;
+    // Apply to water meshes
+    for (const mesh of this.waterMeshes) {
+      if (mesh.material instanceof THREE.Material) {
+        (mesh.material as THREE.MeshPhongMaterial).clippingPlanes = planes as THREE.Plane[] | null;
+      }
+    }
+    // Apply to all other decorations (trees, rocks, flowers, etc.)
+    for (const obj of this.decorations) {
+      obj.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) {
+          child.material.clippingPlanes = planes as THREE.Plane[] | null;
+        }
+      });
+    }
+    // Apply to grass clumps
+    for (const mesh of this.grassBlades) {
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.clippingPlanes = planes as THREE.Plane[] | null;
+      }
+    }
+    // Apply to mist clouds
+    for (const mesh of this.mistClouds) {
+      if (mesh.material instanceof THREE.Material) {
+        mesh.material.clippingPlanes = planes as THREE.Plane[] | null;
       }
     }
   }
@@ -118,14 +152,21 @@ export class TerrainDecorator {
         }
         break;
       case TerrainType.MOUNTAIN:
-        // Mountains get sparse rocks + sparse trees at the correct height
-        if (rng.next() > 0.55) this.addRock(worldX, treeElevation, worldZ, rng);
-        if (rng.next() > 0.8) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng);
-        if (!neighborTooTall && rng.next() > 0.65) {
-          if (elevation >= 6.5) {
-            this.addSnowPine(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
-          } else {
-            this.addTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+        if (this.desertMode) {
+          // Desert plateaus/mesas: cacti, desert rocks, no trees
+          if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng);
+          if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng);
+          if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+        } else {
+          // Mountains get sparse rocks + sparse trees at the correct height
+          if (rng.next() > 0.55) this.addRock(worldX, treeElevation, worldZ, rng);
+          if (rng.next() > 0.8) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng);
+          if (!neighborTooTall && rng.next() > 0.65) {
+            if (elevation >= 6.5) {
+              this.addSnowPine(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+            } else {
+              this.addTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+            }
           }
         }
         // Iron ore vein indicator — rusty-orange rocks on iron-rich mountains
@@ -137,7 +178,9 @@ export class TerrainDecorator {
         // Ocean plane handles water visuals — no decoration needed
         break;
       case TerrainType.DESERT:
-        if (rng.next() > 0.8) this.addCactus(worldX, elevation, worldZ, rng);
+        if (rng.next() > 0.75) this.addCactus(worldX, elevation, worldZ, rng);
+        if (rng.next() > 0.85) this.addTumbleweed(worldX + (rng.next() - 0.5) * 0.5, elevation, worldZ + (rng.next() - 0.5) * 0.5, rng);
+        if (rng.next() > 0.92) this.addDesertRock(worldX + (rng.next() - 0.5) * 0.4, elevation, worldZ + (rng.next() - 0.5) * 0.4, rng);
         break;
       case TerrainType.SNOW:
         // No trees in snow zones — too high/cold. Just rocks occasionally.
@@ -589,6 +632,56 @@ export class TerrainDecorator {
       arm.rotation.z = -0.5;
       group.add(arm);
     }
+
+    group.position.set(x, elevation, z);
+    this.scene.add(group);
+    this.decorations.push(group);
+  }
+
+  private addTumbleweed(x: number, elevation: number, z: number, rng: SeededRand): void {
+    const group = new THREE.Group();
+    const size = 0.12 + rng.next() * 0.1;
+    // Dry tangled ball of sticks
+    const ballGeo = new THREE.IcosahedronGeometry(size, 1);
+    const mat = new THREE.MeshLambertMaterial({
+      color: 0xb8860b, // dark goldenrod — dried plant
+      wireframe: true,
+    });
+    const ball = new THREE.Mesh(ballGeo, mat);
+    ball.position.y = size;
+    ball.rotation.set(rng.next() * Math.PI, rng.next() * Math.PI, 0);
+    group.add(ball);
+
+    // Inner core (slightly darker, solid)
+    const coreGeo = new THREE.IcosahedronGeometry(size * 0.5, 0);
+    const coreMat = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.y = size;
+    group.add(core);
+
+    group.position.set(x, elevation, z);
+    this.scene.add(group);
+    this.decorations.push(group);
+  }
+
+  private addDesertRock(x: number, elevation: number, z: number, rng: SeededRand): void {
+    const group = new THREE.Group();
+    // Weathered sandstone rock
+    const w = 0.15 + rng.next() * 0.2;
+    const h = 0.1 + rng.next() * 0.15;
+    const d = 0.15 + rng.next() * 0.15;
+    const geo = new THREE.BoxGeometry(w, h, d);
+    // Warm sandstone colors
+    const colors = [0xc4a46c, 0xb8956a, 0xd4a96a, 0xc9935e];
+    const mat = new THREE.MeshLambertMaterial({
+      color: colors[Math.floor(rng.next() * colors.length)],
+    });
+    const rock = new THREE.Mesh(geo, mat);
+    rock.position.y = h / 2;
+    rock.rotation.y = rng.next() * Math.PI;
+    rock.rotation.x = (rng.next() - 0.5) * 0.3;
+    rock.castShadow = true;
+    group.add(rock);
 
     group.position.set(x, elevation, z);
     this.scene.add(group);

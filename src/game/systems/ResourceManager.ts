@@ -29,6 +29,7 @@ class ResourceManager {
     if (stoneAmount <= 0) return;
 
     this.ctx.stoneStockpile[unit.owner] += stoneAmount;
+    this.ctx.players[unit.owner].resources.stone += stoneAmount;
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
@@ -76,6 +77,21 @@ class ResourceManager {
     if (unit.owner === 0) {
       this.updateHUD();
       this.ctx.hud.showNotification(`🧱 +${amount} clay`, '#c2703e');
+    }
+    unit.carryAmount = 0;
+    unit.carryType = null;
+  }
+
+  handleGoldDeposit(unit: Unit): void {
+    const goldAmount = unit.carryAmount;
+    if (goldAmount <= 0) return;
+
+    this.ctx.goldStockpile[unit.owner] += goldAmount;
+    this.ctx.players[unit.owner].resources.gold += goldAmount;
+    this.updateStockpileVisual(unit.owner);
+    if (unit.owner === 0) {
+      this.updateHUD();
+      this.ctx.hud.showNotification(`💰 +${goldAmount} gold`, '#ffd700');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -229,6 +245,7 @@ class ResourceManager {
       { name: 'Coal',    count: this.ctx.charcoalStockpile[owner],   color: 0x333333 },
       { name: 'Steel',   count: this.ctx.steelStockpile[owner],      color: 0x71797e },
       { name: 'Crystal', count: this.ctx.crystalStockpile[owner],    color: 0x9b59b6 },
+      { name: 'Gold',    count: this.ctx.goldStockpile[owner],       color: 0xffd700 },
     ];
 
     // Only show resources that have > 0

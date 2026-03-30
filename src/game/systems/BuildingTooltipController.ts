@@ -3,7 +3,7 @@
  * and demolition. Extracted from main.ts to keep UI logic separate.
  */
 
-import { PlacedBuilding, BuildingKind, UnitType, GameContext } from '../../types';
+import { PlacedBuilding, BuildingKind, UnitType, GameContext, Base, HexCoord } from '../../types';
 
 /** Slim interface for callbacks that require main.ts state */
 export interface TooltipOps {
@@ -15,6 +15,12 @@ export interface TooltipOps {
   queueUnit(unitType: string, buildingKind: BuildingKind): void;
   /** Get queue button options for a building kind */
   getBuildingQueueOptions(kind: BuildingKind): { type: string; label: string; costLabel: string }[];
+  /** Order selected/all units to capture a zone (move + defensive stance) */
+  captureZone(position: HexCoord): void;
+  /** Order selected/all units to attack-move to a position */
+  attackTarget(position: HexCoord): void;
+  /** Set rally point for all combat buildings to a position */
+  setRallyToPosition(position: HexCoord): void;
 }
 
 export default class BuildingTooltipController {
@@ -129,6 +135,173 @@ export default class BuildingTooltipController {
     });
 
     // Close tooltip when clicking elsewhere
+    const closeHandler = (ev: MouseEvent) => {
+      if (el.contains(ev.target as Node)) return;
+      this.hideTooltip();
+      document.removeEventListener('mousedown', closeHandler, true);
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 50);
+  }
+
+  /** Show tooltip for an enemy/neutral building — stats + attack/rally actions */
+  showEnemyBuildingTooltip(pb: PlacedBuilding, screenX: number, screenY: number): void {
+    this.hideTooltip();
+
+    const el = document.createElement('div');
+    el.id = 'building-tooltip';
+    el.style.cssText = `
+      position: fixed; left: ${screenX + 12}px; top: ${screenY - 8}px;
+      background: rgba(30,15,15,0.95); border: 2px solid #e74c3c; border-radius: 8px;
+      padding: 10px 14px; color: #eee; font-family: 'Segoe UI',sans-serif; font-size: 13px;
+      z-index: 9999; min-width: 200px; pointer-events: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    `;
+
+    const kindLabel = pb.kind.replace('_', ' ');
+    const displayKind = kindLabel.charAt(0).toUpperCase() + kindLabel.slice(1);
+    const ownerLabel = pb.owner === 2 ? 'Neutral' : `Enemy (AI ${pb.owner})`;
+    const ownerColor = pb.owner === 2 ? '#d4af37' : '#e74c3c';
+    const hpPct = Math.round((pb.health / pb.maxHealth) * 100);
+    const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
+
+    // Building-specific modifiers
+    let modifiers = '';
+    if (pb.kind === 'barracks') modifiers = '<div style="color:#aaa;font-size:11px;margin-top:2px">Spawns combat units</div>';
+    else if (pb.kind === 'wizard_tower') modifiers = '<div style="color:#9b59b6;font-size:11px;margin-top:2px">Spawns mages &amp; healers</div>';
+    else if (pb.kind === 'armory') modifiers = '<div style="color:#71797e;font-size:11px;margin-top:2px">Spawns armored units</div>';
+    else if (pb.kind === 'workshop') modifiers = '<div style="color:#8b4513;font-size:11px;margin-top:2px">Crafts siege weapons</div>';
+    else if (pb.kind === 'smelter') modifiers = '<div style="color:#b87333;font-size:11px;margin-top:2px">Smelts steel from iron</div>';
+
+    const btnStyle = `
+      display:inline-block; padding:5px 12px; margin:2px 4px 2px 0; border-radius:4px;
+      cursor:pointer; font-size:12px; border:1px solid #555; color:#eee;
+    `;
+
+    let html = `
+      <div style="font-size:15px;font-weight:bold;margin-bottom:6px;color:${ownerColor}">⚔ ${displayKind}</div>
+      <div style="margin-bottom:4px">Owner: <span style="color:${ownerColor}">${ownerLabel}</span></div>
+      <div style="margin-bottom:4px">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
+      <div style="margin-bottom:2px">Position: (${pb.position.q}, ${pb.position.r})</div>
+      ${modifiers}
+      <div style="margin:8px 0 6px;border-bottom:1px solid #555;"></div>
+      <div style="font-size:11px;color:#aaa;margin-bottom:4px">⚠ Very tanky — siege weapons deal full damage</div>
+      <div>
+        <span id="btt-attack" style="${btnStyle} background:#c0392b;">⚔ Attack</span>
+        <span id="btt-rally-to" style="${btnStyle} background:#2980b9;">🚩 Rally Here</span>
+      </div>
+    `;
+
+    el.innerHTML = html;
+    document.body.appendChild(el);
+    this.tooltipEl = el;
+
+    // Clamp position
+    const r = el.getBoundingClientRect();
+    if (r.right > window.innerWidth) el.style.left = `${window.innerWidth - r.width - 8}px`;
+    if (r.bottom > window.innerHeight) el.style.top = `${window.innerHeight - r.height - 8}px`;
+
+    // Wire up buttons
+    el.querySelector('#btt-attack')?.addEventListener('click', () => {
+      this.ops.attackTarget(pb.position);
+      this.hideTooltip();
+    });
+    el.querySelector('#btt-rally-to')?.addEventListener('click', () => {
+      this.ops.setRallyToPosition(pb.position);
+      this.hideTooltip();
+    });
+
+    // Close on outside click
+    const closeHandler = (ev: MouseEvent) => {
+      if (el.contains(ev.target as Node)) return;
+      this.hideTooltip();
+      document.removeEventListener('mousedown', closeHandler, true);
+    };
+    setTimeout(() => document.addEventListener('mousedown', closeHandler, true), 50);
+  }
+
+  /** Show tooltip for a base (friendly, enemy, or neutral) */
+  showBaseTooltip(base: Base, isOwn: boolean, screenX: number, screenY: number): void {
+    this.hideTooltip();
+
+    const borderColor = isOwn ? '#3498db' : (base.owner === 2 ? '#d4af37' : '#e74c3c');
+    const bgColor = isOwn ? 'rgba(15,20,30,0.95)' : (base.owner === 2 ? 'rgba(30,25,10,0.95)' : 'rgba(30,15,15,0.95)');
+
+    const el = document.createElement('div');
+    el.id = 'building-tooltip';
+    el.style.cssText = `
+      position: fixed; left: ${screenX + 12}px; top: ${screenY - 8}px;
+      background: ${bgColor}; border: 2px solid ${borderColor}; border-radius: 8px;
+      padding: 10px 14px; color: #eee; font-family: 'Segoe UI',sans-serif; font-size: 13px;
+      z-index: 9999; min-width: 200px; pointer-events: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    `;
+
+    let nameLabel: string;
+    let ownerLabel: string;
+    if (base.owner === 2) {
+      nameLabel = '🏰 Neutral Citadel';
+      ownerLabel = '<span style="color:#d4af37">Neutral (Capturable)</span>';
+    } else if (isOwn) {
+      nameLabel = '🏰 Your Base';
+      ownerLabel = '<span style="color:#3498db">Player</span>';
+    } else {
+      nameLabel = '🏰 Enemy Base';
+      ownerLabel = `<span style="color:#e74c3c">Enemy (AI ${base.owner})</span>`;
+    }
+
+    const btnStyle = `
+      display:inline-block; padding:5px 12px; margin:2px 4px 2px 0; border-radius:4px;
+      cursor:pointer; font-size:12px; border:1px solid #555; color:#eee;
+    `;
+
+    let html = `
+      <div style="font-size:15px;font-weight:bold;margin-bottom:6px;color:${borderColor}">${nameLabel}</div>
+      <div style="margin-bottom:4px">Owner: ${ownerLabel}</div>
+      <div style="margin-bottom:2px">Capture Zone: <span style="color:#aaa">5-hex radius</span></div>
+      <div style="margin-bottom:2px">Position: (${base.position.q}, ${base.position.r})</div>
+    `;
+
+    // Zone control info based on base type
+    if (base.owner === 2) {
+      html += '<div style="color:#d4af37;font-size:11px;margin-top:4px">Hold unit majority in the zone to capture this outpost</div>';
+    } else if (!isOwn) {
+      html += '<div style="color:#e74c3c;font-size:11px;margin-top:4px">Occupy the zone with more units to capture — instant defeat for the enemy</div>';
+    } else {
+      html += '<div style="color:#3498db;font-size:11px;margin-top:4px">Keep units in the zone to defend — losing this base means defeat</div>';
+    }
+
+    html += '<div style="margin:8px 0 6px;border-bottom:1px solid #555;"></div>';
+
+    // Action buttons
+    if (!isOwn) {
+      html += `<div>
+        <span id="btt-capture" style="${btnStyle} background:#27ae60;">🏴 Capture Zone</span>
+        <span id="btt-rally-to" style="${btnStyle} background:#2980b9;">🚩 Rally Here</span>
+      </div>`;
+    } else {
+      html += `<div>
+        <span id="btt-rally-to" style="${btnStyle} background:#2980b9;">🚩 Rally Here</span>
+      </div>`;
+    }
+
+    el.innerHTML = html;
+    document.body.appendChild(el);
+    this.tooltipEl = el;
+
+    // Clamp position
+    const r = el.getBoundingClientRect();
+    if (r.right > window.innerWidth) el.style.left = `${window.innerWidth - r.width - 8}px`;
+    if (r.bottom > window.innerHeight) el.style.top = `${window.innerHeight - r.height - 8}px`;
+
+    // Wire up buttons
+    el.querySelector('#btt-capture')?.addEventListener('click', () => {
+      this.ops.captureZone(base.position);
+      this.hideTooltip();
+    });
+    el.querySelector('#btt-rally-to')?.addEventListener('click', () => {
+      this.ops.setRallyToPosition(base.position);
+      this.hideTooltip();
+    });
+
+    // Close on outside click
     const closeHandler = (ev: MouseEvent) => {
       if (el.contains(ev.target as Node)) return;
       this.hideTooltip();
