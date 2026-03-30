@@ -207,7 +207,7 @@ export class HUD {
     `;
     header.innerHTML = `
       <span>${cat.name}</span>
-      <span style="font-size:9px;color:#888;">Tab to exit · Scroll/Shift to cycle</span>
+      <span style="font-size:9px;color:#888;">Tab to exit · Shift to cycle</span>
     `;
     this.menuContentArea.appendChild(header);
 
@@ -1777,7 +1777,7 @@ export class HUD {
         <div class="section">
           <div class="section-title" style="color: #f0c040;">🎮 Menu System</div>
           <div style="margin-bottom: 8px; font-size: 12px; color: #ccc;">
-            Press a number key to open a building category. <strong>Scroll wheel</strong> or <strong>Shift</strong> cycles buildings.
+            Press a number key to open a building category. <strong>Shift</strong> cycles buildings.
             <strong>Click</strong> to place. <strong>QWERTY</strong> keys queue units/actions. <strong>Tab</strong> to exit.
           </div>
 

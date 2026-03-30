@@ -374,13 +374,8 @@ class Cubitopia {
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
     });
 
-    // Scroll wheel cycles buildings in active menu
-    window.addEventListener('wheel', (e) => {
-      if (this.menuCategory !== 0) {
-        e.preventDefault();
-        this.cycleBuildingInMenu(e.deltaY > 0 ? 1 : -1);
-      }
-    }, { passive: false });
+    // Scroll wheel in mine mode adjusts depth (handled elsewhere);
+    // building menu cycling is Shift-only — no scroll hijacking.
 
     // Ghost preview on mousemove (for all placement modes)
     canvasEl.addEventListener('mousemove', (e) => {
