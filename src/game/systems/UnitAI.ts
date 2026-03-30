@@ -39,8 +39,13 @@ export class UnitAI {
   static wallsBuilt: Set<string> = new Set(); // "q,r" keys
   /** Track wall owners (set by main.ts) */
   static wallOwners: Map<string, number> = new Map(); // "q,r" → owner
-  /** Stone stockpile reference (synced from main.ts each frame) */
+  /** Stockpile references (synced from main.ts each frame) */
   static stoneStockpile: number[] = [0, 0];
+  static ironStockpile: number[] = [0, 0];
+  static clayStockpile: number[] = [0, 0];
+  static crystalStockpile: number[] = [0, 0];
+  static charcoalStockpile: number[] = [0, 0];
+  static steelStockpile: number[] = [0, 0];
 
   /** Per-unit blacklist of tiles that failed pathfinding — avoids retrying same unreachable target every frame.
    *  Key: unitId, Value: Map of "q,r" → expiry timestamp */
@@ -1472,64 +1477,127 @@ export class UnitAI {
     return best;
   }
 
-  /** Find nearest minable tile for auto-mine (builders only, within range of base).
-   *  Mines any solid terrain: mountains (stone), plains (stone), desert (clay), etc. */
-  /** Find best mine site for AI builders — quarry pattern: not too close to base,
-   *  not too far, prefer clustered mining near already-mined tiles */
+  /** Determine what resource the AI needs most right now.
+   *  Returns a priority-ordered list of resource targets for mining. */
+  private static getAIMiningPriorities(owner: number): { resource: string; urgency: number }[] {
+    const priorities: { resource: string; urgency: number }[] = [];
+
+    const stone = UnitAI.stoneStockpile[owner];
+    const iron = UnitAI.ironStockpile[owner];
+    const clay = UnitAI.clayStockpile[owner];
+    const crystal = UnitAI.crystalStockpile[owner];
+    const charcoal = UnitAI.charcoalStockpile[owner];
+    const steel = UnitAI.steelStockpile[owner];
+
+    // Crystal: needed for wizard tower (3) and mage units (1 each)
+    // High priority if we have none and need it for buildings/units
+    if (crystal < 4) priorities.push({ resource: 'crystal', urgency: crystal < 1 ? 20 : 12 });
+
+    // Iron: needed for steel (2 iron + 1 charcoal → 1 steel)
+    // Steel needed for armory (3), armored units (1 each)
+    if (iron < 4 && steel < 3) priorities.push({ resource: 'iron', urgency: iron < 1 ? 18 : 10 });
+
+    // Clay: needed for charcoal (3 wood + 2 clay → 2 charcoal)
+    // Charcoal needed for steel smelting
+    if (clay < 4 && charcoal < 3) priorities.push({ resource: 'clay', urgency: clay < 1 ? 15 : 8 });
+
+    // Stone: always useful — walls, buildings, general construction
+    if (stone < 10) priorities.push({ resource: 'stone', urgency: stone < 3 ? 14 : 5 });
+
+    // Default: always mine stone as fallback
+    if (priorities.length === 0) priorities.push({ resource: 'stone', urgency: 3 });
+
+    // Sort by urgency descending
+    priorities.sort((a, b) => b.urgency - a.urgency);
+    return priorities;
+  }
+
+  /** Find best mine site for AI builders — resource-aware strategy.
+   *  Considers what the AI needs (iron, crystal, clay, stone) and searches
+   *  appropriate terrain types with expanded range for rare resources. */
   private static findNearestMineSite(unit: Unit, map: GameMap): HexCoord | null {
-    let best: HexCoord | null = null;
-    let bestScore = Infinity;
-    const midQ = Math.floor(map.width / 2);
     const basePos = UnitAI.basePositions.get(unit.owner);
     if (!basePos) return null;
 
+    const midQ = Math.floor(map.width / 2);
+    const priorities = UnitAI.getAIMiningPriorities(unit.owner);
+
     const MIN_MINE_RANGE = 4; // Don't mine right under the base
-    const MAX_MINE_RANGE = 10; // Not too far — stone must be carried back
+    // Expand search range for rare resources — crystal/iron may be far away
+    const MAX_MINE_RANGE_STONE = 12;
+    const MAX_MINE_RANGE_RARE = 20; // Iron, crystal, clay can be further
+
+    let best: HexCoord | null = null;
+    let bestScore = Infinity;
 
     map.tiles.forEach((tile, key) => {
-      // Skip water, forest (lumberjacks handle trees), and already-mined bedrock
+      // Skip water, forest, and bedrock
       if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.RIVER
           || tile.terrain === TerrainType.LAKE || tile.terrain === TerrainType.WATERFALL
           || tile.terrain === TerrainType.FOREST) return;
       if (tile.elevation <= -39) return; // Bedrock
+      if (tile.voxelData.blocks.length === 0) return; // Empty tile
 
       // Skip tiles claimed by other builders
       const claimer = UnitAI.claimedMines.get(key);
       if (claimer && claimer !== unit.id) return;
-      // Skip tiles we already failed to path to recently
       if (UnitAI.isUnreachable(unit.id, key)) return;
 
       const [q, r] = key.split(',').map(Number);
-      // Only look at tiles on the unit's own half (+2 buffer)
-      if (unit.owner === 0 && q > midQ + 2) return;
-      if (unit.owner === 1 && q < midQ - 2) return;
+      // Stay on own half (+3 buffer for rare resources)
+      if (unit.owner === 0 && q > midQ + 3) return;
+      if (unit.owner === 1 && q < midQ - 3) return;
 
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
-      if (baseDist < MIN_MINE_RANGE) return; // Too close to base — keep clear
-      if (baseDist > MAX_MINE_RANGE) return; // Too far — slow stone transport
+      if (baseDist < MIN_MINE_RANGE) return;
 
       const unitDist = Pathfinder.heuristic(unit.position, coord);
 
-      // Quarry clustering bonus: prefer tiles adjacent to already-mined tiles or other claimed mines
+      // Classify what this tile yields
+      let tileResource = 'stone'; // default
+      if (tile.terrain === TerrainType.SNOW || tile.elevation >= 18) {
+        tileResource = 'crystal';
+      } else if (tile.terrain === TerrainType.DESERT) {
+        tileResource = 'clay';
+      } else if (tile.terrain === TerrainType.MOUNTAIN && tile.elevation >= 10) {
+        // Deep mountains have iron blocks underground — mine down to get them
+        tileResource = 'iron';
+      }
+
+      // Apply range limits: stone is close, rare resources can be further
+      const maxRange = tileResource === 'stone' ? MAX_MINE_RANGE_STONE : MAX_MINE_RANGE_RARE;
+      if (baseDist > maxRange) return;
+
+      // Score this tile based on how urgently we need its resource
+      let resourceBonus = 0;
+      let matched = false;
+      for (const p of priorities) {
+        if (p.resource === tileResource) {
+          resourceBonus = -p.urgency; // Negative = better score
+          matched = true;
+          break;
+        }
+      }
+      // Small bonus for tiles that match ANY need (even low priority)
+      if (!matched) resourceBonus = 2;
+
+      // Quarry clustering: prefer tiles near active mines
       let clusterBonus = 0;
       const neighbors = Pathfinder.getHexNeighbors(coord);
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;
-        if (UnitAI.claimedMines.has(nKey)) clusterBonus -= 2; // Near active quarry
+        if (UnitAI.claimedMines.has(nKey)) clusterBonus -= 2;
         const nTile = map.tiles.get(nKey);
-        if (nTile && nTile.elevation <= -1) clusterBonus -= 1; // Near already-dug tile
+        if (nTile && nTile.elevation <= -1) clusterBonus -= 1;
       }
 
-      // Prefer mountains (high value stone) > desert (clay) > plains (stone)
-      const terrainBonus = tile.terrain === TerrainType.MOUNTAIN ? -6
-        : tile.terrain === TerrainType.DESERT ? -3 : 0;
+      // Distance scoring: closer to unit is better, ideal 6-8 from base
+      const idealDist = tileResource === 'stone' ? 6 : 8;
+      const distPenalty = Math.abs(baseDist - idealDist) * 0.8;
+      const travelPenalty = unitDist * 0.6;
 
-      // Score: balance distance, terrain value, and clustering
-      // Sweet spot distance (~6-7 from base) gets best score
-      const idealDist = 6;
-      const distPenalty = Math.abs(baseDist - idealDist) * 1.5;
-      const score = distPenalty + unitDist * 0.5 + terrainBonus + clusterBonus;
+      const score = distPenalty + travelPenalty + resourceBonus + clusterBonus;
       if (score < bestScore) {
         bestScore = score;
         best = coord;

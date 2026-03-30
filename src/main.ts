@@ -2325,8 +2325,13 @@ class Cubitopia {
       disableCombat: this.hud.debugFlags.disableCombat,
     };
 
-    // Sync stone stockpile to UnitAI so builders know if they have resources
+    // Sync stockpiles to UnitAI so builders know what resources are available
     UnitAI.stoneStockpile = this.stoneStockpile;
+    UnitAI.ironStockpile = this.ironStockpile;
+    UnitAI.clayStockpile = this.clayStockpile;
+    UnitAI.crystalStockpile = this.crystalStockpile;
+    UnitAI.charcoalStockpile = this.charcoalStockpile;
+    UnitAI.steelStockpile = this.steelStockpile;
 
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);

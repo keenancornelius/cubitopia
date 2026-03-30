@@ -270,7 +270,7 @@ export default class AIController {
     if (st.forestry && lumberjacks < 4 && st.workerSpawnQueue.length < 2) {
       st.workerSpawnQueue.push({ type: UnitType.LUMBERJACK, building: 'forestry' });
     }
-    if (st.masonry && builders < 3 && st.workerSpawnQueue.length < 2) {
+    if (st.masonry && builders < 4 && st.workerSpawnQueue.length < 2) {
       st.workerSpawnQueue.push({ type: UnitType.BUILDER, building: 'masonry' });
     }
     if (st.farmhouse && villagers < 3 && st.workerSpawnQueue.length < 2) {
