@@ -837,6 +837,32 @@ export class UnitAI {
 
       // ===== AI combat units: auto-engage nearby enemies, attack walls, then rally/wave =====
       if (UnitAI.debugFlags.disableCombat) return;
+
+      // Zone control: AI units with _playerCommanded (set by AIController) that are
+      // inside a non-owned capture zone should hold position, just like player units.
+      // Without this, the idle handler below would redirect them away from zones.
+      if (unit._playerCommanded && unit.stance === UnitStance.DEFENSIVE) {
+        for (const base of UnitAI.bases) {
+          if (base.destroyed || base.owner === unit.owner) continue;
+          const distToBase = Pathfinder.heuristic(unit.position, base.position);
+          if (distToBase <= 5) {
+            // Engage nearby threats while holding the zone
+            const zoneEnemy = UnitAI.findBestTarget(unit, allUnits, player.id, detectionRange);
+            if (zoneEnemy) {
+              const eDist = Pathfinder.heuristic(unit.position, zoneEnemy.position);
+              if (eDist <= unit.stats.range) {
+                unit.state = UnitState.ATTACKING;
+                unit.command = { type: CommandType.ATTACK, targetPosition: zoneEnemy.position, targetUnitId: zoneEnemy.id };
+              } else if (eDist <= 3) {
+                // Close enough to chase briefly without leaving the zone
+                UnitAI.commandAttack(unit, zoneEnemy.position, zoneEnemy.id, map);
+              }
+            }
+            return; // Hold zone position — don't fall through to rally/wave logic
+          }
+        }
+      }
+
       const enemy = UnitAI.findBestTarget(unit, allUnits, player.id, detectionRange);
 
       if (enemy) {
