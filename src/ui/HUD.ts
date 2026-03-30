@@ -1981,15 +1981,14 @@ export class HUD {
     if (atkBonus !== 0) modifiers += `<div style="color:#e67e22;">⚔ Attack modifier: ${atkBonus > 0 ? '+' : ''}${atkBonus}</div>`;
     if (tile.terrain === TerrainType.WATER) modifiers += `<div style="color:#e74c3c;">✗ Impassable</div>`;
     if (tile.terrain === TerrainType.FOREST) modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
-    if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
-      modifiers += `<div style="color:#c0652a;">⛏ Iron ore vein (iron)</div>`;
+    if ((tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.SNOW) && tile.elevation >= 13) {
+      modifiers += `<div style="color:#9b59b6;">💎 Snow peak — crystal deposits</div>`;
+    } else if (tile.terrain === TerrainType.SNOW) {
+      modifiers += `<div style="color:#9b59b6;">💎 Crystal deposits</div>`;
+    } else if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
+      modifiers += `<div style="color:#c0652a;">⛏ Iron ore vein</div>`;
     } else if (tile.terrain === TerrainType.MOUNTAIN) {
       modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
-    }
-    if (tile.terrain === TerrainType.SNOW && tile.resource === ResourceType.CRYSTAL) {
-      modifiers += `<div style="color:#9b59b6;">💎 Crystal vein (crystal)</div>`;
-    } else if (tile.terrain === TerrainType.SNOW) {
-      modifiers += `<div style="color:#b0c4de;">❄ Frozen peak (stone)</div>`;
     }
     if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand → stone)</div>`;
     if (tile.terrain === TerrainType.JUNGLE) modifiers += `<div style="color:#2d6b30;">🌿 Dense jungle (wood)</div>`;

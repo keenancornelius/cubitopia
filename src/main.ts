@@ -970,15 +970,20 @@ class Cubitopia {
     let resourceType = ResourceType.STONE;
     const currentElev = tile.elevation;
 
+    // Snow-capped peaks (elevation >= 13) yield crystal regardless of terrain type,
+    // since visual snow is elevation-based, not terrain-type-based
+    const SNOW_CAP = 13;
+    const isSnowCapped = currentElev >= SNOW_CAP
+      || (tile.terrain === TerrainType.SNOW)
+      || (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.CRYSTAL);
+
     switch (tile.terrain) {
       case TerrainType.SNOW:
-        // Snow peaks always yield crystal — the defining strategic resource
-        resourceYield = 2;
-        resourceType = ResourceType.CRYSTAL;
-        break;
       case TerrainType.MOUNTAIN:
-        // Mountains: iron ore veins or stone
-        if (tile.resource === ResourceType.IRON) {
+        if (isSnowCapped) {
+          resourceYield = 2; // Crystal from snow-capped peaks
+          resourceType = ResourceType.CRYSTAL;
+        } else if (tile.resource === ResourceType.IRON) {
           resourceYield = 2; // Iron ore vein
           resourceType = ResourceType.IRON;
         } else {
@@ -1015,14 +1020,35 @@ class Cubitopia {
         resourceType = ResourceType.STONE;
     }
 
-    // Remove ONE layer of elevation (progressive mining)
-    const newElevation = Math.max(Cubitopia.MAX_MINE_DEPTH, currentElev - 1);
+    // --- Progressive mining: chip ridges from top first, then lower base ---
+    const RIDGE_H = 10;
+    const SNOW_CAP_H = 13;
+    const hasRidge = currentElev >= RIDGE_H;
+    const hasSnowCap = currentElev >= SNOW_CAP_H;
+
+    // Ridge/snow tiles: remove decoration layers first (2 elevation ticks to clear ridge)
+    // then normal mining once below ridge threshold. This looks like carving INTO the peak.
+    const ridgeLayers = hasSnowCap ? 4 : (hasRidge ? 3 : 0); // snow ridges are taller
+    const effectiveRidgeBottom = currentElev; // Ridge sits on top of the column
+
+    let newElevation: number;
+    if (hasRidge && currentElev - 1 >= RIDGE_H) {
+      // Still in ridge zone — drop 2 levels per tick (chipping away the peak fast)
+      newElevation = Math.max(Cubitopia.MAX_MINE_DEPTH, currentElev - 2);
+    } else {
+      // Normal mining — 1 level per tick
+      newElevation = Math.max(Cubitopia.MAX_MINE_DEPTH, currentElev - 1);
+    }
     tile.elevation = newElevation;
     tile.voxelData.heightMap = [[newElevation]];
 
     // Remove decorations when terrain gets low
     if (newElevation <= 3 && tile.terrain !== TerrainType.PLAINS) {
       tile.terrain = TerrainType.PLAINS;
+    }
+    // When elevation drops below snow cap, transition terrain type to mountain
+    if (newElevation < SNOW_CAP_H && tile.terrain === TerrainType.SNOW) {
+      tile.terrain = TerrainType.MOUNTAIN;
     }
     // Always clean up decorations when mining
     this.terrainDecorator.removeDecoration(minePos);
