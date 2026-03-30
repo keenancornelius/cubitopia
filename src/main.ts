@@ -813,18 +813,7 @@ class Cubitopia {
   }
 
   /**
-   * Raycast for mine mode — detects side-face hits for horizontal mining.
-   * Returns the hex tile to mine: for top-face hits, the tile under the cursor;
-   * for side-face hits, the tile BEHIND the clicked wall face.
-   */
-  /**
-   * Mine-mode raycast with Shift+click for horizontal mining.
-   * - Normal click: select the tile for downward mining (standard raycast).
-   * - Shift+click: horizontal mining — resolve which tile you clicked, then pick the
-   *   nearest HIGHER-elevation neighbor in the direction you clicked (offset from tile center).
-   *   This works even though the camera can't physically raycast to side faces.
-   */
-  /** Result from mine mode raycasting — includes which block face was hit */
+  /** Result from mine mode raycasting — includes mining mode */
   private lastMineHit: { coord: HexCoord; mode: 'vertical' | 'horizontal'; targetY?: number } | null = null;
 
   private mouseToMineHex(e: MouseEvent, canvasEl: HTMLCanvasElement): HexCoord | null {
@@ -847,15 +836,9 @@ class Cubitopia {
       const [q, r] = voxelHit.tileKey.split(',').map(Number);
       const coord = { q, r };
 
-      // Determine if this is a side-face hit (horizontal mining) or top-face (vertical)
-      const isTopFace = Math.abs(voxelHit.faceNormal.y) > 0.5;
-
-      if (isTopFace) {
-        // Top face → vertical mine (dig down from the top)
-        this.lastMineHit = { coord, mode: 'vertical' };
-      } else {
-        // Side face → horizontal mine at the block's Y level
-        // Get the block's Y position from the tile's voxel data
+      // Shift+click = horizontal mine at the hit block's Y level
+      // Regular click = vertical mine (dig down from top)
+      if (e.shiftKey) {
         const tile = this.currentMap.tiles.get(voxelHit.tileKey);
         if (tile && tile.voxelData.blocks[voxelHit.blockIndex]) {
           const blockY = tile.voxelData.blocks[voxelHit.blockIndex].localPosition.y;
@@ -863,6 +846,8 @@ class Cubitopia {
         } else {
           this.lastMineHit = { coord, mode: 'vertical' };
         }
+      } else {
+        this.lastMineHit = { coord, mode: 'vertical' };
       }
 
       return coord;
