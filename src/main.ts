@@ -791,13 +791,21 @@ class Cubitopia {
       lastDragHex = null;
     });
 
-    // Scroll wheel adjusts mine depth when in mine mode
+    // Scroll wheel adjusts mine depth (or horizontal Y level with Shift) in mine mode
     canvasEl.addEventListener('wheel', (e) => {
       if (this.mineMode) {
         e.preventDefault();
         e.stopPropagation();
-        const delta = e.deltaY > 0 ? -1 : 1; // scroll down = shallower, scroll up = deeper
-        this.adjustMineDepth(delta);
+        if (e.shiftKey) {
+          // Shift+scroll = adjust horizontal mining Y level
+          const delta = e.deltaY > 0 ? -1 : 1;
+          this.horizontalTargetY = Math.max(0, Math.min(25, this.horizontalTargetY + delta));
+          this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, this.horizontalTargetY);
+          this.updateHorizontalYIndicator();
+        } else {
+          const delta = e.deltaY > 0 ? -1 : 1; // scroll down = shallower, scroll up = deeper
+          this.adjustMineDepth(delta);
+        }
       }
     }, { capture: true }); // capture phase so it fires before camera zoom
   }
@@ -839,11 +847,8 @@ class Cubitopia {
       const coord = { q, r };
 
       if (e.shiftKey) {
-        // Shift+click = horizontal mine — derive Y from the hit world position
-        // worldPosition.y is in world space; blocks are at localY * VOXEL_SIZE
-        const VOXEL_SIZE = 0.52;
-        const targetY = Math.floor(voxelHit.worldPosition.y / VOXEL_SIZE);
-        this.lastMineHit = { coord, mode: 'horizontal', targetY };
+        // Shift+click = horizontal mine at the current horizontalTargetY level
+        this.lastMineHit = { coord, mode: 'horizontal', targetY: this.horizontalTargetY };
       } else {
         this.lastMineHit = { coord, mode: 'vertical' };
       }
@@ -855,18 +860,7 @@ class Cubitopia {
     const fallback = this.raycastToHex(raycaster);
     if (fallback) {
       if (e.shiftKey) {
-        // Shift+click on ground plane — use tile's top Y level for horizontal mining
-        const key = `${fallback.q},${fallback.r}`;
-        const tile = this.currentMap.tiles.get(key);
-        if (tile && tile.voxelData.blocks.length > 0) {
-          let maxY = 0;
-          for (const b of tile.voxelData.blocks) {
-            if (b.localPosition.y > maxY) maxY = b.localPosition.y;
-          }
-          this.lastMineHit = { coord: fallback, mode: 'horizontal', targetY: Math.floor(maxY) };
-        } else {
-          this.lastMineHit = { coord: fallback, mode: 'vertical' };
-        }
+        this.lastMineHit = { coord: fallback, mode: 'horizontal', targetY: this.horizontalTargetY };
       } else {
         this.lastMineHit = { coord: fallback, mode: 'vertical' };
       }
@@ -886,6 +880,48 @@ class Cubitopia {
   adjustMineDepth(delta: number): void {
     this.blueprintSystem.adjustMineDepth(delta);
     this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers);
+  }
+
+  /** Visual indicator for horizontal mining Y level */
+  private horizontalYIndicatorMesh: THREE.Mesh | null = null;
+
+  private updateHorizontalYIndicator(): void {
+    // Remove old indicator
+    if (this.horizontalYIndicatorMesh) {
+      this.renderer.scene.remove(this.horizontalYIndicatorMesh);
+      this.horizontalYIndicatorMesh.geometry.dispose();
+      (this.horizontalYIndicatorMesh.material as THREE.Material).dispose();
+      this.horizontalYIndicatorMesh = null;
+    }
+
+    if (!this.mineMode) return;
+
+    // Large semi-transparent plane at the target Y level across the whole map
+    const VOXEL_SCALE = 0.52;
+    const planeSize = 80; // covers a large area
+    const geo = new THREE.PlaneGeometry(planeSize, planeSize);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x00ccff,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const plane = new THREE.Mesh(geo, mat);
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.y = this.horizontalTargetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
+    plane.renderOrder = 999;
+    this.renderer.scene.add(plane);
+    this.horizontalYIndicatorMesh = plane;
+  }
+
+  private clearHorizontalYIndicator(): void {
+    if (this.horizontalYIndicatorMesh) {
+      this.renderer.scene.remove(this.horizontalYIndicatorMesh);
+      this.horizontalYIndicatorMesh.geometry.dispose();
+      (this.horizontalYIndicatorMesh.material as THREE.Material).dispose();
+      this.horizontalYIndicatorMesh = null;
+    }
   }
 
   private toggleMineMode(): void {
@@ -2793,6 +2829,8 @@ class Cubitopia {
   private wallRotation = 0; // 0 or Math.PI/2
   private harvestMode = false;
   private mineMode = false;
+  /** Current Y-level target for horizontal (tunnel) mining. Shift+scroll adjusts. */
+  private horizontalTargetY = 5;
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
 
   // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
@@ -3434,6 +3472,7 @@ class Cubitopia {
     this.hud.setPlantTreeMode(false);
     this.mineMode = false;
     this.hud.setMineMode(false);
+    this.clearHorizontalYIndicator();
     this.plantCropsMode = false;
     this.hud.setPlantCropsMode(false);
     this.workshopPlaceMode = false;

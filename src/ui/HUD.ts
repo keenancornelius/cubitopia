@@ -1030,7 +1030,7 @@ export class HUD {
 
   private mineModeIndicator: HTMLElement | null = null;
 
-  setMineMode(active: boolean, depthLayers?: number): void {
+  setMineMode(active: boolean, depthLayers?: number, horizontalY?: number): void {
     if (!this.mineModeIndicator) {
       this.mineModeIndicator = document.createElement('div');
       this.mineModeIndicator.style.cssText = `
@@ -1043,7 +1043,10 @@ export class HUD {
       this.container.appendChild(this.mineModeIndicator);
     }
     const depth = depthLayers ?? 3;
-    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to dig down · Shift+click to tunnel · [Tab] to close`;
+    const hzInfo = horizontalY !== undefined
+      ? ` · <span style="color:#00ccff">Tunnel Y: <span style="font-size:20px">${horizontalY}</span></span> · Shift+Scroll to move`
+      : '';
+    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to dig down · Shift+click to tunnel${hzInfo} · [Tab] to close`;
     this.mineModeIndicator.style.display = active ? 'block' : 'none';
     if (active) this.hideAllModeIndicators('mine');
   }
