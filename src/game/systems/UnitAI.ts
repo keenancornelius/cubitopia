@@ -905,7 +905,7 @@ export class UnitAI {
         // If a wall was built on the next waypoint, re-path around it
         if (Pathfinder.blockedTiles.has(nextKey)) {
           const finalGoal = path[path.length - 1];
-          const newPath = Pathfinder.findPath(unit.position, finalGoal, map, unit.type === UnitType.LUMBERJACK, unit.owner);
+          const newPath = Pathfinder.findPath(unit.position, finalGoal, map, unit.type === UnitType.LUMBERJACK, unit.owner, unit.type === UnitType.BUILDER);
           if (newPath.length > 1) {
             unit._path = newPath;
             unit._pathIndex = 1;
@@ -1619,7 +1619,8 @@ export class UnitAI {
         if (Pathfinder.blockedTiles.has(nextKey) && nextKey !== `${path[path.length - 1].q},${path[path.length - 1].r}`) {
           const finalGoal = path[path.length - 1];
           const canForest = unit.type === UnitType.LUMBERJACK;
-          const newPath = Pathfinder.findPath(unit.position, finalGoal, map, canForest, unit.owner);
+          const canRidge = unit.type === UnitType.BUILDER;
+          const newPath = Pathfinder.findPath(unit.position, finalGoal, map, canForest, unit.owner, canRidge);
           if (newPath.length > 1) {
             unit._path = newPath;
             unit._pathIndex = 1;

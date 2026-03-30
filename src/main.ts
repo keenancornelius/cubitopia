@@ -971,13 +971,14 @@ class Cubitopia {
     const currentElev = tile.elevation;
 
     switch (tile.terrain) {
-      case TerrainType.MOUNTAIN:
       case TerrainType.SNOW:
-        // Snow/mountain tiles: check resource type for crystal, iron, or stone
-        if (tile.resource === ResourceType.CRYSTAL) {
-          resourceYield = 2; // Crystal vein — magical resource
-          resourceType = ResourceType.CRYSTAL;
-        } else if (tile.resource === ResourceType.IRON) {
+        // Snow peaks always yield crystal — the defining strategic resource
+        resourceYield = 2;
+        resourceType = ResourceType.CRYSTAL;
+        break;
+      case TerrainType.MOUNTAIN:
+        // Mountains: iron ore veins or stone
+        if (tile.resource === ResourceType.IRON) {
           resourceYield = 2; // Iron ore vein
           resourceType = ResourceType.IRON;
         } else {
