@@ -913,7 +913,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.barracksModeIndicator.innerHTML = '🏗️ BARRACKS PLACEMENT — Click to place barracks (costs 10 wood) · [R] Rotate · [K] to exit';
+      this.barracksModeIndicator.innerHTML = '🏗️ BARRACKS PLACEMENT — Click to place barracks (costs 10 wood) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.barracksModeIndicator);
     }
     this.barracksModeIndicator.style.display = active ? 'block' : 'none';
@@ -930,7 +930,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.forestryModeIndicator.innerHTML = '🌳 FORESTRY PLACEMENT — Click to place forestry (costs 8 wood) · [R] Rotate · [F] to exit';
+      this.forestryModeIndicator.innerHTML = '🌳 FORESTRY PLACEMENT — Click to place forestry (costs 8 wood) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.forestryModeIndicator);
     }
     this.forestryModeIndicator.style.display = active ? 'block' : 'none';
@@ -947,7 +947,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.masonryModeIndicator.innerHTML = '⬜ MASONRY PLACEMENT — Click to place masonry (costs 8 wood) · [R] Rotate · [M] to exit';
+      this.masonryModeIndicator.innerHTML = '⬜ MASONRY PLACEMENT — Click to place masonry (costs 8 wood) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.masonryModeIndicator);
     }
     this.masonryModeIndicator.style.display = active ? 'block' : 'none';
@@ -969,7 +969,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.farmhouseModeIndicator.innerHTML = '🏠 FARMHOUSE PLACEMENT — Click to place (costs 6 wood) · [R] Rotate · [P] to exit';
+      this.farmhouseModeIndicator.innerHTML = '🏠 FARMHOUSE PLACEMENT — Click to place (costs 6 wood) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.farmhouseModeIndicator);
     }
     this.farmhouseModeIndicator.style.display = active ? 'block' : 'none';
@@ -986,7 +986,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.siloModeIndicator.innerHTML = '🏗️ SILO PLACEMENT — Click to place (costs 5 wood) · [R] Rotate · [I] to exit';
+      this.siloModeIndicator.innerHTML = '🏗️ SILO PLACEMENT — Click to place (costs 5 wood) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.siloModeIndicator);
     }
     this.siloModeIndicator.style.display = active ? 'block' : 'none';
@@ -1003,7 +1003,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.farmPatchModeIndicator.innerHTML = '🌾 HARVEST — Click plains for farms, tall grass for hay (villagers) · [J] to exit';
+      this.farmPatchModeIndicator.innerHTML = '🌾 HARVEST — Click plains for farms, tall grass for hay (villagers) · [Tab] to close';
       this.container.appendChild(this.farmPatchModeIndicator);
     }
     this.farmPatchModeIndicator.style.display = active ? 'block' : 'none';
@@ -1021,7 +1021,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.plantTreeModeIndicator.innerHTML = '🌱 PLANT TREES — Click & drag on plains to plant saplings (1 wood each) · [T] to exit';
+      this.plantTreeModeIndicator.innerHTML = '🌱 PLANT TREES — Click & drag on plains to plant saplings (1 wood each) · [Tab] to close';
       this.container.appendChild(this.plantTreeModeIndicator);
     }
     this.plantTreeModeIndicator.style.display = active ? 'block' : 'none';
@@ -1043,7 +1043,7 @@ export class HUD {
       this.container.appendChild(this.mineModeIndicator);
     }
     const depth = depthLayers ?? 3;
-    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to mark · [N] to exit`;
+    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to mark · [Tab] to close`;
     this.mineModeIndicator.style.display = active ? 'block' : 'none';
     if (active) this.hideAllModeIndicators('mine');
   }
@@ -1061,7 +1061,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.plantCropsModeIndicator.innerHTML = '🌱 PLANT CROPS — Click cleared plains to plant farm crops · [C] to exit';
+      this.plantCropsModeIndicator.innerHTML = '🌱 PLANT CROPS — Click cleared plains to plant farm crops · [Tab] to close';
       this.container.appendChild(this.plantCropsModeIndicator);
     }
     this.plantCropsModeIndicator.style.display = active ? 'block' : 'none';
@@ -1081,7 +1081,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.workshopModeIndicator.innerHTML = '🔧 WORKSHOP PLACEMENT — Click to place (costs 12 wood + 4 stone) · [R] Rotate · [W] to exit';
+      this.workshopModeIndicator.innerHTML = '🔧 WORKSHOP PLACEMENT — Click to place (costs 12 wood + 4 stone) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.workshopModeIndicator);
     }
     this.workshopModeIndicator.style.display = active ? 'block' : 'none';
@@ -1102,7 +1102,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.smelterModeIndicator.innerHTML = '🔥 SMELTER PLACEMENT — Click to place (costs 8 wood + 6 stone) · [R] Rotate · [E] to exit';
+      this.smelterModeIndicator.innerHTML = '🔥 SMELTER PLACEMENT — Click to place (costs 8 wood + 6 stone) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.smelterModeIndicator);
     }
     this.smelterModeIndicator.style.display = active ? 'block' : 'none';
@@ -1119,7 +1119,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.armoryModeIndicator.innerHTML = '⚔️ ARMORY PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 steel) · [R] Rotate · [A] to exit';
+      this.armoryModeIndicator.innerHTML = '⚔️ ARMORY PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 steel) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.armoryModeIndicator);
     }
     this.armoryModeIndicator.style.display = active ? 'block' : 'none';
@@ -1136,7 +1136,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.wizardTowerModeIndicator.innerHTML = '🔮 WIZARD TOWER PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 crystal) · [R] Rotate · [Y] to exit';
+      this.wizardTowerModeIndicator.innerHTML = '🔮 WIZARD TOWER PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 crystal) · [R] Rotate · [Tab] to close';
       this.container.appendChild(this.wizardTowerModeIndicator);
     }
     this.wizardTowerModeIndicator.style.display = active ? 'block' : 'none';
@@ -1511,7 +1511,7 @@ export class HUD {
       font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
       display: none; text-align: center;
     `;
-    indicator.innerHTML = '🏰 WALL BUILD MODE — Click tiles for walls (1 stone) · Shift+click for gates (2 stone) · Walls auto-connect · [B] to exit';
+    indicator.innerHTML = '🏰 WALL BUILD MODE — Click tiles for walls (1 stone) · Shift+click for gates (2 stone) · Walls auto-connect · [Tab] to close';
     this.container.appendChild(indicator);
     return indicator;
   }
@@ -1533,7 +1533,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.harvestModeIndicator.innerHTML = '🪓 HARVEST MODE — Click & drag to mark trees for chopping · [H] to exit';
+      this.harvestModeIndicator.innerHTML = '🪓 HARVEST MODE — Click & drag to mark trees for chopping · [Tab] to close';
       this.container.appendChild(this.harvestModeIndicator);
     }
     this.harvestModeIndicator.style.display = active ? 'block' : 'none';

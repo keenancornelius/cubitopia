@@ -300,11 +300,15 @@ class Cubitopia {
       if (e.key === '2' && !e.shiftKey) { this.openMenuCategory(2); return; }
       if (e.key === '3' && !e.shiftKey) { this.openMenuCategory(3); return; }
 
-      // Tab exits menu
-      if (e.key === 'Tab' && this.menuCategory !== 0) {
-        e.preventDefault();
-        this.closeMenu();
-        return;
+      // Tab exits menu and/or any active action mode (mine, harvest, wall, placement)
+      if (e.key === 'Tab') {
+        const hadMode = this.mineMode || this.harvestMode || this.farmPatchMode
+          || this.plantTreeMode || this.wallBuildMode || this.menuCategory !== 0;
+        if (hadMode) {
+          e.preventDefault();
+          this.closeMenu();   // Clears menu + calls clearAllModes
+          return;
+        }
       }
 
       // Shift cycles buildings within active menu
