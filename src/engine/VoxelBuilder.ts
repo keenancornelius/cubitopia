@@ -19,6 +19,7 @@ const BLOCK_COLORS: Record<BlockType, number> = {
   [BlockType.GOLD]:  0xffc107,
   [BlockType.WALL]:  0xd4a373,  // warm brick/clay — distinct from terrain stone
   [BlockType.JUNGLE]: 0x2d6b30,  // dark rich jungle green
+  [BlockType.CLAY]:   0xc2703e,  // warm terracotta clay
 };
 
 // Slightly oversized to seal hairline gaps between adjacent tiles

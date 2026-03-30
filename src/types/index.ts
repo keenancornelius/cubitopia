@@ -93,6 +93,7 @@ export enum BlockType {
   GOLD = 'gold',
   WALL = 'wall',
   JUNGLE = 'jungle',
+  CLAY = 'clay',
 }
 
 export enum ImprovementType {

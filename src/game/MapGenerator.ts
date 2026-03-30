@@ -1188,30 +1188,27 @@ export class MapGenerator {
     const subBlock = isHighEnoughForStone ? BlockType.STONE :
                      terrain === TerrainType.DESERT ? BlockType.SAND : BlockType.DIRT;
 
-    // For water features (rivers, lakes, waterfalls), extend solid fill UP to
-    // match neighbor elevation. This prevents terrain gaps visible from below
-    // and ensures solid underground for lava tube carving.
+    const offsets = [-0.5, 0, 0.5];
+
+    // Water features use a simplified column: clay all the way down from surface
     const isWaterFeature = terrain === TerrainType.RIVER || terrain === TerrainType.LAKE
                         || terrain === TerrainType.WATERFALL;
-    const fillHeight = isWaterFeature ? Math.max(height, maxNeighborElevation) : height;
-
-    const offsets = [-0.5, 0, 0.5];
 
     // === SOLID FILL: every Y level from DEPTH to surface ===
     // This creates real mineable terrain all the way down through the world.
     // Block types change with depth: surface → sub-surface → dirt → stone → gold → iron
-    // Water features fill to neighbor height to seal canyon gaps from below.
+    // Water features: sand surface, clay all the way down (riverbed/lakebed)
     for (const lx of offsets) {
       for (const lz of offsets) {
-        for (let y = DEPTH; y < fillHeight; y++) {
+        for (let y = DEPTH; y < height; y++) {
           let blockType: BlockType;
-          if (y === height - 1) {
-            blockType = topBlock;            // water surface layer (sand/stone)
-          } else if (y >= height - 2 && y < height) {
+          if (isWaterFeature) {
+            // Water tiles: sand on top, clay everywhere below
+            blockType = y === height - 1 ? topBlock : BlockType.CLAY;
+          } else if (y === height - 1) {
+            blockType = topBlock;            // surface layer
+          } else if (y >= height - 2) {
             blockType = subBlock;            // sub-surface
-          } else if (y >= height) {
-            // Above water surface but below neighbor elevation — solid underground fill
-            blockType = y < 3 ? BlockType.STONE : BlockType.DIRT;
           } else if (y >= height - 4 && isHighEnoughForStone) {
             blockType = BlockType.STONE;     // mountain stone cap
           } else if (y < -20) {
@@ -1307,7 +1304,11 @@ export class MapGenerator {
       }
     });
 
-    if (highPoints.length === 0 || (lowPoints.length === 0 && waterfallPoints.length === 0)) return;
+    console.log(`[LavaTubes] Candidates: ${highPoints.length} high, ${lowPoints.length} low, ${waterfallPoints.length} waterfall`);
+    if (highPoints.length === 0 || (lowPoints.length === 0 && waterfallPoints.length === 0)) {
+      console.log('[LavaTubes] Not enough endpoints, skipping tube generation');
+      return;
+    }
 
     // --- Step 2: Generate 2-4 tubes connecting high→low points ---
     const numTubes = 2 + Math.floor(this.rng.next() * 3); // 2-4 tubes
@@ -1330,12 +1331,13 @@ export class MapGenerator {
       if (!start) continue;
 
       // Pick exit: prefer waterfall adjacency, then low points
-      // Try to find exit far enough from start (at least 8 hexes)
+      // Require long distance — tubes should span large portions of the map
       let end: { q: number; r: number; elev: number } | null = null;
       const candidates = this.rng.next() < 0.4 && waterfallPoints.length > 0
         ? waterfallPoints : lowPoints;
+      const minDist = Math.max(12, Math.min(w, h) * 0.35); // at least 35% of map
 
-      for (let attempt = 0; attempt < 30; attempt++) {
+      for (let attempt = 0; attempt < 50; attempt++) {
         const idx = Math.floor(this.rng.next() * candidates.length);
         const candidate = candidates[idx];
         const cKey = `${candidate.q},${candidate.r}`;
@@ -1343,20 +1345,27 @@ export class MapGenerator {
         const dq = candidate.q - start.q;
         const dr = candidate.r - start.r;
         const dist = Math.sqrt(dq * dq + dr * dr);
-        if (dist >= 8 && dist <= w * 0.6) {
+        if (dist >= minDist) {
           end = candidate;
           usedEnds.add(cKey);
           break;
         }
       }
-      if (!end) continue;
+      if (!end) {
+        console.log(`[LavaTubes] Tube ${t}: no valid endpoint found for start (${start.q},${start.r})`);
+        continue;
+      }
+
+      console.log(`[LavaTubes] Tube ${t}: (${start.q},${start.r}) → (${end.q},${end.r})`);
 
       // --- Step 3: Trace a winding tunnel path from start to end ---
       const tubePath = this.traceTubePath(start, end, map, w, h);
+      console.log(`[LavaTubes] Tube ${t}: path length = ${tubePath.length}`);
       if (tubePath.length < 4) continue;
 
       // --- Step 4: Carve tunnel blocks and set tile properties ---
       this.carveTunnelBlocks(tubePath, map);
+      console.log(`[LavaTubes] Tube ${t}: carved ${tubePath.length} tiles`);
     }
   }
 
@@ -1371,7 +1380,9 @@ export class MapGenerator {
     const visited = new Set<string>();
     let cq = start.q;
     let cr = start.r;
-    const maxSteps = Math.floor(Math.sqrt((end.q - start.q) ** 2 + (end.r - start.r) ** 2) * 2.5);
+    // Allow plenty of steps — tubes should be able to cross the entire map with winding
+    const straightDist = Math.sqrt((end.q - start.q) ** 2 + (end.r - start.r) ** 2);
+    const maxSteps = Math.floor(straightDist * 3) + 20;
 
     for (let step = 0; step < maxSteps; step++) {
       const key = `${cq},${cr}`;
@@ -1380,8 +1391,7 @@ export class MapGenerator {
 
       const tile = map.tiles.get(key);
       if (!tile) break;
-      // Don't tunnel through water/lake tiles
-      if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.LAKE) break;
+      // Tubes are underground — they can pass under any terrain including water
 
       path.push({ q: cq, r: cr });
 
@@ -1405,11 +1415,11 @@ export class MapGenerator {
         if (visited.has(nKey)) continue;
 
         const nTile = map.tiles.get(nKey);
-        if (!nTile || nTile.terrain === TerrainType.WATER || nTile.terrain === TerrainType.LAKE) continue;
+        if (!nTile) continue;
 
-        // Score: direction toward goal + noise for winding
+        // Score: direction toward goal + strong noise for organic winding
         const dirScore = -(Math.abs(end.q - nq) + Math.abs(end.r - nr)); // closer to goal = higher
-        const noiseWander = this.noise.fbm(nq * 0.3 + step * 0.1, nr * 0.3, 2) * 6; // organic winding
+        const noiseWander = this.noise.fbm(nq * 0.25 + step * 0.05, nr * 0.25, 3) * 10; // strong winding
         const score = dirScore + noiseWander;
 
         if (score > bestScore) {
@@ -1427,63 +1437,61 @@ export class MapGenerator {
     return path;
   }
 
-  /** Carve tunnel blocks out of the shell column for each tile on the tube path */
+  /** Carve tunnel blocks out of the shell column for each tile on the tube path.
+   *  Sandworm-scale: carves a 3-hex-wide, 8-block-tall bore that swoops deep underground. */
   private carveTunnelBlocks(path: { q: number; r: number }[], map: GameMap): void {
-    const BORE_HEIGHT = 4;  // vertical clearance of tunnel (4 blocks tall)
-    const BORE_WIDTH = 1;   // how many sub-block columns to carve (center column)
+    const BORE_HEIGHT = 8;  // vertical clearance — massive sandworm bore
 
     for (let i = 0; i < path.length; i++) {
       const { q, r } = path[i];
-      const key = `${q},${r}`;
-      const tile = map.tiles.get(key);
-      if (!tile) continue;
 
-      // Tunnel floor Y: starts at surface near entrances, dips underground in middle
-      // Use a smooth curve: entrance (surface-2) → middle (deep underground) → exit (surface-2)
+      // Tunnel floor Y: starts near surface at entrances, swoops deep in middle
       const t = path.length > 1 ? i / (path.length - 1) : 0; // 0..1 along path
       const depthCurve = Math.sin(t * Math.PI); // 0 at ends, 1 in middle
 
-      // Surface Y for this tile (before tunnel carving)
-      const surfaceY = tile.elevation - 1;
+      // Get surface Y from center tile
+      const centerTile = map.tiles.get(`${q},${r}`);
+      if (!centerTile) continue;
+      const surfaceY = centerTile.elevation - 1;
 
-      // Entrance/exit: just 2 below surface. Middle: go as deep as 60% below surface
-      const entranceFloor = Math.max(0, surfaceY - 3);
-      const deepFloor = Math.max(-15, surfaceY - Math.floor(surfaceY * 0.6));
+      // Entrance/exit: 8 below surface. Middle: deep at Y=-18
+      const entranceFloor = Math.max(-5, surfaceY - 8);
+      const deepFloor = -18; // deep underground swoop
       const tunnelFloorY = Math.round(entranceFloor + (deepFloor - entranceFloor) * depthCurve);
       const tunnelCeilingY = tunnelFloorY + BORE_HEIGHT;
 
-      // Don't carve if tunnel would be above terrain
-      if (tunnelFloorY >= surfaceY - 1) continue;
+      // Carve the center tile AND all 6 neighbors (3-hex-wide bore)
+      const tilesToCarve: [number, number][] = [[q, r], ...this.hexNeighbors(q, r)];
 
-      // Remove blocks in the tunnel bore
-      tile.voxelData.blocks = tile.voxelData.blocks.filter(block => {
-        const by = block.localPosition.y;
-        // Keep blocks outside the tunnel bore
-        if (by < tunnelFloorY || by >= tunnelCeilingY) return true;
+      for (const [tq, tr] of tilesToCarve) {
+        const tKey = `${tq},${tr}`;
+        const tile = map.tiles.get(tKey);
+        if (!tile) continue;
 
-        // For wider tunnels, only carve the center column (x=0, z=0)
-        // For entrances/exits (near ends), carve wider
-        const bx = block.localPosition.x;
-        const bz = block.localPosition.z;
-        const nearEnd = t < 0.15 || t > 0.85;
-        if (nearEnd) {
-          // Wide opening at entrance/exit — carve all sub-positions
-          return false;
-        } else {
-          // Middle of tunnel — carve center and adjacent sub-columns
-          return Math.abs(bx) > 0.25 && Math.abs(bz) > 0.25;
-        }
-      });
+        const tileSurfaceY = tile.elevation - 1;
+        // At entrance/exit, allow ceiling to break surface for cave mouth
+        const nearEnd = t < 0.12 || t > 0.88;
+        if (!nearEnd && tunnelCeilingY >= tileSurfaceY) continue;
+        if (tunnelFloorY >= tileSurfaceY) continue;
 
-      // Mark tile as tunnel
-      tile.hasTunnel = true;
-      tile.tunnelFloorY = tunnelFloorY;
-      tile.tunnelCeilingY = tunnelCeilingY;
+        // Remove ALL blocks in the tunnel bore
+        tile.voxelData.blocks = tile.voxelData.blocks.filter(block => {
+          const by = block.localPosition.y;
+          if (by < tunnelFloorY || by >= tunnelCeilingY) return true;
+          return false; // remove everything in bore range
+        });
 
-      // walkableFloor = tunnel floor (units walk at the lowest open level)
-      tile.walkableFloor = tunnelFloorY;
+        // Mark tile as tunnel
+        tile.hasTunnel = true;
+        tile.tunnelFloorY = tunnelFloorY;
+        tile.tunnelCeilingY = tunnelCeilingY;
+        tile.walkableFloor = tunnelFloorY;
+      }
 
-      // Note: elevation stays the same (highest block) — walkableFloor is what units use
+      if (i === 0 || i === path.length - 1 || i === Math.floor(path.length / 2)) {
+        const label = i === 0 ? 'Entrance' : i === path.length - 1 ? 'Exit' : 'Mid';
+        console.log(`[LavaTubes] ${label} (${q},${r}): surfaceY=${surfaceY}, floorY=${tunnelFloorY}, ceilingY=${tunnelCeilingY}`);
+      }
     }
   }
 
