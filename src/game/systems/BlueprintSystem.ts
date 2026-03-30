@@ -224,12 +224,16 @@ export default class BlueprintSystem {
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
     if (this.ops.isWaterTerrain(tile.terrain)) return;
-    if (UnitAI.playerMineBlueprint.has(key)) return;
     // Check that the tile actually has blocks at this Y level
     const hasBlocks = tile.voxelData.blocks.some(
       b => Math.floor(b.localPosition.y) === Math.floor(targetY)
     );
     if (!hasBlocks) return;
+    // Replace any existing blueprint (vertical or otherwise) on this tile
+    if (UnitAI.playerMineBlueprint.has(key)) {
+      UnitAI.claimedMines.delete(key);
+      this.removeMineMarker(coord);
+    }
     UnitAI.playerMineBlueprint.set(key, { targetElevation: targetY, mode: 'horizontal', targetY });
     this.addMineMarkerHorizontal(coord, targetY);
   }

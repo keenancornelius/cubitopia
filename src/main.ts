@@ -716,16 +716,18 @@ class Cubitopia {
           }
         }
         else if (this.mineMode) {
-          // First click determines drag mode: if tile already marked, drag = erase
           const key = `${hex.q},${hex.r}`;
-          mineEraseMode = UnitAI.playerMineBlueprint.has(key);
-          if (mineEraseMode) {
-            this.blueprintSystem.unpaintMineTile(hex);
+          const hit = this.lastMineHit;
+
+          if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
+            // Shift+click always paints horizontal (replaces existing blueprints)
+            mineEraseMode = false;
+            this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
           } else {
-            // Use lastMineHit to determine vertical vs horizontal mining
-            const hit = this.lastMineHit;
-            if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
-              this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
+            // Normal click: toggle — if already marked, erase; otherwise paint vertical
+            mineEraseMode = UnitAI.playerMineBlueprint.has(key);
+            if (mineEraseMode) {
+              this.blueprintSystem.unpaintMineTile(hex);
             } else {
               this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
             }
@@ -836,16 +838,12 @@ class Cubitopia {
       const [q, r] = voxelHit.tileKey.split(',').map(Number);
       const coord = { q, r };
 
-      // Shift+click = horizontal mine at the hit block's Y level
-      // Regular click = vertical mine (dig down from top)
       if (e.shiftKey) {
-        const tile = this.currentMap.tiles.get(voxelHit.tileKey);
-        if (tile && tile.voxelData.blocks[voxelHit.blockIndex]) {
-          const blockY = tile.voxelData.blocks[voxelHit.blockIndex].localPosition.y;
-          this.lastMineHit = { coord, mode: 'horizontal', targetY: Math.floor(blockY) };
-        } else {
-          this.lastMineHit = { coord, mode: 'vertical' };
-        }
+        // Shift+click = horizontal mine — derive Y from the hit world position
+        // worldPosition.y is in world space; blocks are at localY * VOXEL_SIZE
+        const VOXEL_SIZE = 0.52;
+        const targetY = Math.floor(voxelHit.worldPosition.y / VOXEL_SIZE);
+        this.lastMineHit = { coord, mode: 'horizontal', targetY };
       } else {
         this.lastMineHit = { coord, mode: 'vertical' };
       }
@@ -854,10 +852,26 @@ class Cubitopia {
     }
 
     // Fallback to ground-plane raycast
-    this.lastMineHit = null;
     const fallback = this.raycastToHex(raycaster);
     if (fallback) {
-      this.lastMineHit = { coord: fallback, mode: 'vertical' };
+      if (e.shiftKey) {
+        // Shift+click on ground plane — use tile's top Y level for horizontal mining
+        const key = `${fallback.q},${fallback.r}`;
+        const tile = this.currentMap.tiles.get(key);
+        if (tile && tile.voxelData.blocks.length > 0) {
+          let maxY = 0;
+          for (const b of tile.voxelData.blocks) {
+            if (b.localPosition.y > maxY) maxY = b.localPosition.y;
+          }
+          this.lastMineHit = { coord: fallback, mode: 'horizontal', targetY: Math.floor(maxY) };
+        } else {
+          this.lastMineHit = { coord: fallback, mode: 'vertical' };
+        }
+      } else {
+        this.lastMineHit = { coord: fallback, mode: 'vertical' };
+      }
+    } else {
+      this.lastMineHit = null;
     }
     return fallback;
   }
