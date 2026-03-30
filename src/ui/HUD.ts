@@ -1043,10 +1043,10 @@ export class HUD {
       this.container.appendChild(this.mineModeIndicator);
     }
     const depth = depthLayers ?? 3;
-    const hzInfo = horizontalY !== undefined
-      ? ` · <span style="color:#00ccff">Tunnel Y: <span style="font-size:20px">${horizontalY}</span></span> · Shift+Scroll to move`
+    const sliceInfo = horizontalY !== undefined
+      ? ` · <span style="color:#00ccff">Slice Y: <span style="font-size:20px">${horizontalY}</span></span>`
       : '';
-    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> layers · Scroll to adjust · Click to dig down · Shift+click to tunnel${hzInfo} · [Tab] to close`;
+    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> · Scroll depth · Use slicer to tunnel${sliceInfo} · [Tab] to close`;
     this.mineModeIndicator.style.display = active ? 'block' : 'none';
     if (active) this.hideAllModeIndicators('mine');
   }
@@ -2168,6 +2168,105 @@ export class HUD {
   // has been removed. All debug UI is now handled by DebugPanel.ts (unified tabbed panel).
   // The debugFlags, gameSpeed, and debugSpawnCount properties remain here because
   // they are referenced throughout main.ts game logic.
+
+  // === ELEVATION SLICER ===
+  private slicerContainer: HTMLElement | null = null;
+  private slicerSlider: HTMLInputElement | null = null;
+  private slicerLabel: HTMLElement | null = null;
+  private _onSliceChange: ((y: number | null) => void) | null = null;
+
+  set onSliceChange(cb: ((y: number | null) => void) | null) { this._onSliceChange = cb; }
+
+  showElevationSlicer(show: boolean, maxY = 25, minY = -40): void {
+    if (!show) {
+      if (this.slicerContainer) {
+        this.slicerContainer.style.display = 'none';
+      }
+      return;
+    }
+
+    if (!this.slicerContainer) {
+      this.slicerContainer = document.createElement('div');
+      this.slicerContainer.style.cssText = `
+        position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+        display: flex; flex-direction: column; align-items: center; gap: 6px;
+        background: rgba(0,0,0,0.75); padding: 10px 8px; border-radius: 8px;
+        border: 2px solid #ff8c00; z-index: 100;
+      `;
+
+      // Label at top
+      const topLabel = document.createElement('div');
+      topLabel.style.cssText = 'color: #ff8c00; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;';
+      topLabel.textContent = 'SLICE';
+      this.slicerContainer.appendChild(topLabel);
+
+      // Current Y label
+      this.slicerLabel = document.createElement('div');
+      this.slicerLabel.style.cssText = 'color: #00ccff; font-size: 16px; font-weight: bold; min-width: 30px; text-align: center;';
+      this.slicerLabel.textContent = 'ALL';
+      this.slicerContainer.appendChild(this.slicerLabel);
+
+      // Vertical slider
+      this.slicerSlider = document.createElement('input');
+      this.slicerSlider.type = 'range';
+      this.slicerSlider.min = String(minY);
+      this.slicerSlider.max = String(maxY + 1); // +1 for "ALL" position
+      this.slicerSlider.value = String(maxY + 1);
+      this.slicerSlider.style.cssText = `
+        writing-mode: vertical-lr; direction: rtl;
+        width: 28px; height: 200px;
+        accent-color: #00ccff; cursor: pointer;
+      `;
+      this.slicerSlider.addEventListener('input', () => {
+        const val = parseInt(this.slicerSlider!.value);
+        if (val > maxY) {
+          // Top position = show all
+          this.slicerLabel!.textContent = 'ALL';
+          this.slicerLabel!.style.color = '#ff8c00';
+          this._onSliceChange?.(null);
+        } else {
+          this.slicerLabel!.textContent = `Y:${val}`;
+          this.slicerLabel!.style.color = '#00ccff';
+          this._onSliceChange?.(val);
+        }
+      });
+      this.slicerContainer.appendChild(this.slicerSlider);
+
+      // Bottom label
+      const botLabel = document.createElement('div');
+      botLabel.style.cssText = 'color: #666; font-size: 10px;';
+      botLabel.textContent = `${minY}`;
+      this.slicerContainer.appendChild(botLabel);
+
+      this.container.appendChild(this.slicerContainer);
+    }
+
+    this.slicerContainer.style.display = 'flex';
+    // Reset to "ALL"
+    if (this.slicerSlider) {
+      this.slicerSlider.min = String(minY);
+      this.slicerSlider.max = String(maxY + 1);
+      this.slicerSlider.value = String(maxY + 1);
+    }
+    if (this.slicerLabel) {
+      this.slicerLabel.textContent = 'ALL';
+      this.slicerLabel.style.color = '#ff8c00';
+    }
+  }
+
+  /** Programmatically set the slicer value (e.g. from scroll) */
+  setSlicerValue(y: number | null, maxY = 25): void {
+    if (!this.slicerSlider || !this.slicerLabel) return;
+    if (y === null) {
+      this.slicerSlider.value = String(maxY + 1);
+      this.slicerLabel.textContent = 'ALL';
+      this.slicerLabel.style.color = '#ff8c00';
+    } else {
+      this.slicerSlider.value = String(y);
+      this.slicerLabel.textContent = `Y:${y}`;
+      this.slicerLabel.style.color = '#00ccff';
+    }
+  }
 
   dispose(): void {
     this.container.remove();

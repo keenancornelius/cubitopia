@@ -49,6 +49,10 @@ export class VoxelBuilder {
   private maxInstancesPerType: number;
   /** Reverse lookup: blockType → instanceId → { tileKey, blockIndex } */
   private instanceLookup: Map<BlockType, { tileKey: string; blockIndex: number }[]>;
+  /** Clipping plane for Y-level slicer (clips everything above sliceY) */
+  private clipPlane: THREE.Plane;
+  /** Current slice Y level (null = no slicing, show everything) */
+  private sliceY: number | null = null;
 
   constructor(scene: THREE.Scene, maxInstancesPerType: number = 500000) {
     this.scene = scene;
@@ -59,8 +63,38 @@ export class VoxelBuilder {
     this.blockCounts = new Map();
     this.instanceLookup = new Map();
 
+    // Clipping plane: normal points DOWN (-Y), so it clips everything above the plane
+    this.clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 999);
+
     this.initMaterials();
     this.initInstancedMeshes();
+  }
+
+  /**
+   * Set the Y-level slicer. Everything above sliceY is clipped (invisible).
+   * Pass null to disable slicing and show everything.
+   */
+  setSliceY(y: number | null): void {
+    this.sliceY = y;
+    if (y === null) {
+      // Disable clipping — move plane far above
+      this.clipPlane.constant = 999;
+      for (const mat of this.materials.values()) {
+        mat.clippingPlanes = null;
+      }
+    } else {
+      // Plane equation: -Y + constant >= 0 → Y <= constant
+      // We clip at the TOP of the block at sliceY: (sliceY + 1) * VOXEL_SIZE
+      this.clipPlane.constant = (y + 1) * VOXEL_SIZE;
+      for (const mat of this.materials.values()) {
+        mat.clippingPlanes = [this.clipPlane];
+      }
+    }
+  }
+
+  /** Get current slice Y (null if not slicing) */
+  getSliceY(): number | null {
+    return this.sliceY;
   }
 
   private initMaterials(): void {
@@ -324,6 +358,13 @@ export class VoxelBuilder {
         if (!lookup || !lookup[hit.instanceId]) continue;
 
         const { tileKey, blockIndex } = lookup[hit.instanceId];
+
+        // If slicer is active, skip blocks above the slice Y level
+        if (this.sliceY !== null) {
+          const blockWorldY = hit.point.y / VOXEL_SIZE;
+          if (blockWorldY > this.sliceY + 0.5) continue;
+        }
+
         const worldNormal = hit.face
           ? hit.face.normal.clone().transformDirection(mesh.matrixWorld)
           : new THREE.Vector3(0, 1, 0);

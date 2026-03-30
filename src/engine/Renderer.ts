@@ -47,6 +47,9 @@ export class Renderer {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.2;
 
+    // Enable clipping planes for Y-level slicer
+    this.renderer.localClippingEnabled = true;
+
     this.setupLighting();
     this.createParticles();
   }

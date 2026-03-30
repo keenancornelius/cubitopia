@@ -717,14 +717,20 @@ class Cubitopia {
         }
         else if (this.mineMode) {
           const key = `${hex.q},${hex.r}`;
-          const hit = this.lastMineHit;
+          const sliceY = this.voxelBuilder.getSliceY();
 
-          if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
-            // Shift+click always paints horizontal (replaces existing blueprints)
+          if (sliceY !== null) {
+            // Slicer active — paint horizontal mine at the current slice Y
             mineEraseMode = false;
-            this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
+            if (UnitAI.playerMineBlueprint.has(key)) {
+              // If already painted, clicking again removes it
+              this.blueprintSystem.unpaintMineTile(hex);
+              mineEraseMode = true;
+            } else {
+              this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
+            }
           } else {
-            // Normal click: toggle — if already marked, erase; otherwise paint vertical
+            // Slicer at "ALL" — normal vertical mine toggle
             mineEraseMode = UnitAI.playerMineBlueprint.has(key);
             if (mineEraseMode) {
               this.blueprintSystem.unpaintMineTile(hex);
@@ -775,9 +781,9 @@ class Cubitopia {
           if (mineEraseMode) {
             this.blueprintSystem.unpaintMineTile(hex);
           } else {
-            const hit = this.lastMineHit;
-            if (hit && hit.mode === 'horizontal' && hit.targetY !== undefined) {
-              this.blueprintSystem.paintMineTileHorizontal(hex, hit.targetY);
+            const sliceY = this.voxelBuilder.getSliceY();
+            if (sliceY !== null) {
+              this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
             } else {
               this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
             }
@@ -797,16 +803,20 @@ class Cubitopia {
         e.preventDefault();
         e.stopPropagation();
         if (e.shiftKey) {
-          // Shift+scroll = adjust horizontal mining Y level
+          // Shift+scroll = adjust elevation slicer Y level
           // macOS converts Shift+scroll into horizontal scroll (deltaX), so check both axes
           const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
           const sign = Math.sign(rawDelta);
           if (sign === 0) return;
-          // positive raw delta → lower Y; negative → raise Y
           const delta = -sign;
-          this.horizontalTargetY = Math.max(-40, Math.min(25, this.horizontalTargetY + delta));
-          this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, this.horizontalTargetY);
-          this.updateHorizontalYIndicator();
+          const currentSlice = this.voxelBuilder.getSliceY();
+          const newY = currentSlice !== null
+            ? Math.max(-40, Math.min(25, currentSlice + delta))
+            : 25; // first Shift+scroll activates slicer at max
+          this.voxelBuilder.setSliceY(newY);
+          this.horizontalTargetY = newY;
+          this.hud.setSlicerValue(newY);
+          this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, newY);
         } else {
           const delta = e.deltaY > 0 ? -1 : 1; // scroll down = shallower, scroll up = deeper
           this.adjustMineDepth(delta);
@@ -827,10 +837,7 @@ class Cubitopia {
     return this.raycastToHex(raycaster);
   }
 
-  /**
-  /** Result from mine mode raycasting — includes mining mode */
-  private lastMineHit: { coord: HexCoord; mode: 'vertical' | 'horizontal'; targetY?: number } | null = null;
-
+  /** Mine mode raycast — hits voxel blocks (respects slicer), falls back to ground plane */
   private mouseToMineHex(e: MouseEvent, canvasEl: HTMLCanvasElement): HexCoord | null {
     const rect = canvasEl.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -840,39 +847,17 @@ class Cubitopia {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, this.camera.camera);
 
-    if (!this.currentMap) {
-      this.lastMineHit = null;
-      return this.raycastToHex(raycaster);
-    }
+    if (!this.currentMap) return this.raycastToHex(raycaster);
 
-    // --- Minecraft-style: raycast directly against voxel blocks ---
+    // Raycast against voxel blocks (slicer filtering handled inside raycastBlock)
     const voxelHit = this.voxelBuilder.raycastBlock(raycaster);
     if (voxelHit) {
       const [q, r] = voxelHit.tileKey.split(',').map(Number);
-      const coord = { q, r };
-
-      if (e.shiftKey) {
-        // Shift+click = horizontal mine at the current horizontalTargetY level
-        this.lastMineHit = { coord, mode: 'horizontal', targetY: this.horizontalTargetY };
-      } else {
-        this.lastMineHit = { coord, mode: 'vertical' };
-      }
-
-      return coord;
+      return { q, r };
     }
 
     // Fallback to ground-plane raycast
-    const fallback = this.raycastToHex(raycaster);
-    if (fallback) {
-      if (e.shiftKey) {
-        this.lastMineHit = { coord: fallback, mode: 'horizontal', targetY: this.horizontalTargetY };
-      } else {
-        this.lastMineHit = { coord: fallback, mode: 'vertical' };
-      }
-    } else {
-      this.lastMineHit = null;
-    }
-    return fallback;
+    return this.raycastToHex(raycaster);
   }
 
   // paintHarvestTile → moved to BlueprintSystem
@@ -887,47 +872,7 @@ class Cubitopia {
     this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers);
   }
 
-  /** Visual indicator for horizontal mining Y level */
-  private horizontalYIndicatorMesh: THREE.Mesh | null = null;
-
-  private updateHorizontalYIndicator(): void {
-    // Remove old indicator
-    if (this.horizontalYIndicatorMesh) {
-      this.renderer.scene.remove(this.horizontalYIndicatorMesh);
-      this.horizontalYIndicatorMesh.geometry.dispose();
-      (this.horizontalYIndicatorMesh.material as THREE.Material).dispose();
-      this.horizontalYIndicatorMesh = null;
-    }
-
-    if (!this.mineMode) return;
-
-    // Large semi-transparent plane at the target Y level across the whole map
-    const VOXEL_SCALE = 0.52;
-    const planeSize = 80; // covers a large area
-    const geo = new THREE.PlaneGeometry(planeSize, planeSize);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0x00ccff,
-      transparent: true,
-      opacity: 0.12,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const plane = new THREE.Mesh(geo, mat);
-    plane.rotation.x = -Math.PI / 2;
-    plane.position.y = this.horizontalTargetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
-    plane.renderOrder = 999;
-    this.renderer.scene.add(plane);
-    this.horizontalYIndicatorMesh = plane;
-  }
-
-  private clearHorizontalYIndicator(): void {
-    if (this.horizontalYIndicatorMesh) {
-      this.renderer.scene.remove(this.horizontalYIndicatorMesh);
-      this.horizontalYIndicatorMesh.geometry.dispose();
-      (this.horizontalYIndicatorMesh.material as THREE.Material).dispose();
-      this.horizontalYIndicatorMesh = null;
-    }
-  }
+  // Old horizontal Y indicator removed — replaced by clipping plane slicer
 
   private toggleMineMode(): void {
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
@@ -938,6 +883,19 @@ class Cubitopia {
     canvasEl.style.cursor = this.mineMode ? 'crosshair' : 'default';
     StrategyCamera.suppressLeftDrag = this.mineMode;
     SelectionManager.suppressBoxSelect = this.mineMode;
+
+    // Show/hide elevation slicer
+    if (this.mineMode) {
+      this.hud.showElevationSlicer(true);
+      this.hud.onSliceChange = (y) => {
+        this.voxelBuilder.setSliceY(y);
+        this.horizontalTargetY = y ?? 25;
+      };
+    } else {
+      this.hud.showElevationSlicer(false);
+      this.hud.onSliceChange = null;
+      this.voxelBuilder.setSliceY(null);
+    }
   }
 
   /** Handle mining terrain — peel off one layer of voxels, yield resources by terrain type */
@@ -3513,7 +3471,8 @@ class Cubitopia {
     this.hud.setPlantTreeMode(false);
     this.mineMode = false;
     this.hud.setMineMode(false);
-    this.clearHorizontalYIndicator();
+    this.hud.showElevationSlicer(false);
+    this.voxelBuilder.setSliceY(null);
     this.plantCropsMode = false;
     this.hud.setPlantCropsMode(false);
     this.workshopPlaceMode = false;

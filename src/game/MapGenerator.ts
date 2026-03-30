@@ -1180,10 +1180,14 @@ export class MapGenerator {
 
     const offsets = [-0.5, 0, 0.5];
 
+    // Shell thickness: at least 6 layers, or enough to cover neighbor height difference + 2
+    const heightDiff = height - minNeighborElevation;
+    const shellThickness = Math.max(6, heightDiff + 2);
+
     // === SURFACE BLOCKS (top of column) ===
     for (const lx of offsets) {
       for (const lz of offsets) {
-        for (let y = Math.max(DEPTH, height - 3); y < height; y++) {
+        for (let y = Math.max(DEPTH, height - shellThickness); y < height; y++) {
           let blockType: BlockType;
           if (y === height - 1) {
             blockType = topBlock;
@@ -1222,10 +1226,10 @@ export class MapGenerator {
 
     // === EDGE BLOCKS (side faces of the cube) ===
     if (isEdgeTile) {
-      // Full column from DEPTH+1 to surface-3 for edge tiles
+      // Full column from DEPTH+1 to surface for edge tiles
       for (const lx of offsets) {
         for (const lz of offsets) {
-          for (let y = DEPTH + 1; y < Math.max(DEPTH + 1, height - 3); y++) {
+          for (let y = DEPTH + 1; y < Math.max(DEPTH + 1, height - shellThickness); y++) {
             let blockType: BlockType;
             if (y < -10) blockType = BlockType.IRON;
             else if (y < -5) blockType = BlockType.GOLD;
@@ -1242,9 +1246,9 @@ export class MapGenerator {
     }
 
     // === PIT WALL BLOCKS (where neighbors are lower) ===
-    if (minNeighborElevation < height - 3) {
-      // Fill from minNeighborElevation to surface-3 (connecting surface to exposed wall)
-      const wallTop = Math.max(DEPTH + 1, height - 3);
+    if (minNeighborElevation < height - shellThickness) {
+      // Fill from minNeighborElevation to surface shell bottom (connecting surface to exposed wall)
+      const wallTop = Math.max(DEPTH + 1, height - shellThickness);
       const wallBottom = Math.max(DEPTH + 1, minNeighborElevation);
       for (const lx of offsets) {
         for (const lz of offsets) {
