@@ -1168,26 +1168,6 @@ export class MapGenerator {
         tile.walkableFloor = tile.elevation;
       }
 
-      // Water tiles: fill up to max neighbor elevation with underground blocks.
-      // This seals the cliff face gap visible from the water side — without
-      // changing the tile's elevation (water surface stays low).
-      const isWaterTile = tile.terrain === TerrainType.RIVER || tile.terrain === TerrainType.LAKE
-                       || tile.terrain === TerrainType.WATERFALL;
-      if (isWaterTile && maxNeighborElev > tile.elevation) {
-        const offsets = [-0.5, 0, 0.5];
-        for (const lx of offsets) {
-          for (const lz of offsets) {
-            for (let y = tile.elevation; y < maxNeighborElev; y++) {
-              tile.voxelData.blocks.push({
-                localPosition: { x: lx, y, z: lz },
-                type: y < 3 ? BlockType.STONE : BlockType.DIRT,
-                health: 100, maxHealth: 100,
-              });
-            }
-          }
-        }
-        // NOTE: Do NOT recalculate elevation here — water surface stays at original level
-      }
     });
   }
 

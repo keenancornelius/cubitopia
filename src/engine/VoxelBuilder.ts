@@ -274,7 +274,9 @@ export class VoxelBuilder {
    */
   rebuildFromMap(map: GameMap): void {
     this.clearAll();
+    let totalBlocks = 0;
     map.tiles.forEach((tile, key) => {
+      totalBlocks += tile.voxelData.blocks.length;
       const [q, r] = key.split(',').map(Number);
       const worldX = q * 1.5;
       const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
@@ -293,6 +295,10 @@ export class VoxelBuilder {
         );
       }
     });
+    console.log(`[VoxelBuilder] Total blocks: ${totalBlocks}`);
+    for (const [type, count] of this.blockCounts.entries()) {
+      if (count > 100000) console.log(`[VoxelBuilder] ${type}: ${count} instances (max: ${this.maxInstancesPerType})`);
+    }
   }
 
   /** Same as addBlock but also records the tile/block mapping for raycast lookups */
