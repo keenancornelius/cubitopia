@@ -20,7 +20,8 @@ type SoundName =
   | 'rage' | 'assassin_strike'
   | 'ui_click' | 'ui_hover'
   | 'battle_start' | 'level_up'
-  | 'queue_confirm' | 'queue_error' | 'craft_confirm';
+  | 'queue_confirm' | 'queue_error' | 'craft_confirm'
+  | 'unit_spawn';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -81,6 +82,7 @@ export default class SoundManager {
       case 'queue_confirm': this.synthQueueConfirm(vol); break;
       case 'queue_error':   this.synthQueueError(vol); break;
       case 'craft_confirm': this.synthCraftConfirm(vol); break;
+      case 'unit_spawn':    this.synthUnitSpawn(vol); break;
     }
   }
 
@@ -734,6 +736,48 @@ export default class SoundManager {
       o.connect(g).connect(ctx.destination);
       o.start(); o.stop(t + 0.25);
     });
+  }
+
+  /** Unit spawn: satisfying pop-into-existence — bubble pop + brief whoosh + bright ping */
+  private synthUnitSpawn(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Layer 1: Bubble pop — sine sweep from low to high with fast cutoff
+    const pop = ctx.createOscillator();
+    pop.type = 'sine';
+    pop.frequency.setValueAtTime(180, t);
+    pop.frequency.exponentialRampToValueAtTime(this.vary(900), t + 0.04);
+    const popG = ctx.createGain();
+    popG.gain.setValueAtTime(0.001, t);
+    popG.gain.linearRampToValueAtTime(vol * 0.25, t + 0.008);
+    popG.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    pop.connect(popG).connect(ctx.destination);
+    pop.start(); pop.stop(t + 0.1);
+    // Layer 2: Brief airy whoosh (filtered noise burst)
+    this.filteredNoise('bandpass', this.vary(2200), 1.2, vol * 0.08, 0.005, 0.07);
+    // Layer 3: Bright materialization ping (high sine, slightly delayed)
+    const ping = ctx.createOscillator();
+    ping.type = 'sine';
+    ping.frequency.setValueAtTime(this.vary(1320), t + 0.03);
+    const pingG = ctx.createGain();
+    pingG.gain.setValueAtTime(0.001, t);
+    pingG.gain.setValueAtTime(0.001, t + 0.03);
+    pingG.gain.linearRampToValueAtTime(vol * 0.14, t + 0.035);
+    pingG.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    ping.connect(pingG).connect(ctx.destination);
+    ping.start(); ping.stop(t + 0.18);
+    // Layer 4: Sub thud — ground impact feel
+    const thud = ctx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(90, t + 0.01);
+    thud.frequency.exponentialRampToValueAtTime(45, t + 0.08);
+    const thudG = ctx.createGain();
+    thudG.gain.setValueAtTime(0.001, t);
+    thudG.gain.setValueAtTime(0.001, t + 0.01);
+    thudG.gain.linearRampToValueAtTime(vol * 0.18, t + 0.02);
+    thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    thud.connect(thudG).connect(ctx.destination);
+    thud.start(); thud.stop(t + 0.12);
   }
 
   /** Battle start: war horn fanfare — 3 layered ascending notes with harmonics */

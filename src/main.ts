@@ -2317,6 +2317,7 @@ class Cubitopia {
           this.players[0].units.push(unit);
           this.allUnits.push(unit);
           this.unitRenderer.addUnit(unit, this.getElevation(pos));
+          this.sound.play('unit_spawn', 0.45);
           this.selectionManager.setPlayerUnits(this.allUnits, 0);
           this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
           // Rally point
