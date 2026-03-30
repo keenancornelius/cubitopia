@@ -798,8 +798,13 @@ class Cubitopia {
         e.stopPropagation();
         if (e.shiftKey) {
           // Shift+scroll = adjust horizontal mining Y level
-          const delta = e.deltaY > 0 ? -1 : 1;
-          this.horizontalTargetY = Math.max(0, Math.min(25, this.horizontalTargetY + delta));
+          // macOS converts Shift+scroll into horizontal scroll (deltaX), so check both axes
+          const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+          const sign = Math.sign(rawDelta);
+          if (sign === 0) return;
+          // positive raw delta → lower Y; negative → raise Y
+          const delta = -sign;
+          this.horizontalTargetY = Math.max(-40, Math.min(25, this.horizontalTargetY + delta));
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, this.horizontalTargetY);
           this.updateHorizontalYIndicator();
         } else {
@@ -972,18 +977,54 @@ class Cubitopia {
       // --- HORIZONTAL MINING: remove blocks at the target Y level ---
       // This creates tunnels, overhangs, and cave-outs
       const targetY = Math.floor(mineTarget!.targetY!);
-      const atLevel = blocks
+
+      // Shell columns are hollow inside — if no blocks at targetY but tile is tall enough,
+      // fill in blocks at this Y level so mining can create a visible tunnel
+      const atLevelCount = blocks.filter(b => Math.floor(b.localPosition.y) === targetY).length;
+      if (atLevelCount === 0 && tile.elevation > targetY) {
+        const offsets = [-0.5, 0, 0.5];
+        const fillType = targetY < 0 ? BlockType.STONE
+          : targetY < tile.elevation - 2 ? BlockType.DIRT
+          : BlockType.STONE;
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            tile.voxelData.blocks.push({
+              localPosition: { x: lx, y: targetY, z: lz },
+              type: fillType,
+              health: 100,
+              maxHealth: 100,
+            });
+          }
+        }
+        // Also fill one layer above and below for wall visibility
+        for (const adjY of [targetY - 1, targetY + 1]) {
+          if (adjY >= -40 && adjY < tile.elevation) {
+            const adjCount = tile.voxelData.blocks.filter(
+              b => Math.floor(b.localPosition.y) === adjY
+            ).length;
+            if (adjCount === 0) {
+              for (const lx of offsets) {
+                for (const lz of offsets) {
+                  tile.voxelData.blocks.push({
+                    localPosition: { x: lx, y: adjY, z: lz },
+                    type: fillType,
+                    health: 100,
+                    maxHealth: 100,
+                  });
+                }
+              }
+            }
+          }
+        }
+        this.voxelBuilder.rebuildFromMap(this.currentMap);
+      }
+
+      // Now find blocks at the target level to remove
+      const updatedBlocks = tile.voxelData.blocks;
+      const atLevel = updatedBlocks
         .map((b, i) => ({ block: b, index: i }))
         .filter(({ block }) => Math.floor(block.localPosition.y) === targetY);
       toRemove = atLevel.slice(0, Math.min(BLOCKS_PER_TICK, atLevel.length));
-
-      // If no blocks left at target Y, try one level above (erode upward)
-      if (toRemove.length === 0) {
-        const above = blocks
-          .map((b, i) => ({ block: b, index: i }))
-          .filter(({ block }) => Math.floor(block.localPosition.y) === targetY + 1);
-        toRemove = above.slice(0, Math.min(BLOCKS_PER_TICK, above.length));
-      }
     } else {
       // --- VERTICAL MINING: remove topmost blocks (dig down) ---
       const sorted = blocks

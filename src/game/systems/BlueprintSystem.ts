@@ -224,11 +224,9 @@ export default class BlueprintSystem {
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
     if (this.ops.isWaterTerrain(tile.terrain)) return;
-    // Check that the tile actually has blocks at this Y level
-    const hasBlocks = tile.voxelData.blocks.some(
-      b => Math.floor(b.localPosition.y) === Math.floor(targetY)
-    );
-    if (!hasBlocks) return;
+    // Allow blueprint if tile extends above the target Y (mountains are hollow shells
+    // with blocks only near the top, but visually they're solid at all Y levels below elevation)
+    if (tile.elevation <= targetY) return;
     // Replace any existing blueprint (vertical or otherwise) on this tile
     if (UnitAI.playerMineBlueprint.has(key)) {
       UnitAI.claimedMines.delete(key);
