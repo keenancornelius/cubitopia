@@ -76,26 +76,26 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3774 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew significantly during new buildings/resources/units overhaul (Smelter, Armory, Wizard Tower + iron/charcoal/steel/crystal). Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3000.
-- `src/game/systems/AIController.ts` — **AI brain (~945 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
-- `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
-- `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
-- `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~314 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber) with collection notifications, crafting (rope, charcoal, steel smelting), stockpile visuals for all 10 resource types.
-- `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~196 lines)**. Standalone functions for all 6 building types.
+- `src/main.ts` — **Central orchestrator (~4205 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew during zone capture + AI overhaul session. Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3500.
+- `src/game/systems/AIController.ts` — **AI brain (~1100 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, territory-first 3-phase commander (garrison → capture neutral zones → capital assault), guard tactics. Uses `AIBuildingOps` slim interface for building operations.
+- `src/game/systems/BuildingSystem.ts` — **Building registry (~255 lines)**. Owns `placedBuildings[]`, `wallConnectable`, spawn index. Delegates mesh creation to BuildingMeshFactory. Syncs UnitAI.buildingPositions/buildingOwners on register/unregister.
+- `src/game/systems/WallSystem.ts` — **Wall & gate system (~447 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
+- `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~346 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber) with collection notifications, crafting (rope, charcoal, steel smelting), stockpile visuals for all 10 resource types.
+- `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~316 lines)**. Standalone functions for all building types (barracks, forestry, masonry, farmhouse, workshop, silo, smelter, armory, wizard_tower).
 - `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
-- `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~144 lines)**. Building click tooltip, queue buttons, demolish. Uses `TooltipOps` slim interface.
-- `src/game/systems/BlueprintSystem.ts` — **Visual markers (~353 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
-- `src/game/systems/FormationSystem.ts` — **Pure formation functions (~155 lines)**. Box, line, wedge, circle formations + hex ring helper + unit priority sorting. No class state.
-- `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~290 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
-- `src/ui/MenuController.ts` — **Main menu with map selector (~220 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
-- `src/game/systems/DebugController.ts` — **Debug/playtester commands (~246 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
-- `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands
-- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~210 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
-- `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~310 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Handles underground layer checks. Emits CaptureEvent on flip.
+- `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~317 lines)**. Friendly building tooltip (queue/demolish), enemy building tooltip (attack), base tooltip (capture zone/rally). Uses `TooltipOps` slim interface.
+- `src/game/systems/BlueprintSystem.ts` — **Visual markers (~392 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
+- `src/game/systems/FormationSystem.ts` — **Pure formation functions (~163 lines)**. Box, line, wedge, circle formations + hex ring helper + unit priority sorting. No class state.
+- `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~321 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
+- `src/ui/MenuController.ts` — **Main menu with map selector (~256 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
+- `src/game/systems/DebugController.ts` — **Debug/playtester commands (~267 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
+- `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands. Static helpers: isUndergroundBase(), findAdjacentEnemyBuilding(). Tracks buildingPositions/buildingOwners for auto-attack.
+- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~254 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
+- `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~400 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Y-distance layer check for underground bases. Emits CaptureEvent on flip.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
-- `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
+- `src/game/MapPresets.ts` — **Map type configs + arena generators (~625 lines)**. MAP_PRESETS data, generateArenaMap(), generateDesertTunnelsMap(), MapGenParams for generator overrides. Grew significantly with Desert Tunnels map type.
 - `src/engine/SoundManager.ts` — **Procedural audio (~905 lines)**. Web Audio API synthesized SFX (25 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, level_up (triumphant brass fanfare), AoE splash, UI sounds, queue_confirm/queue_error/craft_confirm feedback, unit_spawn pop.
-- `src/ui/HUD.ts` — **All UI (~2175 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/HUD.ts` — **All UI (~2519 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel, capture zone HUD cards. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
 - `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
 - `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
@@ -123,7 +123,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `AIBuildState` interface — tracks each AI player's buildings, spawn queues, wave state
 - `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units
 - `updateSmartAISpawnQueue()` — timer-based unit spawning from buildings
-- `updateSmartAICommander()` — wave mustering, formation attacks, rally behavior
+- `updateSmartAICommander()` — territory-first 3-phase strategy: garrison owned outposts → capture neutral zones → assault enemy capital. Idle units always redirect to nearest uncaptured zone.
 - `updateSmartAITactics()` — guard assignments at choke points, worker escorts, building defense
 - AI uses `guardAssignments: Map<string, HexCoord>` to track which units are posted where
 - Uses `AIBuildingOps` slim interface to access BuildingSystem (mesh builders, registerBuilding, aiFindBuildTile) without direct dependency
@@ -229,7 +229,7 @@ Resolved items are struck through. Remaining items should be addressed during th
 
 7. **`regenerateMap()` and `restartGame()` share ~90% code**: The cleanup logic is duplicated between these two methods. Should extract a shared `cleanupGameState()` method and have both call it.
 
-8. **HUD.ts still ~1900 lines**: With old debug UI removed, HUD is smaller but still large. The help overlay (~200 lines), stance panel, spawn queue display, and selection panel could be extracted into separate files.
+8. **HUD.ts now ~2519 lines**: Grew with capture zone HUD cards, selection panel capture action, and help menu updates. The help overlay (~300 lines), stance panel, spawn queue display, capture zone HUD, and selection panel could be extracted into separate files.
 
 ---
 
@@ -307,7 +307,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3755 after buildings/resources/units overhaul + nested menu system — CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~4205 after buildings/resources/units overhaul + zone capture + AI territory strategy. CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines back to ~3700.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
