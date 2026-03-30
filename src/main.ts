@@ -2917,7 +2917,7 @@ class Cubitopia {
           ],
         },
         {
-          kind: 'masonry', label: 'Masonry', color: '#808080',
+          kind: 'masonry', label: 'Masonry', color: '#b08050',
           actions: [
             { key: 'Q', label: 'Builder (3w)', action: 'spawn:masonry:BUILDER:3' },
             { key: 'W', label: 'Mine Terrain', action: 'action:mine' },

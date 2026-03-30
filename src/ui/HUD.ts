@@ -1792,7 +1792,7 @@ export class HUD {
             <span class="key">2</span> ECONOMY BUILDINGS
           </div>
           <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><strong style="color:#6b8e23;">Forestry</strong> (8w) — Q: Lumberjack 3w · W: Chop Trees · E: Plant Trees</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#808080;">●</span> <span><strong style="color:#808080;">Masonry</strong> (8w) — Q: Builder 3w · W: Mine Terrain · E: Build Walls</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#b08050;">●</span> <span><strong style="color:#b08050;">Masonry</strong> (8w) — Q: Builder 3w · W: Mine Terrain · E: Build Walls</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><strong style="color:#daa520;">Farmhouse</strong> (6w) — Q: Villager 3w · W: Farm/Hay · E: Plant Crops</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><strong style="color:#5d4037;">Workshop</strong> (12w+4s) — Q: Catapult · W: Trebuchet · E: Craft Rope · R: Sell Wood</span></div>
 
