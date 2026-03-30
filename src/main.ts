@@ -720,13 +720,22 @@ class Cubitopia {
           const sliceY = this.voxelBuilder.getSliceY();
 
           if (sliceY !== null) {
-            // Slicer active — paint horizontal mine at the current slice Y
+            // Slicer active — paint/unpaint this specific Y level
             mineEraseMode = false;
-            if (UnitAI.playerMineBlueprint.has(key)) {
-              // If already painted, clicking again removes it
-              this.blueprintSystem.unpaintMineTile(hex);
-              mineEraseMode = true;
+            const existing = UnitAI.playerMineBlueprint.get(key);
+            if (existing?.mode === 'horizontal' && existing.yLevels?.includes(sliceY)) {
+              // This Y level is already queued — remove just this level
+              existing.yLevels = existing.yLevels.filter(y => y !== sliceY);
+              this.blueprintSystem.removeMineMarkerAtY(hex, sliceY);
+              if (existing.yLevels.length === 0) {
+                // No levels left — remove entire blueprint
+                this.blueprintSystem.unpaintMineTile(hex);
+                mineEraseMode = true;
+              } else {
+                existing.targetY = existing.yLevels[0];
+              }
             } else {
+              // Add this Y level
               this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
             }
           } else {
@@ -989,12 +998,24 @@ class Cubitopia {
     // Check if mine blueprint is complete
     let complete = false;
     if (isHorizontal) {
-      // Horizontal: done when no blocks remain at target Y level
       const targetY = Math.floor(mineTarget!.targetY!);
       const remaining = tile.voxelData.blocks.filter(
         b => Math.floor(b.localPosition.y) === targetY
       );
-      complete = remaining.length === 0;
+      if (remaining.length === 0) {
+        // This Y level is done — check if more levels are queued
+        const levels = mineTarget!.yLevels || [];
+        const doneIdx = levels.indexOf(targetY);
+        if (doneIdx !== -1) levels.splice(doneIdx, 1);
+        if (levels.length > 0) {
+          // Advance to next Y level
+          mineTarget!.targetY = levels[0];
+          mineTarget!.yLevels = levels;
+          UnitAI.claimedMines.delete(key);
+        } else {
+          complete = true;
+        }
+      }
     } else {
       complete = UnitAI.isMineComplete(key, tile.elevation);
     }

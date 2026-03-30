@@ -24,7 +24,7 @@ export default class BlueprintSystem {
   /** Harvest area markers */
   harvestMarkers: Map<string, THREE.Mesh> = new Map();
   /** Mine area markers */
-  mineMarkers: Map<string, THREE.Mesh> = new Map();
+  mineMarkers: Map<string, THREE.Mesh | THREE.Group> = new Map();
   /** Farm patch markers */
   farmPatchMarkers: Map<string, THREE.Mesh> = new Map();
   /** Build preview hover ghost */
@@ -224,15 +224,31 @@ export default class BlueprintSystem {
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
     if (this.ops.isWaterTerrain(tile.terrain)) return;
-    // Allow blueprint if tile extends above the target Y (mountains are hollow shells
-    // with blocks only near the top, but visually they're solid at all Y levels below elevation)
     if (tile.elevation <= targetY) return;
-    // Replace any existing blueprint (vertical or otherwise) on this tile
-    if (UnitAI.playerMineBlueprint.has(key)) {
-      UnitAI.claimedMines.delete(key);
-      this.removeMineMarker(coord);
+
+    const existing = UnitAI.playerMineBlueprint.get(key);
+    if (existing && existing.mode === 'horizontal') {
+      // Append this Y level if not already queued
+      const levels = existing.yLevels || (existing.targetY !== undefined ? [existing.targetY] : []);
+      if (levels.includes(targetY)) return; // already queued
+      levels.push(targetY);
+      existing.yLevels = levels;
+      // Keep targetY as the first unfinished level for miners
+      existing.targetY = levels[0];
+    } else {
+      // New horizontal blueprint (or replacing a vertical one)
+      if (existing) {
+        UnitAI.claimedMines.delete(key);
+        this.removeMineMarker(coord);
+      }
+      UnitAI.playerMineBlueprint.set(key, {
+        targetElevation: targetY,
+        mode: 'horizontal',
+        targetY,
+        yLevels: [targetY],
+      });
     }
-    UnitAI.playerMineBlueprint.set(key, { targetElevation: targetY, mode: 'horizontal', targetY });
+    // Add a marker at this specific Y level
     this.addMineMarkerHorizontal(coord, targetY);
   }
 
@@ -273,30 +289,65 @@ export default class BlueprintSystem {
     this.mineMarkers.set(key, ring);
   }
 
-  /** Horizontal mine marker — a cyan arrow/ring at the target Y level (side of tile) */
+  /** Horizontal mine marker — adds a cyan ring at the target Y level.
+   *  Multiple Y levels on the same tile each get their own ring inside a Group. */
   addMineMarkerHorizontal(coord: HexCoord, targetY: number): void {
     const key = `${coord.q},${coord.r}`;
-    if (this.mineMarkers.has(key)) this.removeMineMarker(coord);
-
     const worldX = coord.q * 1.5;
     const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
     const VOXEL_SCALE = 0.52;
 
-    // Place the ring at the target Y level, standing upright (vertical ring)
+    // Get or create a group for this tile's markers
+    let group = this.mineMarkers.get(key) as THREE.Group | undefined;
+    if (!group || !(group instanceof THREE.Group)) {
+      // Replace any old non-group marker
+      if (group) {
+        this.ctx.scene.remove(group);
+        if ((group as THREE.Mesh).geometry) (group as THREE.Mesh).geometry.dispose();
+        if ((group as THREE.Mesh).material) ((group as THREE.Mesh).material as THREE.Material).dispose();
+      }
+      group = new THREE.Group();
+      group.name = `mine_${key}`;
+      this.ctx.scene.add(group);
+      this.mineMarkers.set(key, group);
+    }
+
+    // Check if a ring already exists at this Y level
+    const yPos = targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
+    for (const child of group.children) {
+      if (Math.abs(child.position.y - yPos) < 0.01) return; // already has a ring here
+    }
+
+    // Add a new ring at this Y level
     const ringGeo = new THREE.RingGeometry(0.3, 0.55, 6);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.0, 0.8, 1.0), // cyan for horizontal
+      color: new THREE.Color(0.0, 0.8, 1.0),
       transparent: true,
       opacity: 0.75,
       side: THREE.DoubleSide, depthWrite: false,
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
-    // Horizontal ring sits flat on the Y level being mined
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(worldX, targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5, worldZ);
-    ring.name = `mine_${key}`;
-    this.ctx.scene.add(ring);
-    this.mineMarkers.set(key, ring);
+    ring.position.set(worldX, yPos, worldZ);
+    group.add(ring);
+  }
+
+  /** Remove just one Y-level ring from a horizontal mine marker group */
+  removeMineMarkerAtY(coord: HexCoord, targetY: number): void {
+    const key = `${coord.q},${coord.r}`;
+    const marker = this.mineMarkers.get(key);
+    if (!marker || !(marker instanceof THREE.Group)) return;
+    const VOXEL_SCALE = 0.52;
+    const yPos = targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
+    for (let i = marker.children.length - 1; i >= 0; i--) {
+      const child = marker.children[i] as THREE.Mesh;
+      if (Math.abs(child.position.y - yPos) < 0.01) {
+        marker.remove(child);
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) (child.material as THREE.Material).dispose();
+        break;
+      }
+    }
   }
 
   removeMineMarker(coord: HexCoord): void {
@@ -304,19 +355,24 @@ export default class BlueprintSystem {
     const marker = this.mineMarkers.get(key);
     if (marker) {
       this.ctx.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
+      if (marker instanceof THREE.Group) {
+        for (const child of marker.children) {
+          if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+          if ((child as THREE.Mesh).material) ((child as THREE.Mesh).material as THREE.Material).dispose();
+        }
+      } else {
+        marker.geometry.dispose();
+        (marker.material as THREE.Material).dispose();
+      }
       this.mineMarkers.delete(key);
     }
   }
 
   clearAllMineMarkers(): void {
-    for (const [, marker] of this.mineMarkers) {
-      this.ctx.scene.remove(marker);
-      marker.geometry.dispose();
-      (marker.material as THREE.Material).dispose();
+    for (const [key] of this.mineMarkers) {
+      const [q, r] = key.split(',').map(Number);
+      this.removeMineMarker({ q, r });
     }
-    this.mineMarkers.clear();
   }
 
   // ===================== FARM PATCH MARKERS =====================

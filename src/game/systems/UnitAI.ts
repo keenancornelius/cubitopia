@@ -9,11 +9,12 @@ import { Pathfinder } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 
-/** Mine target: vertical (top-down dig) or horizontal (tunnel at a specific Y level) */
+/** Mine target: vertical (top-down dig) or horizontal (tunnel at specific Y levels) */
 export interface MineTarget {
   targetElevation: number;
   mode: 'vertical' | 'horizontal';
-  targetY?: number; // Y level to mine at (horizontal mode)
+  targetY?: number;      // Primary Y level (horizontal mode) — miners work this first
+  yLevels?: number[];    // All queued Y levels for horizontal mining on this tile
 }
 
 export interface UnitAIDebugFlags {
