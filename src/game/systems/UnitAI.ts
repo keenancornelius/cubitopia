@@ -260,26 +260,35 @@ export class UnitAI {
         UnitAI.claimedMines.set(claimKey, unit.id);
 
         const dist = Pathfinder.heuristic(unit.position, mineTile);
-        if (dist <= 1) {
+        // Allow mining from 2 tiles away for ridge tiles (elevation >= 10) since adjacent may also be impassable
+        const mineData = map.tiles.get(claimKey);
+        const mineReach = (mineData && mineData.elevation >= 10) ? 2 : 1;
+        if (dist <= mineReach) {
           unit.state = UnitState.GATHERING;
           unit.command = { type: CommandType.GATHER, targetPosition: mineTile, targetUnitId: null };
           unit.gatherCooldown = 2.5;
         } else {
-          // For impassable tiles (ridges, elevation >= 10), pathfind to adjacent walkable tile
+          // For impassable tiles (ridges, elevation >= 10), pathfind to nearest walkable tile
+          // within 2 hex rings (ridges can be clustered, so ring-1 may all be impassable)
           const mineTileData = map.tiles.get(claimKey);
           if (mineTileData && mineTileData.elevation >= 10) {
-            const neighbors = Pathfinder.getHexNeighbors(mineTile);
             let bestAdj: HexCoord | null = null;
             let bestAdjDist = Infinity;
-            for (const n of neighbors) {
-              const nKey = `${n.q},${n.r}`;
-              const nTile = map.tiles.get(nKey);
-              if (nTile && nTile.terrain !== TerrainType.WATER && nTile.elevation < 10
-                  && !Pathfinder.blockedTiles.has(nKey)) {
-                const d = Pathfinder.heuristic(unit.position, n);
-                if (d < bestAdjDist) {
-                  bestAdjDist = d;
-                  bestAdj = n;
+            // Search ring 1 first, then ring 2 if needed
+            for (let ring = 1; ring <= 2 && !bestAdj; ring++) {
+              const candidates = ring === 1
+                ? Pathfinder.getHexNeighbors(mineTile)
+                : Pathfinder.getHexNeighbors(mineTile).flatMap(n => Pathfinder.getHexNeighbors(n));
+              for (const n of candidates) {
+                const nKey = `${n.q},${n.r}`;
+                const nTile = map.tiles.get(nKey);
+                if (nTile && nTile.terrain !== TerrainType.WATER && nTile.elevation < 10
+                    && !Pathfinder.blockedTiles.has(nKey)) {
+                  const d = Pathfinder.heuristic(unit.position, n);
+                  if (d < bestAdjDist) {
+                    bestAdjDist = d;
+                    bestAdj = n;
+                  }
                 }
               }
             }
@@ -329,24 +338,31 @@ export class UnitAI {
           const claimKey = `${autoMineTile.q},${autoMineTile.r}`;
           UnitAI.claimedMines.set(claimKey, unit.id);
 
+          const autoMineData = map.tiles.get(claimKey);
+          const autoMineReach = (autoMineData && autoMineData.elevation >= 10) ? 2 : 1;
           const dist = Pathfinder.heuristic(unit.position, autoMineTile);
-          if (dist <= 1) {
+          if (dist <= autoMineReach) {
             unit.state = UnitState.GATHERING;
             unit.command = { type: CommandType.GATHER, targetPosition: autoMineTile, targetUnitId: null };
             unit.gatherCooldown = 2.5;
           } else {
-            const neighbors = Pathfinder.getHexNeighbors(autoMineTile);
             let bestAdj: HexCoord | null = null;
             let bestAdjDist = Infinity;
-            for (const n of neighbors) {
-              const nKey = `${n.q},${n.r}`;
-              const nTile = map.tiles.get(nKey);
-              if (nTile && nTile.terrain !== TerrainType.WATER && nTile.elevation < 10
-                  && !Pathfinder.blockedTiles.has(nKey)) {
-                const d = Pathfinder.heuristic(unit.position, n);
-                if (d < bestAdjDist) {
-                  bestAdjDist = d;
-                  bestAdj = n;
+            // Search ring 1 first, then ring 2 for ridge tiles
+            for (let ring = 1; ring <= 2 && !bestAdj; ring++) {
+              const candidates = ring === 1
+                ? Pathfinder.getHexNeighbors(autoMineTile)
+                : Pathfinder.getHexNeighbors(autoMineTile).flatMap(n => Pathfinder.getHexNeighbors(n));
+              for (const n of candidates) {
+                const nKey = `${n.q},${n.r}`;
+                const nTile = map.tiles.get(nKey);
+                if (nTile && nTile.terrain !== TerrainType.WATER && nTile.elevation < 10
+                    && !Pathfinder.blockedTiles.has(nKey)) {
+                  const d = Pathfinder.heuristic(unit.position, n);
+                  if (d < bestAdjDist) {
+                    bestAdjDist = d;
+                    bestAdj = n;
+                  }
                 }
               }
             }
