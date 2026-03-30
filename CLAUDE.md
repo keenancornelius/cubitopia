@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3592 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew significantly during new buildings/resources/units overhaul (Smelter, Armory, Wizard Tower + iron/charcoal/steel/crystal). Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3000.
+- `src/main.ts` — **Central orchestrator (~3755 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew significantly during new buildings/resources/units overhaul (Smelter, Armory, Wizard Tower + iron/charcoal/steel/crystal). Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3000.
 - `src/game/systems/AIController.ts` — **AI brain (~945 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -94,7 +94,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~672 lines)**. Web Audio API synthesized SFX (21 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, level_up (triumphant brass fanfare), AoE splash, UI sounds.
-- `src/ui/HUD.ts` — **All UI (~2191 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/HUD.ts` — **All UI (~2175 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
 - `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
 - `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
@@ -306,7 +306,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3592 after buildings/resources/units overhaul — CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3755 after buildings/resources/units overhaul + nested menu system — CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)

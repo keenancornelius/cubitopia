@@ -211,41 +211,30 @@ class Cubitopia {
   private setupEventHandlers(): void {
     this.hud.onNewMap(() => this.regenerateMap());
 
-    // Wire up control panel buttons to same logic as keyboard
+    // Wire up control panel buttons — global actions + nested menu system
     this.hud.onBuildWalls(() => this.toggleBuildMode());
     this.hud.onHarvest(() => this.toggleHarvestMode());
     this.hud.onMine(() => this.toggleMineMode());
-    this.hud.onBarracks(() => this.toggleBuildingPlaceMode('barracks'));
-    this.hud.onForestry(() => this.toggleBuildingPlaceMode('forestry'));
-    this.hud.onMasonry(() => this.toggleBuildingPlaceMode('masonry'));
     this.hud.onSellWood(() => this.resourceManager.doSellWood());
-    this.hud.onSpawnWarrior(() => this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior'));
-    this.hud.onSpawnArcher(() => this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer'));
-    this.hud.onSpawnRider(() => this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider'));
-    this.hud.onSpawnLumberjack(() => this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack'));
-    this.hud.onSpawnBuilder(() => this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder'));
-    this.hud.onFarmhouse(() => this.toggleBuildingPlaceMode('farmhouse'));
-    this.hud.onSilo(() => this.toggleBuildingPlaceMode('silo'));
     this.hud.onFarmPatch(() => this.toggleFarmPatchMode());
-    this.hud.onPlantTree(() => this.togglePlantTreeMode());
-    this.hud.onSpawnVillager(() => this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager'));
     this.hud.onHelp(() => this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp());
-    this.hud.onPlantCrops(() => this.togglePlantCropsMode());
-    this.hud.onWorkshop(() => this.toggleBuildingPlaceMode('workshop'));
-    this.hud.onSpawnTrebuchet(() => this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet'));
-    this.hud.onCraftRope(() => this.resourceManager.craftRope());
-    this.hud.onSmelter(() => this.toggleBuildingPlaceMode('smelter'));
-    this.hud.onArmory(() => this.toggleBuildingPlaceMode('armory'));
-    this.hud.onWizardTower(() => this.toggleBuildingPlaceMode('wizard_tower'));
-    this.hud.onCraftCharcoal(() => this.resourceManager.craftCharcoal());
-    this.hud.onSmeltSteel(() => this.resourceManager.smeltSteel());
-    this.hud.onSpawnGreatsword(() => this.doSpawnQueueArmory(UnitType.GREATSWORD, 'Greatsword', 8, 2));
-    this.hud.onSpawnAssassin(() => this.doSpawnQueueArmory(UnitType.ASSASSIN, 'Assassin', 7, 1));
-    this.hud.onSpawnBerserker(() => this.doSpawnQueueArmory(UnitType.BERSERKER, 'Berserker', 7, 2));
-    this.hud.onSpawnShieldbearer(() => this.doSpawnQueueArmory(UnitType.SHIELDBEARER, 'Shieldbearer', 8, 3));
-    this.hud.onSpawnMage(() => this.doSpawnQueueWizardTower(UnitType.MAGE, 'Mage', 8, 2));
-    this.hud.onSpawnBattlemage(() => this.doSpawnQueueWizardTower(UnitType.BATTLEMAGE, 'Battlemage', 12, 3));
-    this.hud.onSpawnHealer(() => this.doSpawnQueueWizardTower(UnitType.HEALER, 'Healer', 6, 1));
+
+    // Nested menu callbacks
+    this.hud.onMenuCategory((catOrEncoded: number) => {
+      if (catOrEncoded >= 10) {
+        // Encoded category + index from tab click: cat=floor(n/10), idx=n%10
+        const cat = Math.floor(catOrEncoded / 10) as 1 | 2 | 3;
+        const idx = catOrEncoded % 10;
+        this.menuCategory = cat;
+        this.menuBuildingIndex = idx;
+        const building = Cubitopia.MENU_CATEGORIES[cat - 1].buildings[idx];
+        this.toggleBuildingPlaceMode(building.kind);
+        this.hud.updateNestedMenu(this.menuCategory, this.menuBuildingIndex, Cubitopia.MENU_CATEGORIES);
+      } else {
+        this.openMenuCategory(catOrEncoded as 1 | 2 | 3);
+      }
+    });
+    this.hud.onMenuAction((action: string) => this.executeMenuAction(action));
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
@@ -300,95 +289,94 @@ class Cubitopia {
       this.issueCommand(worldPos);
     });
 
-    // Keyboard shortcuts — delegate to shared methods
+    // Keyboard shortcuts — nested menu system + global actions
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
     window.addEventListener('keydown', (e) => {
       if (this.hud.isHelpVisible()) return;
 
-      if (e.key === 'b' || e.key === 'B') this.toggleBuildMode();
-      if (e.key === 'h' || e.key === 'H') this.toggleHarvestMode();
-      if (e.key === 'k' || e.key === 'K') this.toggleBuildingPlaceMode('barracks');
-      if (e.key === 'f' || e.key === 'F') this.toggleBuildingPlaceMode('forestry');
-      if (e.key === 'm' || e.key === 'M') this.toggleBuildingPlaceMode('masonry');
-      if (e.key === 'r' || e.key === 'R') {
-        // R rotates in any placement mode (walls auto-orient, no rotation needed)
-        if (this.wallBuildMode) {
-          // Walls connect automatically — no manual rotation
-        } else if (this.barracksPlaceMode) {
-          this.barracksRotation = this.barracksRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.barracksRotation;
-        } else if (this.forestryPlaceMode) {
-          this.forestryRotation = this.forestryRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.forestryRotation;
-        } else if (this.masonryPlaceMode) {
-          this.masonryRotation = this.masonryRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.masonryRotation;
-        } else if (this.farmhousePlaceMode) {
-          this.farmhouseRotation = this.farmhouseRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.farmhouseRotation;
-        } else if (this.siloPlaceMode) {
-          this.siloRotation = this.siloRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.siloRotation;
-        } else if (this.workshopPlaceMode) {
-          this.workshopRotation = this.workshopRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.workshopRotation;
-        } else if (this.smelterPlaceMode) {
-          this.smelterRotation = this.smelterRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.smelterRotation;
-        } else if (this.armoryPlaceMode) {
-          this.armoryRotation = this.armoryRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.armoryRotation;
-        } else if (this.wizardTowerPlaceMode) {
-          this.wizardTowerRotation = this.wizardTowerRotation === 0 ? Math.PI / 2 : 0;
-          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.wizardTowerRotation;
-        }
+      // --- Nested Menu System ---
+      // 1/2/3 open menu categories
+      if (e.key === '1' && !e.shiftKey) { this.openMenuCategory(1); return; }
+      if (e.key === '2' && !e.shiftKey) { this.openMenuCategory(2); return; }
+      if (e.key === '3' && !e.shiftKey) { this.openMenuCategory(3); return; }
+
+      // Tab exits menu
+      if (e.key === 'Tab' && this.menuCategory !== 0) {
+        e.preventDefault();
+        this.closeMenu();
+        return;
       }
-      if (e.key === 'g' || e.key === 'G') this.resourceManager.doSellWood();
-      if (e.key === 'p' || e.key === 'P') this.toggleBuildingPlaceMode('farmhouse');
-      if (e.key === 'i' || e.key === 'I') this.toggleBuildingPlaceMode('silo');
-      if (e.key === 'w' || e.key === 'W') this.toggleBuildingPlaceMode('workshop');
-      if (e.key === 'j' || e.key === 'J') this.toggleFarmPatchMode();
-      if (e.key === 't' || e.key === 'T') this.togglePlantTreeMode();
-      if (e.key === 'n' || e.key === 'N') this.toggleMineMode();
-      if (e.key === 'c' || e.key === 'C') this.togglePlantCropsMode();
-      // Barracks queuing (keys 1-5)
-      if (e.key === '1' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior');
-      if (e.key === '2' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer');
-      if (e.key === '3' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider');
-      if (e.key === '4' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.SCOUT, 6, 'Scout');
-      if (e.key === '5' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.PALADIN, 12, 'Paladin');
 
-      // Shift-key spawning for other buildings
-      if (e.shiftKey && e.key === '3') this.doSpawnQueueWorkshop(UnitType.CATAPULT, 'Catapult');
-      if (e.shiftKey && e.key === '4') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
-      if (e.shiftKey && e.key === '5') this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack');
-      if (e.shiftKey && e.key === '6') this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder');
-      if (e.shiftKey && e.key === '7') this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager');
-      if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
+      // Shift cycles buildings within active menu
+      if ((e.key === 'Shift') && this.menuCategory !== 0) {
+        this.cycleBuildingInMenu(1);
+        return;
+      }
 
-      // Building placement hotkeys
-      if (e.key === 'e' || e.key === 'E') this.toggleBuildingPlaceMode('smelter');
-      if (e.key === 'a' || e.key === 'A') this.toggleBuildingPlaceMode('armory');
-      if (e.key === 'y' || e.key === 'Y') this.toggleBuildingPlaceMode('wizard_tower');
+      // QWERTY actions when menu is open
+      if (this.menuCategory !== 0) {
+        const keyUpper = e.key.toUpperCase();
+        const qwertyKeys = ['Q', 'W', 'E', 'R', 'T', 'Y'];
+        const qIdx = qwertyKeys.indexOf(keyUpper);
+        if (qIdx >= 0) {
+          const cat = Cubitopia.MENU_CATEGORIES[this.menuCategory - 1];
+          const building = cat.buildings[this.menuBuildingIndex];
+          if (qIdx < building.actions.length) {
+            this.executeMenuAction(building.actions[qIdx].action);
+          }
+          return;
+        }
+        // R rotates building in placement mode (doesn't consume if not in QWERTY range)
+        // Fall through to rotation handler below
+      }
 
-      // Crafting hotkeys
-      if (e.key === 'x' || e.key === 'X') this.resourceManager.craftCharcoal();
-      if (e.key === 'z' || e.key === 'Z') this.resourceManager.smeltSteel();
+      // R rotates in any placement mode
+      if (e.key === 'r' || e.key === 'R') {
+        // Find which placement mode is active and toggle its rotation
+        const placeModes: { flag: string; rotation: string }[] = [
+          { flag: 'barracksPlaceMode', rotation: 'barracksRotation' },
+          { flag: 'forestryPlaceMode', rotation: 'forestryRotation' },
+          { flag: 'masonryPlaceMode', rotation: 'masonryRotation' },
+          { flag: 'farmhousePlaceMode', rotation: 'farmhouseRotation' },
+          { flag: 'siloPlaceMode', rotation: 'siloRotation' },
+          { flag: 'workshopPlaceMode', rotation: 'workshopRotation' },
+          { flag: 'smelterPlaceMode', rotation: 'smelterRotation' },
+          { flag: 'armoryPlaceMode', rotation: 'armoryRotation' },
+          { flag: 'wizardTowerPlaceMode', rotation: 'wizardTowerRotation' },
+        ];
+        for (const pm of placeModes) {
+          if ((this as any)[pm.flag]) {
+            (this as any)[pm.rotation] = (this as any)[pm.rotation] === 0 ? Math.PI / 2 : 0;
+            if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = (this as any)[pm.rotation];
+            break;
+          }
+        }
+        // If we're in menu and R is also a QWERTY action, it was already handled above
+        if (this.menuCategory !== 0) return;
+      }
 
-      // Unit spawning: Armory (keys 6-9) — auto-opens build menu if no armory
-      if (e.key === '6' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.GREATSWORD, 'Greatsword', 8, 2);
-      if (e.key === '7' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.ASSASSIN, 'Assassin', 7, 1);
-      if (e.key === '8' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.BERSERKER, 'Berserker', 7, 2);
-      if (e.key === '9' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.SHIELDBEARER, 'Shieldbearer', 8, 3);
-
-      // Unit spawning: Wizard Tower (key 0, Shift+1, Shift+2) — auto-opens build menu if no tower
-      if (e.key === '0' && !e.shiftKey) this.doSpawnQueueWizardTower(UnitType.MAGE, 'Mage', 8, 2);
-      if (e.shiftKey && e.key === '1') this.doSpawnQueueWizardTower(UnitType.BATTLEMAGE, 'Battlemage', 12, 3);
-      if (e.shiftKey && e.key === '2') this.doSpawnQueueWizardTower(UnitType.HEALER, 'Healer', 6, 1);
+      // --- Global actions (always available, close menu if open) ---
+      const globalAction = (action: () => void) => {
+        if (this.menuCategory !== 0) { this.menuCategory = 0; this.menuBuildingIndex = 0; this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES); }
+        action();
+      };
+      if (e.key === 'b' || e.key === 'B') globalAction(() => this.toggleBuildMode());
+      if (e.key === 'h' || e.key === 'H') globalAction(() => this.toggleHarvestMode());
+      if (e.key === 'n' || e.key === 'N') globalAction(() => this.toggleMineMode());
+      if (e.key === 'j' || e.key === 'J') globalAction(() => this.toggleFarmPatchMode());
+      if (e.key === 'g' || e.key === 'G') globalAction(() => this.resourceManager.doSellWood());
 
       if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
     });
+
+    // Scroll wheel cycles buildings in active menu
+    window.addEventListener('wheel', (e) => {
+      if (this.menuCategory !== 0) {
+        e.preventDefault();
+        this.cycleBuildingInMenu(e.deltaY > 0 ? 1 : -1);
+      }
+    }, { passive: false });
 
     // Ghost preview on mousemove (for all placement modes)
     canvasEl.addEventListener('mousemove', (e) => {
@@ -2922,6 +2910,181 @@ class Cubitopia {
   private charcoalStockpile: number[] = [0, 0];
   private steelStockpile: number[] = [0, 0];
   private crystalStockpile: number[] = [0, 0];
+
+  // --- Nested Menu System ---
+  // Category 0 = none, 1 = combat, 2 = economy, 3 = crafting
+  private menuCategory: 0 | 1 | 2 | 3 = 0;
+  private menuBuildingIndex = 0; // which building within the category is selected
+
+  // Data-driven menu config: category → array of buildings, each with QWERTY actions
+  private static readonly MENU_CATEGORIES: {
+    name: string;
+    buildings: {
+      kind: BuildingKind;
+      label: string;
+      color: string;
+      actions: { key: string; label: string; action: string; }[];
+    }[];
+  }[] = [
+    { // Category 1: Combat
+      name: '⚔️ COMBAT',
+      buildings: [
+        {
+          kind: 'barracks', label: 'Barracks', color: '#e67e22',
+          actions: [
+            { key: 'Q', label: 'Warrior (5g)', action: 'spawn:barracks:WARRIOR:5' },
+            { key: 'W', label: 'Archer (8g)', action: 'spawn:barracks:ARCHER:8' },
+            { key: 'E', label: 'Rider (10g)', action: 'spawn:barracks:RIDER:10' },
+            { key: 'R', label: 'Scout (6g)', action: 'spawn:barracks:SCOUT:6' },
+            { key: 'T', label: 'Paladin (12g)', action: 'spawn:barracks:PALADIN:12' },
+          ],
+        },
+        {
+          kind: 'armory', label: 'Armory', color: '#708090',
+          actions: [
+            { key: 'Q', label: 'Greatsword (8g+2s)', action: 'spawn:armory:GREATSWORD:8:2' },
+            { key: 'W', label: 'Assassin (7g+1s)', action: 'spawn:armory:ASSASSIN:7:1' },
+            { key: 'E', label: 'Berserker (7g+2s)', action: 'spawn:armory:BERSERKER:7:2' },
+            { key: 'R', label: 'Shieldbearer (8g+3s)', action: 'spawn:armory:SHIELDBEARER:8:3' },
+          ],
+        },
+        {
+          kind: 'wizard_tower', label: 'Wizard Tower', color: '#6a0dad',
+          actions: [
+            { key: 'Q', label: 'Mage (8g+2c)', action: 'spawn:wizard_tower:MAGE:8:2' },
+            { key: 'W', label: 'Battlemage (12g+3c)', action: 'spawn:wizard_tower:BATTLEMAGE:12:3' },
+            { key: 'E', label: 'Healer (6g+1c)', action: 'spawn:wizard_tower:HEALER:6:1' },
+          ],
+        },
+      ],
+    },
+    { // Category 2: Economy
+      name: '🏭 ECONOMY',
+      buildings: [
+        {
+          kind: 'forestry', label: 'Forestry', color: '#6b8e23',
+          actions: [
+            { key: 'Q', label: 'Lumberjack (3w)', action: 'spawn:forestry:LUMBERJACK:3' },
+            { key: 'W', label: 'Chop Trees', action: 'action:harvest' },
+            { key: 'E', label: 'Plant Trees', action: 'action:plantTree' },
+          ],
+        },
+        {
+          kind: 'masonry', label: 'Masonry', color: '#808080',
+          actions: [
+            { key: 'Q', label: 'Builder (3w)', action: 'spawn:masonry:BUILDER:3' },
+            { key: 'W', label: 'Mine Terrain', action: 'action:mine' },
+            { key: 'E', label: 'Build Walls', action: 'action:walls' },
+          ],
+        },
+        {
+          kind: 'farmhouse', label: 'Farmhouse', color: '#daa520',
+          actions: [
+            { key: 'Q', label: 'Villager (3w)', action: 'spawn:farmhouse:VILLAGER:3' },
+            { key: 'W', label: 'Farm/Hay', action: 'action:farmPatch' },
+            { key: 'E', label: 'Plant Crops', action: 'action:plantCrops' },
+          ],
+        },
+        {
+          kind: 'workshop', label: 'Workshop', color: '#5d4037',
+          actions: [
+            { key: 'Q', label: 'Catapult', action: 'spawn:workshop:CATAPULT' },
+            { key: 'W', label: 'Trebuchet', action: 'spawn:workshop:TREBUCHET' },
+            { key: 'E', label: 'Craft Rope', action: 'craft:rope' },
+            { key: 'R', label: 'Sell Wood', action: 'action:sellWood' },
+          ],
+        },
+      ],
+    },
+    { // Category 3: Crafting & Components
+      name: '⚒️ CRAFTING',
+      buildings: [
+        {
+          kind: 'smelter', label: 'Smelter', color: '#8b4513',
+          actions: [
+            { key: 'Q', label: 'Smelt Steel (2i+1c)', action: 'craft:steel' },
+            { key: 'W', label: 'Craft Charcoal (3w+2c)', action: 'craft:charcoal' },
+          ],
+        },
+        {
+          kind: 'silo', label: 'Silo', color: '#c0c0c0',
+          actions: [],
+        },
+      ],
+    },
+  ];
+
+  private openMenuCategory(cat: 1 | 2 | 3): void {
+    if (this.menuCategory === cat) {
+      // Already in this category — close it
+      this.closeMenu();
+      return;
+    }
+    this.menuCategory = cat;
+    this.menuBuildingIndex = 0;
+    // Activate placement mode for the first building in the category
+    const building = Cubitopia.MENU_CATEGORIES[cat - 1].buildings[0];
+    this.toggleBuildingPlaceMode(building.kind);
+    this.sound.play('ui_click');
+    this.hud.updateNestedMenu(this.menuCategory, this.menuBuildingIndex, Cubitopia.MENU_CATEGORIES);
+  }
+
+  private closeMenu(): void {
+    this.menuCategory = 0;
+    this.menuBuildingIndex = 0;
+    this.clearAllModes();
+    this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES);
+  }
+
+  private cycleBuildingInMenu(direction: number): void {
+    if (this.menuCategory === 0) return;
+    const cat = Cubitopia.MENU_CATEGORIES[this.menuCategory - 1];
+    const savedCat = this.menuCategory;
+    this.menuBuildingIndex = (this.menuBuildingIndex + direction + cat.buildings.length) % cat.buildings.length;
+    const building = cat.buildings[this.menuBuildingIndex];
+    this.toggleBuildingPlaceMode(building.kind);
+    // Restore menu state (toggleBuildingPlaceMode calls clearAllModes internally — doesn't touch menu vars)
+    this.menuCategory = savedCat;
+    this.sound.play('ui_hover');
+    this.hud.updateNestedMenu(this.menuCategory, this.menuBuildingIndex, Cubitopia.MENU_CATEGORIES);
+  }
+
+  private executeMenuAction(actionStr: string): void {
+    const parts = actionStr.split(':');
+    if (parts[0] === 'spawn') {
+      const buildingKey = parts[1];
+      const unitName = parts[2];
+      const unitType = (UnitType as any)[unitName] as UnitType;
+      if (unitType === undefined) return;
+
+      if (buildingKey === 'armory') {
+        const goldCost = parseInt(parts[3]);
+        const steelCost = parseInt(parts[4]);
+        this.doSpawnQueueArmory(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase(), goldCost, steelCost);
+      } else if (buildingKey === 'wizard_tower') {
+        const goldCost = parseInt(parts[3]);
+        const crystalCost = parseInt(parts[4]);
+        this.doSpawnQueueWizardTower(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase(), goldCost, crystalCost);
+      } else if (buildingKey === 'workshop') {
+        this.doSpawnQueueWorkshop(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase());
+      } else {
+        const cost = parseInt(parts[3]);
+        this.doSpawnQueueGeneric(buildingKey, unitType, cost, unitName.charAt(0) + unitName.slice(1).toLowerCase());
+      }
+    } else if (parts[0] === 'craft') {
+      if (parts[1] === 'rope') this.resourceManager.craftRope();
+      else if (parts[1] === 'steel') this.resourceManager.smeltSteel();
+      else if (parts[1] === 'charcoal') this.resourceManager.craftCharcoal();
+    } else if (parts[0] === 'action') {
+      if (parts[1] === 'harvest') this.toggleHarvestMode();
+      else if (parts[1] === 'mine') this.toggleMineMode();
+      else if (parts[1] === 'walls') this.toggleBuildMode();
+      else if (parts[1] === 'farmPatch') this.toggleFarmPatchMode();
+      else if (parts[1] === 'plantTree') this.togglePlantTreeMode();
+      else if (parts[1] === 'plantCrops') this.togglePlantCropsMode();
+      else if (parts[1] === 'sellWood') this.resourceManager.doSellWood();
+    }
+  }
 
   // --- Rally Point System ---
   private rallyPoints: Map<string, HexCoord> = new Map(); // buildingKey → rally target

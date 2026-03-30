@@ -23,41 +23,13 @@ export class HUD {
   private helpVisible = false;
   private controlPanel: HTMLElement | null = null;
 
-  // Callbacks for control panel buttons
+  // Callbacks for control panel buttons (global actions + nested menu)
   private _onBuildWalls: (() => void) | null = null;
   private _onHarvest: (() => void) | null = null;
-  private _onBarracks: (() => void) | null = null;
-  private _onForestry: (() => void) | null = null;
-  private _onMasonry: (() => void) | null = null;
   private _onSellWood: (() => void) | null = null;
-  private _onSpawnWarrior: (() => void) | null = null;
-  private _onSpawnArcher: (() => void) | null = null;
-  private _onSpawnRider: (() => void) | null = null;
-  private _onSpawnLumberjack: (() => void) | null = null;
-  private _onSpawnBuilder: (() => void) | null = null;
-  private _onFarmhouse: (() => void) | null = null;
-  private _onSilo: (() => void) | null = null;
   private _onFarmPatch: (() => void) | null = null;
-  private _onPlantTree: (() => void) | null = null;
-  private _onSpawnVillager: (() => void) | null = null;
   private _onMine: (() => void) | null = null;
   private _onHelp: (() => void) | null = null;
-  private _onPlantCrops: (() => void) | null = null;
-  private _onWorkshop: (() => void) | null = null;
-  private _onSpawnTrebuchet: (() => void) | null = null;
-  private _onCraftRope: (() => void) | null = null;
-  private _onSmelter: (() => void) | null = null;
-  private _onArmory: (() => void) | null = null;
-  private _onWizardTower: (() => void) | null = null;
-  private _onCraftCharcoal: (() => void) | null = null;
-  private _onSmeltSteel: (() => void) | null = null;
-  private _onSpawnGreatsword: (() => void) | null = null;
-  private _onSpawnAssassin: (() => void) | null = null;
-  private _onSpawnBerserker: (() => void) | null = null;
-  private _onSpawnShieldbearer: (() => void) | null = null;
-  private _onSpawnMage: (() => void) | null = null;
-  private _onSpawnBattlemage: (() => void) | null = null;
-  private _onSpawnHealer: (() => void) | null = null;
   private _onSetStance: ((stance: UnitStance) => void) | null = null;
   private _onSetFormation: ((formation: FormationType) => void) | null = null;
   private _onRespawnUnits: (() => void) | null = null;
@@ -65,38 +37,10 @@ export class HUD {
 
   onBuildWalls(cb: () => void) { this._onBuildWalls = cb; }
   onHarvest(cb: () => void) { this._onHarvest = cb; }
-  onBarracks(cb: () => void) { this._onBarracks = cb; }
-  onForestry(cb: () => void) { this._onForestry = cb; }
-  onMasonry(cb: () => void) { this._onMasonry = cb; }
   onSellWood(cb: () => void) { this._onSellWood = cb; }
-  onMine(cb: () => void) { this._onMine = cb; }
-  onSpawnWarrior(cb: () => void) { this._onSpawnWarrior = cb; }
-  onSpawnArcher(cb: () => void) { this._onSpawnArcher = cb; }
-  onSpawnRider(cb: () => void) { this._onSpawnRider = cb; }
-  onSpawnLumberjack(cb: () => void) { this._onSpawnLumberjack = cb; }
-  onSpawnBuilder(cb: () => void) { this._onSpawnBuilder = cb; }
-  onFarmhouse(cb: () => void) { this._onFarmhouse = cb; }
-  onSilo(cb: () => void) { this._onSilo = cb; }
   onFarmPatch(cb: () => void) { this._onFarmPatch = cb; }
-  onPlantTree(cb: () => void) { this._onPlantTree = cb; }
-  onSpawnVillager(cb: () => void) { this._onSpawnVillager = cb; }
+  onMine(cb: () => void) { this._onMine = cb; }
   onHelp(cb: () => void) { this._onHelp = cb; }
-  onPlantCrops(cb: () => void) { this._onPlantCrops = cb; }
-  onWorkshop(cb: () => void) { this._onWorkshop = cb; }
-  onSpawnTrebuchet(cb: () => void) { this._onSpawnTrebuchet = cb; }
-  onCraftRope(cb: () => void) { this._onCraftRope = cb; }
-  onSmelter(cb: () => void) { this._onSmelter = cb; }
-  onArmory(cb: () => void) { this._onArmory = cb; }
-  onWizardTower(cb: () => void) { this._onWizardTower = cb; }
-  onCraftCharcoal(cb: () => void) { this._onCraftCharcoal = cb; }
-  onSmeltSteel(cb: () => void) { this._onSmeltSteel = cb; }
-  onSpawnGreatsword(cb: () => void) { this._onSpawnGreatsword = cb; }
-  onSpawnAssassin(cb: () => void) { this._onSpawnAssassin = cb; }
-  onSpawnBerserker(cb: () => void) { this._onSpawnBerserker = cb; }
-  onSpawnShieldbearer(cb: () => void) { this._onSpawnShieldbearer = cb; }
-  onSpawnMage(cb: () => void) { this._onSpawnMage = cb; }
-  onSpawnBattlemage(cb: () => void) { this._onSpawnBattlemage = cb; }
-  onSpawnHealer(cb: () => void) { this._onSpawnHealer = cb; }
 
   /** Update formation button highlights without rebuilding the entire panel */
   updateFormationHighlight(formation: FormationType): void {
@@ -153,6 +97,11 @@ export class HUD {
     }
   }
 
+  // Nested menu dynamic content area
+  private menuContentArea: HTMLElement | null = null;
+  private _onMenuAction: ((action: string) => void) | null = null;
+  onMenuAction(cb: (action: string) => void) { this._onMenuAction = cb; }
+
   private createControlPanel(): HTMLElement {
     const panel = document.createElement('div');
     panel.style.cssText = `
@@ -160,7 +109,7 @@ export class HUD {
       background: rgba(0, 0, 0, 0.85); padding: 8px 10px; border-radius: 10px;
       border: 2px solid rgba(255,255,255,0.2);
       display: flex; flex-direction: column; gap: 2px;
-      pointer-events: auto; z-index: 101;
+      pointer-events: auto; z-index: 101; min-width: 220px;
     `;
 
     const makeBtn = (label: string, key: string, color: string, cb: () => void): HTMLElement => {
@@ -190,104 +139,30 @@ export class HUD {
       return header;
     };
 
-    // BUILDINGS section
-    panel.appendChild(makeHeaderBtn('📦 BUILDINGS'));
-    const buildingsRow1 = document.createElement('div');
-    buildingsRow1.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    buildingsRow1.appendChild(makeBtn('Walls', 'B', '#2980b9', () => this._onBuildWalls?.()));
-    buildingsRow1.appendChild(makeBtn('Barracks', 'K', '#e67e22', () => this._onBarracks?.()));
-    buildingsRow1.appendChild(makeBtn('Forestry', 'F', '#6b8e23', () => this._onForestry?.()));
-    panel.appendChild(buildingsRow1);
-    const buildingsRow2 = document.createElement('div');
-    buildingsRow2.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px;';
-    buildingsRow2.appendChild(makeBtn('Masonry', 'M', '#808080', () => this._onMasonry?.()));
-    buildingsRow2.appendChild(makeBtn('Farmhouse', 'P', '#daa520', () => this._onFarmhouse?.()));
-    buildingsRow2.appendChild(makeBtn('Silo', 'I', '#c0c0c0', () => this._onSilo?.()));
-    buildingsRow2.appendChild(makeBtn('Workshop', 'W', '#5d4037', () => this._onWorkshop?.()));
-    panel.appendChild(buildingsRow2);
-    const buildingsRow3 = document.createElement('div');
-    buildingsRow3.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px;';
-    buildingsRow3.appendChild(makeBtn('Smelter', 'E', '#8b4513', () => this._onSmelter?.()));
-    buildingsRow3.appendChild(makeBtn('Armory', 'A', '#708090', () => this._onArmory?.()));
-    buildingsRow3.appendChild(makeBtn('Wizard Tower', 'Y', '#6a0dad', () => this._onWizardTower?.()));
-    panel.appendChild(buildingsRow3);
+    // MENU CATEGORIES — top-level buttons
+    panel.appendChild(makeHeaderBtn('🏗️ MENUS'));
+    const menuRow = document.createElement('div');
+    menuRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    menuRow.appendChild(makeBtn('Combat', '1', '#c0392b', () => this._onMenuCategory?.(1)));
+    menuRow.appendChild(makeBtn('Economy', '2', '#27ae60', () => this._onMenuCategory?.(2)));
+    menuRow.appendChild(makeBtn('Crafting', '3', '#f39c12', () => this._onMenuCategory?.(3)));
+    panel.appendChild(menuRow);
 
-    // UNITS section - Barracks units
-    panel.appendChild(makeHeaderBtn('⚔️ BARRACKS'));
-    const unitsRow1 = document.createElement('div');
-    unitsRow1.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    unitsRow1.appendChild(makeBtn('Warrior', '1', '#c0392b', () => this._onSpawnWarrior?.()));
-    unitsRow1.appendChild(makeBtn('Archer', '2', '#8e44ad', () => this._onSpawnArcher?.()));
-    unitsRow1.appendChild(makeBtn('Rider', '3', '#d35400', () => this._onSpawnRider?.()));
-    panel.appendChild(unitsRow1);
+    // Dynamic menu content area (populated by updateNestedMenu)
+    this.menuContentArea = document.createElement('div');
+    this.menuContentArea.id = 'nested-menu-content';
+    panel.appendChild(this.menuContentArea);
 
-    // FORESTRY section
-    panel.appendChild(makeHeaderBtn('🌲 FORESTRY'));
-    const forestryRow = document.createElement('div');
-    forestryRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    forestryRow.appendChild(makeBtn('Lumberjack', '4', '#8B4513', () => this._onSpawnLumberjack?.()));
-    forestryRow.appendChild(makeBtn('Chop Trees', 'H', '#27ae60', () => this._onHarvest?.()));
-    forestryRow.appendChild(makeBtn('Plant Trees', 'T', '#228B22', () => this._onPlantTree?.()));
-    panel.appendChild(forestryRow);
-
-    // MASONRY section
-    panel.appendChild(makeHeaderBtn('🛠️ MASONRY'));
-    const masonryRow = document.createElement('div');
-    masonryRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    masonryRow.appendChild(makeBtn('Builder', '5', '#b8860b', () => this._onSpawnBuilder?.()));
-    masonryRow.appendChild(makeBtn('Mine', 'N', '#ff8c00', () => this._onMine?.()));
-    panel.appendChild(masonryRow);
-
-    // FARMING section
-    panel.appendChild(makeHeaderBtn('🌾 FARMING'));
-    const farmRow = document.createElement('div');
-    farmRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    farmRow.appendChild(makeBtn('Villager', '6', '#daa520', () => this._onSpawnVillager?.()));
-    farmRow.appendChild(makeBtn('Farm/Hay', 'J', '#8bc34a', () => this._onFarmPatch?.()));
-    farmRow.appendChild(makeBtn('Plant Crops', 'C', '#228B22', () => this._onPlantCrops?.()));
-    panel.appendChild(farmRow);
-
-    // WORKSHOP section
-    panel.appendChild(makeHeaderBtn('🔧 WORKSHOP'));
-    const workshopRow = document.createElement('div');
-    workshopRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    workshopRow.appendChild(makeBtn('Trebuchet', '7', '#5d4037', () => this._onSpawnTrebuchet?.()));
-    workshopRow.appendChild(makeBtn('Craft Rope', 'L', '#c9a96e', () => this._onCraftRope?.()));
-    panel.appendChild(workshopRow);
-
-    // ARMORY section
-    panel.appendChild(makeHeaderBtn('🗡️ ARMORY'));
-    const armoryRow = document.createElement('div');
-    armoryRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    armoryRow.appendChild(makeBtn('Greatsword', '6', '#b22222', () => this._onSpawnGreatsword?.()));
-    armoryRow.appendChild(makeBtn('Assassin', '7', '#2f4f4f', () => this._onSpawnAssassin?.()));
-    armoryRow.appendChild(makeBtn('Berserker', '8', '#cc3300', () => this._onSpawnBerserker?.()));
-    armoryRow.appendChild(makeBtn('Shieldbearer', '9', '#4682b4', () => this._onSpawnShieldbearer?.()));
-    panel.appendChild(armoryRow);
-
-    // WIZARD TOWER section
-    panel.appendChild(makeHeaderBtn('🔮 WIZARD TOWER'));
-    const wizardRow = document.createElement('div');
-    wizardRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    wizardRow.appendChild(makeBtn('Mage', '0', '#7c3aed', () => this._onSpawnMage?.()));
-    wizardRow.appendChild(makeBtn('Battlemage', '⇧1', '#9333ea', () => this._onSpawnBattlemage?.()));
-    wizardRow.appendChild(makeBtn('Healer', '⇧2', '#22c55e', () => this._onSpawnHealer?.()));
-    panel.appendChild(wizardRow);
-
-    // CRAFTING section
-    panel.appendChild(makeHeaderBtn('⚒️ CRAFTING'));
-    const craftRow = document.createElement('div');
-    craftRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    craftRow.appendChild(makeBtn('Charcoal', 'X', '#333', () => this._onCraftCharcoal?.()));
-    craftRow.appendChild(makeBtn('Steel', 'Z', '#71797e', () => this._onSmeltSteel?.()));
-    panel.appendChild(craftRow);
-
-    // ECONOMY section
-    panel.appendChild(makeHeaderBtn('💰 ECONOMY'));
-    const econRow = document.createElement('div');
-    econRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    econRow.appendChild(makeBtn('Sell Wood', 'G', '#f39c12', () => this._onSellWood?.()));
-    panel.appendChild(econRow);
+    // GLOBAL ACTIONS — always visible
+    panel.appendChild(makeHeaderBtn('🎯 ACTIONS'));
+    const actionsRow = document.createElement('div');
+    actionsRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    actionsRow.appendChild(makeBtn('Walls', 'B', '#2980b9', () => this._onBuildWalls?.()));
+    actionsRow.appendChild(makeBtn('Chop', 'H', '#27ae60', () => this._onHarvest?.()));
+    actionsRow.appendChild(makeBtn('Mine', 'N', '#ff8c00', () => this._onMine?.()));
+    actionsRow.appendChild(makeBtn('Farm', 'J', '#8bc34a', () => this._onFarmPatch?.()));
+    actionsRow.appendChild(makeBtn('Sell', 'G', '#f39c12', () => this._onSellWood?.()));
+    panel.appendChild(actionsRow);
 
     // HELP section
     panel.appendChild(makeHeaderBtn('❓ HELP'));
@@ -298,6 +173,102 @@ export class HUD {
 
     this.container.appendChild(panel);
     return panel;
+  }
+
+  // Callback for menu category buttons
+  private _onMenuCategory: ((cat: number) => void) | null = null;
+  onMenuCategory(cb: (cat: number) => void) { this._onMenuCategory = cb; }
+
+  /** Update the nested menu panel to show current category, building, and actions */
+  updateNestedMenu(category: 0 | 1 | 2 | 3, buildingIndex: number, categories: {
+    name: string;
+    buildings: {
+      kind: string;
+      label: string;
+      color: string;
+      actions: { key: string; label: string; action: string; }[];
+    }[];
+  }[]): void {
+    if (!this.menuContentArea) return;
+    this.menuContentArea.innerHTML = '';
+
+    if (category === 0) return; // No menu open
+
+    const cat = categories[category - 1];
+    const building = cat.buildings[buildingIndex];
+
+    // Category header with building selector
+    const header = document.createElement('div');
+    header.style.cssText = `
+      color: #fff; font-size: 11px; font-weight: bold; text-transform: uppercase;
+      margin-top: 6px; margin-bottom: 4px; letter-spacing: 1px; padding: 4px 6px;
+      background: rgba(255,255,255,0.08); border-radius: 6px;
+      display: flex; justify-content: space-between; align-items: center;
+    `;
+    header.innerHTML = `
+      <span>${cat.name}</span>
+      <span style="font-size:9px;color:#888;">Tab to exit · Scroll/Shift to cycle</span>
+    `;
+    this.menuContentArea.appendChild(header);
+
+    // Building tabs (shows all buildings in category, highlights active one)
+    const tabsRow = document.createElement('div');
+    tabsRow.style.cssText = 'display: flex; gap: 3px; margin-bottom: 4px;';
+    cat.buildings.forEach((b, i) => {
+      const tab = document.createElement('button');
+      const isActive = i === buildingIndex;
+      tab.style.cssText = `
+        background: ${isActive ? `linear-gradient(135deg, ${b.color}, ${this.darken(b.color)})` : 'rgba(40,40,40,0.8)'};
+        color: ${isActive ? '#fff' : '#888'}; border: 1px solid ${isActive ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)'};
+        padding: 4px 8px; font-size: 10px; font-family: 'Courier New', monospace;
+        font-weight: bold; border-radius: 6px; cursor: pointer;
+        text-transform: uppercase; letter-spacing: 0.5px;
+        ${isActive ? `box-shadow: 0 0 8px ${b.color}40;` : ''}
+      `;
+      tab.textContent = b.label;
+      tab.addEventListener('click', () => {
+        // Clicking a tab switches to that building
+        this._onMenuCategory?.(category * 10 + i); // Encode category + index
+      });
+      tabsRow.appendChild(tab);
+    });
+    this.menuContentArea.appendChild(tabsRow);
+
+    // Placement hint
+    const placeHint = document.createElement('div');
+    placeHint.style.cssText = `
+      font-size: 10px; color: ${building.color}; padding: 2px 4px; margin-bottom: 3px;
+      border-left: 2px solid ${building.color};
+    `;
+    placeHint.textContent = `Click to place ${building.label} · R to rotate`;
+    this.menuContentArea.appendChild(placeHint);
+
+    // Action buttons (QWERTY)
+    if (building.actions.length > 0) {
+      const actionsLabel = document.createElement('div');
+      actionsLabel.style.cssText = 'color: #aaa; font-size: 9px; text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; padding-left: 4px;';
+      actionsLabel.textContent = `${building.label} Actions`;
+      this.menuContentArea.appendChild(actionsLabel);
+
+      const actionsRow = document.createElement('div');
+      actionsRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap; margin-top: 2px;';
+      building.actions.forEach(a => {
+        const btn = document.createElement('button');
+        btn.style.cssText = `
+          background: linear-gradient(135deg, ${building.color}cc, ${this.darken(building.color)});
+          color: white; border: 1px solid rgba(255,255,255,0.2);
+          padding: 4px 7px; font-size: 10px; font-family: 'Courier New', monospace;
+          font-weight: bold; border-radius: 5px; cursor: pointer;
+          text-align: left; white-space: nowrap;
+        `;
+        btn.innerHTML = `<span style="background:rgba(0,0,0,0.4);padding:1px 4px;border-radius:3px;margin-right:3px;font-size:9px;">${a.key}</span>${a.label}`;
+        btn.addEventListener('click', () => this._onMenuAction?.(a.action));
+        btn.addEventListener('mouseenter', () => { btn.style.filter = 'brightness(1.3)'; });
+        btn.addEventListener('mouseleave', () => { btn.style.filter = 'brightness(1)'; });
+        actionsRow.appendChild(btn);
+      });
+      this.menuContentArea.appendChild(actionsRow);
+    }
   }
 
   private darken(hex: string): string {
@@ -1802,31 +1773,44 @@ export class HUD {
           </div>
         </div>
 
-        <!-- ACTIONS -->
+        <!-- NESTED MENU SYSTEM -->
         <div class="section">
-          <div class="section-title" style="color: #f0c040;">🎮 Actions</div>
-          <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Click & drag to mark forest tiles. Lumberjacks will chop them and carry wood to stockpile.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Click plains tiles to create farm plots, or mark tall grass for hay. Villagers will harvest food.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Click & drag to mark terrain for mining. Builders extract stone or iron from mountains (iron from orange ore veins), clay from sand.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Builders construct walls (1 stone each). Shift+click for gates (2 stone). <span class="key">R</span> to rotate.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#228B22;">●</span> <span><span class="key">T</span> <strong>Plant Trees</strong> — Click plains to plant saplings (1 wood). Grow into harvestable forests.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#666;">●</span> <span><span class="key">X</span> <strong>Craft Charcoal</strong> — 3 wood + 2 clay → 2 charcoal (instant).</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#71797e;">●</span> <span><span class="key">Z</span> <strong>Smelt Steel</strong> — 2 iron + 1 charcoal → 1 steel (requires Smelter).</span></div>
+          <div class="section-title" style="color: #f0c040;">🎮 Menu System</div>
+          <div style="margin-bottom: 8px; font-size: 12px; color: #ccc;">
+            Press a number key to open a building category. <strong>Scroll wheel</strong> or <strong>Shift</strong> cycles buildings.
+            <strong>Click</strong> to place. <strong>QWERTY</strong> keys queue units/actions. <strong>Tab</strong> to exit.
+          </div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #c0392b; margin-bottom: 4px; margin-top: 8px;">
+            <span class="key">1</span> COMBAT BUILDINGS
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (10w) — Q: Warrior 5g · W: Archer 8g · E: Rider 10g · R: Scout 6g · T: Paladin 12g</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><strong style="color:#708090;">Armory</strong> (10w+5s+3 steel) — Q: Greatsword 8g+2s · W: Assassin 7g+1s · E: Berserker 7g+2s · R: Shieldbearer 8g+3s</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (10w+5s+3 crystal) — Q: Mage 8g+2c · W: Battlemage 12g+3c · E: Healer 6g+1c</span></div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-bottom: 4px; margin-top: 8px;">
+            <span class="key">2</span> ECONOMY BUILDINGS
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><strong style="color:#6b8e23;">Forestry</strong> (8w) — Q: Lumberjack 3w · W: Chop Trees · E: Plant Trees</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#808080;">●</span> <span><strong style="color:#808080;">Masonry</strong> (8w) — Q: Builder 3w · W: Mine Terrain · E: Build Walls</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><strong style="color:#daa520;">Farmhouse</strong> (6w) — Q: Villager 3w · W: Farm/Hay · E: Plant Crops</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><strong style="color:#5d4037;">Workshop</strong> (12w+4s) — Q: Catapult · W: Trebuchet · E: Craft Rope · R: Sell Wood</span></div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #f39c12; margin-bottom: 4px; margin-top: 8px;">
+            <span class="key">3</span> CRAFTING BUILDINGS
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><strong style="color:#8b4513;">Smelter</strong> (8w+6s) — Q: Smelt Steel (2 iron + 1 charcoal) · W: Craft Charcoal (3 wood + 2 clay)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><strong style="color:#c0c0c0;">Silo</strong> (5w) — Extra food storage capacity.</span></div>
         </div>
 
-        <!-- BUILDINGS -->
+        <!-- GLOBAL ACTIONS -->
         <div class="section">
-          <div class="section-title" style="color: #e67e22;">🏗️ Buildings</div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><span class="key">K</span> <strong>Barracks</strong> — 10 wood. Spawns combat units (Warriors, Archers, Riders) for gold.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><span class="key">F</span> <strong>Forestry</strong> — 8 wood. Spawns Lumberjacks for wood.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#808080;">●</span> <span><span class="key">M</span> <strong>Masonry</strong> — 8 wood. Spawns Builders for wood.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><span class="key">P</span> <strong>Farmhouse</strong> — 6 wood. Spawns Villagers for wood.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><span class="key">I</span> <strong>Silo</strong> — 5 wood. Extra food storage capacity.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><span class="key">W</span> <strong>Workshop</strong> — 12 wood + 4 stone. Crafts rope and spawns Trebuchets.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><span class="key">E</span> <strong>Smelter</strong> — 8 wood + 6 stone. Required to smelt steel from iron + charcoal.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><span class="key">A</span> <strong>Armory</strong> — 10 wood + 5 stone + 3 steel. Spawns Greatsword, Assassin, Berserker, Shieldbearer.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><span class="key">Y</span> <strong>Wizard Tower</strong> — 10 wood + 5 stone + 3 crystal. Spawns Mage, Battlemage, Healer.</span></div>
+          <div class="section-title" style="color: #2980b9;">🎯 Global Actions (always available)</div>
+          <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining (stone, iron, clay).</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
         </div>
 
         <!-- RESOURCES -->
@@ -1876,7 +1860,7 @@ export class HUD {
         <div class="section">
           <div class="section-title" style="color: #3498db;">💡 Tips</div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Workers auto-harvest nearby resources when idle — no micro needed!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Crafting chain: mine iron → craft charcoal (X) → smelt steel (Z) at Smelter → build Armory units!</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Crafting chain: mine iron → craft charcoal (3→Smelter→W) → smelt steel (3→Smelter→Q) → build Armory units (1→Armory)!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
