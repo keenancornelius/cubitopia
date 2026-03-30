@@ -76,7 +76,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~4205 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew during zone capture + AI overhaul session. Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3500.
+- `src/main.ts` — **Central orchestrator (~3739 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Reduced from ~4205 after CombatEventHandler + SpawnQueueSystem extractions. Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated.
 - `src/game/systems/AIController.ts` — **AI brain (~1100 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, territory-first 3-phase commander (garrison → capture neutral zones → capital assault), guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~255 lines)**. Owns `placedBuildings[]`, `wallConnectable`, spawn index. Delegates mesh creation to BuildingMeshFactory. Syncs UnitAI.buildingPositions/buildingOwners on register/unregister.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~447 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
@@ -90,6 +90,8 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/ui/MenuController.ts` — **Main menu with map selector (~256 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~267 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
 - `src/game/systems/UnitAI.ts` — Unit behavior, stances, combat targeting, movement, worker AI, pathfinding commands. Static helpers: isUndergroundBase(), findAdjacentEnemyBuilding(). Tracks buildingPositions/buildingOwners for auto-attack.
+- `src/game/systems/CombatEventHandler.ts` — **Combat event processing (~308 lines)**. Processes all UnitAI events: damage visuals, projectiles, unit deaths, AoE splash, cleave knockback, XP/level-up, worker tasks (build/chop/mine/harvest), building damage. Uses `CombatEventOps` slim interface.
+- `src/game/systems/SpawnQueueSystem.ts` — **Spawn queue management (~430 lines)**. All 7 player spawn queues (barracks, forestry, masonry, farmhouse, workshop, armory, wizard_tower). Queue processing, cost deduction, unit creation, HUD updates. Uses `SpawnQueueOps` slim interface.
 - `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~254 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
 - `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~400 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Y-distance layer check for underground bases. Emits CaptureEvent on flip.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
@@ -291,14 +293,14 @@ We use two patterns depending on the code being extracted:
 | `MenuController.ts` | ~113 | Stateful subsystem (MenuCallbacks interface) |
 | `DebugController.ts` | ~173 | Stateful subsystem (DebugOps interface) |
 | Final compaction | ~23 | ASCII banner + stale comments |
+| `CombatEventHandler.ts` | ~225 | Stateful subsystem (CombatEventOps interface) |
+| `SpawnQueueSystem.ts` | ~240 | Stateful subsystem (SpawnQueueOps interface) |
 
 ### All Pre-Extracted Modules Now Wired
 No remaining files to wire. Future extractions will target new code regions.
 
 ### Next Extraction Targets (priority order)
-1. **CombatEventHandler** — event dispatch loop, damage application, unit death (~100+ lines)
-2. **InputManager** — keyboard/mouse handler breakout from `setupEventHandlers` (~200+ lines)
-3. **SpawnQueueSystem** — spawn processing loop, timer management, queue state (~100-150 lines)
+1. **InputManager** — keyboard/mouse handler breakout from `setupEventHandlers` (~700 lines). Blocked on: placement mode state consolidation (9 boolean flags + 9 rotation angles should become a single `PlacementState` object first). The ops interface would need 40+ methods — worth waiting until coupling is reduced.
 
 ### Shrink-Wrap Discipline (ENFORCED)
 **Every feature addition or refactor MUST leave main.ts the same size or smaller.**
@@ -307,7 +309,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~4205 after buildings/resources/units overhaul + zone capture + AI territory strategy. CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines back to ~3700.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3739 after CombatEventHandler + SpawnQueueSystem extractions recovered ~466 lines from the 4205-line peak.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -334,6 +336,24 @@ No remaining files to wire. Future extractions will target new code regions.
 - `onGrassHarvested(key, pos, elevation)` — call after villager harvests grass (resets to short stage)
 - Public fields `treeAge`, `grassAge`, `treeRegrowthTimers`, `grassGrowthTimers`, `clearedPlains` accessible for external reads
 - Syncs `UnitAI.grassTiles` automatically during grass growth updates
+
+### CombatEventHandler Integration Notes
+- Processes all events from `UnitAI.update()` return value via `processEvents(events)`
+- Uses `CombatEventOps` slim interface: unit lifecycle, UnitRenderer facade, audio, HUD, building/wall damage, worker task handlers
+- Handles godMode (revives player units), disableCombat flag, all debug flags for worker tasks
+- Deferred death: ranged kills set `_pendingKillVisual` flag, resolved on projectile impact callback
+- Building damage: non-siege deals 15% (min 1), siege full; walls/gates siege-only
+- `cleanup()` not needed — stateless, all state is per-event
+
+### SpawnQueueSystem Integration Notes
+- Owns ALL 7 player spawn queues + timers (barracks, forestry, masonry, farmhouse, workshop, armory, wizard_tower)
+- `update(delta)` processes timers, checks affordability, deducts resources, spawns units, assigns rally points
+- `doSpawnQueueGeneric()` / `doSpawnQueueWorkshop()` / `doSpawnQueueArmory()` / `doSpawnQueueWizardTower()` — queue a unit with validation
+- `doSpawnQueue(buildingKey, unitType, unitName, costParts)` — routes to correct queue method
+- `queueUnitFromTooltip(unitType, buildingKind)` — handles tooltip-initiated unit queuing
+- `getQueueHUDEntries(debugFlags)` — returns formatted entries for HUD display (main.ts combines with AI queues)
+- `cleanup()` resets all queues and timers on map regeneration
+- Uses `SpawnQueueOps` slim interface: resource get/set, building queries, spawn tile finding, unit creation
 
 ### FormationSystem Integration Notes
 - Pure standalone functions, no class instance — imported directly

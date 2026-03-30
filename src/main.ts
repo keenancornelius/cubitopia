@@ -32,6 +32,8 @@ import type { BlueprintOps } from './game/systems/BlueprintSystem';
 import { generateFormation, generateBoxFormation, getUnitFormationPriority, getHexRing } from './game/systems/FormationSystem';
 import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
+import CombatEventHandler, { CombatEventOps } from './game/systems/CombatEventHandler';
+import SpawnQueueSystem, { SpawnQueueOps } from './game/systems/SpawnQueueSystem';
 import MenuController from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
 import SoundManager from './engine/SoundManager';
@@ -124,6 +126,8 @@ class Cubitopia {
   private tooltipController!: BuildingTooltipController;
   private blueprintSystem!: BlueprintSystem;
   private natureSystem!: NatureSystem;
+  private combatEventHandler!: CombatEventHandler;
+  private spawnQueueSystem!: SpawnQueueSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
   private sound: SoundManager;
@@ -1604,6 +1608,87 @@ class Cubitopia {
       hasGrass: (key) => this.terrainDecorator.hasGrass(key),
     };
     this.natureSystem = new NatureSystem(natureOps);
+
+    // Combat event handler
+    this.combatEventHandler = new CombatEventHandler({
+      getPlayers: () => this.players,
+      getAllUnits: () => this.allUnits,
+      getDebugFlags: () => this.hud.debugFlags,
+      getWoodStockpile: () => this.woodStockpile,
+      getFoodStockpile: () => this.foodStockpile,
+      getStoneStockpile: () => this.stoneStockpile,
+      removeUnitFromGame: (unit, killer) => this.removeUnitFromGame(unit, killer),
+      updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
+      showDamageEffect: (wp) => this.unitRenderer.showDamageEffect(wp),
+      flashUnit: (id, dur) => this.unitRenderer.flashUnit(id, dur),
+      queueDeferredEffect: (delay, cb) => this.unitRenderer.queueDeferredEffect(delay, cb),
+      fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
+      fireMagicOrb: (from, to, color, id, splash, cb) => this.unitRenderer.fireMagicOrb(from, to, color, id, splash, cb),
+      fireBoulder: (from, to, cb) => this.unitRenderer.fireBoulder(from, to, cb),
+      fireProjectile: (from, to, color, id, cb) => this.unitRenderer.fireProjectile(from, to, color, id, cb),
+      showXPText: (wp, xp) => this.unitRenderer.showXPText(wp, xp),
+      showLevelUpEffect: (id, wp, lvl) => this.unitRenderer.showLevelUpEffect(id, wp, lvl),
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+      showNotification: (msg, color) => this.hud.showNotification(msg, color),
+      updateResources: (player, w, f, s) => this.hud.updateResources(player, w, f, s),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
+      damageBarracks: (pos, dmg) => this.wallSystem.damageBarracks(pos, dmg),
+      damageGate: (pos, dmg) => this.wallSystem.damageGate(pos, dmg),
+      damageWall: (pos, dmg) => this.wallSystem.damageWall(pos, dmg),
+      isGateAt: (key) => this.wallSystem.gatesBuilt.has(key),
+      handleBuildWall: (unit, pos) => this.wallSystem.handleBuildWall(unit, pos),
+      handleBuildGate: (unit, pos) => this.wallSystem.handleBuildGate(unit, pos),
+      handleChopWood: (unit, pos) => this.handleChopWood(unit, pos),
+      handleWoodDeposit: (unit) => this.resourceManager.handleWoodDeposit(unit),
+      handleMineTerrain: (unit, pos) => this.handleMineTerrain(unit, pos),
+      handleStoneDeposit: (unit) => this.resourceManager.handleStoneDeposit(unit),
+      handleClayDeposit: (unit) => this.resourceManager.handleClayDeposit(unit),
+      handleGrassFiberDeposit: (unit) => this.resourceManager.handleGrassFiberDeposit(unit),
+      handleIronDeposit: (unit) => this.resourceManager.handleIronDeposit(unit),
+      handleCrystalDeposit: (unit) => this.resourceManager.handleCrystalDeposit(unit),
+      handleGoldDeposit: (unit) => this.resourceManager.handleGoldDeposit(unit),
+      handleCropHarvest: (unit, pos) => this.resourceManager.handleCropHarvest(unit, pos),
+      handleHarvestGrass: (unit, pos) => this.handleHarvestGrass(unit, pos),
+      handleFoodDeposit: (unit) => this.resourceManager.handleFoodDeposit(unit),
+      isPlayerGateBlueprint: (key) => UnitAI.playerGateBlueprint.has(key),
+    });
+
+    // Spawn queue system
+    this.spawnQueueSystem = new SpawnQueueSystem({
+      getPlayers: () => this.players,
+      getAllUnits: () => this.allUnits,
+      getCurrentMap: () => this.currentMap,
+      getGold: () => this.players[0].resources.gold,
+      setGold: (v) => { this.players[0].resources.gold = v; },
+      getWood: () => this.woodStockpile[0],
+      setWood: (v) => { this.woodStockpile[0] = v; this.players[0].resources.wood = v; },
+      getStone: () => this.stoneStockpile[0],
+      setStone: (v) => { this.stoneStockpile[0] = v; this.players[0].resources.stone = v; },
+      getRope: () => this.ropeStockpile[0],
+      setRope: (v) => { this.ropeStockpile[0] = v; this.players[0].resources.rope = v; },
+      getSteel: () => this.steelStockpile[0],
+      setSteel: (v) => { this.steelStockpile[0] = v; this.players[0].resources.steel = v; },
+      getCrystal: () => this.players[0].resources.crystal,
+      setCrystal: (v) => { this.players[0].resources.crystal = v; },
+      getNextSpawnBuilding: (kind, owner) => this.buildingSystem.getNextSpawnBuilding(kind, owner),
+      getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
+      findSpawnTile: (map, q, r, allow) => this.findSpawnTile(map, q, r, allow),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getElevation: (pos) => this.getElevation(pos),
+      addUnitToRenderer: (unit, elev) => this.unitRenderer.addUnit(unit, elev),
+      addUnitToGame: (unit) => {
+        this.players[0].units.push(unit);
+        this.allUnits.push(unit);
+        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+      },
+      getRallyFormationSlot: (kind, unit) => this.getRallyFormationSlot(kind, unit),
+      showNotification: (msg, color) => this.hud.showNotification(msg, color),
+      updateResources: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+      getDebugFlags: () => this.hud.debugFlags,
+      toggleBuildingPlaceMode: (kind) => this.toggleBuildingPlaceMode(kind),
+    });
   }
 
   /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
@@ -1779,39 +1864,6 @@ class Cubitopia {
   }
 
   /** Spawn queue config for simple (single-resource) buildings */
-  private readonly SPAWN_QUEUE_CONFIG: Record<string, {
-    buildingKind: BuildingKind;
-    getBuilding: () => any;
-    resourceType: 'gold' | 'wood';
-    getResource: () => number;
-    getQueue: () => { type: UnitType; cost: number }[];
-    updateHUD?: (q: { type: UnitType; cost: number }[]) => void;
-  }> = {
-    barracks:  { buildingKind: 'barracks',  getBuilding: () => this.barracks,  resourceType: 'gold', getResource: () => this.players[0].resources.gold, getQueue: () => this.spawnQueue,          updateHUD: (q) => this.hud.updateSpawnQueue(q) },
-    forestry:  { buildingKind: 'forestry',  getBuilding: () => this.forestry,  resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.forestrySpawnQueue,  updateHUD: (q) => this.hud.updateForestrySpawnQueue(q) },
-    masonry:   { buildingKind: 'masonry',   getBuilding: () => this.masonry,   resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.masonrySpawnQueue,   updateHUD: (q) => this.hud.updateMasonrySpawnQueue(q) },
-    farmhouse: { buildingKind: 'farmhouse', getBuilding: () => this.farmhouse, resourceType: 'wood', getResource: () => this.woodStockpile[0],          getQueue: () => this.farmhouseSpawnQueue },
-  };
-
-  /** Generic spawn queue for simple (single-resource) buildings */
-  private doSpawnQueueGeneric(buildingKey: string, type: UnitType, cost: number, name: string): void {
-    const cfg = this.SPAWN_QUEUE_CONFIG[buildingKey];
-    if (!cfg) return;
-    if (!cfg.getBuilding()) {
-      this.hud.showNotification(`Place a ${cfg.buildingKind.charAt(0).toUpperCase() + cfg.buildingKind.slice(1)} first, then press ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode(cfg.buildingKind);
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild && cfg.getResource() < cost) {
-      this.sound.play('queue_error', 0.4);
-      this.hud.showNotification(`Need ${cost} ${cfg.resourceType} for ${name}! (have ${cfg.getResource()})`, '#e67e22');
-      return;
-    }
-    cfg.getQueue().push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
-    if (cfg.updateHUD) cfg.updateHUD(cfg.getQueue());
-    this.sound.play('queue_confirm', 0.5);
-    this.hud.showNotification(`${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' ' + cfg.resourceType})`, '#2ecc71');
-  }
 
   regenerateMap(): void {
     this.voxelBuilder.clearAll();
@@ -1893,14 +1945,7 @@ class Cubitopia {
     // Remove all placed building meshes from scene
     this.buildingSystem.cleanup();
     this.tooltipController.cleanup();
-    this.spawnQueue = [];
-    this.spawnTimer = 0;
-    this.forestrySpawnQueue = [];
-    this.forestrySpawnTimer = 0;
-    this.masonrySpawnQueue = [];
-    this.masonrySpawnTimer = 0;
-    this.farmhouseSpawnQueue = [];
-    this.farmhouseSpawnTimer = 0;
+    this.spawnQueueSystem.cleanup();
     this.farmhousePlaceMode = false;
     this.siloPlaceMode = false;
     this.farmPatchMode = false;
@@ -1913,15 +1958,8 @@ class Cubitopia {
     this.ironStockpile = [0, 0];
     this.charcoalStockpile = [0, 0];
     this.steelStockpile = [0, 0];
-    this.workshopSpawnQueue = [];
-    this.workshopSpawnTimer = 0;
     this.workshopPlaceMode = false;
-    this.armorySpawnQueue = [];
-    this.armorySpawnTimer = 0;
     this.armoryPlaceMode = false;
-    this.wizardTowerSpawnQueue = [];
-    this.wizardTowerSpawnTimer = 0;
-    this.wizardTowerPlaceMode = false;
     this.smelterPlaceMode = false;
     // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
@@ -2491,142 +2529,15 @@ class Cubitopia {
       this.players[0].resources.crystal = 999;
     }
 
-    // --- Generic spawn queue processing ---
-    // Each entry: [kind, queue, timer field, spawn time, canAfford fn, deductCost fn]
-    type SimpleQueueItem = { type: UnitType; cost: number };
-    type WorkshopQueueItem = { type: UnitType; cost: { wood: number; stone: number; rope: number } };
-    type ArmoryQueueItem = { type: UnitType; cost: { gold: number; steel: number } };
-    type WizardTowerQueueItem = { type: UnitType; cost: { gold: number; crystal: number } };
+    // --- Spawn queue processing (delegated to SpawnQueueSystem) ---
+    this.spawnQueueSystem.update(delta);
 
-    const spawnConfigs: {
-      kind: string; color: string; spawnTime: number;
-      queue: { type: UnitType }[];
-      getTimer: () => number; setTimer: (v: number) => void;
-      canAfford: (item: any) => boolean; deductCost: (item: any) => void;
-    }[] = [
-      {
-        kind: 'barracks', color: '#e67e22', spawnTime: 5,
-        queue: this.spawnQueue,
-        getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => this.players[0].resources.gold >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { this.players[0].resources.gold -= item.cost; },
-      },
-      {
-        kind: 'forestry', color: '#6b8e23', spawnTime: 5,
-        queue: this.forestrySpawnQueue,
-        getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
-      },
-      {
-        kind: 'masonry', color: '#808080', spawnTime: 5,
-        queue: this.masonrySpawnQueue,
-        getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
-      },
-      {
-        kind: 'farmhouse', color: '#d4a030', spawnTime: 5,
-        queue: this.farmhouseSpawnQueue,
-        getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => this.woodStockpile[0] >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { this.woodStockpile[0] -= item.cost; this.players[0].resources.wood -= item.cost; },
-      },
-      {
-        kind: 'workshop', color: '#c9a96e', spawnTime: 8,
-        queue: this.workshopSpawnQueue,
-        getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
-        canAfford: (item: WorkshopQueueItem) =>
-          this.ropeStockpile[0] >= item.cost.rope &&
-          this.stoneStockpile[0] >= item.cost.stone &&
-          this.woodStockpile[0] >= item.cost.wood,
-        deductCost: (item: WorkshopQueueItem) => {
-          this.ropeStockpile[0] -= item.cost.rope; this.players[0].resources.rope -= item.cost.rope;
-          this.stoneStockpile[0] -= item.cost.stone; this.players[0].resources.stone -= item.cost.stone;
-          this.woodStockpile[0] -= item.cost.wood; this.players[0].resources.wood -= item.cost.wood;
-        },
-      },
-      {
-        kind: 'armory', color: '#e67e22', spawnTime: 6,
-        queue: this.armorySpawnQueue,
-        getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
-        canAfford: (item: ArmoryQueueItem) =>
-          this.players[0].resources.gold >= item.cost.gold &&
-          this.steelStockpile[0] >= item.cost.steel,
-        deductCost: (item: ArmoryQueueItem) => {
-          this.players[0].resources.gold -= item.cost.gold;
-          this.steelStockpile[0] -= item.cost.steel; this.players[0].resources.steel -= item.cost.steel;
-        },
-      },
-      {
-        kind: 'wizard_tower', color: '#7c3aed', spawnTime: 7,
-        queue: this.wizardTowerSpawnQueue,
-        getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
-        canAfford: (item: WizardTowerQueueItem) =>
-          this.players[0].resources.gold >= item.cost.gold &&
-          this.players[0].resources.crystal >= item.cost.crystal,
-        deductCost: (item: WizardTowerQueueItem) => {
-          this.players[0].resources.gold -= item.cost.gold;
-          this.players[0].resources.crystal -= item.cost.crystal;
-        },
-      },
-    ];
-
-    const isCombatType = (t: UnitType) =>
-      t !== UnitType.BUILDER && t !== UnitType.LUMBERJACK && t !== UnitType.VILLAGER;
-
-    for (const cfg of spawnConfigs) {
-      const building = this.buildingSystem.getNextSpawnBuilding(cfg.kind as any, 0);
-      if (!building || cfg.queue.length === 0) continue;
-
-      const timer = cfg.getTimer() + delta;
-      const spawnTime = this.hud.debugFlags.instantSpawn ? 0 : cfg.spawnTime;
-
-      if (timer >= spawnTime) {
-        cfg.setTimer(0);
-        const next = cfg.queue[0];
-        if (cfg.canAfford(next)) {
-          cfg.deductCost(next);
-          cfg.queue.shift();
-          // Spawn unit at building position (round-robin)
-          const spawnBuilding = this.buildingSystem.getNextSpawnBuilding(cfg.kind as any, 0)!;
-          const pos = this.findSpawnTile(this.currentMap!, spawnBuilding.position.q, spawnBuilding.position.r, true);
-          const unit = UnitFactory.create(next.type, 0, pos);
-          const wp = this.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          this.players[0].units.push(unit);
-          this.allUnits.push(unit);
-          this.unitRenderer.addUnit(unit, this.getElevation(pos));
-          this.sound.play('unit_spawn', 0.45);
-          this.selectionManager.setPlayerUnits(this.allUnits, 0);
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          // Rally point
-          const rallySlot = this.getRallyFormationSlot(cfg.kind as any, unit);
-          if (rallySlot) UnitAI.commandMove(unit, rallySlot, this.currentMap!);
-          // Combat units default to aggressive at rally points
-          if (isCombatType(unit.type)) unit.stance = UnitStance.AGGRESSIVE;
-        }
-      } else {
-        cfg.setTimer(timer);
-      }
-    }
-
-    // Update unified spawn queue HUD with progress bars
-    // Include player 0's queues AND all AI players' queues
-    const allQueueEntries = spawnConfigs.map(cfg => ({
-      kind: cfg.kind,
-      color: cfg.color,
-      items: cfg.queue.map(q => ({ type: q.type })),
-      timerProgress: cfg.queue.length > 0
-        ? cfg.getTimer() / (this.hud.debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
-        : 0,
-    }));
-
+    // Update unified spawn queue HUD with progress bars (player + AI)
+    const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags);
     // Add AI queues for all players
     for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
       const st = this.aiController.aiState[pid];
       const label = this.players.length > 1 ? `P${pid + 1} ` : '';
-      // AI combat queue (barracks)
       if (st.spawnQueue.length > 0) {
         allQueueEntries.push({
           kind: `${label}barracks`,
@@ -2635,7 +2546,6 @@ class Cubitopia {
           timerProgress: st.spawnTimer / 5,
         });
       }
-      // AI worker queue (forestry/masonry/farmhouse)
       if (st.workerSpawnQueue.length > 0) {
         allQueueEntries.push({
           kind: `${label}workers`,
@@ -2645,7 +2555,6 @@ class Cubitopia {
         });
       }
     }
-
     this.hud.updateAllSpawnQueues(allQueueEntries);
 
     // Update occupied tiles for pathfinder (units prefer unoccupied paths)
@@ -2679,232 +2588,8 @@ class Cubitopia {
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
 
-    for (const event of events) {
-      // godMode: prevent player units (owner 0) from dying or taking damage
-      if (this.hud.debugFlags.godMode) {
-        if (event.type === 'unit:killed' && event.unit && event.unit.owner === 0) {
-          // Revive the unit instead of removing it
-          event.unit.currentHealth = event.unit.stats.maxHealth;
-          continue;
-        }
-        if (event.type === 'combat' && event.defender && event.defender.owner === 0) {
-          // Restore player unit health after combat
-          event.defender.currentHealth = event.defender.stats.maxHealth;
-        }
-        if (event.type === 'combat' && event.attacker && event.attacker.owner === 0) {
-          event.attacker.currentHealth = event.attacker.stats.maxHealth;
-        }
-      }
-
-      if (event.type === 'unit:killed' && event.unit) {
-        // CombatLog.logKill already called in UnitAI.handleAttacking at the source
-        // Gold reward for kills
-        if (event.killer && event.unit) {
-          const killerOwner = event.killer.owner;
-          const goldReward = event.unit.type === UnitType.TREBUCHET || event.unit.type === UnitType.CATAPULT ? 5 : 3;
-          this.players[killerOwner].resources.gold += goldReward;
-          if (killerOwner === 0) {
-            this.hud.showNotification(`💰 +${goldReward} gold`, '#FFD700');
-            this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-          }
-        }
-
-        // If killed by a ranged unit, defer the visual death until projectile lands
-        const killerIsRanged = event.killer && event.killer.stats.range > 1;
-        if (killerIsRanged) {
-          // Defer — the onImpact callback from the projectile will handle visual death
-          // Store pending kill info on the unit for the impact callback to pick up
-          (event.unit as any)._pendingKillVisual = true;
-          (event.unit as any)._killer = event.killer;
-        } else {
-          // Melee kill: slight delay to sync with strike animation frame
-          const unit = event.unit;
-          const killer = event.killer;
-          this.unitRenderer.queueDeferredEffect(180, () => {
-            this.removeUnitFromGame(unit, killer);
-            this.sound.play('death');
-          });
-        }
-      }
-      if (event.type === 'combat' && event.attacker && event.defender && !this.hud.debugFlags.disableCombat) {
-        // CombatLog.logDamage already called in UnitAI.handleAttacking at the source
-        const isRangedAttack = event.attacker.stats.range > 1;
-
-        // Determine sound to play
-        let hitSound: string = 'hit_melee';
-        if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
-          hitSound = 'hit_siege';
-        } else if (event.attacker.stats.range > 1) {
-          hitSound = 'hit_ranged';
-        } else if (event.attacker.type === UnitType.ASSASSIN) {
-          hitSound = 'assassin_strike';
-        } else if (event.attacker.type === UnitType.RIDER || event.attacker.type === UnitType.SCOUT) {
-          hitSound = 'hit_pierce';
-        } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK
-                || event.attacker.type === UnitType.GREATSWORD) {
-          hitSound = 'hit_cleave';
-        } else if (event.attacker.type === UnitType.SHIELDBEARER || event.attacker.type === UnitType.PALADIN
-                || event.attacker.type === UnitType.BATTLEMAGE) {
-          hitSound = 'hit_blunt';
-        }
-
-        // Closure to apply damage visuals (used on impact for ranged, or deferred for melee)
-        const attacker = event.attacker;
-        const defender = event.defender;
-        const applyDamageVisuals = () => {
-          this.unitRenderer.updateHealthBar(attacker);
-          this.unitRenderer.updateHealthBar(defender);
-          this.unitRenderer.showDamageEffect(defender.worldPosition);
-          this.unitRenderer.flashUnit(defender.id, 0.15);
-          this.sound.play(hitSound as any);
-          if (hitSound === 'assassin_strike') this.sound.play('hit_pierce');
-          // If this hit killed the defender and death was deferred, process it now
-          if ((defender as any)._pendingKillVisual) {
-            (defender as any)._pendingKillVisual = false;
-            this.removeUnitFromGame(defender, (defender as any)._killer);
-            this.sound.play('death');
-          }
-        };
-
-        if (isRangedAttack) {
-          // Fire projectile with onImpact callback for damage visuals
-          const defId = event.defender.id;
-          if (event.attacker.type === UnitType.ARCHER) {
-            this.unitRenderer.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
-          } else if (event.attacker.type === UnitType.MAGE) {
-            this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId, false, applyDamageVisuals);
-          } else if (event.attacker.type === UnitType.BATTLEMAGE) {
-            this.unitRenderer.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x7c4dff, defId, true, applyDamageVisuals);
-            this.sound.play('splash_aoe');
-          } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
-            this.unitRenderer.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition, applyDamageVisuals);
-          } else {
-            // Other ranged types — fire generic projectile
-            this.unitRenderer.fireProjectile(event.attacker.worldPosition, event.defender.worldPosition, 0xFF8800, defId, applyDamageVisuals);
-          }
-          // Update attacker health bar immediately (counter-damage is instant)
-          this.unitRenderer.updateHealthBar(event.attacker);
-        } else {
-          // Melee: delay visuals slightly to sync with strike animation frame (~200ms)
-          this.unitRenderer.queueDeferredEffect(200, applyDamageVisuals);
-        }
-      }
-      // Battlemage AoE splash — show damage visuals on splashed units
-      if ((event as any).type === 'combat:splash') {
-        const splashEvt = event as any;
-        const victim = this.allUnits.find(u => u.id === splashEvt.unitId);
-        if (victim) {
-          this.unitRenderer.updateHealthBar(victim);
-          this.unitRenderer.showDamageEffect(victim.worldPosition);
-          this.unitRenderer.flashUnit(victim.id, 0.12);
-          if (victim.currentHealth <= 0) {
-            this.removeUnitFromGame(victim, undefined);
-            this.sound.play('death');
-          }
-        }
-      }
-      // Greatsword cleave knockback — move units to new hex positions
-      if ((event as any).type === 'combat:cleave') {
-        const ce = event as any;
-        const victim = this.allUnits.find(u => u.id === ce.unitId);
-        if (victim && victim.state !== UnitState.DEAD) {
-          victim.position = { q: ce.knockQ, r: ce.knockR };
-          const wp = this.hexToWorld(victim.position);
-          victim.worldPosition = { x: wp.x, y: wp.y, z: wp.z };
-          this.unitRenderer.updateHealthBar(victim);
-          this.unitRenderer.showDamageEffect(victim.worldPosition);
-          this.unitRenderer.flashUnit(victim.id, 0.12);
-          this.sound.play('hit_cleave');
-        }
-      }
-      // XP gained — floating text
-      if ((event as any).type === 'combat:xp') {
-        const xpEvt = event as any;
-        const unit = this.allUnits.find(u => u.id === xpEvt.unitId);
-        if (unit) {
-          this.unitRenderer.showXPText(unit.worldPosition, xpEvt.xp);
-        }
-      }
-      // Level-up — golden burst + text + glow
-      if ((event as any).type === 'combat:levelup') {
-        const lvlEvt = event as any;
-        const unit = this.allUnits.find(u => u.id === lvlEvt.unitId);
-        if (unit) {
-          this.unitRenderer.showLevelUpEffect(unit.id, unit.worldPosition, lvlEvt.newLevel);
-          this.unitRenderer.updateHealthBar(unit); // refresh HP bar after partial heal
-          this.sound.play('level_up', 0.5);
-        }
-      }
-      // Heal events
-      if ((event as any).type === 'heal') {
-        this.sound.play('heal', 0.4);
-      }
-      if (event.type === 'builder:place_wall' && event.result && !this.hud.debugFlags.disableBuild) {
-        // Check if this is a gate or wall blueprint
-        const key = `${event.result.position.q},${event.result.position.r}`;
-        if (UnitAI.playerGateBlueprint.has(key)) {
-          this.wallSystem.handleBuildGate(event.unit!, event.result.position);
-        } else {
-          this.wallSystem.handleBuildWall(event.unit!, event.result.position);
-        }
-      }
-      if (event.type === 'builder:place_gate' && event.result && !this.hud.debugFlags.disableBuild) {
-        this.wallSystem.handleBuildGate(event.unit!, event.result.position);
-      }
-      if (event.type === 'lumberjack:chop' && event.result && !this.hud.debugFlags.disableChop) {
-        this.handleChopWood(event.unit!, event.result.position);
-      }
-      if (event.type === 'lumberjack:deposit' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        this.resourceManager.handleWoodDeposit(event.unit!);
-      }
-      if (event.type === 'builder:mine' && event.result && !this.hud.debugFlags.disableMine) {
-        this.handleMineTerrain(event.unit!, event.result.position);
-      }
-      if (event.type === 'builder:deposit_stone' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        // Route by carryType — builders can carry stone, clay, grass fiber, iron, gold, or crystal
-        if (event.unit!.carryType === ResourceType.CLAY) {
-          this.resourceManager.handleClayDeposit(event.unit!);
-        } else if (event.unit!.carryType === ResourceType.GRASS_FIBER) {
-          this.resourceManager.handleGrassFiberDeposit(event.unit!);
-        } else if (event.unit!.carryType === ResourceType.IRON) {
-          this.resourceManager.handleIronDeposit(event.unit!);
-        } else if (event.unit!.carryType === ResourceType.CRYSTAL) {
-          this.resourceManager.handleCrystalDeposit(event.unit!);
-        } else if (event.unit!.carryType === ResourceType.GOLD) {
-          this.resourceManager.handleGoldDeposit(event.unit!);
-        } else {
-          this.resourceManager.handleStoneDeposit(event.unit!);
-        }
-      }
-      if (event.type === 'villager:harvest' && event.result && !this.hud.debugFlags.disableHarvest) {
-        this.resourceManager.handleCropHarvest(event.unit!, event.result.position);
-      }
-      if (event.type === 'villager:harvest_grass' && event.result && !this.hud.debugFlags.disableHarvest) {
-        this.handleHarvestGrass(event.unit!, event.result.position);
-      }
-      if (event.type === 'villager:deposit' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        this.resourceManager.handleFoodDeposit(event.unit!);
-      }
-      if (event.type === 'unit:attack_wall' && event.unit && event.result) {
-        const key = `${event.result.position.q},${event.result.position.r}`;
-        const isSiege = event.unit.isSiege === true;
-        // Siege units deal full damage; regular units deal 15% damage to buildings (very tanky)
-        // Walls/gates still require siege — regular units can only damage buildings
-        const baseDmg = event.unit.stats.attack;
-        const pb = this.buildingSystem.getBuildingAt(event.result.position);
-        if (pb) {
-          // Buildings: all units can damage, but non-siege deal heavily reduced damage
-          const dmg = isSiege ? baseDmg : Math.max(1, Math.floor(baseDmg * 0.15));
-          this.wallSystem.damageBarracks(event.result.position, dmg);
-        } else if (this.wallSystem.gatesBuilt.has(key)) {
-          // Gates: siege only
-          if (isSiege) this.wallSystem.damageGate(event.result.position, baseDmg);
-        } else {
-          // Walls: siege only
-          if (isSiege) this.wallSystem.damageWall(event.result.position, baseDmg);
-        }
-      }
-    }
+    // Process combat events (delegated to CombatEventHandler)
+    this.combatEventHandler.processEvents(events);
 
     // Update unit visual positions and animations
     const gameTime = this.clock.elapsedTime;
@@ -3117,48 +2802,7 @@ class Cubitopia {
 
   /** Queue a unit from the building tooltip */
   private queueUnitFromTooltip(unitType: string, buildingKind: BuildingKind): void {
-    switch (buildingKind) {
-      case 'barracks': {
-        const costs: Record<string, number> = { warrior: 5, archer: 8, rider: 10, paladin: 6 };
-        const cost = costs[unitType] ?? 5;
-        const type = unitType === 'archer' ? UnitType.ARCHER :
-                     unitType === 'rider' ? UnitType.RIDER :
-                     unitType === 'paladin' ? UnitType.PALADIN : UnitType.WARRIOR;
-        this.spawnQueue.push({ type, cost });
-        this.hud.updateSpawnQueue(this.spawnQueue);
-        break;
-      }
-      case 'forestry': {
-        const costs: Record<string, number> = { lumberjack: 3, scout: 4 };
-        const cost = costs[unitType] ?? 3;
-        const type = unitType === 'scout' ? UnitType.SCOUT : UnitType.LUMBERJACK;
-        this.forestrySpawnQueue.push({ type, cost });
-        this.hud.updateForestrySpawnQueue(this.forestrySpawnQueue);
-        break;
-      }
-      case 'masonry': {
-        const type = UnitType.BUILDER;
-        this.masonrySpawnQueue.push({ type, cost: 4 });
-        this.hud.updateMasonrySpawnQueue(this.masonrySpawnQueue);
-        break;
-      }
-      case 'farmhouse': {
-        const type = UnitType.VILLAGER;
-        this.farmhouseSpawnQueue.push({ type, cost: 3 });
-        break;
-      }
-      case 'workshop': {
-        const type = unitType === 'catapult' ? UnitType.CATAPULT : UnitType.TREBUCHET;
-        const costMap: Record<string, { rope: number; stone: number; wood: number }> = {
-          trebuchet: { rope: 6, stone: 4, wood: 4 },
-          catapult: { rope: 3, stone: 3, wood: 3 },
-        };
-        const cost = costMap[unitType] ?? costMap.trebuchet;
-        this.workshopSpawnQueue.push({ type, cost });
-        this.hud.updateWorkshopSpawnQueue(this.workshopSpawnQueue);
-        break;
-      }
-    }
+    this.spawnQueueSystem.queueUnitFromTooltip(unitType, buildingKind);
   }
 
   /** Demolish a player building, removing it from the world and refunding some resources */
@@ -3288,23 +2932,15 @@ class Cubitopia {
   // --- Placement mode flags & rotation ---
   private barracksPlaceMode = false;
   private barracksRotation = 0;
-  private spawnQueue: { type: UnitType; cost: number }[] = [];
-  private spawnTimer = 0;
 
   private forestryPlaceMode = false;
   private forestryRotation = 0;
-  private forestrySpawnQueue: { type: UnitType; cost: number }[] = [];
-  private forestrySpawnTimer = 0;
 
   private masonryPlaceMode = false;
   private masonryRotation = 0;
-  private masonrySpawnQueue: { type: UnitType; cost: number }[] = [];
-  private masonrySpawnTimer = 0;
 
   private farmhousePlaceMode = false;
   private farmhouseRotation = 0;
-  private farmhouseSpawnQueue: { type: UnitType; cost: number }[] = [];
-  private farmhouseSpawnTimer = 0;
   private siloPlaceMode = false;
   private siloRotation = 0;
   private farmPatchMode = false;
@@ -3316,8 +2952,6 @@ class Cubitopia {
   // --- Workshop & Trebuchet Spawning ---
   private workshopPlaceMode = false;
   private workshopRotation = 0;
-  private workshopSpawnQueue: { type: UnitType; cost: { wood: number; stone: number; rope: number } }[] = [];
-  private workshopSpawnTimer = 0;
 
   // --- Smelter ---
   private smelterPlaceMode = false;
@@ -3326,14 +2960,10 @@ class Cubitopia {
   // --- Armory & Advanced Melee Spawning ---
   private armoryPlaceMode = false;
   private armoryRotation = 0;
-  private armorySpawnQueue: { type: UnitType; cost: { gold: number; steel: number } }[] = [];
-  private armorySpawnTimer = 0;
 
   // --- Wizard Tower & Magic Unit Spawning ---
   private wizardTowerPlaceMode = false;
   private wizardTowerRotation = 0;
-  private wizardTowerSpawnQueue: { type: UnitType; cost: { gold: number; crystal: number } }[] = [];
-  private wizardTowerSpawnTimer = 0;
 
   // --- Grass Fiber, Clay, Rope Stockpiles ---
   private grassFiberStockpile: number[] = [0, 0];
@@ -3491,20 +3121,7 @@ class Cubitopia {
       const unitType = (UnitType as any)[unitName] as UnitType;
       if (unitType === undefined) return;
 
-      if (buildingKey === 'armory') {
-        const goldCost = parseInt(parts[3]);
-        const steelCost = parseInt(parts[4]);
-        this.doSpawnQueueArmory(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase(), goldCost, steelCost);
-      } else if (buildingKey === 'wizard_tower') {
-        const goldCost = parseInt(parts[3]);
-        const crystalCost = parseInt(parts[4]);
-        this.doSpawnQueueWizardTower(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase(), goldCost, crystalCost);
-      } else if (buildingKey === 'workshop') {
-        this.doSpawnQueueWorkshop(unitType, unitName.charAt(0) + unitName.slice(1).toLowerCase());
-      } else {
-        const cost = parseInt(parts[3]);
-        this.doSpawnQueueGeneric(buildingKey, unitType, cost, unitName.charAt(0) + unitName.slice(1).toLowerCase());
-      }
+      this.spawnQueueSystem.doSpawnQueue(buildingKey, unitType, unitName, parts.slice(3));
     } else if (parts[0] === 'craft') {
       if (parts[1] === 'rope') { this.resourceManager.craftRope(); this.sound.play('craft_confirm', 0.5); }
       else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(); this.sound.play('craft_confirm', 0.5); }
@@ -3691,89 +3308,6 @@ class Cubitopia {
 
   // placeWorkshop → now handled by placeGenericBuilding('workshop', coord)
 
-  private doSpawnQueueWorkshop(type: UnitType, name: string): void {
-    if (!this.workshop) {
-      this.hud.showNotification(`📍 Place a Workshop first [W], then press 7 again`, '#e67e22');
-      this.toggleBuildingPlaceMode('workshop');
-      return;
-    }
-    // Trebuchet costs: 3 rope + 5 stone + 5 wood
-    const cost = { wood: 5, stone: 5, rope: 3 };
-    if (!this.hud.debugFlags.freeBuild) {
-      if (this.ropeStockpile[0] < cost.rope) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${cost.rope} rope! (have ${this.ropeStockpile[0]}). Craft rope at Workshop.`, '#e67e22');
-        return;
-      }
-      if (this.stoneStockpile[0] < cost.stone) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${cost.stone} stone! (have ${this.stoneStockpile[0]})`, '#e67e22');
-        return;
-      }
-      if (this.woodStockpile[0] < cost.wood) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${cost.wood} wood! (have ${this.woodStockpile[0]})`, '#e67e22');
-        return;
-      }
-    }
-    const actualCost = this.hud.debugFlags.freeBuild ? { wood: 0, stone: 0, rope: 0 } : cost;
-    this.workshopSpawnQueue.push({ type, cost: actualCost });
-    this.hud.updateWorkshopSpawnQueue(this.workshopSpawnQueue);
-    this.sound.play('queue_confirm', 0.5);
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost.rope + ' rope + ' + cost.stone + ' stone + ' + cost.wood + ' wood'})`, '#2ecc71');
-  }
-
-  /** Spawn queue for Armory units (gold + steel cost) */
-  private doSpawnQueueArmory(type: UnitType, name: string, goldCost: number, steelCost: number): void {
-    const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-    if (!armory) {
-      this.hud.showNotification(`📍 Place an Armory first [A], then queue ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('armory');
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild) {
-      if (this.players[0].resources.gold < goldCost) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
-        return;
-      }
-      if (this.steelStockpile[0] < steelCost) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${steelCost} steel for ${name}! (have ${this.steelStockpile[0]})`, '#e67e22');
-        return;
-      }
-    }
-    const cost = this.hud.debugFlags.freeBuild ? { gold: 0, steel: 0 } : { gold: goldCost, steel: steelCost };
-    this.armorySpawnQueue.push({ type, cost });
-    this.sound.play('queue_confirm', 0.5);
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + steelCost + ' steel'})`, '#2ecc71');
-  }
-
-  /** Spawn queue for Wizard Tower units (gold + crystal cost) */
-  private doSpawnQueueWizardTower(type: UnitType, name: string, goldCost: number, crystalCost: number): void {
-    const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-    if (!wt) {
-      this.hud.showNotification(`📍 Place a Wizard Tower first [Y], then queue ${name} again`, '#e67e22');
-      this.toggleBuildingPlaceMode('wizard_tower');
-      return;
-    }
-    if (!this.hud.debugFlags.freeBuild) {
-      if (this.players[0].resources.gold < goldCost) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
-        return;
-      }
-      if (this.players[0].resources.crystal < crystalCost) {
-        this.sound.play('queue_error', 0.4);
-        this.hud.showNotification(`⚠️ Need ${crystalCost} crystal for ${name}! (have ${this.players[0].resources.crystal})`, '#e67e22');
-        return;
-      }
-    }
-    const cost = this.hud.debugFlags.freeBuild ? { gold: 0, crystal: 0 } : { gold: goldCost, crystal: crystalCost };
-    this.wizardTowerSpawnQueue.push({ type, cost });
-    this.sound.play('queue_confirm', 0.5);
-    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + crystalCost + ' crystal'})`, '#7c3aed');
-  }
 
   // --- Toggle modes for farmhouse, silo, farm patches ---
 
