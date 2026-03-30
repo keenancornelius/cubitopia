@@ -352,65 +352,137 @@ export default class SoundManager {
     this.filteredNoise('lowpass', 1200, 1, vol * 0.3, 0.002, 0.07);
   }
 
-  /** Death: descending harmonics fading out, hollow collapse */
+  /** Death: sharp body-drop thud + bone crack + fading groan */
   private synthDeath(vol: number): void {
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-    // Fundamental descending pitch
-    const osc1 = ctx.createOscillator();
-    osc1.type = 'sawtooth';
-    osc1.frequency.setValueAtTime(this.vary(900), t);
-    osc1.frequency.exponentialRampToValueAtTime(120, t + 0.7);
-    // Lowpass that follows the pitch down → hollow, fading
-    const lpf = ctx.createBiquadFilter();
-    lpf.type = 'lowpass';
-    lpf.frequency.setValueAtTime(2000, t);
-    lpf.frequency.exponentialRampToValueAtTime(200, t + 0.7);
-    lpf.Q.setValueAtTime(2, t);
-    const g1 = this.envGain(vol * 0.3, 0.005, 0.7);
-    osc1.connect(lpf).connect(g1).connect(ctx.destination);
-    osc1.start(); osc1.stop(t + 0.75);
-    // Harmonic layer (octave up, fades faster)
-    this.envTone(this.vary(1800), 'triangle', vol * 0.12, 0.005, 0.3, { freqEnd: 240 });
-    // Soft noise exhale
-    this.filteredNoise('highpass', 400, 0.5, vol * 0.08, 0.01, 0.5);
+
+    // Layer 1: Body impact — quick low thud (hitting the ground)
+    const thud = ctx.createOscillator();
+    thud.type = 'sine';
+    thud.frequency.setValueAtTime(this.vary(90), t);
+    thud.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+    const thudG = ctx.createGain();
+    thudG.gain.setValueAtTime(0.001, t);
+    thudG.gain.linearRampToValueAtTime(vol * 0.4, t + 0.005);
+    thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    thud.connect(thudG).connect(ctx.destination);
+    thud.start(); thud.stop(t + 0.25);
+
+    // Layer 2: Armor/bone crack — short mid-freq noise snap
+    this.filteredNoise('bandpass', 1800, 4, vol * 0.2, 0.002, 0.04);
+
+    // Layer 3: Descending groan — voice-like filtered saw, drops in pitch
+    const groan = ctx.createOscillator();
+    groan.type = 'sawtooth';
+    groan.frequency.setValueAtTime(this.vary(320), t + 0.03);
+    groan.frequency.exponentialRampToValueAtTime(100, t + 0.45);
+    const groanLpf = ctx.createBiquadFilter();
+    groanLpf.type = 'lowpass';
+    groanLpf.frequency.setValueAtTime(600, t);
+    groanLpf.frequency.exponentialRampToValueAtTime(150, t + 0.4);
+    groanLpf.Q.setValueAtTime(3, t);
+    const groanG = ctx.createGain();
+    groanG.gain.setValueAtTime(0.001, t);
+    groanG.gain.linearRampToValueAtTime(vol * 0.15, t + 0.05);
+    groanG.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    groan.connect(groanLpf).connect(groanG).connect(ctx.destination);
+    groan.start(); groan.stop(t + 0.5);
+
+    // Layer 4: Metal clatter — brief high noise (weapon/shield dropping)
+    const clatterSrc = ctx.createBufferSource();
+    clatterSrc.buffer = this.noiseBuffer!;
+    const clatterF = ctx.createBiquadFilter();
+    clatterF.type = 'bandpass';
+    clatterF.frequency.setValueAtTime(this.vary(2800), t + 0.06);
+    clatterF.Q.setValueAtTime(2, t);
+    const clatterG = ctx.createGain();
+    clatterG.gain.setValueAtTime(0.001, t);
+    clatterG.gain.setValueAtTime(0.001, t + 0.06);
+    clatterG.gain.linearRampToValueAtTime(vol * 0.1, t + 0.065);
+    clatterG.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    clatterSrc.connect(clatterF).connect(clatterG).connect(ctx.destination);
+    clatterSrc.start(); clatterSrc.stop(t + 0.2);
+
+    // Layer 5: Fading exhale — soft noise tail
+    this.filteredNoise('lowpass', 500, 0.7, vol * 0.06, 0.05, 0.4);
   }
 
-  /** Heal: ascending shimmer cascade with harmonic chime */
+  /** Heal: angelic choir pad — warm stacked voices with slow swell and airy breath */
   private synthHeal(vol: number): void {
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-    // Cascade of ascending tones (staggered for sparkle)
-    const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6
-    notes.forEach((freq, i) => {
-      const delay = i * 0.06;
+
+    // Layer 1: Choir vowel pad — stacked 5ths with detuned pairs (simulates voices)
+    // C4, G4, C5 chord with ±3 cent detune pairs for chorus/ensemble width
+    const choirNotes = [262, 392, 523]; // C4, G4, C5
+    choirNotes.forEach((freq) => {
+      [-3, 3].forEach(detuneCents => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine'; // Pure tone = vowel fundamental
+        osc.frequency.setValueAtTime(freq, t);
+        osc.detune.setValueAtTime(detuneCents, t);
+
+        // Soft vowel formant — bandpass around 800Hz gives "ah" quality
+        const formant = ctx.createBiquadFilter();
+        formant.type = 'bandpass';
+        formant.frequency.setValueAtTime(800, t);
+        formant.Q.setValueAtTime(2, t);
+
+        // Gentle swell envelope (choir breathes in then sustains)
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.001, t);
+        g.gain.linearRampToValueAtTime(vol * 0.12, t + 0.15); // slow attack
+        g.gain.setValueAtTime(vol * 0.12, t + 0.35); // sustain
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.7); // gentle release
+
+        osc.connect(formant).connect(g).connect(ctx.destination);
+        osc.start(); osc.stop(t + 0.75);
+      });
+    });
+
+    // Layer 2: Upper harmonics — triangle waves an octave up for brightness/shimmer
+    // E5, G5 add the major quality (angelic = major chord)
+    const upperNotes = [659, 784]; // E5, G5
+    upperNotes.forEach((freq) => {
       const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, t + delay);
+      osc.type = 'triangle'; // Softer harmonics than sine, slightly breathy
+      osc.frequency.setValueAtTime(freq, t);
+
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.001, t);
-      g.gain.setValueAtTime(0.001, t + delay);
-      g.gain.linearRampToValueAtTime(vol * (0.2 + i * 0.05), t + delay + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.25);
+      g.gain.linearRampToValueAtTime(vol * 0.06, t + 0.2);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+
       osc.connect(g).connect(ctx.destination);
-      osc.start(); osc.stop(t + delay + 0.3);
+      osc.start(); osc.stop(t + 0.65);
     });
-    // High shimmer layer: tremolo at 6Hz on high sine
-    const shimOsc = ctx.createOscillator();
-    shimOsc.type = 'sine';
-    shimOsc.frequency.setValueAtTime(6500, t);
-    const shimGain = ctx.createGain();
-    shimGain.gain.setValueAtTime(vol * 0.06, t);
-    shimGain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
-    // Tremolo LFO
-    const lfo = ctx.createOscillator();
-    lfo.frequency.setValueAtTime(6, t);
-    const lfoG = ctx.createGain();
-    lfoG.gain.setValueAtTime(vol * 0.04, t);
-    lfo.connect(lfoG).connect(shimGain.gain);
-    shimOsc.connect(shimGain).connect(ctx.destination);
-    shimOsc.start(); lfo.start();
-    shimOsc.stop(t + 0.45); lfo.stop(t + 0.45);
+
+    // Layer 3: Airy breath texture — very soft filtered noise (choir breathiness)
+    const breathSrc = ctx.createBufferSource();
+    breathSrc.buffer = this.noiseBuffer!;
+    const breathFilter = ctx.createBiquadFilter();
+    breathFilter.type = 'bandpass';
+    breathFilter.frequency.setValueAtTime(1200, t);
+    breathFilter.Q.setValueAtTime(0.8, t);
+    const breathGain = ctx.createGain();
+    breathGain.gain.setValueAtTime(0.001, t);
+    breathGain.gain.linearRampToValueAtTime(vol * 0.025, t + 0.1);
+    breathGain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
+    breathSrc.connect(breathFilter).connect(breathGain).connect(ctx.destination);
+    breathSrc.start(); breathSrc.stop(t + 0.6);
+
+    // Layer 4: Slow vibrato on the whole choir (natural voice wobble ~5Hz)
+    const vibLfo = ctx.createOscillator();
+    vibLfo.frequency.setValueAtTime(5, t);
+    const vibGain = ctx.createGain();
+    vibGain.gain.setValueAtTime(3, t); // ±3 Hz pitch wobble
+    // Connect to all choir oscillators would be complex, so add a subtle
+    // amplitude modulation instead (gives warmth/life)
+    const amGain = ctx.createGain();
+    amGain.gain.setValueAtTime(vol * 0.015, t);
+    vibLfo.connect(amGain);
+    vibLfo.start(); vibLfo.stop(t + 0.7);
   }
 
   /** AoE splash: initial blast + shockwave ring + secondary pops */
