@@ -1146,6 +1146,18 @@ export class MapGenerator {
         isEdge,
         minNeighborElev
       );
+
+      // Recalculate elevation from actual block positions — ridges are real terrain.
+      // This means tile.elevation reflects the TRUE highest point including ridges,
+      // not just the base surface level.
+      let maxY = -Infinity;
+      for (const b of tile.voxelData.blocks) {
+        if (b.localPosition.y > maxY) maxY = b.localPosition.y;
+      }
+      if (maxY > -Infinity) {
+        tile.elevation = maxY + 1;
+        tile.voxelData.heightMap = [[tile.elevation]];
+      }
     });
   }
 
@@ -1252,7 +1264,7 @@ export class MapGenerator {
       }
     }
 
-    // === DECORATIONS (ridges, snow) — skip for waterfalls so water effects are unobstructed ===
+    // === RIDGE TERRAIN (real terrain, not decorations) — baked into elevation ===
     if (isRidgeTerrain && !isSnowZone && terrain !== TerrainType.WATERFALL) {
       // Stone ridges below snow line — sparse peaked blocks
       for (let y = 0; y < 3; y++) {

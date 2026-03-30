@@ -1036,45 +1036,10 @@ class Cubitopia {
       }
     }
 
-    // RIDGE / SNOW DECORATION BLOCKS — minable layer by layer
-    const SNOW_CAP_HEIGHT = 13;
-    const RIDGE_HEIGHT = 10;
-    const isSnowZone = height >= SNOW_CAP_HEIGHT;
-    const isRidgeTerrain = height >= RIDGE_HEIGHT;
-
-    if (isRidgeTerrain && !isSnowZone && tile.terrain !== TerrainType.WATERFALL) {
-      // Stone ridges below snow line — sparse peaked blocks
-      for (let y = 0; y < 3; y++) {
-        blocks.push({ localPosition: { x: 0, y: height + y, z: 0 }, type: BlockType.STONE, health: 100, maxHealth: 100 });
-      }
-      for (let y = 0; y < 2; y++) {
-        blocks.push({ localPosition: { x: -0.5, y: height + y, z: 0.5 }, type: BlockType.STONE, health: 100, maxHealth: 100 });
-      }
-      blocks.push({ localPosition: { x: 0.5, y: height, z: -0.5 }, type: BlockType.STONE, health: 100, maxHealth: 100 });
-    }
-    if (isSnowZone && tile.terrain !== TerrainType.WATERFALL) {
-      // Snow zone ridges — fuller stone core covered in snow
-      const ridgeOffsets: [number, number][] = [
-        [0, 0], [-0.5, 0], [0.5, 0], [0, -0.5], [0, 0.5],
-        [-0.5, 0.5], [0.5, -0.5],
-      ];
-      for (const [rx, rz] of ridgeOffsets) {
-        const maxY = rx === 0 && rz === 0 ? 4 : (Math.abs(rx) + Math.abs(rz) < 0.8 ? 3 : 2);
-        for (let y = 0; y < maxY; y++) {
-          blocks.push({ localPosition: { x: rx, y: height + y, z: rz }, type: BlockType.STONE, health: 100, maxHealth: 100 });
-        }
-      }
-      // Snow blanket
-      blocks.push({ localPosition: { x: 0, y: height + 4, z: 0 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: -0.5, y: height + 3, z: 0 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: 0.5, y: height + 3, z: 0 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: 0, y: height + 3, z: -0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: 0, y: height + 3, z: 0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: -0.5, y: height + 2, z: 0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: 0.5, y: height + 2, z: -0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: 0.5, y: height, z: 0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-      blocks.push({ localPosition: { x: -0.5, y: height, z: -0.5 }, type: BlockType.SNOW, health: 100, maxHealth: 100 });
-    }
+    // Ridge/snow blocks are NO LONGER generated here — they are real terrain
+    // created during MapGenerator.computeShellBlocks. rebuildTileShell is only
+    // called for base-flattening and structural repairs, where ridges should
+    // NOT be regenerated (mined ridges stay mined).
 
     tile.voxelData.blocks = blocks;
   }

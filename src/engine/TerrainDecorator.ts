@@ -75,20 +75,12 @@ export class TerrainDecorator {
     const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
     const rng = new SeededRand(coord.q * 1000 + coord.r);
 
-    // Ridge spires appear at height >= 7, scaled elevation >= 3.5
-    // Trees on ridge tiles need to be raised above the spires (tallest spire = 3 blocks * 0.52)
-    const RIDGE_ELEV_THRESHOLD = 3.5; // height 7 * 0.5
-    const thisHasRidge = elevation >= RIDGE_ELEV_THRESHOLD;
-    const neighborHasRidge = maxNeighborElevation >= RIDGE_ELEV_THRESHOLD;
-
-    // For ridge tiles, place trees on top of the tallest spire
-    const treeElevation = thisHasRidge ? elevation + 3 * 0.52 : elevation;
+    // Ridges are now real terrain — tile elevation already includes ridge height.
+    // Trees sit at the tile's elevation directly (no manual spire offset needed).
+    const treeElevation = elevation;
 
     // Only block trees if a neighbor is dramatically taller (would visually engulf the tree)
-    const effectiveNeighborHeight = neighborHasRidge
-      ? maxNeighborElevation + 1.5
-      : maxNeighborElevation;
-    const neighborTooTall = (effectiveNeighborHeight - treeElevation) > 2.5;
+    const neighborTooTall = (maxNeighborElevation - treeElevation) > 2.5;
 
     switch (terrain) {
       case TerrainType.FOREST:
