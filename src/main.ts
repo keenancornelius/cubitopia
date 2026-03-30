@@ -1078,42 +1078,11 @@ class Cubitopia {
       return y < 2 ? BlockType.STONE : BlockType.DIRT;
     };
 
-    // SURFACE BLOCKS (top 3 layers)
+    // SOLID FILL: every Y level from DEPTH to surface (matches generateShellColumn)
     for (const lx of offsets) {
       for (const lz of offsets) {
-        for (let y = Math.max(DEPTH, height - 3); y < height; y++) {
+        for (let y = DEPTH; y < height; y++) {
           blocks.push({ localPosition: { x: lx, y, z: lz }, type: blockTypeAt(y), health: 100, maxHealth: 100 });
-        }
-      }
-    }
-
-    // BOTTOM FACE (bedrock floor at y=DEPTH)
-    for (const lx of offsets) {
-      for (const lz of offsets) {
-        blocks.push({ localPosition: { x: lx, y: DEPTH, z: lz }, type: BlockType.GRASS, health: 100, maxHealth: 100 });
-      }
-    }
-
-    // EDGE BLOCKS (side faces of the cube)
-    if (isEdge) {
-      for (const lx of offsets) {
-        for (const lz of offsets) {
-          for (let y = DEPTH + 1; y < Math.max(DEPTH + 1, height - 3); y++) {
-            blocks.push({ localPosition: { x: lx, y, z: lz }, type: blockTypeAt(y), health: 100, maxHealth: 100 });
-          }
-        }
-      }
-    }
-
-    // PIT WALL BLOCKS (where neighbors are lower — exposed underground)
-    if (minNeighborElev < height - 3) {
-      const wallTop = Math.max(DEPTH + 1, height - 3);
-      const wallBottom = Math.max(DEPTH + 1, minNeighborElev);
-      for (const lx of offsets) {
-        for (const lz of offsets) {
-          for (let y = wallBottom; y < wallTop; y++) {
-            blocks.push({ localPosition: { x: lx, y, z: lz }, type: blockTypeAt(y), health: 100, maxHealth: 100 });
-          }
         }
       }
     }
@@ -1148,11 +1117,11 @@ class Cubitopia {
 
       const nElev = nTile.elevation;
       // Only care about neighbors taller than the mined tile — they might need pit walls
-      if (nElev <= minedElev + 3) continue;
+      if (nElev <= minedElev) continue;
 
-      // Determine the y-range that should have wall blocks on this neighbor
-      const wallTop = Math.max(DEPTH + 1, nElev - 3);
-      const wallBottom = Math.max(DEPTH + 1, minedElev);
+      // With solid terrain, fill any gaps between mined elevation and neighbor surface
+      const wallTop = nElev;
+      const wallBottom = Math.max(DEPTH, minedElev);
       if (wallBottom >= wallTop) continue;
 
       // Build a set of existing block positions so we don't duplicate
