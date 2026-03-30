@@ -1044,9 +1044,9 @@ export class HUD {
     }
     const depth = depthLayers ?? 3;
     const sliceInfo = horizontalY !== undefined
-      ? ` · <span style="color:#00ccff">Slice Y: <span style="font-size:20px">${horizontalY}</span></span>`
+      ? ` · <span style="color:#00ccff">Slice Y: <span style="font-size:20px">${horizontalY}</span></span> · Paint = ${depth}-deep tunnel`
       : '';
-    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> · Scroll depth · Use slicer to tunnel${sliceInfo} · [Tab] to close`;
+    this.mineModeIndicator.innerHTML = `MINE MODE — Depth: <span style="color:#fff;font-size:20px">${depth}</span> · Scroll depth · Shift+scroll slicer${sliceInfo} · [Tab] close`;
     this.mineModeIndicator.style.display = active ? 'block' : 'none';
     if (active) this.hideAllModeIndicators('mine');
   }
@@ -1811,7 +1811,7 @@ export class HUD {
           <div class="section-title" style="color: #2980b9;">🎯 Global Actions (always available)</div>
           <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining (stone, iron, clay).</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Use slicer (Shift+scroll or slider) to set a Y level for tunnels. Paint = depth-deep tunnel at that Y.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
         </div>

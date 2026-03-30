@@ -717,26 +717,13 @@ class Cubitopia {
         }
         else if (this.mineMode) {
           const key = `${hex.q},${hex.r}`;
-          const sliceY = this.voxelBuilder.getSliceY();
-
-          if (sliceY !== null) {
-            // Slicer active — toggle tile at this Y level
-            mineEraseMode = UnitAI.playerMineBlueprint.has(key);
-            if (mineEraseMode) {
-              // Remove entire blueprint (all Y levels) for this tile
-              this.blueprintSystem.unpaintMineTile(hex);
-            } else {
-              // Paint horizontal mine at slice Y
-              this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
-            }
+          mineEraseMode = UnitAI.playerMineBlueprint.has(key);
+          if (mineEraseMode) {
+            this.blueprintSystem.unpaintMine(hex);
           } else {
-            // Slicer at "ALL" — normal vertical mine toggle
-            mineEraseMode = UnitAI.playerMineBlueprint.has(key);
-            if (mineEraseMode) {
-              this.blueprintSystem.unpaintMineTile(hex);
-            } else {
-              this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
-            }
+            // startY = sliceY if slicer active, null = surface
+            const sliceY = this.voxelBuilder.getSliceY();
+            this.blueprintSystem.paintMine(hex, sliceY);
           }
         }
       }
@@ -779,14 +766,10 @@ class Cubitopia {
         }
         else if (this.mineMode) {
           if (mineEraseMode) {
-            this.blueprintSystem.unpaintMineTile(hex);
+            this.blueprintSystem.unpaintMine(hex);
           } else {
             const sliceY = this.voxelBuilder.getSliceY();
-            if (sliceY !== null) {
-              this.blueprintSystem.paintMineTileHorizontal(hex, sliceY);
-            } else {
-              this.blueprintSystem.paintMineTile(hex, Cubitopia.MAX_MINE_DEPTH);
-            }
+            this.blueprintSystem.paintMine(hex, sliceY);
           }
         }
       }
@@ -814,7 +797,6 @@ class Cubitopia {
             ? Math.max(-40, Math.min(25, currentSlice + delta))
             : 25; // first Shift+scroll activates slicer at max
           this.voxelBuilder.setSliceY(newY);
-          this.horizontalTargetY = newY;
           this.hud.setSlicerValue(newY);
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, newY);
         } else {
@@ -889,7 +871,10 @@ class Cubitopia {
       this.hud.showElevationSlicer(true);
       this.hud.onSliceChange = (y) => {
         this.voxelBuilder.setSliceY(y);
-        this.horizontalTargetY = y ?? 25;
+        // Update HUD to show current slice Y
+        if (y !== null) {
+          this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, y);
+        }
       };
     } else {
       this.hud.showElevationSlicer(false);
@@ -922,31 +907,23 @@ class Cubitopia {
     const tile = this.currentMap.tiles.get(key);
     if (!tile || tile.voxelData.blocks.length === 0) return;
 
-    const BLOCKS_PER_TICK = 3;
+    const BLOCKS_PER_TICK = 9;
     const blocks = tile.voxelData.blocks;
 
-    // Check if this is a horizontal or vertical mine
-    const mineTarget = UnitAI.getMineTarget(key);
-    const isHorizontal = mineTarget?.mode === 'horizontal' && mineTarget.targetY !== undefined;
+    // Get the mine blueprint — determines the Y range to excavate
+    const target = UnitAI.getMineTarget(key);
+    if (!target) return;
 
-    let toRemove: { block: typeof blocks[0]; index: number }[];
+    const bottomY = target.startY - target.depth + 1;
 
-    if (isHorizontal) {
-      // --- HORIZONTAL MINING: remove blocks at the target Y level ---
-      // Terrain is solid, so blocks exist at every Y level from DEPTH to surface.
-      const targetY = Math.floor(mineTarget!.targetY!);
-      const atLevel = blocks
-        .map((b, i) => ({ block: b, index: i }))
-        .filter(({ block }) => Math.floor(block.localPosition.y) === targetY);
-      toRemove = atLevel.slice(0, Math.min(BLOCKS_PER_TICK, atLevel.length));
-    } else {
-      // --- VERTICAL MINING: remove topmost blocks (dig down) ---
-      const sorted = blocks
-        .map((b, i) => ({ block: b, index: i }))
-        .sort((a, b) => b.block.localPosition.y - a.block.localPosition.y);
-      toRemove = sorted.slice(0, Math.min(BLOCKS_PER_TICK, sorted.length));
-    }
+    // Find blocks WITHIN the blueprint's Y range, sorted top-down
+    // Miners always work from the highest Y in the range downward
+    const inRange = blocks
+      .map((b, i) => ({ block: b, index: i }))
+      .filter(({ block }) => block.localPosition.y >= bottomY && block.localPosition.y <= target.startY)
+      .sort((a, b) => b.block.localPosition.y - a.block.localPosition.y);
 
+    const toRemove = inRange.slice(0, Math.min(BLOCKS_PER_TICK, inRange.length));
     if (toRemove.length === 0) return;
 
     // Determine resource from the primary block being mined
@@ -986,31 +963,8 @@ class Cubitopia {
     // Add pit wall blocks to neighbors where needed
     this.addNeighborPitWalls(minePos);
 
-    // Check if mine blueprint is complete
-    let complete = false;
-    if (isHorizontal) {
-      const targetY = Math.floor(mineTarget!.targetY!);
-      const remaining = tile.voxelData.blocks.filter(
-        b => Math.floor(b.localPosition.y) === targetY
-      );
-      if (remaining.length === 0) {
-        // This Y level is done — check if more levels are queued
-        const levels = mineTarget!.yLevels || [];
-        const doneIdx = levels.indexOf(targetY);
-        if (doneIdx !== -1) levels.splice(doneIdx, 1);
-        if (levels.length > 0) {
-          // Advance to next Y level
-          mineTarget!.targetY = levels[0];
-          mineTarget!.yLevels = levels;
-          UnitAI.claimedMines.delete(key);
-        } else {
-          complete = true;
-        }
-      }
-    } else {
-      complete = UnitAI.isMineComplete(key, tile.elevation);
-    }
-
+    // Check if mine blueprint is complete (no blocks left in range)
+    const complete = UnitAI.isMineComplete(key, tile);
     if (complete) {
       UnitAI.playerMineBlueprint.delete(key);
       UnitAI.claimedMines.delete(key);
@@ -2765,8 +2719,6 @@ class Cubitopia {
   private wallRotation = 0; // 0 or Math.PI/2
   private harvestMode = false;
   private mineMode = false;
-  /** Current Y-level target for horizontal (tunnel) mining. Shift+scroll adjusts. */
-  private horizontalTargetY = 5;
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
 
   // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---

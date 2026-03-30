@@ -202,60 +202,51 @@ export default class BlueprintSystem {
     this.harvestMarkers.clear();
   }
 
-  // ===================== MINE MARKERS =====================
+  // ===================== MINE SYSTEM (v2 — unified) =====================
+  //
+  // ONE blueprint type for all mining. Each blueprint stores:
+  //   startY  — the highest Y level to mine (surface-1 for surface mines, or sliceY for tunnels)
+  //   depth   — how many layers to remove downward from startY
+  //
+  // Miners always work TOP-DOWN within the startY→(startY-depth+1) range.
+  // No separate "horizontal" vs "vertical" mode — it's all the same: remove
+  // blocks in a Y range. The slicer just controls WHERE startY is.
 
-  paintMineTile(coord: HexCoord, maxMineDepth: number): void {
+  /** Paint a mine blueprint on a tile.
+   *  @param coord   hex coordinate
+   *  @param startY  highest Y level to mine (null = surface-1, i.e. top of tile)
+   */
+  paintMine(coord: HexCoord, startY: number | null = null): void {
     if (!this.ctx.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
     if (this.ops.isWaterTerrain(tile.terrain)) return;
-    if (tile.elevation <= maxMineDepth) return;
+
+    // Determine the Y range to mine
+    const depth = this.mineDepthLayers;
+    const topY = startY ?? (tile.elevation - 1);  // surface = elevation-1
+    const bottomY = topY - depth + 1;
+
+    // Check tile actually has blocks in this range
+    const hasBlocks = tile.voxelData.blocks.some(
+      b => b.localPosition.y >= bottomY && b.localPosition.y <= topY
+    );
+    if (!hasBlocks) return;
+
+    // If already blueprinted, toggle off (erase)
     if (UnitAI.playerMineBlueprint.has(key)) return;
-    const targetElev = Math.max(maxMineDepth, tile.elevation - this.mineDepthLayers);
-    UnitAI.playerMineBlueprint.set(key, { targetElevation: targetElev, mode: 'vertical' });
-    this.addMineMarker(coord, this.mineDepthLayers);
+
+    UnitAI.playerMineBlueprint.set(key, {
+      startY: topY,
+      depth,
+    });
+
+    this.addMineMarker(coord, topY, depth);
   }
 
-  /** Paint a horizontal mine blueprint — miners will carve a tunnel at the given Y level */
-  paintMineTileHorizontal(coord: HexCoord, targetY: number): void {
-    if (!this.ctx.currentMap) return;
-    const key = `${coord.q},${coord.r}`;
-    const tile = this.ctx.currentMap.tiles.get(key);
-    if (!tile) return;
-    if (this.ops.isWaterTerrain(tile.terrain)) return;
-    if (tile.elevation <= targetY) return;
-
-    const existing = UnitAI.playerMineBlueprint.get(key);
-    if (existing && existing.mode === 'horizontal') {
-      // Append this Y level if not already queued
-      const levels = existing.yLevels || (existing.targetY !== undefined ? [existing.targetY] : []);
-      if (levels.includes(targetY)) return; // already queued
-      levels.push(targetY);
-      // Sort descending — miners work from top (exposed surface) down
-      levels.sort((a, b) => b - a);
-      existing.yLevels = levels;
-      existing.targetY = levels[0];
-    } else {
-      // New horizontal blueprint (or replacing a vertical one)
-      if (existing) {
-        UnitAI.claimedMines.delete(key);
-        this.removeMineMarker(coord);
-      }
-      UnitAI.playerMineBlueprint.set(key, {
-        targetElevation: targetY,
-        mode: 'horizontal',
-        targetY,
-        yLevels: [targetY],
-      });
-    }
-    // Use standard yellow marker — slicer context makes the Y level obvious
-    if (!this.mineMarkers.has(key)) {
-      this.addMineMarker(coord, 1);
-    }
-  }
-
-  unpaintMineTile(coord: HexCoord): void {
+  /** Remove a mine blueprint from a tile */
+  unpaintMine(coord: HexCoord): void {
     const key = `${coord.q},${coord.r}`;
     if (!UnitAI.playerMineBlueprint.has(key)) return;
     UnitAI.playerMineBlueprint.delete(key);
@@ -263,114 +254,58 @@ export default class BlueprintSystem {
     this.removeMineMarker(coord);
   }
 
+  /** Adjust mine depth with scroll wheel (1-20) */
   adjustMineDepth(delta: number): void {
     this.mineDepthLayers = Math.max(1, Math.min(20, this.mineDepthLayers + delta));
   }
 
-  addMineMarker(coord: HexCoord, depthLayers = 1): void {
+  /** Place a yellow ring marker at the mine's startY position */
+  addMineMarker(coord: HexCoord, startY: number, depth: number): void {
     const key = `${coord.q},${coord.r}`;
     if (this.mineMarkers.has(key)) this.removeMineMarker(coord);
 
+    const VOXEL_SIZE = 0.52;
     const worldX = coord.q * 1.5;
     const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const baseY = this.ctx.getElevation(coord);
+    // Position ring at the TOP of the mine range (startY)
+    const markerY = (startY + 1) * VOXEL_SIZE + 0.02;
 
-    const innerRadius = 0.5 - Math.min(0.15, depthLayers * 0.015);
+    const innerRadius = 0.5 - Math.min(0.15, depth * 0.015);
     const ringGeo = new THREE.RingGeometry(innerRadius, 0.7, 6);
-    const brightness = Math.min(1.0, 0.5 + depthLayers * 0.05);
+    const brightness = Math.min(1.0, 0.5 + depth * 0.05);
     const ringMat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(1.0, brightness * 0.55, 0),
       transparent: true,
-      opacity: Math.min(0.85, 0.5 + depthLayers * 0.03),
+      opacity: Math.min(0.85, 0.5 + depth * 0.03),
       side: THREE.DoubleSide, depthWrite: false,
     });
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = -Math.PI / 2;
-    ring.position.set(worldX, baseY + 0.05, worldZ);
+    ring.position.set(worldX, markerY, worldZ);
     ring.name = `mine_${key}`;
     this.ctx.scene.add(ring);
     this.mineMarkers.set(key, ring);
   }
 
-  /** Horizontal mine marker — adds a cyan ring at the target Y level.
-   *  Multiple Y levels on the same tile each get their own ring inside a Group. */
-  addMineMarkerHorizontal(coord: HexCoord, targetY: number): void {
-    const key = `${coord.q},${coord.r}`;
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const VOXEL_SCALE = 0.52;
-
-    // Get or create a group for this tile's markers
-    let group = this.mineMarkers.get(key) as THREE.Group | undefined;
-    if (!group || !(group instanceof THREE.Group)) {
-      // Replace any old non-group marker
-      if (group) {
-        this.ctx.scene.remove(group);
-        if ((group as THREE.Mesh).geometry) (group as THREE.Mesh).geometry.dispose();
-        if ((group as THREE.Mesh).material) ((group as THREE.Mesh).material as THREE.Material).dispose();
-      }
-      group = new THREE.Group();
-      group.name = `mine_${key}`;
-      this.ctx.scene.add(group);
-      this.mineMarkers.set(key, group);
-    }
-
-    // Check if a ring already exists at this Y level
-    const yPos = targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
-    for (const child of group.children) {
-      if (Math.abs(child.position.y - yPos) < 0.01) return; // already has a ring here
-    }
-
-    // Add a new ring at this Y level
-    const ringGeo = new THREE.RingGeometry(0.3, 0.55, 6);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(0.0, 0.8, 1.0),
-      transparent: true,
-      opacity: 0.75,
-      side: THREE.DoubleSide, depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.set(worldX, yPos, worldZ);
-    group.add(ring);
-  }
-
-  /** Remove just one Y-level ring from a horizontal mine marker group */
-  removeMineMarkerAtY(coord: HexCoord, targetY: number): void {
-    const key = `${coord.q},${coord.r}`;
-    const marker = this.mineMarkers.get(key);
-    if (!marker || !(marker instanceof THREE.Group)) return;
-    const VOXEL_SCALE = 0.52;
-    const yPos = targetY * VOXEL_SCALE + VOXEL_SCALE * 0.5;
-    for (let i = marker.children.length - 1; i >= 0; i--) {
-      const child = marker.children[i] as THREE.Mesh;
-      if (Math.abs(child.position.y - yPos) < 0.01) {
-        marker.remove(child);
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) (child.material as THREE.Material).dispose();
-        break;
-      }
-    }
-  }
-
+  /** Remove mine marker for a tile */
   removeMineMarker(coord: HexCoord): void {
     const key = `${coord.q},${coord.r}`;
     const marker = this.mineMarkers.get(key);
-    if (marker) {
-      this.ctx.scene.remove(marker);
-      if (marker instanceof THREE.Group) {
-        for (const child of marker.children) {
-          if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
-          if ((child as THREE.Mesh).material) ((child as THREE.Mesh).material as THREE.Material).dispose();
-        }
-      } else {
-        marker.geometry.dispose();
-        (marker.material as THREE.Material).dispose();
+    if (!marker) return;
+    this.ctx.scene.remove(marker);
+    if (marker instanceof THREE.Group) {
+      for (const child of marker.children) {
+        if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+        if ((child as THREE.Mesh).material) ((child as THREE.Mesh).material as THREE.Material).dispose();
       }
-      this.mineMarkers.delete(key);
+    } else {
+      marker.geometry.dispose();
+      (marker.material as THREE.Material).dispose();
     }
+    this.mineMarkers.delete(key);
   }
 
+  /** Remove all mine markers */
   clearAllMineMarkers(): void {
     for (const [key] of this.mineMarkers) {
       const [q, r] = key.split(',').map(Number);

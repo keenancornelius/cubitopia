@@ -58,9 +58,9 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 4, isSiege: false,
   },
   [UnitType.BUILDER]: {
-    stats: { maxHealth: 8, attack: 1, defense: 2, movement: 2, range: 1 },
-    moveSpeed: 1.0, attackSpeed: 0.5, color: 0xd4a574,
-    carryCapacity: 4, isSiege: false,
+    stats: { maxHealth: 8, attack: 1, defense: 2, movement: 3, range: 1 },
+    moveSpeed: 2.2, attackSpeed: 0.5, color: 0xd4a574,
+    carryCapacity: 8, isSiege: false,
   },
   [UnitType.LUMBERJACK]: {
     stats: { maxHealth: 8, attack: 2, defense: 1, movement: 2, range: 1 },
