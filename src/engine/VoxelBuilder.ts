@@ -31,6 +31,15 @@ function colorHash(x: number, y: number, z: number): number {
   return (h & 0x7fffffff) / 0x7fffffff;
 }
 
+/** Info returned when a raycast hits a specific voxel block */
+export interface VoxelHitInfo {
+  tileKey: string;       // "q,r"
+  blockIndex: number;    // index into tile.voxelData.blocks
+  blockType: BlockType;
+  worldPosition: THREE.Vector3;
+  faceNormal: THREE.Vector3;
+}
+
 export class VoxelBuilder {
   private geometry: THREE.BoxGeometry;
   private materials: Map<BlockType, THREE.MeshLambertMaterial>;
@@ -38,6 +47,8 @@ export class VoxelBuilder {
   private scene: THREE.Scene;
   private blockCounts: Map<BlockType, number>;
   private maxInstancesPerType: number;
+  /** Reverse lookup: blockType → instanceId → { tileKey, blockIndex } */
+  private instanceLookup: Map<BlockType, { tileKey: string; blockIndex: number }[]>;
 
   constructor(scene: THREE.Scene, maxInstancesPerType: number = 500000) {
     this.scene = scene;
@@ -46,6 +57,7 @@ export class VoxelBuilder {
     this.materials = new Map();
     this.instancedMeshes = new Map();
     this.blockCounts = new Map();
+    this.instanceLookup = new Map();
 
     this.initMaterials();
     this.initInstancedMeshes();
@@ -204,6 +216,7 @@ export class VoxelBuilder {
       mesh.count = 0;
       mesh.instanceMatrix.needsUpdate = true;
       this.blockCounts.set(type, 0);
+      this.instanceLookup.set(type, []);
     }
   }
 
@@ -226,17 +239,113 @@ export class VoxelBuilder {
       const worldX = q * 1.5;
       const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
 
-      for (const block of tile.voxelData.blocks) {
-        this.addBlock(
+      for (let i = 0; i < tile.voxelData.blocks.length; i++) {
+        const block = tile.voxelData.blocks[i];
+        this.addBlockWithLookup(
           {
             x: worldX + block.localPosition.x,
             y: block.localPosition.y,
             z: worldZ + block.localPosition.z,
           },
-          block.type
+          block.type,
+          key,
+          i,
         );
       }
     });
+  }
+
+  /** Same as addBlock but also records the tile/block mapping for raycast lookups */
+  private addBlockWithLookup(position: GridPosition, type: BlockType, tileKey: string, blockIndex: number): void {
+    const mesh = this.instancedMeshes.get(type);
+    if (!mesh) return;
+
+    const count = this.blockCounts.get(type) || 0;
+    if (count >= this.maxInstancesPerType) return;
+
+    const matrix = new THREE.Matrix4();
+    matrix.setPosition(position.x, position.y * VOXEL_SIZE, position.z);
+    mesh.setMatrixAt(count, matrix);
+
+    // Per-instance color variation (same as addBlock)
+    const baseColor = BLOCK_COLORS[type];
+    const base = new THREE.Color(baseColor);
+    const hash = colorHash(
+      Math.round(position.x * 100),
+      Math.round(position.y * 100),
+      Math.round(position.z * 100)
+    );
+    const hash2 = colorHash(
+      Math.round(position.z * 100 + 7),
+      Math.round(position.x * 100 + 13),
+      Math.round(position.y * 100 + 31)
+    );
+
+    let hueShift = 0, satShift = 0, lightShift = 0;
+    switch (type) {
+      case BlockType.GRASS: hueShift = (hash - 0.5) * 0.08; satShift = (hash2 - 0.5) * 0.15; lightShift = (hash - 0.5) * 0.18; break;
+      case BlockType.SAND: hueShift = (hash - 0.5) * 0.05; satShift = (hash2 - 0.5) * 0.2; lightShift = (hash - 0.5) * 0.14; break;
+      case BlockType.STONE: hueShift = (hash - 0.5) * 0.04; satShift = (hash2 - 0.5) * 0.1; lightShift = (hash - 0.5) * 0.16; break;
+      case BlockType.DIRT: hueShift = (hash - 0.5) * 0.06; satShift = (hash2 - 0.5) * 0.12; lightShift = (hash - 0.5) * 0.15; break;
+      case BlockType.SNOW: hueShift = (hash - 0.5) * 0.03; satShift = (hash2 - 0.5) * 0.08; lightShift = (hash - 0.5) * 0.06; break;
+      case BlockType.WATER: hueShift = (hash - 0.5) * 0.06; satShift = (hash2 - 0.5) * 0.15; lightShift = (hash - 0.5) * 0.12; break;
+      default: hueShift = (hash - 0.5) * 0.04; satShift = (hash2 - 0.5) * 0.1; lightShift = (hash - 0.5) * 0.1; break;
+    }
+    const heightDarken = Math.max(-0.08, Math.min(0, (position.y - 5) * -0.005));
+    base.offsetHSL(hueShift, satShift, lightShift + heightDarken);
+    mesh.setColorAt(count, base);
+
+    mesh.count = count + 1;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    this.blockCounts.set(type, count + 1);
+
+    // Record lookup
+    let lookup = this.instanceLookup.get(type);
+    if (!lookup) { lookup = []; this.instanceLookup.set(type, lookup); }
+    lookup[count] = { tileKey, blockIndex };
+  }
+
+  /**
+   * Raycast against all instanced voxel meshes and return info about the hit block.
+   * Returns null if no voxel block was hit.
+   */
+  raycastBlock(raycaster: THREE.Raycaster): VoxelHitInfo | null {
+    let bestDist = Infinity;
+    let bestHit: VoxelHitInfo | null = null;
+
+    for (const [type, mesh] of this.instancedMeshes.entries()) {
+      if (mesh.count === 0) continue;
+      const intersects = raycaster.intersectObject(mesh, false);
+      for (const hit of intersects) {
+        if (hit.distance >= bestDist) break; // sorted by distance
+        if (hit.instanceId === undefined) continue;
+        const lookup = this.instanceLookup.get(type);
+        if (!lookup || !lookup[hit.instanceId]) continue;
+
+        const { tileKey, blockIndex } = lookup[hit.instanceId];
+        const worldNormal = hit.face
+          ? hit.face.normal.clone().transformDirection(mesh.matrixWorld)
+          : new THREE.Vector3(0, 1, 0);
+
+        bestDist = hit.distance;
+        bestHit = {
+          tileKey,
+          blockIndex,
+          blockType: type,
+          worldPosition: hit.point.clone(),
+          faceNormal: worldNormal,
+        };
+        break; // first (closest) hit for this mesh type
+      }
+    }
+
+    return bestHit;
+  }
+
+  /** Get all instanced meshes (for external raycast usage) */
+  getInstancedMeshes(): Map<BlockType, THREE.InstancedMesh> {
+    return this.instancedMeshes;
   }
 
   dispose(): void {

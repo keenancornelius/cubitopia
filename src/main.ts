@@ -825,114 +825,16 @@ class Cubitopia {
 
     if (!this.currentMap) return this.raycastToHex(raycaster);
 
-    // Raycast with face-normal detection for top vs side faces
-    const intersects = raycaster.intersectObjects(this.renderer.scene.children, true);
-    let clickedCoord: HexCoord | null = null;
-    let hitPoint: THREE.Vector3 | null = null;
-    let isTopFace = true; // Default to top face
-
-    for (const hit of intersects) {
-      if (!(hit.object instanceof THREE.Mesh)) continue;
-      const name = hit.object.name || hit.object.parent?.name || '';
-      if (name.startsWith('harvest_') || name.startsWith('ghost_') || name.startsWith('mine_')) continue;
-
-      hitPoint = hit.point.clone();
-
-      // Check face normal to determine if it's a top or side face
-      if (hit.face && hit.face.normal) {
-        let worldNormal = hit.face.normal.clone();
-        const mesh = hit.object as THREE.Mesh;
-        if (mesh.matrixWorld) {
-          const normalMatrix = new THREE.Matrix3().setFromMatrix4(mesh.matrixWorld);
-          worldNormal.applyMatrix3(normalMatrix).normalize();
-        }
-
-        // Top face has normal.y > 0.5
-        isTopFace = worldNormal.y > 0.5;
-
-        // If it's a side face, nudge the hit point outward along the normal
-        if (!isTopFace) {
-          hitPoint = hit.point.clone().add(worldNormal.clone().multiplyScalar(0.8));
-        }
-      }
-
-      const coord = this.worldToHex(hitPoint);
-      if (coord) {
-        clickedCoord = coord;
-        break;
-      }
+    // --- Minecraft-style: raycast directly against voxel blocks ---
+    // This correctly hits ridge tips, snow caps, and any visible block face.
+    const voxelHit = this.voxelBuilder.raycastBlock(raycaster);
+    if (voxelHit) {
+      const [q, r] = voxelHit.tileKey.split(',').map(Number);
+      return { q, r };
     }
 
-    if (!clickedCoord) {
-      clickedCoord = this.raycastToHex(raycaster);
-    }
-    if (!clickedCoord) return null;
-
-    // --- SIDE FACE MINING (horizontal) ---
-    // If the hit was a side face, this is treated as horizontal mining
-    if (!isTopFace && this.currentMap) {
-      // Side face click = mine the block on the tall column from the adjacent lower tile
-      // The adjusted hit point already resolved to the neighbor, so just return it
-      return clickedCoord;
-    }
-
-    // --- TOP FACE MINING (vertical) or Shift+click HORIZONTAL ---
-    // For top face, normal vertical mining (dig downward)
-    // For shift+click with top face, allow selecting a neighbor for horizontal mine
-    if (e.shiftKey && this.currentMap) {
-      // Use the click's world XZ offset from tile center to pick a direction
-      const tileWorldX = clickedCoord.q * 1.5;
-      const tileWorldZ = clickedCoord.r * 1.5 + (clickedCoord.q % 2 === 1 ? 0.75 : 0);
-
-      // Direction from tile center to click point (XZ plane)
-      let dx = 0, dz = 0;
-      if (hitPoint) {
-        dx = hitPoint.x - tileWorldX;
-        dz = hitPoint.z - tileWorldZ;
-      }
-      // If click was dead center, use camera forward projected onto XZ
-      if (Math.abs(dx) < 0.01 && Math.abs(dz) < 0.01) {
-        const camDir = new THREE.Vector3();
-        this.camera.camera.getWorldDirection(camDir);
-        dx = camDir.x;
-        dz = camDir.z;
-      }
-
-      // Score each neighbor by: (a) direction alignment, (b) higher elevation
-      const neighbors = Pathfinder.getHexNeighbors(clickedCoord);
-      const clickedTile = this.currentMap.tiles.get(`${clickedCoord.q},${clickedCoord.r}`);
-      let bestNeighbor: HexCoord | null = null;
-      let bestScore = -Infinity;
-
-      for (const n of neighbors) {
-        const nTile = this.currentMap.tiles.get(`${n.q},${n.r}`);
-        if (!nTile) continue;
-        // Only consider neighbors at higher elevation (they have a wall to mine)
-        if (nTile.elevation <= (clickedTile?.elevation ?? 999)) continue;
-
-        // Direction from clicked tile to this neighbor
-        const nWorldX = n.q * 1.5;
-        const nWorldZ = n.r * 1.5 + (n.q % 2 === 1 ? 0.75 : 0);
-        const ndx = nWorldX - tileWorldX;
-        const ndz = nWorldZ - tileWorldZ;
-
-        // Dot product for direction alignment (higher = better match)
-        const len = Math.sqrt(dx * dx + dz * dz) * Math.sqrt(ndx * ndx + ndz * ndz);
-        const dot = len > 0.001 ? (dx * ndx + dz * ndz) / len : 0;
-
-        if (dot > bestScore) {
-          bestScore = dot;
-          bestNeighbor = n;
-        }
-      }
-
-      // If we found a higher neighbor in the click direction, mine it (horizontal)
-      if (bestNeighbor && bestScore > -0.5) return bestNeighbor;
-
-      // No higher neighbors — fall through to normal downward mine
-    }
-
-    return clickedCoord;
+    // Fallback to ground-plane raycast if no voxel block was hit
+    return this.raycastToHex(raycaster);
   }
 
   // paintHarvestTile → moved to BlueprintSystem
@@ -1029,12 +931,10 @@ class Cubitopia {
     this.natureSystem.grassAge.delete(key);
     this.natureSystem.grassGrowthTimers.delete(key);
 
-    // Rebuild NEIGHBOR shells (pit walls may be newly exposed) but NOT the mined tile
-    // The mined tile keeps its remaining blocks as-is — true per-block destruction
-    const neighbors = Pathfinder.getHexNeighbors(minePos);
-    for (const n of neighbors) {
-      this.rebuildTileShell(n);
-    }
+    // Add pit wall blocks to neighbors where the mined tile exposed underground faces.
+    // We do NOT call rebuildTileShell — that would regenerate ridges/snow decorations and
+    // cause visual spikes. Instead, only append missing wall blocks.
+    this.addNeighborPitWalls(minePos);
 
     // Check if mine blueprint target depth has been reached
     if (UnitAI.isMineComplete(key, tile.elevation)) {
@@ -1177,6 +1077,75 @@ class Cubitopia {
     }
 
     tile.voxelData.blocks = blocks;
+  }
+
+  /**
+   * Lightweight pit-wall filler for neighbors of a mined tile.
+   * Only APPENDS missing wall blocks — never removes or regenerates existing blocks,
+   * so ridges, snow caps, and already-mined surfaces stay untouched.
+   */
+  private addNeighborPitWalls(minedCoord: HexCoord): void {
+    if (!this.currentMap) return;
+    const minedKey = `${minedCoord.q},${minedCoord.r}`;
+    const minedTile = this.currentMap.tiles.get(minedKey);
+    if (!minedTile) return;
+    const minedElev = minedTile.elevation;
+    const DEPTH = Cubitopia.UNDERGROUND_DEPTH;
+    const offsets = [-0.5, 0, 0.5];
+
+    const neighbors = Pathfinder.getHexNeighbors(minedCoord);
+    for (const n of neighbors) {
+      const nKey = `${n.q},${n.r}`;
+      const nTile = this.currentMap.tiles.get(nKey);
+      if (!nTile) continue;
+
+      const nElev = nTile.elevation;
+      // Only care about neighbors taller than the mined tile — they might need pit walls
+      if (nElev <= minedElev + 3) continue;
+
+      // Determine the y-range that should have wall blocks on this neighbor
+      const wallTop = Math.max(DEPTH + 1, nElev - 3);
+      const wallBottom = Math.max(DEPTH + 1, minedElev);
+      if (wallBottom >= wallTop) continue;
+
+      // Build a set of existing block positions so we don't duplicate
+      const existingPositions = new Set<string>();
+      for (const b of nTile.voxelData.blocks) {
+        existingPositions.add(`${b.localPosition.x},${b.localPosition.y},${b.localPosition.z}`);
+      }
+
+      // Block type helper (simplified — matches rebuildTileShell logic)
+      const terrain = nElev <= 2 ? TerrainType.PLAINS : nTile.terrain;
+      const blockTypeAt = (y: number): BlockType => {
+        if (y >= 0 && y === nElev - 1) return this.terrainToBlock(terrain);
+        if (y >= 0 && y >= nElev - 2) {
+          return terrain === TerrainType.DESERT ? BlockType.SAND :
+            terrain === TerrainType.SNOW ? BlockType.SNOW :
+            terrain === TerrainType.MOUNTAIN ? BlockType.STONE : BlockType.DIRT;
+        }
+        if (y < -10) return BlockType.IRON;
+        if (y < -5) return BlockType.GOLD;
+        if (y < 0) return BlockType.STONE;
+        return y < 2 ? BlockType.STONE : BlockType.DIRT;
+      };
+
+      // Append only the missing wall blocks
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          for (let y = wallBottom; y < wallTop; y++) {
+            const posKey = `${lx},${y},${lz}`;
+            if (!existingPositions.has(posKey)) {
+              nTile.voxelData.blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: blockTypeAt(y),
+                health: 100,
+                maxHealth: 100,
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   private terrainToBlock(terrain: TerrainType): BlockType {
