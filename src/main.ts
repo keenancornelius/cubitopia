@@ -1606,11 +1606,13 @@ class Cubitopia {
       return;
     }
     if (!this.hud.debugFlags.freeBuild && cfg.getResource() < cost) {
+      this.sound.play('queue_error', 0.4);
       this.hud.showNotification(`Need ${cost} ${cfg.resourceType} for ${name}! (have ${cfg.getResource()})`, '#e67e22');
       return;
     }
     cfg.getQueue().push({ type, cost: this.hud.debugFlags.freeBuild ? 0 : cost });
     if (cfg.updateHUD) cfg.updateHUD(cfg.getQueue());
+    this.sound.play('queue_confirm', 0.5);
     this.hud.showNotification(`${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost + ' ' + cfg.resourceType})`, '#2ecc71');
   }
 
@@ -3072,9 +3074,9 @@ class Cubitopia {
         this.doSpawnQueueGeneric(buildingKey, unitType, cost, unitName.charAt(0) + unitName.slice(1).toLowerCase());
       }
     } else if (parts[0] === 'craft') {
-      if (parts[1] === 'rope') this.resourceManager.craftRope();
-      else if (parts[1] === 'steel') this.resourceManager.smeltSteel();
-      else if (parts[1] === 'charcoal') this.resourceManager.craftCharcoal();
+      if (parts[1] === 'rope') { this.resourceManager.craftRope(); this.sound.play('craft_confirm', 0.5); }
+      else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(); this.sound.play('craft_confirm', 0.5); }
+      else if (parts[1] === 'charcoal') { this.resourceManager.craftCharcoal(); this.sound.play('craft_confirm', 0.5); }
     } else if (parts[0] === 'action') {
       if (parts[1] === 'harvest') this.toggleHarvestMode();
       else if (parts[1] === 'mine') this.toggleMineMode();
@@ -3267,14 +3269,17 @@ class Cubitopia {
     const cost = { wood: 5, stone: 5, rope: 3 };
     if (!this.hud.debugFlags.freeBuild) {
       if (this.ropeStockpile[0] < cost.rope) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${cost.rope} rope! (have ${this.ropeStockpile[0]}). Craft rope at Workshop.`, '#e67e22');
         return;
       }
       if (this.stoneStockpile[0] < cost.stone) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${cost.stone} stone! (have ${this.stoneStockpile[0]})`, '#e67e22');
         return;
       }
       if (this.woodStockpile[0] < cost.wood) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${cost.wood} wood! (have ${this.woodStockpile[0]})`, '#e67e22');
         return;
       }
@@ -3282,6 +3287,7 @@ class Cubitopia {
     const actualCost = this.hud.debugFlags.freeBuild ? { wood: 0, stone: 0, rope: 0 } : cost;
     this.workshopSpawnQueue.push({ type, cost: actualCost });
     this.hud.updateWorkshopSpawnQueue(this.workshopSpawnQueue);
+    this.sound.play('queue_confirm', 0.5);
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost.rope + ' rope + ' + cost.stone + ' stone + ' + cost.wood + ' wood'})`, '#2ecc71');
   }
 
@@ -3295,16 +3301,19 @@ class Cubitopia {
     }
     if (!this.hud.debugFlags.freeBuild) {
       if (this.players[0].resources.gold < goldCost) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
         return;
       }
       if (this.steelStockpile[0] < steelCost) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${steelCost} steel for ${name}! (have ${this.steelStockpile[0]})`, '#e67e22');
         return;
       }
     }
     const cost = this.hud.debugFlags.freeBuild ? { gold: 0, steel: 0 } : { gold: goldCost, steel: steelCost };
     this.armorySpawnQueue.push({ type, cost });
+    this.sound.play('queue_confirm', 0.5);
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + steelCost + ' steel'})`, '#2ecc71');
   }
 
@@ -3318,16 +3327,19 @@ class Cubitopia {
     }
     if (!this.hud.debugFlags.freeBuild) {
       if (this.players[0].resources.gold < goldCost) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
         return;
       }
       if (this.players[0].resources.crystal < crystalCost) {
+        this.sound.play('queue_error', 0.4);
         this.hud.showNotification(`⚠️ Need ${crystalCost} crystal for ${name}! (have ${this.players[0].resources.crystal})`, '#e67e22');
         return;
       }
     }
     const cost = this.hud.debugFlags.freeBuild ? { gold: 0, crystal: 0 } : { gold: goldCost, crystal: crystalCost };
     this.wizardTowerSpawnQueue.push({ type, cost });
+    this.sound.play('queue_confirm', 0.5);
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + crystalCost + ' crystal'})`, '#7c3aed');
   }
 

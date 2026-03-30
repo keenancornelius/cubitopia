@@ -19,7 +19,8 @@ type SoundName =
   | 'select' | 'command' | 'build'
   | 'rage' | 'assassin_strike'
   | 'ui_click' | 'ui_hover'
-  | 'battle_start' | 'level_up';
+  | 'battle_start' | 'level_up'
+  | 'queue_confirm' | 'queue_error' | 'craft_confirm';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -77,6 +78,9 @@ export default class SoundManager {
       case 'ui_hover':     this.synthUIHover(vol); break;
       case 'battle_start': this.synthBattleStart(vol); break;
       case 'level_up':     this.synthLevelUp(vol); break;
+      case 'queue_confirm': this.synthQueueConfirm(vol); break;
+      case 'queue_error':   this.synthQueueError(vol); break;
+      case 'craft_confirm': this.synthCraftConfirm(vol); break;
     }
   }
 
@@ -617,6 +621,119 @@ export default class SoundManager {
   /** UI hover: soft, barely-there blip */
   private synthUIHover(vol: number): void {
     this.envTone(this.vary(3200), 'sine', vol * 0.05, 0.001, 0.025);
+  }
+
+  /** Queue confirm: crisp ascending two-note chime — "unit accepted" feedback */
+  private synthQueueConfirm(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Note 1: short pop (C5)
+    const o1 = ctx.createOscillator();
+    o1.type = 'sine';
+    o1.frequency.setValueAtTime(523, t);
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0.001, t);
+    g1.gain.linearRampToValueAtTime(vol * 0.18, t + 0.005);
+    g1.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    o1.connect(g1).connect(ctx.destination);
+    o1.start(); o1.stop(t + 0.1);
+    // Note 2: bright resolve (E5, slightly delayed)
+    const o2 = ctx.createOscillator();
+    o2.type = 'sine';
+    o2.frequency.setValueAtTime(659, t + 0.06);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.001, t);
+    g2.gain.setValueAtTime(0.001, t + 0.06);
+    g2.gain.linearRampToValueAtTime(vol * 0.2, t + 0.065);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+    o2.connect(g2).connect(ctx.destination);
+    o2.start(); o2.stop(t + 0.18);
+    // Tiny metallic click layer (triangle, high)
+    const click = ctx.createOscillator();
+    click.type = 'triangle';
+    click.frequency.setValueAtTime(this.vary(4200), t);
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.001, t);
+    cg.gain.linearRampToValueAtTime(vol * 0.06, t + 0.002);
+    cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    click.connect(cg).connect(ctx.destination);
+    click.start(); click.stop(t + 0.05);
+  }
+
+  /** Queue error: short descending buzz — "can't afford" rejection */
+  private synthQueueError(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Buzzy low tone (sawtooth through lowpass)
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(280, t);
+    osc.frequency.exponentialRampToValueAtTime(160, t + 0.15);
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.setValueAtTime(800, t);
+    lpf.Q.setValueAtTime(2, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(vol * 0.15, t + 0.008);
+    g.gain.setValueAtTime(vol * 0.15, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(lpf).connect(g).connect(ctx.destination);
+    osc.start(); osc.stop(t + 0.22);
+    // Second hit (minor second dissonance — Db below)
+    const o2 = ctx.createOscillator();
+    o2.type = 'square';
+    o2.frequency.setValueAtTime(260, t + 0.04);
+    o2.frequency.exponentialRampToValueAtTime(140, t + 0.16);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.001, t);
+    g2.gain.setValueAtTime(0.001, t + 0.04);
+    g2.gain.linearRampToValueAtTime(vol * 0.08, t + 0.048);
+    g2.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    const lpf2 = ctx.createBiquadFilter();
+    lpf2.type = 'lowpass';
+    lpf2.frequency.setValueAtTime(600, t);
+    o2.connect(lpf2).connect(g2).connect(ctx.destination);
+    o2.start(); o2.stop(t + 0.2);
+  }
+
+  /** Craft confirm: anvil-like ting + shimmer — satisfying crafting feedback */
+  private synthCraftConfirm(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Metallic strike (high sine with fast decay)
+    const strike = ctx.createOscillator();
+    strike.type = 'sine';
+    strike.frequency.setValueAtTime(this.vary(1800), t);
+    const sg = ctx.createGain();
+    sg.gain.setValueAtTime(0.001, t);
+    sg.gain.linearRampToValueAtTime(vol * 0.2, t + 0.003);
+    sg.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    strike.connect(sg).connect(ctx.destination);
+    strike.start(); strike.stop(t + 0.15);
+    // Resonant body (triangle, lower)
+    const body = ctx.createOscillator();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(this.vary(880), t);
+    const bg = ctx.createGain();
+    bg.gain.setValueAtTime(0.001, t);
+    bg.gain.linearRampToValueAtTime(vol * 0.12, t + 0.005);
+    bg.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    body.connect(bg).connect(ctx.destination);
+    body.start(); body.stop(t + 0.22);
+    // Tiny shimmer tail (high sine pair, detuned)
+    [2640, 2680].forEach(freq => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq, t + 0.05);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + 0.05);
+      g.gain.linearRampToValueAtTime(vol * 0.04, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      o.connect(g).connect(ctx.destination);
+      o.start(); o.stop(t + 0.25);
+    });
   }
 
   /** Battle start: war horn fanfare — 3 layered ascending notes with harmonics */

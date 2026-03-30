@@ -146,12 +146,12 @@ export class StrategyCamera {
     if (StrategyCamera.suppressInput) return;
     const panAmount = this.config.panSpeed;
     switch (e.key) {
-      case 'w': case 'ArrowUp':    this.target.z -= panAmount; break;
-      case 's': case 'ArrowDown':  this.target.z += panAmount; break;
-      case 'a': case 'ArrowLeft':  this.target.x -= panAmount; break;
-      case 'd': case 'ArrowRight': this.target.x += panAmount; break;
-      case 'q': this.theta -= 0.1; break;
-      case 'e': this.theta += 0.1; break;
+      case 'ArrowUp':    this.target.z -= panAmount; break;
+      case 'ArrowDown':  this.target.z += panAmount; break;
+      case 'ArrowLeft':  this.target.x -= panAmount; break;
+      case 'ArrowRight': this.target.x += panAmount; break;
+      case ',': case '<': this.theta -= 0.1; break;  // Rotate camera left
+      case '.': case '>': this.theta += 0.1; break;  // Rotate camera right
     }
     this.clampTarget();
     this.updateCameraPosition();
