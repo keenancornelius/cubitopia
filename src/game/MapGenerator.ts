@@ -1190,22 +1190,15 @@ export class MapGenerator {
 
     const offsets = [-0.5, 0, 0.5];
 
-    // Water features use a simplified column: clay all the way down from surface
-    const isWaterFeature = terrain === TerrainType.RIVER || terrain === TerrainType.LAKE
-                        || terrain === TerrainType.WATERFALL;
-
     // === SOLID FILL: every Y level from DEPTH to surface ===
     // This creates real mineable terrain all the way down through the world.
     // Block types change with depth: surface → sub-surface → dirt → stone → gold → iron
-    // Water features: sand surface, clay all the way down (riverbed/lakebed)
+    // Water tiles use the same underground layers as regular terrain.
     for (const lx of offsets) {
       for (const lz of offsets) {
         for (let y = DEPTH; y < height; y++) {
           let blockType: BlockType;
-          if (isWaterFeature) {
-            // Water tiles: sand on top, clay everywhere below
-            blockType = y === height - 1 ? topBlock : BlockType.CLAY;
-          } else if (y === height - 1) {
+          if (y === height - 1) {
             blockType = topBlock;            // surface layer
           } else if (y >= height - 2) {
             blockType = subBlock;            // sub-surface
