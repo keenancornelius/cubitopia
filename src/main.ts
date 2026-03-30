@@ -973,8 +973,11 @@ class Cubitopia {
     switch (tile.terrain) {
       case TerrainType.MOUNTAIN:
       case TerrainType.SNOW:
-        // Iron-rich mountains yield iron ore instead of stone
-        if (tile.resource === ResourceType.IRON) {
+        // Snow/mountain tiles: check resource type for crystal, iron, or stone
+        if (tile.resource === ResourceType.CRYSTAL) {
+          resourceYield = 2; // Crystal vein — magical resource
+          resourceType = ResourceType.CRYSTAL;
+        } else if (tile.resource === ResourceType.IRON) {
           resourceYield = 2; // Iron ore vein
           resourceType = ResourceType.IRON;
         } else {
@@ -2575,13 +2578,15 @@ class Cubitopia {
         this.handleMineTerrain(event.unit!, event.result.position);
       }
       if (event.type === 'builder:deposit_stone' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        // Route by carryType — builders can carry stone, clay, grass fiber, or iron
+        // Route by carryType — builders can carry stone, clay, grass fiber, iron, or crystal
         if (event.unit!.carryType === ResourceType.CLAY) {
           this.resourceManager.handleClayDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.GRASS_FIBER) {
           this.resourceManager.handleGrassFiberDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.IRON) {
           this.resourceManager.handleIronDeposit(event.unit!);
+        } else if (event.unit!.carryType === ResourceType.CRYSTAL) {
+          this.resourceManager.handleCrystalDeposit(event.unit!);
         } else {
           this.resourceManager.handleStoneDeposit(event.unit!);
         }

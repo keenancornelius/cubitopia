@@ -96,6 +96,21 @@ class ResourceManager {
     unit.carryType = null;
   }
 
+  handleCrystalDeposit(unit: Unit): void {
+    const amount = unit.carryAmount;
+    if (amount <= 0) return;
+
+    this.ctx.crystalStockpile[unit.owner] += amount;
+    this.ctx.players[unit.owner].resources.crystal += amount;
+    this.updateStockpileVisual(unit.owner);
+    if (unit.owner === 0) {
+      this.updateHUD();
+      this.ctx.hud.showNotification(`💎 +${amount} crystal`, '#9b59b6');
+    }
+    unit.carryAmount = 0;
+    unit.carryType = null;
+  }
+
   handleCropHarvest(unit: Unit, _farmPos: HexCoord): void {
     const foodYield = 3;
     unit.carryAmount = Math.min(foodYield, unit.carryCapacity);
