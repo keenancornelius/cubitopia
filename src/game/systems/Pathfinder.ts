@@ -38,7 +38,9 @@ export class Pathfinder {
       return [];
     }
     // Ridge tiles (elevation >= 10) are impassable rocky crags — builders can traverse them
-    if (goalTile.elevation >= 10 && !canTraverseRidge) {
+    // Tunnel tiles bypass this check (walkableFloor is underground, always < 10)
+    const goalWalkable = goalTile.walkableFloor ?? goalTile.elevation;
+    if (goalWalkable >= 10 && !canTraverseRidge) {
       return [];
     }
     // If goal is forest, path to an adjacent clear tile instead
@@ -52,7 +54,8 @@ export class Pathfinder {
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;
         const nTile = map.tiles.get(nKey);
-        if (nTile && nTile.terrain !== TerrainType.WATER && (nTile.elevation < 10 || canTraverseRidge)
+        const nw = nTile ? (nTile.walkableFloor ?? nTile.elevation) : 999;
+        if (nTile && nTile.terrain !== TerrainType.WATER && (nw < 10 || canTraverseRidge)
             && nTile.terrain !== TerrainType.FOREST && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
           if (dist < bestDist) {
@@ -104,7 +107,9 @@ export class Pathfinder {
         if (!tile || tile.terrain === TerrainType.WATER) {
           continue;
         }
-        if (tile.elevation >= 10 && !canTraverseRidge) {
+        // Tunnel tiles bypass ridge check (walkableFloor is underground)
+        const nWalkable = tile.walkableFloor ?? tile.elevation;
+        if (nWalkable >= 10 && !canTraverseRidge) {
           continue;
         }
         if (tile.terrain === TerrainType.FOREST && !canTraverseForest) {
@@ -123,7 +128,10 @@ export class Pathfinder {
 
         let moveCost = Pathfinder.getMoveCost(tile.terrain);
         // Ridge tiles are slow to traverse — steep climbing cost
-        if (tile.elevation >= 10) moveCost += 4;
+        // Tunnel tiles with low walkableFloor bypass this
+        if (nWalkable >= 10) moveCost += 4;
+        // Tunnel shortcut: slightly reduce cost to encourage pathfinder to use tunnels
+        if (tile.hasTunnel) moveCost = Math.max(0.5, moveCost - 0.5);
         // Add heavy penalty for tiles occupied by other units (strong anti-collision)
         if (Pathfinder.occupiedTiles.has(nKey) && nKey !== effectiveGoalKey) {
           moveCost += 8;

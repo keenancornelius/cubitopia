@@ -127,6 +127,7 @@ export function generateArenaMap(size: number, seed?: number): ArenaMap {
         position: { q, r },
         terrain,
         elevation,
+        walkableFloor: elevation,
         resource: null,
         improvement: null,
         unit: null,

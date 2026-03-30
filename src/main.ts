@@ -945,6 +945,10 @@ class Cubitopia {
       tile.elevation = maxY + 1;
     }
     tile.voxelData.heightMap = [[tile.elevation]];
+    // Update walkableFloor to match (unless tile has a tunnel with lower floor)
+    if (!tile.hasTunnel) {
+      tile.walkableFloor = tile.elevation;
+    }
 
     // Terrain transitions as we mine down
     if (tile.elevation <= 3 && tile.terrain !== TerrainType.PLAINS) {
@@ -1251,7 +1255,9 @@ class Cubitopia {
   private getElevation(coord: HexCoord): number {
     if (!this.currentMap) return 1;
     const tile = this.currentMap.tiles.get(`${coord.q},${coord.r}`);
-    return tile ? tile.elevation * 0.5 : 0.5;
+    if (!tile) return 0.5;
+    // Use walkableFloor for unit positioning — tunnel tiles walk at floor level
+    return (tile.walkableFloor ?? tile.elevation) * 0.5;
   }
 
   private hexToWorld(coord: HexCoord): { x: number; y: number; z: number } {
@@ -1422,6 +1428,7 @@ class Cubitopia {
         // Force flat elevation across the whole base area
         if (tile.elevation !== FLAT_ELEV) {
           tile.elevation = FLAT_ELEV;
+          tile.walkableFloor = FLAT_ELEV;
           changed = true;
         }
 

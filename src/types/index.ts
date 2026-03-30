@@ -21,6 +21,9 @@ export interface Tile {
   position: HexCoord;
   terrain: TerrainType;
   elevation: number;
+  /** Lowest walkable Y for this tile. Equals elevation for normal tiles.
+   *  For tunnel tiles, this is the tunnel floor Y — units walk here instead. */
+  walkableFloor: number;
   resource: ResourceType | null;
   improvement: ImprovementType | null;
   unit: Unit | null;
@@ -28,6 +31,12 @@ export interface Tile {
   voxelData: VoxelData;
   visible: boolean;
   explored: boolean;
+  /** True if this tile has a lava tube tunnel carved through it */
+  hasTunnel?: boolean;
+  /** Y level of the tunnel floor (only set if hasTunnel) */
+  tunnelFloorY?: number;
+  /** Y level of the tunnel ceiling (only set if hasTunnel) */
+  tunnelCeilingY?: number;
 }
 
 export interface VoxelData {
