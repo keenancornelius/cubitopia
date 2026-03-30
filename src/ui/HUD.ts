@@ -1982,11 +1982,12 @@ export class HUD {
     if (tile.terrain === TerrainType.WATER) modifiers += `<div style="color:#e74c3c;">✗ Impassable</div>`;
     if (tile.terrain === TerrainType.FOREST) modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
     if ((tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.SNOW) && tile.elevation >= 13) {
-      modifiers += `<div style="color:#9b59b6;">💎 Snow peak — crystal deposits</div>`;
+      modifiers += `<div style="color:#9b59b6;">💎 Snow blocks yield crystal</div>`;
+      modifiers += `<div style="color:#95a5a6;">⛏ Stone blocks yield stone</div>`;
     } else if (tile.terrain === TerrainType.SNOW) {
-      modifiers += `<div style="color:#9b59b6;">💎 Crystal deposits</div>`;
+      modifiers += `<div style="color:#9b59b6;">💎 Snow blocks yield crystal</div>`;
     } else if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
-      modifiers += `<div style="color:#c0652a;">⛏ Iron ore vein</div>`;
+      modifiers += `<div style="color:#c0652a;">⛏ Contains iron ore blocks</div>`;
     } else if (tile.terrain === TerrainType.MOUNTAIN) {
       modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
     }

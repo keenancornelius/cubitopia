@@ -959,105 +959,78 @@ class Cubitopia {
   }
 
   /** Handle mining terrain — peel off one layer of voxels, yield resources by terrain type */
+  /** Map block type → resource type for per-block mining */
+  private blockToResource(blockType: BlockType): { type: ResourceType; yield: number } {
+    switch (blockType) {
+      case BlockType.SNOW:   return { type: ResourceType.CRYSTAL, yield: 1 };
+      case BlockType.STONE:  return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.IRON:   return { type: ResourceType.IRON,    yield: 1 };
+      case BlockType.GOLD:   return { type: ResourceType.GOLD,    yield: 1 };
+      case BlockType.SAND:   return { type: ResourceType.CLAY,    yield: 1 };
+      case BlockType.DIRT:   return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.GRASS:  return { type: ResourceType.FOOD,    yield: 1 };
+      case BlockType.WOOD:   return { type: ResourceType.WOOD,    yield: 1 };
+      case BlockType.JUNGLE: return { type: ResourceType.WOOD,    yield: 1 };
+      default:               return { type: ResourceType.STONE,   yield: 1 };
+    }
+  }
+
+  /** Per-block mining: remove topmost blocks from a tile, yield resources based on block type */
   private handleMineTerrain(unit: Unit, minePos: HexCoord): void {
     if (!this.currentMap) return;
     const key = `${minePos.q},${minePos.r}`;
     const tile = this.currentMap.tiles.get(key);
-    if (!tile) return;
+    if (!tile || tile.voxelData.blocks.length === 0) return;
 
-    // Resource yield depends on terrain type and what layer we're mining
-    let resourceYield = 0;
-    let resourceType = ResourceType.STONE;
-    const currentElev = tile.elevation;
+    // --- Find and remove the topmost blocks ---
+    const BLOCKS_PER_TICK = 3; // Remove 3 blocks per mine tick (a small cluster)
+    const blocks = tile.voxelData.blocks;
 
-    // Snow-capped peaks (elevation >= 13) yield crystal regardless of terrain type,
-    // since visual snow is elevation-based, not terrain-type-based
-    const SNOW_CAP = 13;
-    const isSnowCapped = currentElev >= SNOW_CAP
-      || (tile.terrain === TerrainType.SNOW)
-      || (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.CRYSTAL);
+    // Sort by y descending to find the highest blocks
+    const sorted = blocks
+      .map((b, i) => ({ block: b, index: i }))
+      .sort((a, b) => b.block.localPosition.y - a.block.localPosition.y);
 
-    switch (tile.terrain) {
-      case TerrainType.SNOW:
-      case TerrainType.MOUNTAIN:
-        if (isSnowCapped) {
-          resourceYield = 2; // Crystal from snow-capped peaks
-          resourceType = ResourceType.CRYSTAL;
-        } else if (tile.resource === ResourceType.IRON) {
-          resourceYield = 2; // Iron ore vein
-          resourceType = ResourceType.IRON;
-        } else {
-          resourceYield = 3; // Hard rock — good stone
-          resourceType = ResourceType.STONE;
-        }
-        break;
-      case TerrainType.DESERT:
-        resourceYield = 2; // Sand — yields clay
-        resourceType = ResourceType.CLAY;
-        break;
-      case TerrainType.RIVER:
-      case TerrainType.LAKE:
-        resourceYield = 2; // Sandy riverbeds — yields clay
-        resourceType = ResourceType.CLAY;
-        break;
-      case TerrainType.JUNGLE:
-        resourceYield = 1; // Dense vegetation
-        resourceType = ResourceType.STONE;
-        break;
-      case TerrainType.FOREST:
-        resourceYield = 1; // Forest floor dirt
-        resourceType = ResourceType.STONE;
-        break;
-      default:
-        // Plains and other terrain: deeper layers yield more stone
-        if (currentElev > 4) {
-          resourceYield = 2; // Upper layers: dirt/stone mix
-        } else if (currentElev > 2) {
-          resourceYield = 2; // Mid layers: harder stone
-        } else {
-          resourceYield = 3; // Deep layers: solid rock
-        }
-        resourceType = ResourceType.STONE;
-    }
+    // Take the topmost N blocks
+    const toRemove = sorted.slice(0, Math.min(BLOCKS_PER_TICK, sorted.length));
+    if (toRemove.length === 0) return;
 
-    // --- Progressive mining: chip ridges from top first, then lower base ---
-    const RIDGE_H = 10;
-    const SNOW_CAP_H = 13;
-    const hasRidge = currentElev >= RIDGE_H;
-    const hasSnowCap = currentElev >= SNOW_CAP_H;
+    // Determine resource from the primary (highest) block being mined
+    const primaryBlock = toRemove[0].block;
+    const resource = this.blockToResource(primaryBlock.type);
 
-    // Ridge/snow tiles: remove decoration layers first (2 elevation ticks to clear ridge)
-    // then normal mining once below ridge threshold. This looks like carving INTO the peak.
-    const ridgeLayers = hasSnowCap ? 4 : (hasRidge ? 3 : 0); // snow ridges are taller
-    const effectiveRidgeBottom = currentElev; // Ridge sits on top of the column
+    // Remove blocks from the array (remove by index, highest first to avoid shifting)
+    const indicesToRemove = new Set(toRemove.map(t => t.index));
+    tile.voxelData.blocks = blocks.filter((_, i) => !indicesToRemove.has(i));
 
-    let newElevation: number;
-    if (hasRidge && currentElev - 1 >= RIDGE_H) {
-      // Still in ridge zone — drop 2 levels per tick (chipping away the peak fast)
-      newElevation = Math.max(Cubitopia.MAX_MINE_DEPTH, currentElev - 2);
+    // --- Recalculate tile elevation from remaining blocks ---
+    if (tile.voxelData.blocks.length === 0) {
+      tile.elevation = Cubitopia.MAX_MINE_DEPTH;
     } else {
-      // Normal mining — 1 level per tick
-      newElevation = Math.max(Cubitopia.MAX_MINE_DEPTH, currentElev - 1);
+      let maxY = Cubitopia.MAX_MINE_DEPTH;
+      for (const b of tile.voxelData.blocks) {
+        if (b.localPosition.y > maxY) maxY = b.localPosition.y;
+      }
+      tile.elevation = maxY + 1; // elevation = 1 above the highest block
     }
-    tile.elevation = newElevation;
-    tile.voxelData.heightMap = [[newElevation]];
+    tile.voxelData.heightMap = [[tile.elevation]];
 
-    // Remove decorations when terrain gets low
-    if (newElevation <= 3 && tile.terrain !== TerrainType.PLAINS) {
+    // Terrain transitions as we mine down
+    if (tile.elevation <= 3 && tile.terrain !== TerrainType.PLAINS) {
       tile.terrain = TerrainType.PLAINS;
     }
-    // When elevation drops below snow cap, transition terrain type to mountain
-    if (newElevation < SNOW_CAP_H && tile.terrain === TerrainType.SNOW) {
+    if (tile.elevation < 13 && tile.terrain === TerrainType.SNOW) {
       tile.terrain = TerrainType.MOUNTAIN;
     }
-    // Always clean up decorations when mining
+
+    // Clean up decorations
     this.terrainDecorator.removeDecoration(minePos);
     this.terrainDecorator.removeGrassClump(key);
     this.natureSystem.grassAge.delete(key);
     this.natureSystem.grassGrowthTimers.delete(key);
 
-    // Rebuild shell blocks for the mined tile AND its neighbors (newly exposed walls)
-    this.rebuildTileShell(minePos);
+    // Rebuild NEIGHBOR shells (pit walls may be newly exposed) but NOT the mined tile
+    // The mined tile keeps its remaining blocks as-is — true per-block destruction
     const neighbors = Pathfinder.getHexNeighbors(minePos);
     for (const n of neighbors) {
       this.rebuildTileShell(n);
@@ -1073,12 +1046,13 @@ class Cubitopia {
       UnitAI.claimedMines.delete(key);
     }
 
-    // Rebuild the voxel mesh for this area
+    // Rebuild the voxel mesh
     this.voxelBuilder.rebuildFromMap(this.currentMap);
 
-    // Load resource onto the worker
-    unit.carryAmount = Math.min(resourceYield, unit.carryCapacity);
-    unit.carryType = resourceType;
+    // Load resource onto the worker — type determined by what block was destroyed
+    const totalYield = toRemove.length * resource.yield;
+    unit.carryAmount = Math.min(totalYield, unit.carryCapacity);
+    unit.carryType = resource.type;
   }
 
   /** Rebuild shell blocks for a single tile using neighbor info */
