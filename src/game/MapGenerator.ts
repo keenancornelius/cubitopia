@@ -1312,6 +1312,14 @@ export class MapGenerator {
   }
 
   private generateResource(terrain: TerrainType): ResourceType | null {
+    // Snow tiles get special higher resource rates since they're already rare
+    if (terrain === TerrainType.SNOW) {
+      const roll = this.rng.next();
+      if (roll < 0.6) return ResourceType.CRYSTAL;  // 60% crystal vein
+      if (roll < 0.8) return ResourceType.STONE;     // 20% frozen stone
+      return null;                                     // 20% barren peak
+    }
+
     if (this.rng.next() > 0.2) return null;
 
     switch (terrain) {
@@ -1320,7 +1328,6 @@ export class MapGenerator {
       case TerrainType.MOUNTAIN:
         return this.rng.next() > 0.5 ? ResourceType.IRON : ResourceType.STONE;
       case TerrainType.DESERT: return ResourceType.GOLD;
-      case TerrainType.SNOW: return ResourceType.CRYSTAL;
       case TerrainType.JUNGLE: return this.rng.next() > 0.5 ? ResourceType.WOOD : ResourceType.FOOD;
       case TerrainType.RIVER: return ResourceType.FOOD;
       case TerrainType.LAKE: return ResourceType.FOOD;

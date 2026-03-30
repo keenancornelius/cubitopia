@@ -1986,12 +1986,17 @@ export class HUD {
     } else if (tile.terrain === TerrainType.MOUNTAIN) {
       modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
     }
+    if (tile.terrain === TerrainType.SNOW && tile.resource === ResourceType.CRYSTAL) {
+      modifiers += `<div style="color:#9b59b6;">💎 Crystal vein (crystal)</div>`;
+    } else if (tile.terrain === TerrainType.SNOW) {
+      modifiers += `<div style="color:#b0c4de;">❄ Frozen peak (stone)</div>`;
+    }
     if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand → stone)</div>`;
     if (tile.terrain === TerrainType.JUNGLE) modifiers += `<div style="color:#2d6b30;">🌿 Dense jungle (wood)</div>`;
     if (tile.terrain === TerrainType.RIVER) modifiers += `<div style="color:#1e88e5;">🏊 Swimmable river</div>`;
     if (tile.terrain === TerrainType.LAKE) modifiers += `<div style="color:#1565c0;">🏊 Swimmable lake</div>`;
     if (tile.terrain === TerrainType.WATERFALL) modifiers += `<div style="color:#42a5f5;">💧 Waterfall</div>`;
-    if (tile.elevation >= 4 && tile.terrain !== TerrainType.MOUNTAIN && tile.terrain !== TerrainType.DESERT && tile.terrain !== TerrainType.JUNGLE) modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
+    if (tile.elevation >= 4 && tile.terrain !== TerrainType.MOUNTAIN && tile.terrain !== TerrainType.SNOW && tile.terrain !== TerrainType.DESERT && tile.terrain !== TerrainType.JUNGLE) modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
 
     this.terrainInfoPanel.innerHTML = `
       <div style="font-weight:bold; font-size:15px; color:${terrainColor}; margin-bottom:6px;">${terrainName}</div>
