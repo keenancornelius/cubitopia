@@ -232,8 +232,10 @@ export default class BlueprintSystem {
       const levels = existing.yLevels || (existing.targetY !== undefined ? [existing.targetY] : []);
       if (levels.includes(targetY)) return; // already queued
       levels.push(targetY);
+      // Sort descending — miners work from top (exposed surface) down
+      levels.sort((a, b) => b - a);
       existing.yLevels = levels;
-      // Keep targetY as the first unfinished level for miners
+      // Miners always start at the highest (most exposed) level
       existing.targetY = levels[0];
     } else {
       // New horizontal blueprint (or replacing a vertical one)
