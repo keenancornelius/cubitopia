@@ -26,7 +26,7 @@ export class Pathfinder {
   /** Set of tile keys occupied by units. Updated each tick from main game loop. */
   static occupiedTiles: Set<string> = new Set();
 
-  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number): HexCoord[] {
+  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number, canTraverseRidge = false): HexCoord[] {
     const startKey = `${start.q},${start.r}`;
     const goalKey = `${goal.q},${goal.r}`;
 
@@ -37,8 +37,8 @@ export class Pathfinder {
     if (!goalTile || goalTile.terrain === TerrainType.WATER) {
       return [];
     }
-    // Ridge tiles (elevation >= 10) are impassable rocky crags — mountains below are walkable
-    if (goalTile.elevation >= 10) {
+    // Ridge tiles (elevation >= 10) are impassable rocky crags — builders can traverse them
+    if (goalTile.elevation >= 10 && !canTraverseRidge) {
       return [];
     }
     // If goal is forest, path to an adjacent clear tile instead
@@ -52,7 +52,7 @@ export class Pathfinder {
       for (const n of neighbors) {
         const nKey = `${n.q},${n.r}`;
         const nTile = map.tiles.get(nKey);
-        if (nTile && nTile.terrain !== TerrainType.WATER && nTile.elevation < 10
+        if (nTile && nTile.terrain !== TerrainType.WATER && (nTile.elevation < 10 || canTraverseRidge)
             && nTile.terrain !== TerrainType.FOREST && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
           if (dist < bestDist) {
@@ -100,8 +100,11 @@ export class Pathfinder {
         if (closed.has(nKey)) continue;
 
         const tile = map.tiles.get(nKey);
-        // Block water and ridge-height tiles; forest blocks everyone except lumberjacks
-        if (!tile || tile.terrain === TerrainType.WATER || tile.elevation >= 10) {
+        // Block water and ridge-height tiles; forest blocks everyone except lumberjacks; ridges block everyone except builders
+        if (!tile || tile.terrain === TerrainType.WATER) {
+          continue;
+        }
+        if (tile.elevation >= 10 && !canTraverseRidge) {
           continue;
         }
         if (tile.terrain === TerrainType.FOREST && !canTraverseForest) {
@@ -119,6 +122,8 @@ export class Pathfinder {
         }
 
         let moveCost = Pathfinder.getMoveCost(tile.terrain);
+        // Ridge tiles are slow to traverse — steep climbing cost
+        if (tile.elevation >= 10) moveCost += 4;
         // Add heavy penalty for tiles occupied by other units (strong anti-collision)
         if (Pathfinder.occupiedTiles.has(nKey) && nKey !== effectiveGoalKey) {
           moveCost += 8;
