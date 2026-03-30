@@ -15,6 +15,14 @@ export interface CombatResult {
 }
 
 export class CombatSystem {
+  /** Correct hex distance for offset coordinates (odd-q) */
+  static hexDist(q1: number, r1: number, q2: number, r2: number): number {
+    // Convert offset (odd-q) to cube coordinates, same as Pathfinder
+    const x1 = q1, z1 = r1 - (q1 - (q1 & 1)) / 2, y1 = -x1 - z1;
+    const x2 = q2, z2 = r2 - (q2 - (q2 & 1)) / 2, y2 = -x2 - z2;
+    return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2), Math.abs(z1 - z2));
+  }
+
   /**
    * Resolve combat between an attacker and defender.
    * Accounts for berserker rage, shieldbearer aura, assassin burst.
@@ -39,8 +47,7 @@ export class CombatSystem {
       for (const ally of allUnits) {
         if (ally.type === UnitType.SHIELDBEARER && ally.owner === defender.owner &&
             ally.currentHealth > 0 && ally !== defender) {
-          const dist = Math.abs(ally.position.q - defender.position.q) +
-                       Math.abs(ally.position.r - defender.position.r);
+          const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
           if (dist <= 2) {
             defStat += 2;
             break; // Only one aura stacks
@@ -60,8 +67,7 @@ export class CombatSystem {
 
     // Counter-attack: defender can only retaliate if attacker is within defender's range.
     // Ranged units attacking from outside melee range take zero counter-damage.
-    const dist = Math.abs(attacker.position.q - defender.position.q) +
-                 Math.abs(attacker.position.r - defender.position.r);
+    const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
     const canCounter = dist <= defender.stats.range;
     const attackerDamage = canCounter ? Math.round(defenderRatio * defStat * 3.5) : 0;
 
@@ -80,18 +86,28 @@ export class CombatSystem {
   /**
    * Apply combat results to units
    */
-  static apply(attacker: Unit, defender: Unit, result: CombatResult): void {
+  static apply(attacker: Unit, defender: Unit, result: CombatResult): { xpGained: number; leveledUp: boolean; newLevel: number } {
     attacker.currentHealth -= result.attackerDamage;
     defender.currentHealth -= result.defenderDamage;
-    attacker.hasActed = true;
+    // Note: hasActed is NOT set here — real-time combat uses attackCooldown instead
+
+    let xpGained = 0;
+    let leveledUp = false;
+    let newLevel = attacker.level;
 
     if (result.attackerSurvived) {
-      attacker.experience += result.experienceGained;
+      xpGained = result.experienceGained;
+      attacker.experience += xpGained;
       if (attacker.experience >= attacker.level * 5) {
         attacker.level++;
-        attacker.currentHealth = attacker.stats.maxHealth;
+        newLevel = attacker.level;
+        leveledUp = true;
+        // Partial heal on level-up: restore 30% of max HP (not full heal)
+        const healAmt = Math.round(attacker.stats.maxHealth * 0.3);
+        attacker.currentHealth = Math.min(attacker.stats.maxHealth, attacker.currentHealth + healAmt);
       }
     }
+    return { xpGained, leveledUp, newLevel };
   }
 
   /**
@@ -112,8 +128,7 @@ export class CombatSystem {
     for (const ally of allUnits) {
       if (ally.owner !== healer.owner || ally === healer || ally.currentHealth <= 0) continue;
       if (ally.currentHealth >= ally.stats.maxHealth) continue;
-      const dist = Math.abs(ally.position.q - healer.position.q) +
-                   Math.abs(ally.position.r - healer.position.r);
+      const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, healer.position.q, healer.position.r);
       if (dist <= healRange) {
         ally.currentHealth = Math.min(ally.stats.maxHealth, ally.currentHealth + healAmount);
         healed.push(ally.id);
@@ -130,12 +145,11 @@ export class CombatSystem {
   static applyBattlemageAoE(attacker: Unit, target: Unit, allUnits: Unit[]): string[] {
     if (attacker.type !== UnitType.BATTLEMAGE) return [];
     const splashed: string[] = [];
-    const splashDamage = Math.max(1, Math.round(attacker.stats.attack * 0.4));
+    const splashDamage = Math.max(1, Math.round(attacker.stats.attack * 0.75));
 
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit === target || unit.currentHealth <= 0) continue;
-      const dist = Math.abs(unit.position.q - target.position.q) +
-                   Math.abs(unit.position.r - target.position.r);
+      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, target.position.q, target.position.r);
       if (dist <= 1) {
         unit.currentHealth = Math.max(0, unit.currentHealth - splashDamage);
         splashed.push(unit.id);
@@ -162,8 +176,7 @@ export class CombatSystem {
     const victims: Unit[] = [];
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
-      const dist = Math.abs(unit.position.q - attacker.position.q) +
-                   Math.abs(unit.position.r - attacker.position.r);
+      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
       if (dist <= 1 && unit !== target) {
         victims.push(unit);
       }
@@ -235,8 +248,7 @@ export class CombatSystem {
    * Calculate if a unit can attack another (range check)
    */
   static canAttack(attacker: Unit, defender: Unit): boolean {
-    const dist = Math.abs(attacker.position.q - defender.position.q) +
-      Math.abs(attacker.position.r - defender.position.r);
-    return dist <= attacker.stats.range && !attacker.hasActed;
+    const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
+    return dist <= attacker.stats.range;
   }
 }

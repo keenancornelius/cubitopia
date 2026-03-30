@@ -68,6 +68,8 @@ export enum ResourceType {
   GRASS_FIBER = 'grass_fiber',
   CLAY = 'clay',
   ROPE = 'rope',
+  CHARCOAL = 'charcoal',
+  STEEL = 'steel',
 }
 
 export enum BlockType {
@@ -240,6 +242,8 @@ export interface PlayerResources {
   grass_fiber: number;
   clay: number;
   rope: number;
+  charcoal: number;
+  steel: number;
 }
 
 export interface City {
@@ -351,7 +355,7 @@ export type EventCallback = (event: GameEvent) => void;
 
 // --- Building System Types ---
 
-export type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo';
+export type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo' | 'smelter' | 'armory' | 'wizard_tower';
 
 export interface PlacedBuilding {
   id: string;
@@ -373,6 +377,9 @@ export interface AIBuildState {
   farmhouse: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
   workshop: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
   silo: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  smelter: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  armory: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  wizard_tower: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
   meshes: THREE.Group[];
   spawnQueue: { type: UnitType; cost: number }[];
   workerSpawnQueue: { type: UnitType; building: string }[];
@@ -393,7 +400,7 @@ export interface AIBuildState {
 
 export function createAIBuildState(): AIBuildState {
   return {
-    barracks: null, forestry: null, masonry: null, farmhouse: null, workshop: null, silo: null,
+    barracks: null, forestry: null, masonry: null, farmhouse: null, workshop: null, silo: null, smelter: null, armory: null, wizard_tower: null,
     meshes: [], spawnQueue: [], workerSpawnQueue: [], spawnTimer: 0, workerSpawnTimer: 0,
     econTimer: -10, cmdTimer: 0, autoMarchTimer: 0, battleStarted: false,
     armySize: 0, waveNumber: 0, mustering: true, rallyTimer: 0, buildPhase: 0,
@@ -421,12 +428,16 @@ export interface GameContext {
   grassFiberStockpile: number[];
   clayStockpile: number[];
   ropeStockpile: number[];
+  ironStockpile: number[];
+  charcoalStockpile: number[];
+  steelStockpile: number[];
 
   hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
   getElevation(pos: HexCoord): number;
   isTileOccupied(key: string): boolean;
   findSpawnTile(map: GameMap, q: number, r: number, allowOccupied?: boolean): HexCoord;
   isWaterTerrain(terrain: TerrainType): boolean;
+  hasBuilding(kind: BuildingKind, owner: number): boolean;
 }
 
 // Forward-declare imported types used in GameContext

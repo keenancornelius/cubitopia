@@ -1001,25 +1001,25 @@ export class MapGenerator {
     }
 
     // High elevation: always mountains or snow peaks
-    if (elevation > 0.65) {
+    if (elevation > 0.6) {
       if (temperature < 0.3) return TerrainType.SNOW;
       return TerrainType.MOUNTAIN;
     }
 
-    // Mid-high elevation: rocky highlands with treeline
-    if (elevation > 0.55) {
+    // Mid-high elevation: rocky highlands — mostly mountains
+    if (elevation > 0.5) {
       if (temperature < 0.25) return TerrainType.SNOW;
-      if (moisture > 0.6) return TerrainType.FOREST; // alpine forests
-      if (moisture < 0.35) return TerrainType.MOUNTAIN;
+      if (moisture > 0.7) return TerrainType.FOREST; // only very wet alpine forests
       return TerrainType.MOUNTAIN;
     }
 
-    // Upper-mid elevation: mixed terrain
-    if (elevation > 0.48) {
+    // Upper-mid elevation: rocky terrain with some vegetation
+    if (elevation > 0.42) {
       if (temperature < 0.3) return TerrainType.SNOW;
-      if (moisture > 0.65) return TerrainType.FOREST;
-      if (moisture > 0.45) return TerrainType.FOREST; // more forests at mid elevations
+      if (moisture > 0.65) return TerrainType.FOREST; // wet highlands get forest
       if (moisture < 0.25) return TerrainType.DESERT; // arid highlands
+      // Drier elevated terrain reads as mountain, wetter as plains
+      if (moisture < 0.5) return TerrainType.MOUNTAIN;
       return TerrainType.PLAINS;
     }
 

@@ -18,7 +18,7 @@ export interface UnitConfig {
 
 export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
   [UnitType.WARRIOR]: {
-    stats: { maxHealth: 10, attack: 3, defense: 3, movement: 2, range: 1 },
+    stats: { maxHealth: 18, attack: 3, defense: 3, movement: 2, range: 1 },
     moveSpeed: 1.5, attackSpeed: 1.0, color: 0xc0392b,
     carryCapacity: 4, isSiege: false,
   },
@@ -84,7 +84,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 0, isSiege: false,
   },
   [UnitType.SHIELDBEARER]: {
-    stats: { maxHealth: 20, attack: 1, defense: 7, movement: 1, range: 1 },
+    stats: { maxHealth: 30, attack: 1, defense: 7, movement: 1, range: 1 },
     moveSpeed: 0.7, attackSpeed: 0.5, color: 0xb0bec5,
     carryCapacity: 0, isSiege: false,
   },
@@ -99,7 +99,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 0, isSiege: false,
   },
   [UnitType.GREATSWORD]: {
-    stats: { maxHealth: 14, attack: 6, defense: 2, movement: 1, range: 1 },
+    stats: { maxHealth: 24, attack: 6, defense: 2, movement: 1, range: 1 },
     moveSpeed: 0.9, attackSpeed: 0.7, color: 0x546e7a,
     carryCapacity: 0, isSiege: false,
   },

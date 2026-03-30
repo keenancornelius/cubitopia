@@ -4,7 +4,7 @@
 // ============================================
 
 import * as THREE from 'three';
-import { TerrainType, HexCoord } from '../types';
+import { TerrainType, ResourceType, HexCoord } from '../types';
 
 // Seeded random for consistent decoration placement
 class SeededRand {
@@ -68,7 +68,7 @@ export class TerrainDecorator {
    * Decorate a tile. maxNeighborElevation prevents trees on tiles where
    * a much taller neighbor would cause visual clipping.
    */
-  decorateTile(coord: HexCoord, terrain: TerrainType, elevation: number, maxNeighborElevation: number = elevation): void {
+  decorateTile(coord: HexCoord, terrain: TerrainType, elevation: number, maxNeighborElevation: number = elevation, resource: ResourceType | null = null): void {
     const tileKey = `${coord.q},${coord.r}`;
     const decorsBefore = this.decorations.length;
     const worldX = coord.q * 1.5;
@@ -124,6 +124,10 @@ export class TerrainDecorator {
           } else {
             this.addTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
           }
+        }
+        // Iron ore vein indicator — rusty-orange rocks on iron-rich mountains
+        if (resource === ResourceType.IRON) {
+          this.addIronOreVein(worldX, treeElevation, worldZ, rng);
         }
         break;
       case TerrainType.WATER:
@@ -324,7 +328,7 @@ export class TerrainDecorator {
     const rock = new THREE.Mesh(rockGeo, rockMat);
     rock.position.set(
       x + (rng.next() - 0.5) * 0.4,
-      elevation + 0.1,
+      elevation - 0.05,
       z + (rng.next() - 0.5) * 0.4
     );
     rock.rotation.set(rng.next(), rng.next(), rng.next());
@@ -332,6 +336,34 @@ export class TerrainDecorator {
     rock.castShadow = true;
     this.scene.add(rock);
     this.decorations.push(rock);
+  }
+
+  /** Iron ore vein — cluster of rusty-orange rocks with metallic sheen */
+  private addIronOreVein(x: number, elevation: number, z: number, rng: SeededRand): void {
+    const count = 2 + Math.floor(rng.next() * 2); // 2-3 ore chunks
+    for (let i = 0; i < count; i++) {
+      const size = 0.1 + rng.next() * 0.12;
+      const oreGeo = new THREE.DodecahedronGeometry(size, 0);
+      // Rusty orange-brown color with slight variation
+      const r = 0.55 + rng.next() * 0.15;
+      const g = 0.25 + rng.next() * 0.1;
+      const b = 0.1 + rng.next() * 0.05;
+      const oreMat = new THREE.MeshLambertMaterial({
+        color: new THREE.Color(r, g, b),
+        emissive: new THREE.Color(0.15, 0.06, 0.02), // subtle warm glow
+      });
+      const ore = new THREE.Mesh(oreGeo, oreMat);
+      ore.position.set(
+        x + (rng.next() - 0.5) * 0.5,
+        elevation - 0.06 + rng.next() * 0.04,
+        z + (rng.next() - 0.5) * 0.5
+      );
+      ore.rotation.set(rng.next() * Math.PI, rng.next() * Math.PI, rng.next() * Math.PI);
+      ore.scale.set(1, 0.6 + rng.next() * 0.4, 1);
+      ore.castShadow = true;
+      this.scene.add(ore);
+      this.decorations.push(ore);
+    }
   }
 
   private addFlowers(x: number, elevation: number, z: number, rng: SeededRand): void {

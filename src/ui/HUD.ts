@@ -46,6 +46,18 @@ export class HUD {
   private _onWorkshop: (() => void) | null = null;
   private _onSpawnTrebuchet: (() => void) | null = null;
   private _onCraftRope: (() => void) | null = null;
+  private _onSmelter: (() => void) | null = null;
+  private _onArmory: (() => void) | null = null;
+  private _onWizardTower: (() => void) | null = null;
+  private _onCraftCharcoal: (() => void) | null = null;
+  private _onSmeltSteel: (() => void) | null = null;
+  private _onSpawnGreatsword: (() => void) | null = null;
+  private _onSpawnAssassin: (() => void) | null = null;
+  private _onSpawnBerserker: (() => void) | null = null;
+  private _onSpawnShieldbearer: (() => void) | null = null;
+  private _onSpawnMage: (() => void) | null = null;
+  private _onSpawnBattlemage: (() => void) | null = null;
+  private _onSpawnHealer: (() => void) | null = null;
   private _onSetStance: ((stance: UnitStance) => void) | null = null;
   private _onSetFormation: ((formation: FormationType) => void) | null = null;
   private _onRespawnUnits: (() => void) | null = null;
@@ -73,6 +85,18 @@ export class HUD {
   onWorkshop(cb: () => void) { this._onWorkshop = cb; }
   onSpawnTrebuchet(cb: () => void) { this._onSpawnTrebuchet = cb; }
   onCraftRope(cb: () => void) { this._onCraftRope = cb; }
+  onSmelter(cb: () => void) { this._onSmelter = cb; }
+  onArmory(cb: () => void) { this._onArmory = cb; }
+  onWizardTower(cb: () => void) { this._onWizardTower = cb; }
+  onCraftCharcoal(cb: () => void) { this._onCraftCharcoal = cb; }
+  onSmeltSteel(cb: () => void) { this._onSmeltSteel = cb; }
+  onSpawnGreatsword(cb: () => void) { this._onSpawnGreatsword = cb; }
+  onSpawnAssassin(cb: () => void) { this._onSpawnAssassin = cb; }
+  onSpawnBerserker(cb: () => void) { this._onSpawnBerserker = cb; }
+  onSpawnShieldbearer(cb: () => void) { this._onSpawnShieldbearer = cb; }
+  onSpawnMage(cb: () => void) { this._onSpawnMage = cb; }
+  onSpawnBattlemage(cb: () => void) { this._onSpawnBattlemage = cb; }
+  onSpawnHealer(cb: () => void) { this._onSpawnHealer = cb; }
 
   /** Update formation button highlights without rebuilding the entire panel */
   updateFormationHighlight(formation: FormationType): void {
@@ -181,6 +205,12 @@ export class HUD {
     buildingsRow2.appendChild(makeBtn('Silo', 'I', '#c0c0c0', () => this._onSilo?.()));
     buildingsRow2.appendChild(makeBtn('Workshop', 'W', '#5d4037', () => this._onWorkshop?.()));
     panel.appendChild(buildingsRow2);
+    const buildingsRow3 = document.createElement('div');
+    buildingsRow3.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap; margin-top: 3px;';
+    buildingsRow3.appendChild(makeBtn('Smelter', 'E', '#8b4513', () => this._onSmelter?.()));
+    buildingsRow3.appendChild(makeBtn('Armory', 'A', '#708090', () => this._onArmory?.()));
+    buildingsRow3.appendChild(makeBtn('Wizard Tower', 'Y', '#6a0dad', () => this._onWizardTower?.()));
+    panel.appendChild(buildingsRow3);
 
     // UNITS section - Barracks units
     panel.appendChild(makeHeaderBtn('⚔️ BARRACKS'));
@@ -224,6 +254,33 @@ export class HUD {
     workshopRow.appendChild(makeBtn('Trebuchet', '7', '#5d4037', () => this._onSpawnTrebuchet?.()));
     workshopRow.appendChild(makeBtn('Craft Rope', 'L', '#c9a96e', () => this._onCraftRope?.()));
     panel.appendChild(workshopRow);
+
+    // ARMORY section
+    panel.appendChild(makeHeaderBtn('🗡️ ARMORY'));
+    const armoryRow = document.createElement('div');
+    armoryRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    armoryRow.appendChild(makeBtn('Greatsword', '6', '#b22222', () => this._onSpawnGreatsword?.()));
+    armoryRow.appendChild(makeBtn('Assassin', '7', '#2f4f4f', () => this._onSpawnAssassin?.()));
+    armoryRow.appendChild(makeBtn('Berserker', '8', '#cc3300', () => this._onSpawnBerserker?.()));
+    armoryRow.appendChild(makeBtn('Shieldbearer', '9', '#4682b4', () => this._onSpawnShieldbearer?.()));
+    panel.appendChild(armoryRow);
+
+    // WIZARD TOWER section
+    panel.appendChild(makeHeaderBtn('🔮 WIZARD TOWER'));
+    const wizardRow = document.createElement('div');
+    wizardRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    wizardRow.appendChild(makeBtn('Mage', '0', '#7c3aed', () => this._onSpawnMage?.()));
+    wizardRow.appendChild(makeBtn('Battlemage', '⇧1', '#9333ea', () => this._onSpawnBattlemage?.()));
+    wizardRow.appendChild(makeBtn('Healer', '⇧2', '#22c55e', () => this._onSpawnHealer?.()));
+    panel.appendChild(wizardRow);
+
+    // CRAFTING section
+    panel.appendChild(makeHeaderBtn('⚒️ CRAFTING'));
+    const craftRow = document.createElement('div');
+    craftRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
+    craftRow.appendChild(makeBtn('Charcoal', 'X', '#333', () => this._onCraftCharcoal?.()));
+    craftRow.appendChild(makeBtn('Steel', 'Z', '#71797e', () => this._onSmeltSteel?.()));
+    panel.appendChild(craftRow);
 
     // ECONOMY section
     panel.appendChild(makeHeaderBtn('💰 ECONOMY'));
@@ -375,13 +432,28 @@ export class HUD {
   }
 
   // --- Persistent resource bar DOM refs ---
+  // Earth group dropdown
+  private earthGroupBtn: HTMLElement | null = null;
+  private earthGroupDropdown: HTMLElement | null = null;
+  private earthGroupVisible = false;
   private resWoodVal: HTMLElement | null = null;
   private resStoneVal: HTMLElement | null = null;
-  private resFoodVal: HTMLElement | null = null;
-  private resGoldVal: HTMLElement | null = null;
+  private resIronVal: HTMLElement | null = null;
+  private resCrystalVal: HTMLElement | null = null;
   private resGrassFiberVal: HTMLElement | null = null;
   private resClayVal: HTMLElement | null = null;
+
+  // Crafted group dropdown
+  private craftedGroupBtn: HTMLElement | null = null;
+  private craftedGroupDropdown: HTMLElement | null = null;
+  private craftedGroupVisible = false;
+  private resCharcoalVal: HTMLElement | null = null;
   private resRopeVal: HTMLElement | null = null;
+  private resSteelVal: HTMLElement | null = null;
+
+  // Food, Gold, Units (standalone)
+  private resFoodVal: HTMLElement | null = null;
+  private resGoldVal: HTMLElement | null = null;
   private resUnitVal: HTMLElement | null = null;
 
   // --- Enemy resource bar DOM refs ---
@@ -450,37 +522,111 @@ export class HUD {
       return { wrapper: w, val: v };
     };
 
+    // ===== EARTH GROUP (dropdown) =====
+    this.earthGroupBtn = document.createElement('span');
+    this.earthGroupBtn.style.cssText = `
+      cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
+      transition:background 0.15s; white-space:nowrap; user-select:none;
+    `;
+    this.earthGroupBtn.textContent = '⛏️ Earth ▾';
+    row.appendChild(this.earthGroupBtn);
+    row.appendChild(this.makeDot());
+
+    const earthDropdown = document.createElement('div');
+    earthDropdown.style.cssText = `
+      position:absolute; top:100%; left:0; margin-top:6px;
+      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
+      font-size:13px; border:2px solid rgba(255,255,255,0.25);
+      min-width:200px; z-index:1000; pointer-events:auto;
+      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
+      display:none;
+    `;
+    this.earthGroupDropdown = earthDropdown;
+
+    // Earth resources inside dropdown
+    const earthContent = document.createElement('div');
+    earthContent.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
     const wood = mkRes('🪵', '#f0c040');
     this.resWoodVal = wood.val;
-    row.appendChild(wood.wrapper);
-    row.appendChild(this.makeDot());
+    earthContent.appendChild(wood.wrapper);
 
     const stone = mkRes('🪨', '#aaa');
     this.resStoneVal = stone.val;
-    row.appendChild(stone.wrapper);
+    earthContent.appendChild(stone.wrapper);
+
+    const iron = mkRes('⛏️', '#b0a0a0');
+    this.resIronVal = iron.val;
+    earthContent.appendChild(iron.wrapper);
+
+    const crystal = mkRes('💎', '#6ba3e0');
+    this.resCrystalVal = crystal.val;
+    earthContent.appendChild(crystal.wrapper);
+
+    const grassFiber = mkRes('🌿', '#66bb6a');
+    this.resGrassFiberVal = grassFiber.val;
+    earthContent.appendChild(grassFiber.wrapper);
+
+    const clay = mkRes('🧱', '#bf8040');
+    this.resClayVal = clay.val;
+    earthContent.appendChild(clay.wrapper);
+
+    earthDropdown.appendChild(earthContent);
+    bar.appendChild(earthDropdown);
+
+    // ===== CRAFTED GROUP (dropdown) =====
+    this.craftedGroupBtn = document.createElement('span');
+    this.craftedGroupBtn.style.cssText = `
+      cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
+      transition:background 0.15s; white-space:nowrap; user-select:none;
+    `;
+    this.craftedGroupBtn.textContent = '⚒️ Crafted ▾';
+    row.appendChild(this.craftedGroupBtn);
     row.appendChild(this.makeDot());
 
+    const craftedDropdown = document.createElement('div');
+    craftedDropdown.style.cssText = `
+      position:absolute; top:100%; left:0; margin-top:6px;
+      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
+      font-size:13px; border:2px solid rgba(255,255,255,0.25);
+      min-width:200px; z-index:1000; pointer-events:auto;
+      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
+      display:none;
+    `;
+    this.craftedGroupDropdown = craftedDropdown;
+
+    // Crafted resources inside dropdown
+    const craftedContent = document.createElement('div');
+    craftedContent.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
+    const charcoal = mkRes('🔥', '#ff8c00');
+    this.resCharcoalVal = charcoal.val;
+    craftedContent.appendChild(charcoal.wrapper);
+
+    const rope = mkRes('🪢', '#c9a96e');
+    this.resRopeVal = rope.val;
+    craftedContent.appendChild(rope.wrapper);
+
+    const steel = mkRes('⚔️', '#c0c0c0');
+    this.resSteelVal = steel.val;
+    craftedContent.appendChild(steel.wrapper);
+
+    craftedDropdown.appendChild(craftedContent);
+    bar.appendChild(craftedDropdown);
+
+    // ===== FOOD (standalone) =====
     const food = mkRes('🌾', '#8bc34a');
     this.resFoodVal = food.val;
     row.appendChild(food.wrapper);
     row.appendChild(this.makeDot());
 
-    const grassFiber = mkRes('🌿', '#66bb6a');
-    this.resGrassFiberVal = grassFiber.val;
-    row.appendChild(grassFiber.wrapper);
+    // ===== GOLD (standalone) =====
+    const gold = mkRes('💰', '#f0c040');
+    this.resGoldVal = gold.val;
+    row.appendChild(gold.wrapper);
     row.appendChild(this.makeDot());
 
-    const clay = mkRes('🧱', '#bf8040');
-    this.resClayVal = clay.val;
-    row.appendChild(clay.wrapper);
-    row.appendChild(this.makeDot());
-
-    const rope = mkRes('🪢', '#c9a96e');
-    this.resRopeVal = rope.val;
-    row.appendChild(rope.wrapper);
-    row.appendChild(this.makeDot());
-
-    // Units button (interactive, with dropdown)
+    // ===== UNITS (standalone with dropdown) =====
     const unitBtn = document.createElement('span');
     unitBtn.style.cssText = `
       cursor:pointer; position:relative; padding:3px 8px; border-radius:4px;
@@ -494,12 +640,6 @@ export class HUD {
     unitBtn.appendChild(arrow);
     this.resUnitVal = unitValSpan;
     row.appendChild(unitBtn);
-    row.appendChild(this.makeDot());
-
-    // Gold
-    const gold = mkRes('💰', '#f0c040');
-    this.resGoldVal = gold.val;
-    row.appendChild(gold.wrapper);
 
     bar.appendChild(row);
 
@@ -518,7 +658,60 @@ export class HUD {
     bar.appendChild(dropdown);
     this.unitDropdown = dropdown;
 
-    // Event listeners (attached ONCE, never destroyed)
+    // ===== EVENT LISTENERS =====
+    // Earth group toggle
+    this.earthGroupBtn.addEventListener('mouseenter', () => {
+      this.earthGroupBtn!.style.background = 'rgba(255,255,255,0.1)';
+    });
+    this.earthGroupBtn.addEventListener('mouseleave', () => {
+      if (!this.earthGroupVisible) this.earthGroupBtn!.style.background = 'none';
+    });
+
+    const toggleEarthGroup = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (this.earthGroupVisible) {
+        this.earthGroupDropdown!.style.display = 'none';
+        this.earthGroupVisible = false;
+        this.earthGroupBtn!.style.background = 'none';
+      } else {
+        this.earthGroupDropdown!.style.display = 'block';
+        this.earthGroupVisible = true;
+        this.earthGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
+      }
+    };
+
+    this.earthGroupBtn.addEventListener('click', toggleEarthGroup);
+    this.earthGroupBtn.addEventListener('contextmenu', toggleEarthGroup);
+    earthDropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    // Crafted group toggle
+    this.craftedGroupBtn.addEventListener('mouseenter', () => {
+      this.craftedGroupBtn!.style.background = 'rgba(255,255,255,0.1)';
+    });
+    this.craftedGroupBtn.addEventListener('mouseleave', () => {
+      if (!this.craftedGroupVisible) this.craftedGroupBtn!.style.background = 'none';
+    });
+
+    const toggleCraftedGroup = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (this.craftedGroupVisible) {
+        this.craftedGroupDropdown!.style.display = 'none';
+        this.craftedGroupVisible = false;
+        this.craftedGroupBtn!.style.background = 'none';
+      } else {
+        this.craftedGroupDropdown!.style.display = 'block';
+        this.craftedGroupVisible = true;
+        this.craftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
+      }
+    };
+
+    this.craftedGroupBtn.addEventListener('click', toggleCraftedGroup);
+    this.craftedGroupBtn.addEventListener('contextmenu', toggleCraftedGroup);
+    craftedDropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    // Unit dropdown toggle
     unitBtn.addEventListener('mouseenter', () => {
       unitBtn.style.background = 'rgba(255,255,255,0.1)';
     });
@@ -526,7 +719,7 @@ export class HUD {
       if (!this.unitDropdownVisible) unitBtn.style.background = 'none';
     });
 
-    const toggleDropdown = (e: Event) => {
+    const toggleUnitDropdown = (e: Event) => {
       e.stopPropagation();
       e.preventDefault();
       if (this.unitDropdownVisible) {
@@ -540,18 +733,28 @@ export class HUD {
       }
     };
 
-    unitBtn.addEventListener('click', toggleDropdown);
-    unitBtn.addEventListener('contextmenu', toggleDropdown);
+    unitBtn.addEventListener('click', toggleUnitDropdown);
+    unitBtn.addEventListener('contextmenu', toggleUnitDropdown);
 
-    // Close dropdown when clicking anywhere else
+    // Close dropdowns when clicking anywhere else
     document.addEventListener('click', () => {
+      if (this.earthGroupVisible) {
+        this.earthGroupDropdown!.style.display = 'none';
+        this.earthGroupVisible = false;
+        this.earthGroupBtn!.style.background = 'none';
+      }
+      if (this.craftedGroupVisible) {
+        this.craftedGroupDropdown!.style.display = 'none';
+        this.craftedGroupVisible = false;
+        this.craftedGroupBtn!.style.background = 'none';
+      }
       if (this.unitDropdownVisible) {
         this.hideUnitDropdown();
         unitBtn.style.background = 'none';
       }
     });
 
-    // Prevent clicks inside dropdown from closing it
+    // Prevent clicks inside dropdowns from closing them
     dropdown.addEventListener('click', (e) => e.stopPropagation());
   }
 
@@ -694,13 +897,22 @@ export class HUD {
     const stone = stoneStockpile ?? 0;
 
     // Update persistent DOM values (no innerHTML replacement, listeners survive)
+    // Earth group
     if (this.resWoodVal) this.resWoodVal.textContent = `${wood} wood`;
     if (this.resStoneVal) this.resStoneVal.textContent = `${stone} stone`;
-    if (this.resFoodVal) this.resFoodVal.textContent = `${food} food`;
-    if (this.resGoldVal) this.resGoldVal.textContent = `${player.resources.gold} gold`;
+    if (this.resIronVal) this.resIronVal.textContent = `${player.resources.iron} iron`;
+    if (this.resCrystalVal) this.resCrystalVal.textContent = `${player.resources.crystal} crystal`;
     if (this.resGrassFiberVal) this.resGrassFiberVal.textContent = `${player.resources.grass_fiber} fiber`;
     if (this.resClayVal) this.resClayVal.textContent = `${player.resources.clay} clay`;
+
+    // Crafted group
+    if (this.resCharcoalVal) this.resCharcoalVal.textContent = `${player.resources.charcoal} charcoal`;
     if (this.resRopeVal) this.resRopeVal.textContent = `${player.resources.rope} rope`;
+    if (this.resSteelVal) this.resSteelVal.textContent = `${player.resources.steel} steel`;
+
+    // Standalone resources
+    if (this.resFoodVal) this.resFoodVal.textContent = `${food} food`;
+    if (this.resGoldVal) this.resGoldVal.textContent = `${player.resources.gold} gold`;
     if (this.resUnitVal) this.resUnitVal.textContent = `${player.units.length}`;
 
     // Cache units for dropdown refresh
@@ -1434,8 +1646,8 @@ export class HUD {
             <div class="unit-row">
               <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">4</div>
               <div>
-                <div class="unit-name" style="color:#3498db;">Paladin</div>
-                <div class="unit-desc">Heavy tank. 6 gold. High HP & defense. Ideal for holding choke points.</div>
+                <div class="unit-name" style="color:#3498db;">Scout</div>
+                <div class="unit-desc">Fast recon. 6 gold. Barracks <span class="key" style="font-size:9px;">4</span>. High speed, great vision range.</div>
               </div>
             </div>
             <div class="unit-row">
@@ -1474,59 +1686,59 @@ export class HUD {
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#1abc9c;">🗡️</div>
+              <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">5</div>
               <div>
-                <div class="unit-name" style="color:#1abc9c;">Scout</div>
-                <div class="unit-desc">Fast recon. 4 gold. High speed, great vision range. Light dagger attacks.</div>
+                <div class="unit-name" style="color:#3498db;">Paladin</div>
+                <div class="unit-desc">Heavy tank. 12 gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. Holds choke points.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#2980b9;">🔮</div>
               <div>
                 <div class="unit-name" style="color:#2980b9;">Mage</div>
-                <div class="unit-desc">Ranged caster. 8 gold. Range 3. Fires magic orbs with sparkle trails.</div>
+                <div class="unit-desc">Ranged caster. 8g + 2 crystal. Wizard Tower <span class="key" style="font-size:9px;">0</span>. Range 3. Magic orbs.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#27ae60;">💚</div>
               <div>
                 <div class="unit-name" style="color:#27ae60;">Healer</div>
-                <div class="unit-desc">Support. Auto-heals allies within 2 hexes (2 HP/1.5s). Follows combat units.</div>
+                <div class="unit-desc">Support. 6g + 1 crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧1</span>. Heals allies within 2 hex.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#2c3e50;">🗡️</div>
               <div>
                 <div class="unit-name" style="color:#9b59b6;">Assassin</div>
-                <div class="unit-desc">Burst DPS. +3 attack from full HP (ambush). Fast jump-stab. Dual daggers.</div>
+                <div class="unit-desc">Burst DPS. 7g + 1 steel. Armory <span class="key" style="font-size:9px;">7</span>. +3 attack from full HP. Dual daggers.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. +2 defense aura to allies within 2 hex. Heater shield bash knocks enemies back 1 hex. Peels for nearby squishies.</div>
+                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. +2 defense aura, shield bash knockback. Peels for squishies.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#e74c3c;">🪓</div>
               <div>
                 <div class="unit-name" style="color:#e74c3c;">Berserker</div>
-                <div class="unit-desc">Melee DPS. Up to +4 attack at low HP (rage). Dual axes. Heavy overhead cleave.</div>
+                <div class="unit-desc">Melee DPS. 7g + 2 steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +4 attack at low HP (rage). Dual axes.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#8e44ad;">⚡</div>
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Battlemage</div>
-                <div class="unit-desc">AoE caster. Range 3. Splash damage to enemies within 1 hex of target. Firework explosions on impact.</div>
+                <div class="unit-desc">AoE caster. 12g + 3 crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧2</span>. Splash damage to all adjacent enemies.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#546e7a;">⚔</div>
               <div>
                 <div class="unit-name" style="color:#546e7a;">Greatsword</div>
-                <div class="unit-desc">Heavy two-handed claymore. Slow but devastating 360° spin slash hits all adjacent enemies. Knockback pushes victims 1 hex away.</div>
+                <div class="unit-desc">Heavy cleave. 8g + 2 steel. Armory <span class="key" style="font-size:9px;">6</span>. 360° spin hits all adjacent, knockback.</div>
               </div>
             </div>
           </div>
@@ -1537,10 +1749,12 @@ export class HUD {
           <div class="section-title" style="color: #f0c040;">🎮 Actions</div>
           <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Click & drag to mark forest tiles. Lumberjacks will chop them and carry wood to stockpile.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Click plains tiles to create farm plots, or mark tall grass for hay. Villagers will harvest food.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Click & drag to mark terrain for mining. Builders will extract stone from mountains, ridges, sand, swamp.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Click & drag to mark terrain for mining. Builders extract stone or iron from mountains (iron from orange ore veins), clay from sand.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Builders construct walls (1 stone each). Shift+click for gates (2 stone). <span class="key">R</span> to rotate.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#228B22;">●</span> <span><span class="key">T</span> <strong>Plant Trees</strong> — Click plains to plant saplings (1 wood). Grow into harvestable forests.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#666;">●</span> <span><span class="key">X</span> <strong>Craft Charcoal</strong> — 3 wood + 2 clay → 2 charcoal (instant).</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#71797e;">●</span> <span><span class="key">Z</span> <strong>Smelt Steel</strong> — 2 iron + 1 charcoal → 1 steel (requires Smelter).</span></div>
         </div>
 
         <!-- BUILDINGS -->
@@ -1552,6 +1766,9 @@ export class HUD {
           <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><span class="key">P</span> <strong>Farmhouse</strong> — 6 wood. Spawns Villagers for wood.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><span class="key">I</span> <strong>Silo</strong> — 5 wood. Extra food storage capacity.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><span class="key">W</span> <strong>Workshop</strong> — 12 wood + 4 stone. Crafts rope and spawns Trebuchets.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><span class="key">E</span> <strong>Smelter</strong> — 8 wood + 6 stone. Required to smelt steel from iron + charcoal.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><span class="key">A</span> <strong>Armory</strong> — 10 wood + 5 stone + 3 steel. Spawns Greatsword, Assassin, Berserker, Shieldbearer.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><span class="key">Y</span> <strong>Wizard Tower</strong> — 10 wood + 5 stone + 3 crystal. Spawns Mage, Battlemage, Healer.</span></div>
         </div>
 
         <!-- RESOURCES -->
@@ -1561,10 +1778,14 @@ export class HUD {
             <div class="tip"><span class="tip-bullet" style="color:#f0c040;">🪵</span> <span><strong style="color:#f0c040;">Wood</strong> — Harvested from forests by Lumberjacks. Used to build structures and train workers.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#aaa;">🪨</span> <span><strong style="color:#aaa;">Stone</strong> — Mined from mountains/terrain by Builders. Used for advanced buildings.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">🌾</span> <span><strong style="color:#8bc34a;">Food</strong> — Harvested from farms/grass by Villagers. Feeds your population.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood [G]. Used to train combat units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span> or killing enemies (3g/kill, 5g for siege). Used to train combat units.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#66bb6a;">🌿</span> <span><strong style="color:#66bb6a;">Grass Fiber</strong> — Gathered by Villagers when harvesting grass. Used to craft Rope.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#bf8040;">🧱</span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted [L] from 3 fiber + 2 clay. Required for Trebuchets.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#bf8040;">🧱</span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope & Charcoal.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from 3 fiber + 2 clay. Required for Trebuchets.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#c0652a;">⛏</span> <span><strong style="color:#c0652a;">Iron</strong> — Mined from iron ore veins on mountains (orange rocks). Foundation of the steel chain.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#444;">⚫</span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from 3 wood + 2 clay. Carbon needed for smelting steel.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#71797e;">🔨</span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from 2 iron + 1 charcoal (requires Smelter). Used for Armory units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Found on snow terrain. Used for Wizard Tower units.</span></div>
           </div>
         </div>
 
@@ -1597,7 +1818,7 @@ export class HUD {
         <div class="section">
           <div class="section-title" style="color: #3498db;">💡 Tips</div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Workers auto-harvest nearby resources when idle — no micro needed!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>All 3 stockpiles (wood, food, stone) appear next to your base.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span>Crafting chain: mine iron → craft charcoal (X) → smelt steel (Z) at Smelter → build Armory units!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
@@ -1718,7 +1939,11 @@ export class HUD {
     if (atkBonus !== 0) modifiers += `<div style="color:#e67e22;">⚔ Attack modifier: ${atkBonus > 0 ? '+' : ''}${atkBonus}</div>`;
     if (tile.terrain === TerrainType.WATER) modifiers += `<div style="color:#e74c3c;">✗ Impassable</div>`;
     if (tile.terrain === TerrainType.FOREST) modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
-    if (tile.terrain === TerrainType.MOUNTAIN) modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
+    if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
+      modifiers += `<div style="color:#c0652a;">⛏ Iron ore vein (iron)</div>`;
+    } else if (tile.terrain === TerrainType.MOUNTAIN) {
+      modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
+    }
     if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand → stone)</div>`;
     if (tile.terrain === TerrainType.JUNGLE) modifiers += `<div style="color:#2d6b30;">🌿 Dense jungle (wood)</div>`;
     if (tile.terrain === TerrainType.RIVER) modifiers += `<div style="color:#1e88e5;">🏊 Swimmable river</div>`;

@@ -45,6 +45,13 @@ export default class NatureSystem {
   treeGrowthTimers: Map<string, number> = new Map();
   private treeSproutTimer = 0;
 
+  /** Tiles that originally had forest at map creation — only these can regrow */
+  originalForestTiles: Set<string> = new Set();
+  /** How many times each tile has been harvested — regrowth chance decreases */
+  harvestCount: Map<string, number> = new Map();
+  /** Max harvests before a tile stops regrowing entirely */
+  private readonly MAX_HARVESTS = 3;
+
   readonly TREE_REGROW_TIME = 12;
   readonly TREE_GROWTH_TIME = 10;
   private readonly TREE_SPROUT_INTERVAL = 5;
@@ -74,11 +81,31 @@ export default class NatureSystem {
     this.updateGrassSpread(delta);
   }
 
+  // ── Record original forest tiles (call after map generation) ──
+  initializeForestTracking(): void {
+    const map = this.ops.getMap();
+    if (!map) return;
+    for (const [key, tile] of map.tiles) {
+      if (tile.terrain === TerrainType.FOREST) {
+        this.originalForestTiles.add(key);
+      }
+    }
+  }
+
   // ── Tree harvest callback (called by main.ts handleChopWood) ──
   onTreeChopped(key: string): void {
-    this.treeRegrowthTimers.set(key, this.TREE_REGROW_TIME);
     this.treeAge.delete(key);
     this.treeGrowthTimers.delete(key);
+
+    // Only allow regrowth on original forest tiles, with diminishing chance
+    if (!this.originalForestTiles.has(key)) return;
+    const harvests = (this.harvestCount.get(key) ?? 0) + 1;
+    this.harvestCount.set(key, harvests);
+    if (harvests >= this.MAX_HARVESTS) return; // exhausted — no more regrowth
+
+    // Longer regrowth time with each harvest
+    const regrowTime = this.TREE_REGROW_TIME * (1 + harvests * 0.5);
+    this.treeRegrowthTimers.set(key, regrowTime);
   }
 
   /** Get tree age for wood yield calculation */
@@ -120,13 +147,20 @@ export default class NatureSystem {
     const map = this.ops.getMap();
     if (!map) return;
 
-    // 1. Regrowth timers: chopped stumps → saplings
+    // 1. Regrowth timers: chopped stumps → saplings (only on original forest tiles)
     for (const [key, remaining] of this.treeRegrowthTimers) {
       const newTime = remaining - delta;
       if (newTime <= 0) {
         this.treeRegrowthTimers.delete(key);
         const tile = map.tiles.get(key);
         if (!tile || tile.terrain !== TerrainType.PLAINS || Pathfinder.blockedTiles.has(key)) continue;
+        // Only regrow on original forest tiles
+        if (!this.originalForestTiles.has(key)) continue;
+        // Diminishing regrowth chance based on harvest count
+        const harvests = this.harvestCount.get(key) ?? 0;
+        if (harvests >= this.MAX_HARVESTS) continue;
+        const regrowChance = 1 / (1 + harvests); // 100%, 50%, 33%
+        if (Math.random() > regrowChance) continue;
 
         tile.terrain = TerrainType.FOREST;
         const [q, r] = key.split(',').map(Number);
@@ -174,96 +208,10 @@ export default class NatureSystem {
     }
   }
 
-  // ── Tree sprouting ──────────────────────────────────────────
-  private updateTreeSprouts(delta: number): void {
-    const map = this.ops.getMap();
-    if (!map) return;
-    this.treeSproutTimer += delta;
-    if (this.treeSproutTimer < this.TREE_SPROUT_INTERVAL) return;
-    this.treeSproutTimer = 0;
-
-    const adjacentCandidates: string[] = [];
-    const wildCandidates: string[] = [];
-
-    map.tiles.forEach((tile, key) => {
-      if (tile.terrain !== TerrainType.PLAINS) return;
-      if (Pathfinder.blockedTiles.has(key)) return;
-      if (this.treeRegrowthTimers.has(key)) return;
-      if (UnitAI.farmPatches.has(key)) return;
-
-      const [q, r] = key.split(',').map(Number);
-      const neighbors = getHexNeighbors(q, r);
-      const hasForestNeighbor = neighbors.some(([nq, nr]) => {
-        const nt = map.tiles.get(`${nq},${nr}`);
-        return nt && nt.terrain === TerrainType.FOREST;
-      });
-
-      if (hasForestNeighbor) {
-        adjacentCandidates.push(key);
-      } else {
-        wildCandidates.push(key);
-      }
-    });
-
-    for (const key of adjacentCandidates) {
-      if (Math.random() < this.TREE_SPROUT_CHANCE) {
-        this.sproutSapling(key, map);
-      }
-    }
-
-    let wildCount = 0;
-    for (const key of wildCandidates) {
-      if (wildCount >= 2) break;
-      if (Math.random() < 0.005) {
-        this.sproutSapling(key, map);
-        wildCount++;
-      }
-    }
-
-    this.cullOvercrowdedSaplings(map);
-  }
-
-  private sproutSapling(key: string, map: GameMap): void {
-    const tile = map.tiles.get(key);
-    if (!tile) return;
-    if (UnitAI.farmPatches.has(key)) return;
-    const [q, r] = key.split(',').map(Number);
-    if (this.countAdjacentForest(q, r, map) >= 4) return;
-
-    tile.terrain = TerrainType.FOREST;
-    this.ops.addTreeAtStage({ q, r }, tile.elevation * 0.5, 0);
-    this.treeAge.set(key, 0);
-    this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
-  }
-
-  private cullOvercrowdedSaplings(map: GameMap): void {
-    const toCull: string[] = [];
-    for (const [key, age] of this.treeAge) {
-      if (age > 1) continue;
-      const [q, r] = key.split(',').map(Number);
-      if (this.countAdjacentForest(q, r, map) >= 4) {
-        toCull.push(key);
-      }
-    }
-    for (const key of toCull) {
-      const tile = map.tiles.get(key);
-      if (!tile) continue;
-      tile.terrain = TerrainType.PLAINS;
-      const [q, r] = key.split(',').map(Number);
-      this.ops.removeDecoration({ q, r });
-      this.treeAge.delete(key);
-      this.treeGrowthTimers.delete(key);
-    }
-  }
-
-  private countAdjacentForest(q: number, r: number, map: GameMap): number {
-    const neighbors = getHexNeighbors(q, r);
-    let count = 0;
-    for (const [nq, nr] of neighbors) {
-      const nt = map.tiles.get(`${nq},${nr}`);
-      if (nt && nt.terrain === TerrainType.FOREST) count++;
-    }
-    return count;
+  // ── Tree sprouting (disabled — trees no longer spread to new tiles) ──
+  private updateTreeSprouts(_delta: number): void {
+    // Trees only regrow on original forest tiles via regrowth timers.
+    // No new tree spawning on non-forest tiles.
   }
 
   // ── Grass growth ────────────────────────────────────────────
@@ -363,6 +311,8 @@ export default class NatureSystem {
     this.treeAge.clear();
     this.treeGrowthTimers.clear();
     this.treeSproutTimer = 0;
+    this.originalForestTiles.clear();
+    this.harvestCount.clear();
     this.grassAge.clear();
     this.grassGrowthTimers.clear();
     this.grassSpreadTimer = 0;

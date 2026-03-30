@@ -76,6 +76,20 @@ class ResourceManager {
     unit.carryType = null;
   }
 
+  handleIronDeposit(unit: Unit): void {
+    const ironAmount = unit.carryAmount;
+    if (ironAmount <= 0) return;
+
+    this.ctx.ironStockpile[unit.owner] += ironAmount;
+    this.ctx.players[unit.owner].resources.iron += ironAmount;
+    this.updateStockpileVisual(unit.owner);
+    if (unit.owner === 0) {
+      this.updateHUD();
+    }
+    unit.carryAmount = 0;
+    unit.carryType = null;
+  }
+
   handleCropHarvest(unit: Unit, _farmPos: HexCoord): void {
     const foodYield = 3;
     unit.carryAmount = Math.min(foodYield, unit.carryCapacity);
@@ -100,6 +114,57 @@ class ResourceManager {
     this.ctx.players[0].resources.rope += 1;
     this.updateHUD();
     this.ctx.hud.showNotification(`🪢 Crafted 1 rope (${this.ctx.ropeStockpile[0]} total)`, '#2ecc71');
+  }
+
+  craftCharcoal(): void {
+    const woodNeeded = 3;
+    const clayNeeded = 2;
+    if (this.ctx.woodStockpile[0] < woodNeeded || this.ctx.clayStockpile[0] < clayNeeded) {
+      this.ctx.hud.showNotification(
+        `⚠️ Need ${woodNeeded} wood + ${clayNeeded} clay to craft charcoal! (have ${this.ctx.woodStockpile[0]} wood, ${this.ctx.clayStockpile[0]} clay)`,
+        '#e67e22'
+      );
+      return;
+    }
+    this.ctx.woodStockpile[0] -= woodNeeded;
+    this.ctx.players[0].resources.wood -= woodNeeded;
+    this.ctx.clayStockpile[0] -= clayNeeded;
+    this.ctx.players[0].resources.clay -= clayNeeded;
+    this.ctx.charcoalStockpile[0] += 2;
+    this.ctx.players[0].resources.charcoal += 2;
+    this.updateHUD();
+    this.ctx.hud.showNotification(`⚫ Crafted 2 charcoal (${this.ctx.charcoalStockpile[0]} total)`, '#2ecc71');
+  }
+
+  smeltSteel(): void {
+    const ironNeeded = 2;
+    const charcoalNeeded = 1;
+
+    // Check if smelter building exists
+    const hasSmelter = this.ctx.hasBuilding('smelter', 0);
+    if (!hasSmelter) {
+      this.ctx.hud.showNotification(
+        `⚠️ You need a smelter building to smelt steel!`,
+        '#e67e22'
+      );
+      return;
+    }
+
+    if (this.ctx.ironStockpile[0] < ironNeeded || this.ctx.charcoalStockpile[0] < charcoalNeeded) {
+      this.ctx.hud.showNotification(
+        `⚠️ Need ${ironNeeded} iron + ${charcoalNeeded} charcoal to smelt steel! (have ${this.ctx.ironStockpile[0]} iron, ${this.ctx.charcoalStockpile[0]} charcoal)`,
+        '#e67e22'
+      );
+      return;
+    }
+    this.ctx.ironStockpile[0] -= ironNeeded;
+    this.ctx.players[0].resources.iron -= ironNeeded;
+    this.ctx.charcoalStockpile[0] -= charcoalNeeded;
+    this.ctx.players[0].resources.charcoal -= charcoalNeeded;
+    this.ctx.steelStockpile[0] += 1;
+    this.ctx.players[0].resources.steel += 1;
+    this.updateHUD();
+    this.ctx.hud.showNotification(`🔨 Smelted 1 steel (${this.ctx.steelStockpile[0]} total)`, '#2ecc71');
   }
 
   doSellWood(): void {

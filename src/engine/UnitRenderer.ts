@@ -3651,6 +3651,190 @@ export class UnitRenderer {
   }
 
   /**
+   * Show floating XP text (+1 XP, +3 XP) rising from a unit
+   */
+  showXPText(worldPos: { x: number; y: number; z: number }, xp: number): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 48;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 28px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Gold outline + white fill
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.strokeText(`+${xp} XP`, 64, 24);
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(`+${xp} XP`, 64, 24);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(0.8, 0.3, 1);
+    sprite.position.set(worldPos.x + 0.3, worldPos.y + 1.2, worldPos.z);
+    this.scene.add(sprite);
+
+    let elapsed = 0;
+    const animate = () => {
+      elapsed += 0.016;
+      sprite.position.y += 0.8 * 0.016; // float upward
+      mat.opacity = Math.max(0, 1 - elapsed / 1.0);
+      if (elapsed < 1.0) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(sprite);
+        texture.dispose();
+        mat.dispose();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Show level-up effect — golden particle burst + "LEVEL UP!" text + brief golden glow on unit
+   */
+  showLevelUpEffect(unitId: string, worldPos: { x: number; y: number; z: number }, newLevel: number): void {
+    // --- Golden particle burst ---
+    const particleCount = 10 + Math.floor(Math.random() * 6);
+    for (let i = 0; i < particleCount; i++) {
+      const geo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+      const mat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0xFFD700 : 0xFFF8DC,
+        transparent: true,
+        opacity: 1.0,
+      });
+      const p = new THREE.Mesh(geo, mat);
+      const angle = (i / particleCount) * Math.PI * 2;
+      p.position.set(
+        worldPos.x + Math.cos(angle) * 0.15,
+        worldPos.y + 0.6,
+        worldPos.z + Math.sin(angle) * 0.15
+      );
+      const vel = {
+        x: Math.cos(angle) * (1.5 + Math.random()),
+        y: 2 + Math.random() * 2,
+        z: Math.sin(angle) * (1.5 + Math.random()),
+      };
+      this.scene.add(p);
+      let el = 0;
+      const anim = () => {
+        el += 0.016;
+        p.position.x += vel.x * 0.016;
+        p.position.y += vel.y * 0.016;
+        p.position.z += vel.z * 0.016;
+        vel.y -= 4 * 0.016;
+        p.rotation.x += 5 * 0.016;
+        p.rotation.z += 3 * 0.016;
+        mat.opacity = Math.max(0, 1 - el / 0.8);
+        if (el < 0.8) {
+          requestAnimationFrame(anim);
+        } else {
+          this.scene.remove(p);
+          geo.dispose();
+          mat.dispose();
+        }
+      };
+      requestAnimationFrame(anim);
+    }
+
+    // --- Expanding golden ring ---
+    const ringGeo = new THREE.RingGeometry(0.1, 0.15, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xFFD700,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(worldPos.x, worldPos.y + 0.1, worldPos.z);
+    ring.rotation.x = -Math.PI / 2; // lay flat
+    this.scene.add(ring);
+    let ringEl = 0;
+    const ringAnim = () => {
+      ringEl += 0.016;
+      const s = 1 + ringEl * 6;
+      ring.scale.set(s, s, s);
+      ringMat.opacity = Math.max(0, 0.8 - ringEl / 0.6);
+      if (ringEl < 0.6) {
+        requestAnimationFrame(ringAnim);
+      } else {
+        this.scene.remove(ring);
+        ringGeo.dispose();
+        ringMat.dispose();
+      }
+    };
+    requestAnimationFrame(ringAnim);
+
+    // --- "LEVEL UP!" floating text ---
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 32px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    // Black outline
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(`LEVEL ${newLevel}!`, 128, 32);
+    // Gold fill
+    ctx.fillStyle = '#FFD700';
+    ctx.fillText(`LEVEL ${newLevel}!`, 128, 32);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    const spMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sp = new THREE.Sprite(spMat);
+    sp.scale.set(1.4, 0.35, 1);
+    sp.position.set(worldPos.x, worldPos.y + 1.6, worldPos.z);
+    this.scene.add(sp);
+
+    let spEl = 0;
+    const spAnim = () => {
+      spEl += 0.016;
+      sp.position.y += 0.5 * 0.016;
+      // Scale pulse at start
+      const pulse = spEl < 0.3 ? 1 + Math.sin(spEl * 20) * 0.15 : 1;
+      sp.scale.set(1.4 * pulse, 0.35 * pulse, 1);
+      spMat.opacity = spEl < 1.0 ? 1.0 : Math.max(0, 1 - (spEl - 1.0) / 0.5);
+      if (spEl < 1.5) {
+        requestAnimationFrame(spAnim);
+      } else {
+        this.scene.remove(sp);
+        tex.dispose();
+        spMat.dispose();
+      }
+    };
+    requestAnimationFrame(spAnim);
+
+    // --- Brief golden glow on the unit model ---
+    const entry = this.unitMeshes.get(unitId);
+    if (entry) {
+      const origMats = new Map<THREE.Mesh, THREE.Material>();
+      entry.group.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+          origMats.set(child, child.material.clone());
+          child.material = new THREE.MeshLambertMaterial({
+            color: 0xFFD700,
+            emissive: 0xFFAA00,
+            emissiveIntensity: 0.5,
+          });
+        }
+      });
+      setTimeout(() => {
+        entry.group.traverse((child) => {
+          if (child instanceof THREE.Mesh && origMats.has(child)) {
+            (child.material as THREE.Material).dispose();
+            child.material = origMats.get(child)!;
+          }
+        });
+      }, 500);
+    }
+  }
+
+  /**
    * Billboard health bars to face camera (sprites auto-billboard, so this is now a no-op
    * kept for API compatibility in case other elements need billboarding later)
    */

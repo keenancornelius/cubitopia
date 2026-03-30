@@ -194,3 +194,123 @@ export function buildSiloMesh(pos: HexCoord, owner: number, scene: THREE.Scene, 
   scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
   return g;
 }
+
+/** SMELTER — Squat stone furnace with glowing orange interior and chimney stack */
+export function buildSmelterMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
+  const g = createBuildingGroup(pos, owner, 'smelter', getElevation);
+  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const grayStone = 0x808080;
+  const darkStone = 0x505050;
+  const B = bm;
+
+  // Foundation
+  g.add(B(new THREE.BoxGeometry(1.4, 0.2, 1.4), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.1, 0));
+
+  // Main furnace body (gray stone base)
+  g.add(B(new THREE.BoxGeometry(0.8, 0.6, 0.8), new THREE.MeshLambertMaterial({ color: grayStone }), 0, 0.45, 0));
+
+  // Glowing orange interior window (emissive)
+  const windowMat = new THREE.MeshLambertMaterial({ color: 0xff6600, emissive: 0xff6600, emissiveIntensity: 0.8 });
+  g.add(B(new THREE.BoxGeometry(0.3, 0.3, 0.05), windowMat, 0, 0.5, 0.42));
+
+  // Chimney stack (dark gray bricks stacked on the side)
+  g.add(B(new THREE.BoxGeometry(0.25, 0.25, 0.25), new THREE.MeshLambertMaterial({ color: darkStone }), 0.5, 0.9, -0.35));
+  g.add(B(new THREE.BoxGeometry(0.25, 0.25, 0.25), new THREE.MeshLambertMaterial({ color: darkStone }), 0.5, 1.2, -0.35));
+  g.add(B(new THREE.BoxGeometry(0.25, 0.25, 0.25), new THREE.MeshLambertMaterial({ color: darkStone }), 0.5, 1.5, -0.35));
+
+  // Small entrance
+  g.add(B(new THREE.BoxGeometry(0.2, 0.35, 0.08), new THREE.MeshLambertMaterial({ color: 0x2c1810 }), -0.35, 0.35, 0.4));
+
+  // Owner color accent
+  g.add(B(new THREE.BoxGeometry(1.3, 0.08, 1.3), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.25, 0));
+
+  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  return g;
+}
+
+/** ARMORY — Low fortified building with weapon racks and anvil */
+export function buildArmoryMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
+  const g = createBuildingGroup(pos, owner, 'armory', getElevation);
+  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const darkStone = 0x606060;
+  const midStone = 0x808080;
+  const B = bm;
+
+  // Foundation
+  g.add(B(new THREE.BoxGeometry(1.5, 0.2, 1.5), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.1, 0));
+
+  // Main dark stone walls
+  g.add(B(new THREE.BoxGeometry(0.9, 0.5, 0.9), new THREE.MeshLambertMaterial({ color: darkStone }), 0, 0.4, 0));
+
+  // Sloped roof (two angled sections)
+  for (const side of [-1, 1]) {
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.12, 1.0), new THREE.MeshLambertMaterial({ color: midStone }));
+    roof.position.set(side * 0.25, 0.95, 0);
+    roof.rotation.z = side * 0.35;
+    g.add(roof);
+  }
+
+  // Weapon rack decorations on sides (small elongated boxes as swords/spears)
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      const weaponMat = new THREE.MeshLambertMaterial({ color: 0x5a5550 });
+      const weapon = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.45, 0.08), weaponMat);
+      weapon.position.set(side * 0.42, 0.35 + i * 0.18, 0);
+      weapon.rotation.z = (Math.random() - 0.5) * 0.3;
+      g.add(weapon);
+    }
+  }
+
+  // Anvil in front (dark gray)
+  g.add(B(new THREE.BoxGeometry(0.35, 0.3, 0.25), new THREE.MeshLambertMaterial({ color: 0x404040 }), 0, 0.25, 0.5));
+
+  // Owner color accent
+  g.add(B(new THREE.BoxGeometry(1.4, 0.08, 1.4), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.22, 0));
+
+  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  return g;
+}
+
+/** WIZARDTOWER — Tall imposing stone tower with purple windows and pointed roof */
+export function buildWizardTowerMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
+  const g = createBuildingGroup(pos, owner, 'wizardtower', getElevation);
+  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const stoneColor = 0x7a7a7a;
+  const darkStone = 0x5a5a5a;
+  const B = bm;
+
+  // Foundation
+  g.add(B(new THREE.BoxGeometry(1.2, 0.2, 1.2), new THREE.MeshLambertMaterial({ color: 0x7f8c8d }), 0, 0.1, 0));
+
+  // Tower base: stacked cylindrical sections getting narrower
+  const baseMat = new THREE.MeshLambertMaterial({ color: stoneColor });
+  g.add(B(new THREE.CylinderGeometry(0.55, 0.55, 0.5, 6), baseMat, 0, 0.4, 0));
+  g.add(B(new THREE.CylinderGeometry(0.50, 0.50, 0.5, 6), baseMat, 0, 0.95, 0));
+  g.add(B(new THREE.CylinderGeometry(0.45, 0.45, 0.5, 6), baseMat, 0, 1.5, 0));
+  g.add(B(new THREE.CylinderGeometry(0.40, 0.40, 0.4, 6), baseMat, 0, 1.95, 0));
+
+  // Room at top (box section)
+  g.add(B(new THREE.BoxGeometry(0.7, 0.4, 0.7), new THREE.MeshLambertMaterial({ color: darkStone }), 0, 2.3, 0));
+
+  // Pointed roof on top
+  g.add(B(new THREE.ConeGeometry(0.45, 0.7, 6), new THREE.MeshLambertMaterial({ color: 0x4a4a4a }), 0, 2.85, 0));
+
+  // Purple-tinted emissive windows scattered around tower
+  const purpleWindowMat = new THREE.MeshLambertMaterial({ color: 0x6600aa, emissive: 0x6600aa, emissiveIntensity: 0.7 });
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    const height = 0.8 + (i % 2) * 0.8;
+    const radius = 0.5 + (height < 1.2 ? 0.05 : 0.02);
+    g.add(B(new THREE.BoxGeometry(0.12, 0.15, 0.05), purpleWindowMat, Math.cos(angle) * radius, height, Math.sin(angle) * radius));
+  }
+
+  // Chimney on top
+  g.add(B(new THREE.BoxGeometry(0.15, 0.5, 0.15), new THREE.MeshLambertMaterial({ color: 0x505050 }), 0.25, 2.9, -0.2));
+  g.add(B(new THREE.BoxGeometry(0.12, 0.1, 0.12), new THREE.MeshLambertMaterial({ color: 0x707070 }), 0.25, 3.45, -0.2));
+
+  // Owner color accent
+  g.add(B(new THREE.BoxGeometry(1.15, 0.08, 1.15), new THREE.MeshLambertMaterial({ color: tc }), 0, 0.22, 0));
+
+  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  return g;
+}

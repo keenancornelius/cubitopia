@@ -50,8 +50,12 @@ export function generateBoxFormation(center: HexCoord, count: number, tiles: Til
   for (let radius = 1; slots.length < count && radius <= 5; radius++) {
     const ring = getHexRing(center, radius);
     ring.sort((a, b) => {
-      const da = Math.abs(a.q - center.q) + Math.abs(a.r - center.r);
-      const db = Math.abs(b.q - center.q) + Math.abs(b.r - center.r);
+      // Offset (odd-q) to cube distance
+      const ax1 = a.q, az1 = a.r - (a.q - (a.q & 1)) / 2, ay1 = -ax1 - az1;
+      const cx1 = center.q, cz1 = center.r - (center.q - (center.q & 1)) / 2, cy1 = -cx1 - cz1;
+      const da = Math.max(Math.abs(ax1 - cx1), Math.abs(ay1 - cy1), Math.abs(az1 - cz1));
+      const bx1 = b.q, bz1 = b.r - (b.q - (b.q & 1)) / 2, by1 = -bx1 - bz1;
+      const db = Math.max(Math.abs(bx1 - cx1), Math.abs(by1 - cy1), Math.abs(bz1 - cz1));
       return da - db;
     });
     for (const hex of ring) {

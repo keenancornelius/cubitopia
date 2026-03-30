@@ -42,6 +42,14 @@ export interface DebugOps {
   setClayStockpile(val: number): void;
   getRopeStockpile(): number;
   setRopeStockpile(val: number): void;
+  getIronStockpile(): number;
+  setIronStockpile(val: number): void;
+  getCharcoalStockpile(): number;
+  setCharcoalStockpile(val: number): void;
+  getSteelStockpile(): number;
+  setSteelStockpile(val: number): void;
+  getCrystalStockpile(): number;
+  setCrystalStockpile(val: number): void;
 
   // HUD
   updateResourceDisplay(): void;
@@ -113,6 +121,14 @@ export default class DebugController {
     players[0].resources.clay += 999;
     this.ops.setRopeStockpile(this.ops.getRopeStockpile() + 999);
     players[0].resources.rope += 999;
+    this.ops.setIronStockpile(this.ops.getIronStockpile() + 999);
+    players[0].resources.iron += 999;
+    this.ops.setCharcoalStockpile(this.ops.getCharcoalStockpile() + 999);
+    players[0].resources.charcoal += 999;
+    this.ops.setSteelStockpile(this.ops.getSteelStockpile() + 999);
+    players[0].resources.steel += 999;
+    this.ops.setCrystalStockpile(this.ops.getCrystalStockpile() + 999);
+    players[0].resources.crystal += 999;
     this.ops.updateResourceDisplay();
     this.ops.updateStockpileVisual(0);
     this.ops.showNotification('🐛 +999 all resources', '#4caf50');

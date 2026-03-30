@@ -29,6 +29,9 @@ export interface AIBuildingOps {
   buildFarmhouseMesh(pos: HexCoord, owner: number): THREE.Group;
   buildWorkshopMesh(pos: HexCoord, owner: number): THREE.Group;
   buildSiloMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildSmelterMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildArmoryMesh(pos: HexCoord, owner: number): THREE.Group;
+  buildWizardTowerMesh(pos: HexCoord, owner: number): THREE.Group;
   registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth?: number): PlacedBuilding;
 }
 
@@ -166,11 +169,101 @@ export default class AIController {
       if (st.silo) st.buildPhase = 6;
     }
 
+    // --- PHASE 6: Build Smelter ---
+    if (st.buildPhase === 6) {
+      if (!st.smelter && wood >= 8 && stone >= 6) {
+        const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, -toward);
+        if (pos) {
+          this.ctx.woodStockpile[ownerId] -= 8;
+          this.ctx.stoneStockpile[ownerId] -= 6;
+          player.resources.wood -= 8;
+          player.resources.stone -= 6;
+          const mesh = this.buildOps.buildSmelterMesh(pos, ownerId);
+          const pb = this.buildOps.registerBuilding('smelter', ownerId, pos, mesh);
+          st.smelter = { position: pos, worldPosition: pb.worldPosition };
+          st.meshes.push(mesh);
+        }
+      }
+      if (st.smelter) st.buildPhase = 7;
+    }
+
+    // --- PHASE 7: Build Armory ---
+    if (st.buildPhase === 7) {
+      if (!st.armory && wood >= 10 && stone >= 5) {
+        const steel = this.ctx.steelStockpile[ownerId];
+        if (steel >= 3) {
+          const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward * 2, -toward);
+          if (pos) {
+            this.ctx.woodStockpile[ownerId] -= 10;
+            this.ctx.stoneStockpile[ownerId] -= 5;
+            this.ctx.steelStockpile[ownerId] -= 3;
+            player.resources.wood -= 10;
+            player.resources.stone -= 5;
+            player.resources.steel -= 3;
+            const mesh = this.buildOps.buildArmoryMesh(pos, ownerId);
+            const pb = this.buildOps.registerBuilding('armory', ownerId, pos, mesh);
+            st.armory = { position: pos, worldPosition: pb.worldPosition };
+            st.meshes.push(mesh);
+          }
+        }
+      }
+      if (st.armory) st.buildPhase = 8;
+    }
+
+    // --- PHASE 8: Build Wizard Tower ---
+    if (st.buildPhase === 8) {
+      if (!st.wizard_tower && wood >= 10 && stone >= 5) {
+        const crystal = player.resources.crystal;
+        if (crystal >= 3) {
+          const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, -toward, -toward);
+          if (pos) {
+            this.ctx.woodStockpile[ownerId] -= 10;
+            this.ctx.stoneStockpile[ownerId] -= 5;
+            player.resources.wood -= 10;
+            player.resources.stone -= 5;
+            player.resources.crystal -= 3;
+            const mesh = this.buildOps.buildWizardTowerMesh(pos, ownerId);
+            const pb = this.buildOps.registerBuilding('wizard_tower', ownerId, pos, mesh);
+            st.wizard_tower = { position: pos, worldPosition: pb.worldPosition };
+            st.meshes.push(mesh);
+          }
+        }
+      }
+      if (st.wizard_tower) st.buildPhase = 9;
+    }
+
     // --- ONGOING: Sell excess wood for gold ---
     if (st.barracks && this.ctx.woodStockpile[ownerId] >= 15) {
       this.ctx.woodStockpile[ownerId] -= 4;
       player.resources.wood -= 4;
       player.resources.gold += 5;
+    }
+
+    // --- ONGOING: Auto-craft charcoal ---
+    const charcoal = player.resources.charcoal;
+    const clay = this.ctx.clayStockpile[ownerId];
+    if (wood >= 3 && clay >= 2 && charcoal < 5) {
+      this.ctx.woodStockpile[ownerId] -= 3;
+      this.ctx.clayStockpile[ownerId] -= 2;
+      player.resources.wood -= 3;
+      player.resources.clay -= 2;
+      player.resources.charcoal += 2;
+      this.ctx.charcoalStockpile[ownerId] += 2;
+    }
+
+    // --- ONGOING: Auto-smelt steel (if smelter is built) ---
+    if (st.smelter) {
+      const steel = this.ctx.steelStockpile[ownerId];
+      const iron = player.resources.iron;
+      const charcoalNeeded = player.resources.charcoal;
+      if (iron >= 2 && charcoalNeeded >= 1 && steel < 5) {
+        player.resources.iron -= 2;
+        this.ctx.ironStockpile[ownerId] -= 2;
+        player.resources.charcoal -= 1;
+        this.ctx.charcoalStockpile[ownerId] -= 1;
+        player.resources.steel += 1;
+        this.ctx.steelStockpile[ownerId] += 1;
+      }
     }
 
     // --- ONGOING: Queue workers ---
@@ -186,17 +279,73 @@ export default class AIController {
 
     // --- ONGOING: Queue combat units ---
     const maxQueue = Math.min(3 + st.waveNumber, 8);
+    const steel = this.ctx.steelStockpile[ownerId];
+    const crystal = player.resources.crystal;
+
     if (st.barracks && gold >= 5 && st.spawnQueue.length < maxQueue) {
       const roll = Math.random();
       const wave = st.waveNumber;
-      if (st.workshop && wave >= 3 && roll < 0.1) {
-        st.spawnQueue.push({ type: UnitType.TREBUCHET, cost: 15 });
-      } else if (wave >= 2 && roll < 0.25 && gold >= 10) {
-        st.spawnQueue.push({ type: UnitType.RIDER, cost: 10 });
-      } else if (roll < 0.45 && gold >= 8) {
+
+      // Armory units (require steel)
+      if (st.armory && steel >= 1) {
+        if (roll < 0.08 && gold >= 12 && steel >= 1) {
+          st.spawnQueue.push({ type: UnitType.GREATSWORD, cost: 12 });
+        } else if (roll < 0.16 && gold >= 14 && steel >= 1) {
+          st.spawnQueue.push({ type: UnitType.BERSERKER, cost: 14 });
+        } else if (roll < 0.24 && gold >= 11 && steel >= 1) {
+          st.spawnQueue.push({ type: UnitType.SHIELDBEARER, cost: 11 });
+        } else if (roll < 0.30 && gold >= 13 && steel >= 1) {
+          st.spawnQueue.push({ type: UnitType.ASSASSIN, cost: 13 });
+        }
+        // Fall through to barracks units
+        else if (roll < 0.45 && gold >= 8) {
+          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
+        } else if (roll < 0.55 && gold >= 6) {
+          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
+        } else {
+          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
+        }
+      }
+      // Wizard Tower units (require crystal)
+      else if (st.wizard_tower && crystal >= 1) {
+        if (roll < 0.10 && gold >= 9 && crystal >= 1) {
+          st.spawnQueue.push({ type: UnitType.MAGE, cost: 9 });
+        } else if (roll < 0.20 && gold >= 15 && crystal >= 1) {
+          st.spawnQueue.push({ type: UnitType.BATTLEMAGE, cost: 15 });
+        } else if (roll < 0.30 && gold >= 10 && crystal >= 1) {
+          st.spawnQueue.push({ type: UnitType.HEALER, cost: 10 });
+        }
+        // Fall through to barracks units
+        else if (roll < 0.50 && gold >= 8) {
+          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
+        } else if (roll < 0.60 && gold >= 6) {
+          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
+        } else {
+          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
+        }
+      }
+      // Workshop units (require rope and stone)
+      else if (st.workshop && wave >= 2) {
+        const rope = player.resources.rope;
+        if (roll < 0.12 && gold >= 18 && rope >= 2) {
+          st.spawnQueue.push({ type: UnitType.CATAPULT, cost: 18 });
+        } else if (roll < 0.20 && gold >= 15) {
+          st.spawnQueue.push({ type: UnitType.TREBUCHET, cost: 15 });
+        } else if (roll < 0.35 && gold >= 10) {
+          st.spawnQueue.push({ type: UnitType.RIDER, cost: 10 });
+        } else if (roll < 0.55 && gold >= 8) {
+          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
+        } else if (roll < 0.65 && gold >= 6) {
+          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
+        } else {
+          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
+        }
+      } else if (roll < 0.38 && gold >= 12 && steel >= 1) {
+        st.spawnQueue.push({ type: UnitType.PALADIN, cost: 12 });
+      } else if (roll < 0.50 && gold >= 8) {
         st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-      } else if (roll < 0.55 && gold >= 6) {
-        st.spawnQueue.push({ type: UnitType.PALADIN, cost: 6 });
+      } else if (roll < 0.62 && gold >= 6) {
+        st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
       } else {
         st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
       }
@@ -245,16 +394,78 @@ export default class AIController {
     const player = this.ctx.players[ownerId];
     if (!player) return;
 
-    // Combat unit spawning from barracks
+    // Combat unit spawning from barracks, armory, and wizard tower
     if (st.barracks && st.spawnQueue.length > 0) {
       st.spawnTimer += delta;
       if (st.spawnTimer >= 5) {
         st.spawnTimer = 0;
         const next = st.spawnQueue[0];
-        if (player.resources.gold >= next.cost) {
+
+        // Check if we have the required resources
+        let canSpawn = player.resources.gold >= next.cost;
+
+        // Armory units require steel
+        const armoryUnits = [UnitType.GREATSWORD, UnitType.BERSERKER, UnitType.SHIELDBEARER, UnitType.ASSASSIN];
+        if (canSpawn && armoryUnits.includes(next.type)) {
+          canSpawn = this.ctx.steelStockpile[ownerId] >= 1;
+        }
+
+        // Wizard tower units require crystal
+        const wizardUnits = [UnitType.MAGE, UnitType.BATTLEMAGE, UnitType.HEALER];
+        if (canSpawn && wizardUnits.includes(next.type)) {
+          canSpawn = player.resources.crystal >= 1;
+        }
+
+        // Workshop units require rope and stone
+        const workshopUnits = [UnitType.CATAPULT, UnitType.TREBUCHET];
+        if (canSpawn && workshopUnits.includes(next.type)) {
+          const ropeNeeded = next.type === UnitType.CATAPULT ? 2 : 0;
+          canSpawn = player.resources.rope >= ropeNeeded;
+        }
+
+        // Paladin requires steel
+        if (canSpawn && next.type === UnitType.PALADIN) {
+          canSpawn = this.ctx.steelStockpile[ownerId] >= 1;
+        }
+
+        if (canSpawn) {
           player.resources.gold -= next.cost;
+
+          // Deduct steel for armory units
+          if (armoryUnits.includes(next.type)) {
+            this.ctx.steelStockpile[ownerId] -= 1;
+            player.resources.steel -= 1;
+          }
+
+          // Deduct steel for paladin
+          if (next.type === UnitType.PALADIN) {
+            this.ctx.steelStockpile[ownerId] -= 1;
+            player.resources.steel -= 1;
+          }
+
+          // Deduct crystal for wizard tower units
+          if (wizardUnits.includes(next.type)) {
+            player.resources.crystal -= 1;
+          }
+
+          // Deduct rope for catapult
+          if (next.type === UnitType.CATAPULT) {
+            this.ctx.ropeStockpile[ownerId] -= 2;
+            player.resources.rope -= 2;
+          }
+
           st.spawnQueue.shift();
-          const spawnFrom = next.type === UnitType.TREBUCHET && st.workshop ? st.workshop : st.barracks;
+
+          // Determine spawn building based on unit type
+          let spawnFrom = st.barracks;
+          if (armoryUnits.includes(next.type) && st.armory) {
+            spawnFrom = st.armory;
+          } else if (wizardUnits.includes(next.type) && st.wizard_tower) {
+            spawnFrom = st.wizard_tower;
+          } else if (workshopUnits.includes(next.type) && st.workshop) {
+            spawnFrom = st.workshop;
+          }
+
           const pos = this.ctx.findSpawnTile(this.ctx.currentMap!, spawnFrom.position.q, spawnFrom.position.r, true);
           const unit = UnitFactory.create(next.type, ownerId, pos);
           const wp = this.ctx.hexToWorld(pos);
@@ -575,17 +786,23 @@ export default class AIController {
 
   getUnitFormationPriority(unit: Unit): number {
     switch (unit.type) {
-      case UnitType.PALADIN:       return 0;
-      case UnitType.WARRIOR:        return 1;
-      case UnitType.RIDER:          return 2;
+      case UnitType.PALADIN:
+      case UnitType.GREATSWORD:
+      case UnitType.SHIELDBEARER:   return 0;  // Front line tanks
+      case UnitType.WARRIOR:
+      case UnitType.BERSERKER:      return 1;  // Melee damage dealers
+      case UnitType.RIDER:          return 2;  // Fast movers
       case UnitType.LUMBERJACK:
       case UnitType.BUILDER:
-      case UnitType.VILLAGER:       return 3;
+      case UnitType.VILLAGER:       return 3;  // Workers
       case UnitType.ARCHER:
-      case UnitType.MAGE:           return 4;
+      case UnitType.MAGE:
+      case UnitType.BATTLEMAGE:     return 4;  // Ranged attackers
+      case UnitType.ASSASSIN:
+      case UnitType.SCOUT:          return 5;  // Fast/sneaky
+      case UnitType.HEALER:         return 6;  // Support
       case UnitType.CATAPULT:
-      case UnitType.TREBUCHET:
-      case UnitType.SCOUT:          return 5;
+      case UnitType.TREBUCHET:      return 7;  // Siege weapons
       default:                      return 3;
     }
   }
@@ -711,7 +928,10 @@ export default class AIController {
     let best = ring[0];
     let bestDist = Infinity;
     for (const t of ring) {
-      const d = Math.abs(t.q - unit.position.q) + Math.abs(t.r - unit.position.r);
+      // Offset (odd-q) to cube distance
+      const x1 = t.q, z1 = t.r - (t.q - (t.q & 1)) / 2, y1 = -x1 - z1;
+      const x2 = unit.position.q, z2 = unit.position.r - (unit.position.q - (unit.position.q & 1)) / 2, y2 = -x2 - z2;
+      const d = Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2), Math.abs(z1 - z2));
       if (d < bestDist) { bestDist = d; best = t; }
     }
     return best;

@@ -1719,6 +1719,20 @@ export class UnitAI {
     // Find the target
     const target = allUnits.find(u => u.id === unit.command!.targetUnitId);
     if (!target || target.state === UnitState.DEAD) {
+      // Target dead — immediately look for another nearby enemy to chain attacks
+      const detRange = UnitAI.getDetectionRange(unit);
+      const nextEnemy = UnitAI.findBestTarget(unit, allUnits, player.id, detRange);
+      if (nextEnemy && map) {
+        const nextDist = Pathfinder.heuristic(unit.position, nextEnemy.position);
+        if (nextDist <= unit.stats.range) {
+          unit.command = { type: CommandType.ATTACK, targetPosition: nextEnemy.position, targetUnitId: nextEnemy.id };
+          // Continue attacking immediately — don't drop to IDLE
+          return;
+        }
+        // Out of range but detected — chase
+        UnitAI.commandAttack(unit, nextEnemy.position, nextEnemy.id, map);
+        return;
+      }
       unit.state = UnitState.IDLE;
       unit.command = null;
       return;
@@ -1732,10 +1746,13 @@ export class UnitAI {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
         const result = CombatSystem.resolve(unit, target, allUnits);
-        CombatSystem.apply(unit, target, result);
+        const applyInfo = CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
         events.push({ type: 'combat', attacker: unit, defender: target, result });
+        // XP and level-up events
+        if (applyInfo.xpGained > 0) events.push({ type: 'combat:xp', unitId: unit.id, xp: applyInfo.xpGained } as any);
+        if (applyInfo.leveledUp) events.push({ type: 'combat:levelup', unitId: unit.id, newLevel: applyInfo.newLevel } as any);
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
         for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
@@ -1781,11 +1798,14 @@ export class UnitAI {
       // In range — attack if cooldown is ready
       if (unit.attackCooldown <= 0) {
         const result = CombatSystem.resolve(unit, target, allUnits);
-        CombatSystem.apply(unit, target, result);
+        const applyInfo2 = CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
 
         events.push({ type: 'combat', attacker: unit, defender: target, result });
+        // XP and level-up events
+        if (applyInfo2.xpGained > 0) events.push({ type: 'combat:xp', unitId: unit.id, xp: applyInfo2.xpGained } as any);
+        if (applyInfo2.leveledUp) events.push({ type: 'combat:levelup', unitId: unit.id, newLevel: applyInfo2.newLevel } as any);
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
         for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
@@ -1846,18 +1866,29 @@ export class UnitAI {
         }
       } else {
         // Melee unit: re-path toward target (respects walls)
-        const meleePath = Pathfinder.findPath(unit.position, target.position, map!, false, unit.owner);
-        if (meleePath.length > 1) {
-          unit.targetPosition = meleePath[1];
+        // Try pathing to an adjacent hex first (target's hex may be occupied)
+        const HEX_DIRS: HexCoord[] = [{q:1,r:0},{q:-1,r:0},{q:0,r:1},{q:0,r:-1},{q:1,r:-1},{q:-1,r:1}];
+        let bestPath: HexCoord[] = [];
+        let bestLen = Infinity;
+        for (const d of HEX_DIRS) {
+          const adj = { q: target.position.q + d.q, r: target.position.r + d.r };
+          const p = Pathfinder.findPath(unit.position, adj, map!, false, unit.owner);
+          if (p.length > 1 && p.length < bestLen) { bestPath = p; bestLen = p.length; }
+        }
+        // Fallback: try direct path to target hex
+        if (bestPath.length === 0) {
+          bestPath = Pathfinder.findPath(unit.position, target.position, map!, false, unit.owner);
+        }
+        if (bestPath.length > 1) {
+          unit.targetPosition = bestPath[1];
           unit.state = UnitState.MOVING;
-          unit._path = meleePath;
+          unit._path = bestPath;
           unit._pathIndex = 1;
           // Preserve the attack command so we resume attacking once in range
           unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
         } else {
-          // No path to target — stay put and keep trying next tick
+          // No path to target — keep command so we retry next tick
           unit.state = UnitState.IDLE;
-          unit.command = null;
         }
       }
     }

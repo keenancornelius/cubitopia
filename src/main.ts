@@ -187,6 +187,14 @@ class Cubitopia {
       setClayStockpile: (v) => { this.clayStockpile[0] = v; },
       getRopeStockpile: () => this.ropeStockpile[0],
       setRopeStockpile: (v) => { this.ropeStockpile[0] = v; },
+      getIronStockpile: () => this.ironStockpile[0],
+      setIronStockpile: (v) => { this.ironStockpile[0] = v; },
+      getCharcoalStockpile: () => this.charcoalStockpile[0],
+      setCharcoalStockpile: (v) => { this.charcoalStockpile[0] = v; },
+      getSteelStockpile: () => this.steelStockpile[0],
+      setSteelStockpile: (v) => { this.steelStockpile[0] = v; },
+      getCrystalStockpile: () => this.crystalStockpile[0],
+      setCrystalStockpile: (v) => { this.crystalStockpile[0] = v; },
       updateResourceDisplay: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
       updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
@@ -226,6 +234,74 @@ class Cubitopia {
     this.hud.onWorkshop(() => this.toggleBuildingPlaceMode('workshop'));
     this.hud.onSpawnTrebuchet(() => this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet'));
     this.hud.onCraftRope(() => this.resourceManager.craftRope());
+    this.hud.onSmelter(() => this.toggleBuildingPlaceMode('smelter'));
+    this.hud.onArmory(() => this.toggleBuildingPlaceMode('armory'));
+    this.hud.onWizardTower(() => this.toggleBuildingPlaceMode('wizard_tower'));
+    this.hud.onCraftCharcoal(() => this.resourceManager.craftCharcoal());
+    this.hud.onSmeltSteel(() => this.resourceManager.smeltSteel());
+    this.hud.onSpawnGreatsword(() => {
+      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+      if (armory) {
+        this.armorySpawnQueue.push({ type: UnitType.GREATSWORD, cost: { gold: 8, steel: 2 } });
+        this.hud.showNotification('Greatsword queued (8g + 2s)', '#e67e22');
+      } else {
+        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnAssassin(() => {
+      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+      if (armory) {
+        this.armorySpawnQueue.push({ type: UnitType.ASSASSIN, cost: { gold: 7, steel: 1 } });
+        this.hud.showNotification('Assassin queued (7g + 1s)', '#e67e22');
+      } else {
+        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnBerserker(() => {
+      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+      if (armory) {
+        this.armorySpawnQueue.push({ type: UnitType.BERSERKER, cost: { gold: 7, steel: 2 } });
+        this.hud.showNotification('Berserker queued (7g + 2s)', '#e67e22');
+      } else {
+        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnShieldbearer(() => {
+      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+      if (armory) {
+        this.armorySpawnQueue.push({ type: UnitType.SHIELDBEARER, cost: { gold: 8, steel: 3 } });
+        this.hud.showNotification('Shieldbearer queued (8g + 3s)', '#e67e22');
+      } else {
+        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnMage(() => {
+      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+      if (wt) {
+        this.wizardTowerSpawnQueue.push({ type: UnitType.MAGE, cost: { gold: 8, crystal: 2 } });
+        this.hud.showNotification('Mage queued (8g + 2c)', '#7c3aed');
+      } else {
+        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnBattlemage(() => {
+      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+      if (wt) {
+        this.wizardTowerSpawnQueue.push({ type: UnitType.BATTLEMAGE, cost: { gold: 12, crystal: 3 } });
+        this.hud.showNotification('Battlemage queued (12g + 3c)', '#7c3aed');
+      } else {
+        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
+      }
+    });
+    this.hud.onSpawnHealer(() => {
+      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+      if (wt) {
+        this.wizardTowerSpawnQueue.push({ type: UnitType.HEALER, cost: { gold: 6, crystal: 1 } });
+        this.hud.showNotification('Healer queued (6g + 1c)', '#7c3aed');
+      } else {
+        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
+      }
+    });
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
@@ -312,6 +388,15 @@ class Cubitopia {
         } else if (this.workshopPlaceMode) {
           this.workshopRotation = this.workshopRotation === 0 ? Math.PI / 2 : 0;
           if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.workshopRotation;
+        } else if (this.smelterPlaceMode) {
+          this.smelterRotation = this.smelterRotation === 0 ? Math.PI / 2 : 0;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.smelterRotation;
+        } else if (this.armoryPlaceMode) {
+          this.armoryRotation = this.armoryRotation === 0 ? Math.PI / 2 : 0;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.armoryRotation;
+        } else if (this.wizardTowerPlaceMode) {
+          this.wizardTowerRotation = this.wizardTowerRotation === 0 ? Math.PI / 2 : 0;
+          if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = this.wizardTowerRotation;
         }
       }
       if (e.key === 'g' || e.key === 'G') this.resourceManager.doSellWood();
@@ -322,14 +407,83 @@ class Cubitopia {
       if (e.key === 't' || e.key === 'T') this.togglePlantTreeMode();
       if (e.key === 'n' || e.key === 'N') this.toggleMineMode();
       if (e.key === 'c' || e.key === 'C') this.togglePlantCropsMode();
-      if (e.key === '1') this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior');
-      if (e.key === '2') this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer');
-      if (e.key === '3') this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider');
-      if (e.key === '4') this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack');
-      if (e.key === '5') this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder');
-      if (e.key === '6') this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager');
-      if (e.key === '7') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
+      // Barracks queuing (keys 1-5)
+      if (e.key === '1' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.WARRIOR, 5, 'Warrior');
+      if (e.key === '2' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.ARCHER, 8, 'Archer');
+      if (e.key === '3' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.RIDER, 10, 'Rider');
+      if (e.key === '4' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.SCOUT, 6, 'Scout');
+      if (e.key === '5' && !e.shiftKey) this.doSpawnQueueGeneric('barracks', UnitType.PALADIN, 12, 'Paladin');
+
+      // Shift-key spawning for other buildings
+      if (e.shiftKey && e.key === '3') this.doSpawnQueueWorkshop(UnitType.CATAPULT, 'Catapult');
+      if (e.shiftKey && e.key === '4') this.doSpawnQueueWorkshop(UnitType.TREBUCHET, 'Trebuchet');
+      if (e.shiftKey && e.key === '5') this.doSpawnQueueGeneric('forestry', UnitType.LUMBERJACK, 3, 'Lumberjack');
+      if (e.shiftKey && e.key === '6') this.doSpawnQueueGeneric('masonry', UnitType.BUILDER, 3, 'Builder');
+      if (e.shiftKey && e.key === '7') this.doSpawnQueueGeneric('farmhouse', UnitType.VILLAGER, 3, 'Villager');
       if (e.key === 'l' || e.key === 'L') this.resourceManager.craftRope();
+
+      // Building placement hotkeys
+      if (e.key === 'e' || e.key === 'E') this.toggleBuildingPlaceMode('smelter');
+      if (e.key === 'a' || e.key === 'A') this.toggleBuildingPlaceMode('armory');
+      if (e.key === 'y' || e.key === 'Y') this.toggleBuildingPlaceMode('wizard_tower');
+
+      // Crafting hotkeys
+      if (e.key === 'x' || e.key === 'X') this.resourceManager.craftCharcoal();
+      if (e.key === 'z' || e.key === 'Z') this.resourceManager.smeltSteel();
+
+      // Unit spawning: Armory (keys 6-9)
+      if (e.key === '6' && !e.shiftKey) {
+        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+        if (armory) {
+          this.armorySpawnQueue.push({ type: UnitType.GREATSWORD, cost: { gold: 8, steel: 2 } });
+          this.hud.showNotification('Greatsword queued (8g + 2s)', '#e67e22');
+        }
+      }
+      if (e.key === '7' && !e.shiftKey) {
+        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+        if (armory) {
+          this.armorySpawnQueue.push({ type: UnitType.ASSASSIN, cost: { gold: 7, steel: 1 } });
+          this.hud.showNotification('Assassin queued (7g + 1s)', '#e67e22');
+        }
+      }
+      if (e.key === '8') {
+        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+        if (armory) {
+          this.armorySpawnQueue.push({ type: UnitType.BERSERKER, cost: { gold: 7, steel: 2 } });
+          this.hud.showNotification('Berserker queued (7g + 2s)', '#e67e22');
+        }
+      }
+      if (e.key === '9') {
+        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+        if (armory) {
+          this.armorySpawnQueue.push({ type: UnitType.SHIELDBEARER, cost: { gold: 8, steel: 3 } });
+          this.hud.showNotification('Shieldbearer queued (8g + 3s)', '#e67e22');
+        }
+      }
+
+      // Unit spawning: Wizard Tower (key 0, Shift+1, Shift+2)
+      if (e.key === '0') {
+        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+        if (wizardTower) {
+          this.wizardTowerSpawnQueue.push({ type: UnitType.MAGE, cost: { gold: 8, crystal: 2 } });
+          this.hud.showNotification('Mage queued (8g + 2c)', '#7c3aed');
+        }
+      }
+      if (e.shiftKey && e.key === '1') {
+        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+        if (wizardTower) {
+          this.wizardTowerSpawnQueue.push({ type: UnitType.BATTLEMAGE, cost: { gold: 12, crystal: 3 } });
+          this.hud.showNotification('Battlemage queued (12g + 3c)', '#7c3aed');
+        }
+      }
+      if (e.shiftKey && e.key === '2') {
+        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+        if (wizardTower) {
+          this.wizardTowerSpawnQueue.push({ type: UnitType.HEALER, cost: { gold: 6, crystal: 1 } });
+          this.hud.showNotification('Healer queued (6g + 1c)', '#7c3aed');
+        }
+      }
+
       if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
     });
@@ -338,7 +492,8 @@ class Cubitopia {
     canvasEl.addEventListener('mousemove', (e) => {
       const inPlacementMode = this.wallBuildMode || this.barracksPlaceMode ||
                              this.forestryPlaceMode || this.masonryPlaceMode ||
-                             this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode;
+                             this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
+                             this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode;
       if (!inPlacementMode || !this.currentMap) {
         this.blueprintSystem.clearHoverGhost();
         return;
@@ -435,6 +590,9 @@ class Cubitopia {
       else if (this.farmhousePlaceMode) rotation = this.farmhouseRotation;
       else if (this.siloPlaceMode) rotation = this.siloRotation;
       else if (this.workshopPlaceMode) rotation = this.workshopRotation;
+      else if (this.smelterPlaceMode) rotation = this.smelterRotation;
+      else if (this.armoryPlaceMode) rotation = this.armoryRotation;
+      else if (this.wizardTowerPlaceMode) rotation = this.wizardTowerRotation;
 
       this.blueprintSystem.hoverGhost.rotation.y = rotation;
     });
@@ -503,6 +661,7 @@ class Cubitopia {
       const inMode = this.wallBuildMode || this.barracksPlaceMode ||
                      this.forestryPlaceMode || this.masonryPlaceMode ||
                      this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
+                     this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
                      this.rallyPointSetMode || this.plantCropsMode;
       if (!inMode || !this.currentMap) return;
 
@@ -531,6 +690,12 @@ class Cubitopia {
           this.placeGenericBuilding('silo', hexCoord);
         } else if (this.workshopPlaceMode) {
           this.placeGenericBuilding('workshop', hexCoord);
+        } else if (this.smelterPlaceMode) {
+          this.placeGenericBuilding('smelter', hexCoord);
+        } else if (this.armoryPlaceMode) {
+          this.placeGenericBuilding('armory', hexCoord);
+        } else if (this.wizardTowerPlaceMode) {
+          this.placeGenericBuilding('wizard_tower', hexCoord);
         } else if (this.rallyPointSetMode && this.rallyPointBuilding) {
           this.setRallyPoint(this.rallyPointBuilding, hexCoord);
           this.hud.showNotification(`🚩 Rally point set for ${this.rallyPointBuilding}`, '#2ecc71');
@@ -550,6 +715,7 @@ class Cubitopia {
       const inAnyMode = this.wallBuildMode || this.barracksPlaceMode ||
                         this.forestryPlaceMode || this.masonryPlaceMode ||
                         this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
+                        this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
                         this.harvestMode || this.farmPatchMode ||
                         this.plantTreeMode || this.mineMode ||
                         this.plantCropsMode || this.rallyPointSetMode;
@@ -917,8 +1083,14 @@ class Cubitopia {
     switch (tile.terrain) {
       case TerrainType.MOUNTAIN:
       case TerrainType.SNOW:
-        resourceYield = 3; // Hard rock — good stone
-        resourceType = ResourceType.STONE;
+        // Iron-rich mountains yield iron ore instead of stone
+        if (tile.resource === ResourceType.IRON) {
+          resourceYield = 2; // Iron ore vein
+          resourceType = ResourceType.IRON;
+        } else {
+          resourceYield = 3; // Hard rock — good stone
+          resourceType = ResourceType.STONE;
+        }
         break;
       case TerrainType.DESERT:
         resourceYield = 2; // Sand — yields clay
@@ -1293,11 +1465,21 @@ class Cubitopia {
       set clayStockpile(v) { self.clayStockpile = v; },
       get ropeStockpile() { return self.ropeStockpile; },
       set ropeStockpile(v) { self.ropeStockpile = v; },
+      get ironStockpile() { return self.ironStockpile; },
+      set ironStockpile(v) { self.ironStockpile = v; },
+      get charcoalStockpile() { return self.charcoalStockpile; },
+      set charcoalStockpile(v) { self.charcoalStockpile = v; },
+      get steelStockpile() { return self.steelStockpile; },
+      set steelStockpile(v) { self.steelStockpile = v; },
       hexToWorld: (pos: HexCoord) => this.hexToWorld(pos),
       getElevation: (pos: HexCoord) => this.getElevation(pos),
       isTileOccupied: (key: string) => this.isTileOccupied(key),
       findSpawnTile: (map: GameMap, q: number, r: number, allowOccupied?: boolean) => this.findSpawnTile(map, q, r, allowOccupied),
       isWaterTerrain: (terrain: TerrainType) => this.isWaterTerrain(terrain),
+      hasBuilding: (kind: BuildingKind, owner: number) => {
+        const building = self.buildingSystem.getFirstBuilding(kind, owner);
+        return building !== null;
+      },
     };
   }
 
@@ -1352,6 +1534,9 @@ class Cubitopia {
       buildFarmhouseMesh: (pos, owner) => this.buildingSystem.buildFarmhouseMesh(pos, owner),
       buildWorkshopMesh: (pos, owner) => this.buildingSystem.buildWorkshopMesh(pos, owner),
       buildSiloMesh: (pos, owner) => this.buildingSystem.buildSiloMesh(pos, owner),
+      buildSmelterMesh: (pos, owner) => this.buildingSystem.buildSmelterMesh(pos, owner),
+      buildArmoryMesh: (pos, owner) => this.buildingSystem.buildArmoryMesh(pos, owner),
+      buildWizardTowerMesh: (pos, owner) => this.buildingSystem.buildWizardTowerMesh(pos, owner),
       registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.buildingSystem.registerBuilding(kind, owner, pos, mesh, maxHealth),
     };
     this.aiController = new AIController(ctx, buildOps);
@@ -1616,9 +1801,19 @@ class Cubitopia {
     this.grassFiberStockpile = [0, 0];
     this.clayStockpile = [0, 0];
     this.ropeStockpile = [0, 0];
+    this.ironStockpile = [0, 0];
+    this.charcoalStockpile = [0, 0];
+    this.steelStockpile = [0, 0];
     this.workshopSpawnQueue = [];
     this.workshopSpawnTimer = 0;
     this.workshopPlaceMode = false;
+    this.armorySpawnQueue = [];
+    this.armorySpawnTimer = 0;
+    this.armoryPlaceMode = false;
+    this.wizardTowerSpawnQueue = [];
+    this.wizardTowerSpawnTimer = 0;
+    this.wizardTowerPlaceMode = false;
+    this.smelterPlaceMode = false;
     // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
     UnitAI.playerGrassBlueprint.clear();
@@ -1847,7 +2042,7 @@ class Cubitopia {
 
       // Arena: no trees, grass, or decorations — bare colosseum floor
       if (this.mapType !== MapType.ARENA) {
-        this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev);
+        this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev, tile.resource);
       }
     });
 
@@ -1897,14 +2092,16 @@ class Cubitopia {
 
     // Initialize grass tracking for map-generated grass
     this.natureSystem.initializeGrassTracking();
+    // Record original forest tiles — trees only regrow where they started
+    this.natureSystem.initializeForestTracking();
 
     // --- Spawn Units ---
     const isArena = this.mapType === MapType.ARENA;
 
     // Create players — arena gets abundant resources for testing
     const makeResources = (): PlayerResources => isArena
-      ? { food: 999, wood: 999, stone: 999, iron: 999, gold: 999, crystal: 0, grass_fiber: 0, clay: 0, rope: 0 }
-      : { food: 50, wood: 50, stone: 20, iron: 10, gold: 25, crystal: 0, grass_fiber: 0, clay: 0, rope: 0 };
+      ? { food: 999, wood: 999, stone: 999, iron: 999, gold: 999, crystal: 999, grass_fiber: 0, clay: 0, rope: 0, charcoal: 999, steel: 999 }
+      : { food: 50, wood: 50, stone: 20, iron: 0, gold: 25, crystal: 0, grass_fiber: 0, clay: 0, rope: 0, charcoal: 0, steel: 0 };
 
     const p1IsAI = this.gameMode === 'aivai';
     this.players = [
@@ -2101,12 +2298,22 @@ class Cubitopia {
       this.players[0].resources.grass_fiber = 999;
       this.players[0].resources.clay = 999;
       this.players[0].resources.rope = 999;
+      this.ironStockpile[0] = 999;
+      this.charcoalStockpile[0] = 999;
+      this.steelStockpile[0] = 999;
+      this.crystalStockpile[0] = 999;
+      this.players[0].resources.iron = 999;
+      this.players[0].resources.charcoal = 999;
+      this.players[0].resources.steel = 999;
+      this.players[0].resources.crystal = 999;
     }
 
     // --- Generic spawn queue processing ---
     // Each entry: [kind, queue, timer field, spawn time, canAfford fn, deductCost fn]
     type SimpleQueueItem = { type: UnitType; cost: number };
     type WorkshopQueueItem = { type: UnitType; cost: { wood: number; stone: number; rope: number } };
+    type ArmoryQueueItem = { type: UnitType; cost: { gold: number; steel: number } };
+    type WizardTowerQueueItem = { type: UnitType; cost: { gold: number; crystal: number } };
 
     const spawnConfigs: {
       kind: string; color: string; spawnTime: number;
@@ -2154,6 +2361,30 @@ class Cubitopia {
           this.ropeStockpile[0] -= item.cost.rope; this.players[0].resources.rope -= item.cost.rope;
           this.stoneStockpile[0] -= item.cost.stone; this.players[0].resources.stone -= item.cost.stone;
           this.woodStockpile[0] -= item.cost.wood; this.players[0].resources.wood -= item.cost.wood;
+        },
+      },
+      {
+        kind: 'armory', color: '#e67e22', spawnTime: 6,
+        queue: this.armorySpawnQueue,
+        getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
+        canAfford: (item: ArmoryQueueItem) =>
+          this.players[0].resources.gold >= item.cost.gold &&
+          this.steelStockpile[0] >= item.cost.steel,
+        deductCost: (item: ArmoryQueueItem) => {
+          this.players[0].resources.gold -= item.cost.gold;
+          this.steelStockpile[0] -= item.cost.steel; this.players[0].resources.steel -= item.cost.steel;
+        },
+      },
+      {
+        kind: 'wizard_tower', color: '#7c3aed', spawnTime: 7,
+        queue: this.wizardTowerSpawnQueue,
+        getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
+        canAfford: (item: WizardTowerQueueItem) =>
+          this.players[0].resources.gold >= item.cost.gold &&
+          this.players[0].resources.crystal >= item.cost.crystal,
+        deductCost: (item: WizardTowerQueueItem) => {
+          this.players[0].resources.gold -= item.cost.gold;
+          this.players[0].resources.crystal -= item.cost.crystal;
         },
       },
     ];
@@ -2277,6 +2508,17 @@ class Cubitopia {
 
       if (event.type === 'unit:killed' && event.unit) {
         // CombatLog.logKill already called in UnitAI.handleAttacking at the source
+        // Gold reward for kills
+        if (event.killer && event.unit) {
+          const killerOwner = event.killer.owner;
+          const goldReward = event.unit.type === UnitType.TREBUCHET || event.unit.type === UnitType.CATAPULT ? 5 : 3;
+          this.players[killerOwner].resources.gold += goldReward;
+          if (killerOwner === 0) {
+            this.hud.showNotification(`💰 +${goldReward} gold`, '#FFD700');
+            this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+          }
+        }
+
         // If killed by a ranged unit, defer the visual death until projectile lands
         const killerIsRanged = event.killer && event.killer.stats.range > 1;
         if (killerIsRanged) {
@@ -2385,6 +2627,23 @@ class Cubitopia {
           this.sound.play('hit_cleave');
         }
       }
+      // XP gained — floating text
+      if ((event as any).type === 'combat:xp') {
+        const xpEvt = event as any;
+        const unit = this.allUnits.find(u => u.id === xpEvt.unitId);
+        if (unit) {
+          this.unitRenderer.showXPText(unit.worldPosition, xpEvt.xp);
+        }
+      }
+      // Level-up — golden burst + text + glow
+      if ((event as any).type === 'combat:levelup') {
+        const lvlEvt = event as any;
+        const unit = this.allUnits.find(u => u.id === lvlEvt.unitId);
+        if (unit) {
+          this.unitRenderer.showLevelUpEffect(unit.id, unit.worldPosition, lvlEvt.newLevel);
+          this.unitRenderer.updateHealthBar(unit); // refresh HP bar after partial heal
+        }
+      }
       // Heal events
       if ((event as any).type === 'heal') {
         this.sound.play('heal', 0.4);
@@ -2411,11 +2670,13 @@ class Cubitopia {
         this.handleMineTerrain(event.unit!, event.result.position);
       }
       if (event.type === 'builder:deposit_stone' && event.unit && !this.hud.debugFlags.disableDeposit) {
-        // Route by carryType — builders can now carry stone, clay, or grass fiber
+        // Route by carryType — builders can carry stone, clay, grass fiber, or iron
         if (event.unit!.carryType === ResourceType.CLAY) {
           this.resourceManager.handleClayDeposit(event.unit!);
         } else if (event.unit!.carryType === ResourceType.GRASS_FIBER) {
           this.resourceManager.handleGrassFiberDeposit(event.unit!);
+        } else if (event.unit!.carryType === ResourceType.IRON) {
+          this.resourceManager.handleIronDeposit(event.unit!);
         } else {
           this.resourceManager.handleStoneDeposit(event.unit!);
         }
@@ -2679,6 +2940,7 @@ class Cubitopia {
     // Refund half the build cost in wood
     const refunds: Record<BuildingKind, number> = {
       barracks: 5, forestry: 4, masonry: 5, farmhouse: 4, workshop: 8, silo: 3,
+      smelter: 4, armory: 5, wizard_tower: 5,
     };
     const refund = refunds[pb.kind] ?? 3;
     this.woodStockpile[0] += refund;
@@ -2722,10 +2984,30 @@ class Cubitopia {
   private workshopSpawnQueue: { type: UnitType; cost: { wood: number; stone: number; rope: number } }[] = [];
   private workshopSpawnTimer = 0;
 
+  // --- Smelter ---
+  private smelterPlaceMode = false;
+  private smelterRotation = 0;
+
+  // --- Armory & Advanced Melee Spawning ---
+  private armoryPlaceMode = false;
+  private armoryRotation = 0;
+  private armorySpawnQueue: { type: UnitType; cost: { gold: number; steel: number } }[] = [];
+  private armorySpawnTimer = 0;
+
+  // --- Wizard Tower & Magic Unit Spawning ---
+  private wizardTowerPlaceMode = false;
+  private wizardTowerRotation = 0;
+  private wizardTowerSpawnQueue: { type: UnitType; cost: { gold: number; crystal: number } }[] = [];
+  private wizardTowerSpawnTimer = 0;
+
   // --- Grass Fiber, Clay, Rope Stockpiles ---
   private grassFiberStockpile: number[] = [0, 0];
   private clayStockpile: number[] = [0, 0];
   private ropeStockpile: number[] = [0, 0];
+  private ironStockpile: number[] = [0, 0];
+  private charcoalStockpile: number[] = [0, 0];
+  private steelStockpile: number[] = [0, 0];
+  private crystalStockpile: number[] = [0, 0];
 
   // --- Rally Point System ---
   private rallyPoints: Map<string, HexCoord> = new Map(); // buildingKey → rally target
@@ -2800,18 +3082,21 @@ class Cubitopia {
 
   // --- Data-driven building placement config ---
   private readonly BUILDING_PLACEMENT_CONFIG: Record<BuildingKind, {
-    woodCost: number; stoneCost: number;
+    woodCost: number; stoneCost: number; steelCost?: number; crystalCost?: number;
     allowedTerrain: TerrainType[];
     maxHealth?: number;
     notification?: string;
     unitAIHook?: (coord: HexCoord) => void;
   }> = {
-    barracks:  { woodCost: 10, stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: WallSystem.BARRACKS_MAX_HP, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
-    forestry:  { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
-    masonry:   { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
-    farmhouse: { woodCost: 6,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
-    workshop:  { woodCost: 12, stoneCost: 4, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
-    silo:      { woodCost: 5,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Silo built! Villagers will carry crops here. Place farm patches [J]', unitAIHook: (c) => UnitAI.siloPositions.set(0, c) },
+    barracks:      { woodCost: 10, stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: WallSystem.BARRACKS_MAX_HP, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
+    forestry:      { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    masonry:       { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    farmhouse:     { woodCost: 6,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
+    workshop:      { woodCost: 12, stoneCost: 4, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
+    silo:          { woodCost: 5,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Silo built! Villagers will carry crops here. Place farm patches [J]', unitAIHook: (c) => UnitAI.siloPositions.set(0, c) },
+    smelter:       { woodCost: 8,  stoneCost: 6, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Smelter built! Smelt steel with [Z] (2 iron + 1 charcoal)' },
+    armory:        { woodCost: 10, stoneCost: 5, steelCost: 3, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Armory built! Train advanced melee units [6-9]' },
+    wizard_tower:  { woodCost: 10, stoneCost: 5, crystalCost: 3, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Wizard Tower built! Train magic units [0, Shift+1-2]' },
   };
 
   /** Generic building placement — replaces 6 individual placeX methods */
@@ -2831,9 +3116,15 @@ class Cubitopia {
     // Resource check (skip if debug freePlace for most buildings; silo always charges)
     const skipCost = this.hud.debugFlags.freePlace && kind !== 'silo';
     if (!skipCost) {
-      if (this.woodStockpile[0] < cfg.woodCost || this.stoneStockpile[0] < cfg.stoneCost) {
-        const needs = cfg.stoneCost > 0 ? `${cfg.woodCost} wood + ${cfg.stoneCost} stone` : `${cfg.woodCost} wood`;
-        this.hud.showNotification(`Need ${needs} to build ${kind}! (have ${this.woodStockpile[0]} wood, ${this.stoneStockpile[0]} stone)`, '#e67e22');
+      const steelNeeded = cfg.steelCost ?? 0;
+      const crystalNeeded = cfg.crystalCost ?? 0;
+      if (this.woodStockpile[0] < cfg.woodCost || this.stoneStockpile[0] < cfg.stoneCost
+          || this.steelStockpile[0] < steelNeeded || this.players[0].resources.crystal < crystalNeeded) {
+        const parts = [`${cfg.woodCost} wood`];
+        if (cfg.stoneCost > 0) parts.push(`${cfg.stoneCost} stone`);
+        if (steelNeeded > 0) parts.push(`${steelNeeded} steel`);
+        if (crystalNeeded > 0) parts.push(`${crystalNeeded} crystal`);
+        this.hud.showNotification(`Need ${parts.join(' + ')} to build ${kind}!`, '#e67e22');
         return;
       }
       this.woodStockpile[0] -= cfg.woodCost;
@@ -2842,11 +3133,20 @@ class Cubitopia {
         this.stoneStockpile[0] -= cfg.stoneCost;
         this.players[0].resources.stone = Math.max(0, this.players[0].resources.stone - cfg.stoneCost);
       }
+      if (steelNeeded > 0) {
+        this.steelStockpile[0] -= steelNeeded;
+        this.players[0].resources.steel = Math.max(0, this.players[0].resources.steel - steelNeeded);
+      }
+      if (crystalNeeded > 0) {
+        this.players[0].resources.crystal = Math.max(0, this.players[0].resources.crystal - crystalNeeded);
+      }
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
     // Build mesh via BuildingSystem
-    const meshBuilder = this.buildingSystem[`build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh` as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
+    const meshMethodName = kind === 'wizard_tower' ? 'buildWizardTowerMesh'
+      : `build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh`;
+    const meshBuilder = this.buildingSystem[meshMethodName as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
     const mesh = meshBuilder.call(this.buildingSystem, coord, 0);
     this.buildingSystem.registerBuilding(kind, 0, coord, mesh, cfg.maxHealth);
 
@@ -2868,6 +3168,9 @@ class Cubitopia {
       case 'farmhouse': this.farmhousePlaceMode = false; this.hud.setFarmhouseMode(false); break;
       case 'workshop': this.workshopPlaceMode = false; this.hud.setWorkshopMode(false); break;
       case 'silo': this.siloPlaceMode = false; this.hud.setSiloMode(false); break;
+      case 'smelter': this.smelterPlaceMode = false; break;
+      case 'armory': this.armoryPlaceMode = false; break;
+      case 'wizard_tower': this.wizardTowerPlaceMode = false; break;
     }
   }
 

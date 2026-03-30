@@ -3,7 +3,8 @@ import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType } from
 import { Pathfinder } from './Pathfinder';
 import {
   buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
-  buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh
+  buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh,
+  buildSmelterMesh, buildArmoryMesh, buildWizardTowerMesh
 } from './BuildingMeshFactory';
 
 let nextBuildingId = 0;
@@ -19,7 +20,7 @@ class BuildingSystem {
 
   placedBuildings: PlacedBuilding[] = [];
   buildingSpawnIndex: Record<BuildingKind, number> = {
-    barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
+    barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0
   };
   wallConnectable: Set<string> = new Set();
 
@@ -125,6 +126,15 @@ class BuildingSystem {
   buildSiloMesh(pos: HexCoord, owner: number): THREE.Group {
     return buildSiloMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
   }
+  buildSmelterMesh(pos: HexCoord, owner: number): THREE.Group {
+    return buildSmelterMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
+  buildArmoryMesh(pos: HexCoord, owner: number): THREE.Group {
+    return buildArmoryMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
+  buildWizardTowerMesh(pos: HexCoord, owner: number): THREE.Group {
+    return buildWizardTowerMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
 
   // --- Static Helpers ---
 
@@ -197,7 +207,7 @@ class BuildingSystem {
     this.placedBuildings = [];
     this.wallConnectable.clear();
     this.buildingSpawnIndex = {
-      barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0
+      barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0
     };
     nextBuildingId = 0;
   }

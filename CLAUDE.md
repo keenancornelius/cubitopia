@@ -76,11 +76,11 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3163 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew past 3000-line target during combat visual overhaul — next extraction (CombatEventHandler or InputManager) should bring it back under.
-- `src/game/systems/AIController.ts` — **AI brain (~725 lines)**. Economy build phases 0-6, spawn queues, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
+- `src/main.ts` — **Central orchestrator (~3626 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, unit spawning, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew significantly during new buildings/resources/units overhaul (Smelter, Armory, Wizard Tower + iron/charcoal/steel/crystal). Next extraction should target CombatEventHandler, InputManager, or SpawnQueueSystem to bring it back under 3000.
+- `src/game/systems/AIController.ts` — **AI brain (~945 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, wave mustering, formation attacks, guard tactics. Uses `AIBuildingOps` slim interface for building operations.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~225 lines)**. Owns `placedBuildings[]`, `wallConnectable`, `barracksHealth`, spawn index. Delegates mesh creation to BuildingMeshFactory.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~410 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
-- `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~226 lines)**. Deposit handlers, crafting recipes, stockpile visuals.
+- `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~291 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber), crafting (rope, charcoal, steel smelting), stockpile visuals.
 - `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~196 lines)**. Standalone functions for all 6 building types.
 - `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
 - `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~144 lines)**. Building click tooltip, queue buttons, demolish. Uses `TooltipOps` slim interface.
@@ -94,7 +94,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generator (~175 lines)**. MAP_PRESETS data, generateArenaMap(), MapGenParams for generator overrides.
 - `src/engine/SoundManager.ts` — **Procedural audio (~593 lines)**. Web Audio API synthesized SFX (20 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, AoE splash, UI sounds.
-- `src/ui/HUD.ts` — **All UI (~1908 lines, down from ~2175)**. Resource panel, build buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/HUD.ts` — **All UI (~2133 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
 - `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
 - `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
@@ -113,13 +113,14 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - Old single-building references (`this.barracks`, `this.forestry`, etc.) are **getter properties in main.ts** that delegate to `buildingSystem.getFirstBuilding()` for backward compatibility
 - `buildingSystem.registerBuilding()` / `unregisterBuilding()` manage the array + scene + pathfinder blocked tiles
 - `buildingSystem.getNextSpawnBuilding(kind, owner)` does round-robin spawn distribution
-- Building kinds: barracks, forestry, masonry, farmhouse, workshop, silo
+- Building kinds: barracks, forestry, masonry, farmhouse, workshop, silo, smelter, armory, wizard_tower
 - No limit on how many of each type can be built (constrained only by resources)
+- Smelter required for steel smelting, Armory spawns advanced melee (steel cost), Wizard Tower spawns magic units (crystal cost)
 
 ### AI System
 - **Owned by `AIController`** — all AI logic extracted from main.ts
 - `AIBuildState` interface — tracks each AI player's buildings, spawn queues, wave state
-- `updateSmartAIEconomy()` — build phases 0-6, queue workers and combat units
+- `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units
 - `updateSmartAISpawnQueue()` — timer-based unit spawning from buildings
 - `updateSmartAICommander()` — wave mustering, formation attacks, rally behavior
 - `updateSmartAITactics()` — guard assignments at choke points, worker escorts, building defense
@@ -202,8 +203,13 @@ These are separate from weapon range — detection range is how far units "see" 
 - Workshop: `doSpawnQueueWorkshop()` — compound cost (rope + stone + wood), kept separate due to multi-resource validation
 - Spawn processing loop in `updateRTS()` is already data-driven via `spawnConfigs[]` array
 
-### Planned Resources (not yet implemented)
-- **Gold** — universal advanced resource (Phase 3). Earned from neutral city income + trade routes. Spent on city upgrades, mercenaries, tech research, army upkeep. When adding new resource types, extend the Player.resources interface and SPAWN_QUEUE_CONFIG to support multi-resource costs generically (workshop already does this as a one-off).
+### Resource & Crafting System (implemented)
+- **Gold** — earned from selling wood (G) and killing enemies (3g/kill, 5g for siege). Spent on combat units.
+- **Iron** — mined from iron ore veins on mountain tiles (orange rusty rocks). ~50% of mountain tiles have iron resource.
+- **Charcoal** — crafted (X) from 3 wood + 2 clay → 2 charcoal. Carbon needed for steel smelting.
+- **Steel** — smelted (Z) from 2 iron + 1 charcoal (requires Smelter building). Used for Armory unit costs.
+- **Crystal** — found on snow terrain tiles. Used for Wizard Tower unit costs.
+- Stockpile arrays: `woodStockpile`, `stoneStockpile`, `foodStockpile`, `ironStockpile`, `charcoalStockpile`, `steelStockpile`, `crystalStockpile`, `grassFiberStockpile`, `clayStockpile`, `ropeStockpile` — all `number[2]` indexed by owner.
 
 ### Technical Debt — Cleanup Queue
 Resolved items are struck through. Remaining items should be addressed during the next cleanup pass:
@@ -300,7 +306,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3163 after combat visual overhaul + greatsword — next extraction should bring it back under.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3626 after buildings/resources/units overhaul — CombatEventHandler + InputManager + SpawnQueueSystem extractions would recover ~500+ lines.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -349,7 +355,7 @@ No remaining files to wire. Future extractions will target new code regions.
 
 ### DebugController Integration Notes
 - All debug/playtester commands extracted from main.ts HUD callbacks
-- Uses `DebugOps` slim interface (~30 callbacks): state access, spawn helpers, renderer access, world helpers, resource getters/setters, HUD, terrain, nature, win condition
+- Uses `DebugOps` slim interface (~40 callbacks): state access, spawn helpers, renderer access, world helpers, resource getters/setters (including iron/charcoal/steel/crystal stockpiles), HUD, terrain, nature, win condition
 - main.ts creates adapter in `initDebugController()` — all HUD debug button callbacks redirect to `this.debugController.*`
 - Methods: spawnUnit, spawnEnemyUnit, giveResources, killAllEnemy, damageBase, healSelected, buffSelected, teleportSelected, instantWin, instantLose, clearTrees, clearStones
 
