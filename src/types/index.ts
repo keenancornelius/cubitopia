@@ -431,6 +431,7 @@ export interface GameContext {
   ironStockpile: number[];
   charcoalStockpile: number[];
   steelStockpile: number[];
+  crystalStockpile: number[];
 
   hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
   getElevation(pos: HexCoord): number;

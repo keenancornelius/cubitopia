@@ -18,6 +18,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`🪵 +${woodAmount} wood`, '#8b6914');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -31,6 +32,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`🪨 +${stoneAmount} stone`, '#888888');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -45,6 +47,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`🌾 +${foodAmount} food`, '#daa520');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -58,6 +61,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`🌿 +${amount} grass fiber`, '#8bc34a');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -71,6 +75,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`🧱 +${amount} clay`, '#c2703e');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -85,6 +90,7 @@ class ResourceManager {
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
+      this.ctx.hud.showNotification(`⛏ +${ironAmount} iron`, '#b87333');
     }
     unit.carryAmount = 0;
     unit.carryType = null;
@@ -196,11 +202,23 @@ class ResourceManager {
       });
     }
 
-    const woodCount = this.ctx.woodStockpile[owner];
-    const stoneCount = this.ctx.stoneStockpile[owner];
-    const foodCount = this.ctx.foodStockpile[owner];
+    // Gather all resource counts
+    const resources: { name: string; count: number; color: number }[] = [
+      { name: 'Wood',    count: this.ctx.woodStockpile[owner],       color: 0x8b6914 },
+      { name: 'Stone',   count: this.ctx.stoneStockpile[owner],      color: 0x888888 },
+      { name: 'Food',    count: this.ctx.foodStockpile[owner],       color: 0xdaa520 },
+      { name: 'Iron',    count: this.ctx.ironStockpile[owner],       color: 0xb87333 },
+      { name: 'Clay',    count: this.ctx.clayStockpile[owner],       color: 0xc2703e },
+      { name: 'Fiber',   count: this.ctx.grassFiberStockpile[owner], color: 0x8bc34a },
+      { name: 'Rope',    count: this.ctx.ropeStockpile[owner],       color: 0xc2b280 },
+      { name: 'Coal',    count: this.ctx.charcoalStockpile[owner],   color: 0x333333 },
+      { name: 'Steel',   count: this.ctx.steelStockpile[owner],      color: 0x71797e },
+      { name: 'Crystal', count: this.ctx.crystalStockpile[owner],    color: 0x9b59b6 },
+    ];
 
-    if (woodCount <= 0 && stoneCount <= 0 && foodCount <= 0) return;
+    // Only show resources that have > 0
+    const active = resources.filter(r => r.count > 0);
+    if (active.length === 0) return;
 
     const group = new THREE.Group();
     const baseWorldX = base.position.q * 1.5;
@@ -210,34 +228,39 @@ class ResourceManager {
     const offsetX = owner === 0 ? -2.5 : 2.5;
     group.position.set(baseWorldX + offsetX, baseY + 0.5, baseWorldZ);
 
-    const createPile = (count: number, color: number, _label: string, posZ: number) => {
-      if (count <= 0) return null;
+    // Compact grid: 2 columns, rows spaced along Z axis
+    const colSpacing = 1.6;
+    const rowSpacing = 1.2;
 
+    const createMiniPile = (count: number, color: number, name: string, gridX: number, gridZ: number) => {
       const pileGroup = new THREE.Group();
-      pileGroup.position.z = posZ;
+      pileGroup.position.set(gridX, 0, gridZ);
 
-      const blockCount = Math.min(count, 20);
+      // Small block pile — max 8 blocks in a 2x4 grid
+      const blockCount = Math.min(Math.ceil(count / 10), 8);
       for (let i = 0; i < blockCount; i++) {
-        const row = i % 4;
-        const layer = Math.floor(i / 4);
-        const blockGeo = new THREE.BoxGeometry(0.4, 0.2, 0.4);
+        const col = i % 2;
+        const layer = Math.floor(i / 2);
+        const blockGeo = new THREE.BoxGeometry(0.25, 0.15, 0.25);
         const blockMat = new THREE.MeshLambertMaterial({ color });
         const block = new THREE.Mesh(blockGeo, blockMat);
-        block.position.set(row * 0.45 - 0.7, 0.15 + layer * 0.22, 0);
+        block.position.set(col * 0.3 - 0.15, 0.1 + layer * 0.17, 0);
         block.castShadow = true;
         pileGroup.add(block);
       }
 
+      // Floating label: "Name: count"
       const canvas = document.createElement('canvas');
-      canvas.width = 64;
+      canvas.width = 128;
       canvas.height = 32;
       const ctx2d = canvas.getContext('2d')!;
-      ctx2d.fillStyle = '#fff';
-      ctx2d.font = 'bold 20px monospace';
+      ctx2d.clearRect(0, 0, 128, 32);
+      ctx2d.fillStyle = '#ffffff';
+      ctx2d.font = 'bold 16px monospace';
       ctx2d.textAlign = 'center';
-      ctx2d.fillText(`${count}`, 32, 24);
+      ctx2d.fillText(`${name}: ${count}`, 64, 22);
       const texture = new THREE.CanvasTexture(canvas);
-      const labelGeo = new THREE.PlaneGeometry(1, 0.5);
+      const labelGeo = new THREE.PlaneGeometry(1.2, 0.3);
       const labelMat = new THREE.MeshBasicMaterial({
         map: texture,
         transparent: true,
@@ -245,21 +268,21 @@ class ResourceManager {
         depthTest: false,
       });
       const labelMesh = new THREE.Mesh(labelGeo, labelMat);
-      labelMesh.position.y = 1.5;
+      labelMesh.position.y = 1.0;
       labelMesh.renderOrder = 999;
       pileGroup.add(labelMesh);
 
       return pileGroup;
     };
 
-    const foodPile = createPile(foodCount, 0xdaa520, 'Food', -1.5);
-    if (foodPile) group.add(foodPile);
-
-    const woodPile = createPile(woodCount, 0x8b6914, 'Wood', 0);
-    if (woodPile) group.add(woodPile);
-
-    const stonePile = createPile(stoneCount, 0x888888, 'Stone', 1.5);
-    if (stonePile) group.add(stonePile);
+    active.forEach((res, i) => {
+      const col = i % 2;
+      const row = Math.floor(i / 2);
+      const gx = (col - 0.5) * colSpacing;
+      const gz = (row - (active.length / 4)) * rowSpacing;
+      const pile = createMiniPile(res.count, res.color, res.name, gx, gz);
+      group.add(pile);
+    });
 
     this.ctx.scene.add(group);
     this.stockpileMeshes.set(stockKey, group);

@@ -19,7 +19,7 @@ type SoundName =
   | 'select' | 'command' | 'build'
   | 'rage' | 'assassin_strike'
   | 'ui_click' | 'ui_hover'
-  | 'battle_start';
+  | 'battle_start' | 'level_up';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -76,6 +76,7 @@ export default class SoundManager {
       case 'ui_click':     this.synthUIClick(vol); break;
       case 'ui_hover':     this.synthUIHover(vol); break;
       case 'battle_start': this.synthBattleStart(vol); break;
+      case 'level_up':     this.synthLevelUp(vol); break;
     }
   }
 
@@ -582,6 +583,84 @@ export default class SoundManager {
     });
     // Subtle noise breath texture through the horn
     this.filteredNoise('bandpass', 1200, 1.5, vol * 0.05, 0.01, 0.9);
+  }
+
+  /** Level-up: triumphant ascending fanfare — distinct from heal's gentle shimmer.
+   *  Quick brass-like stab → major triad arpeggio → bright sparkle tail */
+  private synthLevelUp(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+
+    // Layer 1: Triumphant brass stab — G4 power chord (triangle + sawtooth)
+    const stabFreqs = [392, 494, 587]; // G4, B4, D5 — major triad
+    stabFreqs.forEach((freq, i) => {
+      // Triangle fundamental (warm body)
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.linearRampToValueAtTime(vol * 0.22, t + 0.008);
+      g.gain.setValueAtTime(vol * 0.22, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + 0.25);
+
+      // Sawtooth overtone (adds brass edge, softer)
+      const saw = ctx.createOscillator();
+      saw.type = 'sawtooth';
+      saw.frequency.setValueAtTime(freq, t);
+      const lpf = ctx.createBiquadFilter();
+      lpf.type = 'lowpass';
+      lpf.frequency.setValueAtTime(2500, t);
+      lpf.Q.setValueAtTime(1, t);
+      const sg = ctx.createGain();
+      sg.gain.setValueAtTime(0.001, t);
+      sg.gain.linearRampToValueAtTime(vol * 0.08, t + 0.008);
+      sg.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      saw.connect(lpf).connect(sg).connect(ctx.destination);
+      saw.start(); saw.stop(t + 0.2);
+    });
+
+    // Layer 2: Ascending arpeggio — G5→B5→D6→G6 (staggered, bright sines)
+    const arpeggioNotes = [784, 988, 1175, 1568]; // G5, B5, D6, G6
+    arpeggioNotes.forEach((freq, i) => {
+      const delay = 0.12 + i * 0.055;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t + delay);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + delay);
+      g.gain.linearRampToValueAtTime(vol * (0.15 + i * 0.03), t + delay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.2);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + delay + 0.25);
+    });
+
+    // Layer 3: Sparkle tail — high sine with tremolo (crowning moment)
+    const sparkleStart = 0.32;
+    const sparkOsc = ctx.createOscillator();
+    sparkOsc.type = 'sine';
+    sparkOsc.frequency.setValueAtTime(3136, t + sparkleStart); // G7
+    sparkOsc.frequency.exponentialRampToValueAtTime(2093, t + sparkleStart + 0.3); // gentle descent to C7
+    const sparkG = ctx.createGain();
+    sparkG.gain.setValueAtTime(0.001, t);
+    sparkG.gain.setValueAtTime(0.001, t + sparkleStart);
+    sparkG.gain.linearRampToValueAtTime(vol * 0.08, t + sparkleStart + 0.01);
+    sparkG.gain.exponentialRampToValueAtTime(0.001, t + sparkleStart + 0.3);
+    // Tremolo LFO for sparkle
+    const lfo = ctx.createOscillator();
+    lfo.frequency.setValueAtTime(8, t);
+    const lfoG = ctx.createGain();
+    lfoG.gain.setValueAtTime(vol * 0.04, t);
+    lfo.connect(lfoG).connect(sparkG.gain);
+    sparkOsc.connect(sparkG).connect(ctx.destination);
+    sparkOsc.start(); lfo.start();
+    sparkOsc.stop(t + sparkleStart + 0.35); lfo.stop(t + sparkleStart + 0.35);
+
+    // Layer 4: Sub bass punch for weight (low G2)
+    this.envTone(98, 'sine', vol * 0.15, 0.005, 0.2);
   }
 
   cleanup(): void {

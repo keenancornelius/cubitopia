@@ -1117,6 +1117,61 @@ export class HUD {
     if (active) this.hideAllModeIndicators('workshop');
   }
 
+  private smelterModeIndicator: HTMLElement | null = null;
+  private armoryModeIndicator: HTMLElement | null = null;
+  private wizardTowerModeIndicator: HTMLElement | null = null;
+
+  setSmelterMode(active: boolean): void {
+    if (!this.smelterModeIndicator) {
+      this.smelterModeIndicator = document.createElement('div');
+      this.smelterModeIndicator.style.cssText = `
+        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
+        font-size: 16px; border: 2px solid #8b4513; color: #d4956a;
+        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
+        display: none; text-align: center;
+      `;
+      this.smelterModeIndicator.innerHTML = '🔥 SMELTER PLACEMENT — Click to place (costs 8 wood + 6 stone) · [R] Rotate · [E] to exit';
+      this.container.appendChild(this.smelterModeIndicator);
+    }
+    this.smelterModeIndicator.style.display = active ? 'block' : 'none';
+    if (active) this.hideAllModeIndicators('smelter');
+  }
+
+  setArmoryMode(active: boolean): void {
+    if (!this.armoryModeIndicator) {
+      this.armoryModeIndicator = document.createElement('div');
+      this.armoryModeIndicator.style.cssText = `
+        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
+        font-size: 16px; border: 2px solid #708090; color: #a0b0c0;
+        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
+        display: none; text-align: center;
+      `;
+      this.armoryModeIndicator.innerHTML = '⚔️ ARMORY PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 steel) · [R] Rotate · [A] to exit';
+      this.container.appendChild(this.armoryModeIndicator);
+    }
+    this.armoryModeIndicator.style.display = active ? 'block' : 'none';
+    if (active) this.hideAllModeIndicators('armory');
+  }
+
+  setWizard_towerMode(active: boolean): void {
+    if (!this.wizardTowerModeIndicator) {
+      this.wizardTowerModeIndicator = document.createElement('div');
+      this.wizardTowerModeIndicator.style.cssText = `
+        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
+        font-size: 16px; border: 2px solid #6a0dad; color: #b388ff;
+        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
+        display: none; text-align: center;
+      `;
+      this.wizardTowerModeIndicator.innerHTML = '🔮 WIZARD TOWER PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 crystal) · [R] Rotate · [Y] to exit';
+      this.container.appendChild(this.wizardTowerModeIndicator);
+    }
+    this.wizardTowerModeIndicator.style.display = active ? 'block' : 'none';
+    if (active) this.hideAllModeIndicators('wizard_tower');
+  }
+
   /** @deprecated Use updateAllSpawnQueues instead */
   updateWorkshopSpawnQueue(_queue: { type: string; cost: { wood: number; stone: number; rope: number } }[]): void {}
 
@@ -1245,6 +1300,9 @@ export class HUD {
     if (except !== 'plantCrops' && this.plantCropsModeIndicator) this.plantCropsModeIndicator.style.display = 'none';
     if (except !== 'rallyPoint' && this.rallyPointModeIndicator) this.rallyPointModeIndicator.style.display = 'none';
     if (except !== 'workshop' && this.workshopModeIndicator) this.workshopModeIndicator.style.display = 'none';
+    if (except !== 'smelter' && this.smelterModeIndicator) this.smelterModeIndicator.style.display = 'none';
+    if (except !== 'armory' && this.armoryModeIndicator) this.armoryModeIndicator.style.display = 'none';
+    if (except !== 'wizard_tower' && this.wizardTowerModeIndicator) this.wizardTowerModeIndicator.style.display = 'none';
   }
 
   /** @deprecated Use updateAllSpawnQueues instead */

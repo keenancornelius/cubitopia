@@ -239,69 +239,13 @@ class Cubitopia {
     this.hud.onWizardTower(() => this.toggleBuildingPlaceMode('wizard_tower'));
     this.hud.onCraftCharcoal(() => this.resourceManager.craftCharcoal());
     this.hud.onSmeltSteel(() => this.resourceManager.smeltSteel());
-    this.hud.onSpawnGreatsword(() => {
-      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-      if (armory) {
-        this.armorySpawnQueue.push({ type: UnitType.GREATSWORD, cost: { gold: 8, steel: 2 } });
-        this.hud.showNotification('Greatsword queued (8g + 2s)', '#e67e22');
-      } else {
-        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnAssassin(() => {
-      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-      if (armory) {
-        this.armorySpawnQueue.push({ type: UnitType.ASSASSIN, cost: { gold: 7, steel: 1 } });
-        this.hud.showNotification('Assassin queued (7g + 1s)', '#e67e22');
-      } else {
-        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnBerserker(() => {
-      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-      if (armory) {
-        this.armorySpawnQueue.push({ type: UnitType.BERSERKER, cost: { gold: 7, steel: 2 } });
-        this.hud.showNotification('Berserker queued (7g + 2s)', '#e67e22');
-      } else {
-        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnShieldbearer(() => {
-      const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-      if (armory) {
-        this.armorySpawnQueue.push({ type: UnitType.SHIELDBEARER, cost: { gold: 8, steel: 3 } });
-        this.hud.showNotification('Shieldbearer queued (8g + 3s)', '#e67e22');
-      } else {
-        this.hud.showNotification('⚠️ Build an Armory first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnMage(() => {
-      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-      if (wt) {
-        this.wizardTowerSpawnQueue.push({ type: UnitType.MAGE, cost: { gold: 8, crystal: 2 } });
-        this.hud.showNotification('Mage queued (8g + 2c)', '#7c3aed');
-      } else {
-        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnBattlemage(() => {
-      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-      if (wt) {
-        this.wizardTowerSpawnQueue.push({ type: UnitType.BATTLEMAGE, cost: { gold: 12, crystal: 3 } });
-        this.hud.showNotification('Battlemage queued (12g + 3c)', '#7c3aed');
-      } else {
-        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
-      }
-    });
-    this.hud.onSpawnHealer(() => {
-      const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-      if (wt) {
-        this.wizardTowerSpawnQueue.push({ type: UnitType.HEALER, cost: { gold: 6, crystal: 1 } });
-        this.hud.showNotification('Healer queued (6g + 1c)', '#7c3aed');
-      } else {
-        this.hud.showNotification('⚠️ Build a Wizard Tower first!', '#e74c3c');
-      }
-    });
+    this.hud.onSpawnGreatsword(() => this.doSpawnQueueArmory(UnitType.GREATSWORD, 'Greatsword', 8, 2));
+    this.hud.onSpawnAssassin(() => this.doSpawnQueueArmory(UnitType.ASSASSIN, 'Assassin', 7, 1));
+    this.hud.onSpawnBerserker(() => this.doSpawnQueueArmory(UnitType.BERSERKER, 'Berserker', 7, 2));
+    this.hud.onSpawnShieldbearer(() => this.doSpawnQueueArmory(UnitType.SHIELDBEARER, 'Shieldbearer', 8, 3));
+    this.hud.onSpawnMage(() => this.doSpawnQueueWizardTower(UnitType.MAGE, 'Mage', 8, 2));
+    this.hud.onSpawnBattlemage(() => this.doSpawnQueueWizardTower(UnitType.BATTLEMAGE, 'Battlemage', 12, 3));
+    this.hud.onSpawnHealer(() => this.doSpawnQueueWizardTower(UnitType.HEALER, 'Healer', 6, 1));
     this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
     this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
     this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
@@ -431,58 +375,16 @@ class Cubitopia {
       if (e.key === 'x' || e.key === 'X') this.resourceManager.craftCharcoal();
       if (e.key === 'z' || e.key === 'Z') this.resourceManager.smeltSteel();
 
-      // Unit spawning: Armory (keys 6-9)
-      if (e.key === '6' && !e.shiftKey) {
-        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-        if (armory) {
-          this.armorySpawnQueue.push({ type: UnitType.GREATSWORD, cost: { gold: 8, steel: 2 } });
-          this.hud.showNotification('Greatsword queued (8g + 2s)', '#e67e22');
-        }
-      }
-      if (e.key === '7' && !e.shiftKey) {
-        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-        if (armory) {
-          this.armorySpawnQueue.push({ type: UnitType.ASSASSIN, cost: { gold: 7, steel: 1 } });
-          this.hud.showNotification('Assassin queued (7g + 1s)', '#e67e22');
-        }
-      }
-      if (e.key === '8') {
-        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-        if (armory) {
-          this.armorySpawnQueue.push({ type: UnitType.BERSERKER, cost: { gold: 7, steel: 2 } });
-          this.hud.showNotification('Berserker queued (7g + 2s)', '#e67e22');
-        }
-      }
-      if (e.key === '9') {
-        const armory = this.buildingSystem.getFirstBuilding('armory', 0);
-        if (armory) {
-          this.armorySpawnQueue.push({ type: UnitType.SHIELDBEARER, cost: { gold: 8, steel: 3 } });
-          this.hud.showNotification('Shieldbearer queued (8g + 3s)', '#e67e22');
-        }
-      }
+      // Unit spawning: Armory (keys 6-9) — auto-opens build menu if no armory
+      if (e.key === '6' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.GREATSWORD, 'Greatsword', 8, 2);
+      if (e.key === '7' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.ASSASSIN, 'Assassin', 7, 1);
+      if (e.key === '8' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.BERSERKER, 'Berserker', 7, 2);
+      if (e.key === '9' && !e.shiftKey) this.doSpawnQueueArmory(UnitType.SHIELDBEARER, 'Shieldbearer', 8, 3);
 
-      // Unit spawning: Wizard Tower (key 0, Shift+1, Shift+2)
-      if (e.key === '0') {
-        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-        if (wizardTower) {
-          this.wizardTowerSpawnQueue.push({ type: UnitType.MAGE, cost: { gold: 8, crystal: 2 } });
-          this.hud.showNotification('Mage queued (8g + 2c)', '#7c3aed');
-        }
-      }
-      if (e.shiftKey && e.key === '1') {
-        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-        if (wizardTower) {
-          this.wizardTowerSpawnQueue.push({ type: UnitType.BATTLEMAGE, cost: { gold: 12, crystal: 3 } });
-          this.hud.showNotification('Battlemage queued (12g + 3c)', '#7c3aed');
-        }
-      }
-      if (e.shiftKey && e.key === '2') {
-        const wizardTower = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
-        if (wizardTower) {
-          this.wizardTowerSpawnQueue.push({ type: UnitType.HEALER, cost: { gold: 6, crystal: 1 } });
-          this.hud.showNotification('Healer queued (6g + 1c)', '#7c3aed');
-        }
-      }
+      // Unit spawning: Wizard Tower (key 0, Shift+1, Shift+2) — auto-opens build menu if no tower
+      if (e.key === '0' && !e.shiftKey) this.doSpawnQueueWizardTower(UnitType.MAGE, 'Mage', 8, 2);
+      if (e.shiftKey && e.key === '1') this.doSpawnQueueWizardTower(UnitType.BATTLEMAGE, 'Battlemage', 12, 3);
+      if (e.shiftKey && e.key === '2') this.doSpawnQueueWizardTower(UnitType.HEALER, 'Healer', 6, 1);
 
       if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
@@ -1471,6 +1373,8 @@ class Cubitopia {
       set charcoalStockpile(v) { self.charcoalStockpile = v; },
       get steelStockpile() { return self.steelStockpile; },
       set steelStockpile(v) { self.steelStockpile = v; },
+      get crystalStockpile() { return self.crystalStockpile; },
+      set crystalStockpile(v) { self.crystalStockpile = v; },
       hexToWorld: (pos: HexCoord) => this.hexToWorld(pos),
       getElevation: (pos: HexCoord) => this.getElevation(pos),
       isTileOccupied: (key: string) => this.isTileOccupied(key),
@@ -1669,14 +1573,23 @@ class Cubitopia {
   }
 
   /** Generic building placement mode toggle — replaces per-building toggleX methods */
+  // Map BuildingKind to member variable prefix (handles underscored names like wizard_tower → wizardTower)
+  private static readonly BUILDING_MODE_PREFIX: Record<string, string> = {
+    wizard_tower: 'wizardTower',
+  };
+
   private toggleBuildingPlaceMode(kind: BuildingKind): void {
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const modeKey = `${kind}PlaceMode` as keyof this;
+    const prefix = Cubitopia.BUILDING_MODE_PREFIX[kind] ?? kind;
+    const modeKey = `${prefix}PlaceMode` as keyof this;
     const wasActive = this[modeKey] as boolean;
     this.clearAllModes();
     (this as any)[modeKey] = !wasActive;
+    // HUD setter uses the raw kind name (e.g. setWizard_towerMode) for consistency
     const hudSetter = `set${kind.charAt(0).toUpperCase() + kind.slice(1)}Mode` as keyof HUD;
-    (this.hud[hudSetter] as (v: boolean) => void)(!wasActive);
+    if (typeof this.hud[hudSetter] === 'function') {
+      (this.hud[hudSetter] as (v: boolean) => void)(!wasActive);
+    }
     canvasEl.style.cursor = !wasActive ? 'crosshair' : 'default';
   }
 
@@ -2642,6 +2555,7 @@ class Cubitopia {
         if (unit) {
           this.unitRenderer.showLevelUpEffect(unit.id, unit.worldPosition, lvlEvt.newLevel);
           this.unitRenderer.updateHealthBar(unit); // refresh HP bar after partial heal
+          this.sound.play('level_up', 0.5);
         }
       }
       // Heal events
@@ -3208,6 +3122,52 @@ class Cubitopia {
     this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : cost.rope + ' rope + ' + cost.stone + ' stone + ' + cost.wood + ' wood'})`, '#2ecc71');
   }
 
+  /** Spawn queue for Armory units (gold + steel cost) */
+  private doSpawnQueueArmory(type: UnitType, name: string, goldCost: number, steelCost: number): void {
+    const armory = this.buildingSystem.getFirstBuilding('armory', 0);
+    if (!armory) {
+      this.hud.showNotification(`📍 Place an Armory first [A], then queue ${name} again`, '#e67e22');
+      this.toggleBuildingPlaceMode('armory');
+      return;
+    }
+    if (!this.hud.debugFlags.freeBuild) {
+      if (this.players[0].resources.gold < goldCost) {
+        this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
+        return;
+      }
+      if (this.steelStockpile[0] < steelCost) {
+        this.hud.showNotification(`⚠️ Need ${steelCost} steel for ${name}! (have ${this.steelStockpile[0]})`, '#e67e22');
+        return;
+      }
+    }
+    const cost = this.hud.debugFlags.freeBuild ? { gold: 0, steel: 0 } : { gold: goldCost, steel: steelCost };
+    this.armorySpawnQueue.push({ type, cost });
+    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + steelCost + ' steel'})`, '#2ecc71');
+  }
+
+  /** Spawn queue for Wizard Tower units (gold + crystal cost) */
+  private doSpawnQueueWizardTower(type: UnitType, name: string, goldCost: number, crystalCost: number): void {
+    const wt = this.buildingSystem.getFirstBuilding('wizard_tower', 0);
+    if (!wt) {
+      this.hud.showNotification(`📍 Place a Wizard Tower first [Y], then queue ${name} again`, '#e67e22');
+      this.toggleBuildingPlaceMode('wizard_tower');
+      return;
+    }
+    if (!this.hud.debugFlags.freeBuild) {
+      if (this.players[0].resources.gold < goldCost) {
+        this.hud.showNotification(`⚠️ Need ${goldCost} gold for ${name}! (have ${this.players[0].resources.gold})`, '#e67e22');
+        return;
+      }
+      if (this.players[0].resources.crystal < crystalCost) {
+        this.hud.showNotification(`⚠️ Need ${crystalCost} crystal for ${name}! (have ${this.players[0].resources.crystal})`, '#e67e22');
+        return;
+      }
+    }
+    const cost = this.hud.debugFlags.freeBuild ? { gold: 0, crystal: 0 } : { gold: goldCost, crystal: crystalCost };
+    this.wizardTowerSpawnQueue.push({ type, cost });
+    this.hud.showNotification(`✅ ${name} queued (${this.hud.debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + crystalCost + ' crystal'})`, '#7c3aed');
+  }
+
   // --- Toggle modes for farmhouse, silo, farm patches ---
 
   // toggleFarmhouseMode, toggleSiloMode → now handled by toggleBuildingPlaceMode
@@ -3287,6 +3247,12 @@ class Cubitopia {
     this.hud.setPlantCropsMode(false);
     this.workshopPlaceMode = false;
     this.hud.setWorkshopMode(false);
+    this.smelterPlaceMode = false;
+    this.hud.setSmelterMode(false);
+    this.armoryPlaceMode = false;
+    this.hud.setArmoryMode(false);
+    this.wizardTowerPlaceMode = false;
+    this.hud.setWizard_towerMode(false);
     this.rallyPointSetMode = false;
     this.rallyPointBuilding = null;
     this.hud.setRallyPointMode(false);
