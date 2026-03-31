@@ -87,7 +87,7 @@ export class UnitRenderer {
     const playerColor = PLAYER_COLORS[unit.owner % PLAYER_COLORS.length];
 
     // Build unit model based on type
-    this.buildUnitModel(group, unit.type, playerColor);
+    UnitRenderer.buildUnitModel(group, unit.type, playerColor);
 
     // Text label above head (higher for siege units)
     const isSiege = unit.type === UnitType.TREBUCHET || unit.type === UnitType.CATAPULT;
@@ -135,7 +135,7 @@ export class UnitRenderer {
     this.scene.add(group);
   }
 
-  private buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number): void {
+  static buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number): void {
     // Helper: create an arm group with a mesh inside, so weapons can be children of the arm
     const makeArmGroup = (name: string, color: number, posX: number, posY: number): THREE.Group => {
       const armGroup = new THREE.Group();

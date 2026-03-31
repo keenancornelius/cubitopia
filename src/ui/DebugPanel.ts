@@ -4,8 +4,11 @@
 // and Combat Monitor into a single overlay
 // ============================================
 
+import * as THREE from 'three';
 import { Unit, UnitType, UnitState } from '../types';
 import { CombatLog, DebugEventType, DebugEvent } from './ArenaDebugConsole';
+import { UNIT_CONFIG } from '../game/entities/UnitFactory';
+import { UnitRenderer } from '../engine/UnitRenderer';
 
 // ---- Army Composition Types ----
 export interface ArmyComposition {
@@ -80,7 +83,15 @@ const ARMY_PRESETS: { name: string; label: string; comp: () => { type: UnitType;
 export class DebugPanel {
   private panel: HTMLElement | null = null;
   private visible = false;
-  private activeTab: 'tools' | 'army' | 'combat' = 'tools';
+  private activeTab: 'tools' | 'army' | 'combat' | 'units' = 'tools';
+
+  // Units tab state
+  private selectedUnitType: UnitType = UnitType.WARRIOR;
+  private previewRenderer: THREE.WebGLRenderer | null = null;
+  private previewScene: THREE.Scene | null = null;
+  private previewCamera: THREE.PerspectiveCamera | null = null;
+  private previewGroup: THREE.Group | null = null;
+  private previewAnimFrame: number = 0;
 
   // Army composition state
   private armyComp: ArmyComposition = {
@@ -127,7 +138,7 @@ export class DebugPanel {
     }
   }
 
-  switchTab(tab: 'tools' | 'army' | 'combat'): void {
+  switchTab(tab: 'tools' | 'army' | 'combat' | 'units'): void {
     this.activeTab = tab;
     this.lastEventCount = 0; // Reset so combat tab rebuilds fully
     this.logContainer = null;
@@ -183,10 +194,11 @@ export class DebugPanel {
     tabBar.style.cssText = `
       display: flex; border-bottom: 2px solid rgba(255,50,50,0.3);
     `;
-    const tabs: { id: 'tools' | 'army' | 'combat'; label: string; icon: string; color: string }[] = [
+    const tabs: { id: 'tools' | 'army' | 'combat' | 'units'; label: string; icon: string; color: string }[] = [
       { id: 'tools', label: 'TOOLS', icon: '🐛', color: '#ff4444' },
       { id: 'army', label: 'ARMY', icon: '⚔', color: '#00d4ff' },
       { id: 'combat', label: 'COMBAT', icon: '📊', color: '#ff9800' },
+      { id: 'units', label: 'UNITS', icon: '🎮', color: '#76ff03' },
     ];
     for (const t of tabs) {
       const tab = document.createElement('div');
@@ -223,6 +235,7 @@ export class DebugPanel {
       case 'tools': this.buildToolsTab(content); break;
       case 'army': this.buildArmyTab(content); break;
       case 'combat': this.buildCombatTab(content); break;
+      case 'units': this.buildUnitsTab(content); break;
     }
   }
 
@@ -761,6 +774,241 @@ export class DebugPanel {
     }
   }
 
+  // ==== UNITS TAB — Live stat sliders + 3D model preview ====
+  private buildUnitsTab(container: HTMLElement): void {
+    this.cleanupPreview();
+
+    // ── Unit type selector (pill buttons) ──
+    const selectorRow = document.createElement('div');
+    selectorRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;margin-bottom:8px;';
+    for (const def of COMBAT_UNIT_DEFS) {
+      const pill = document.createElement('div');
+      const active = def.type === this.selectedUnitType;
+      pill.style.cssText = `
+        padding:3px 6px; border-radius:4px; cursor:pointer; font-size:10px;
+        background:${active ? def.color : 'rgba(255,255,255,0.06)'};
+        color:${active ? '#fff' : '#999'}; border:1px solid ${active ? def.color : '#333'};
+        transition:all 0.12s; white-space:nowrap;
+      `;
+      pill.textContent = `${def.emoji} ${def.label}`;
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.selectedUnitType = def.type;
+        this.rebuildContent();
+      });
+      selectorRow.appendChild(pill);
+    }
+    container.appendChild(selectorRow);
+
+    // ── 3D Model Preview ──
+    const previewContainer = document.createElement('div');
+    previewContainer.style.cssText = `
+      width:100%; height:160px; border-radius:6px; overflow:hidden;
+      background:radial-gradient(ellipse at center, #1a2332 0%, #0a0e18 100%);
+      border:1px solid rgba(255,255,255,0.08); margin-bottom:10px; position:relative;
+    `;
+    container.appendChild(previewContainer);
+
+    // Unit name overlay
+    const activeDef = COMBAT_UNIT_DEFS.find(d => d.type === this.selectedUnitType);
+    const nameOverlay = document.createElement('div');
+    nameOverlay.style.cssText = `
+      position:absolute; bottom:6px; left:0; right:0; text-align:center;
+      font-size:12px; font-weight:bold; color:${activeDef?.color ?? '#fff'};
+      text-shadow:0 1px 4px rgba(0,0,0,0.8); pointer-events:none;
+      letter-spacing:1px; text-transform:uppercase;
+    `;
+    nameOverlay.textContent = activeDef?.label ?? '';
+    previewContainer.appendChild(nameOverlay);
+
+    // Three.js mini renderer
+    this.initPreview(previewContainer);
+
+    // ── Stat Sliders ──
+    const cfg = UNIT_CONFIG[this.selectedUnitType];
+    const slidersDiv = document.createElement('div');
+    slidersDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
+    // Section: Combat Stats
+    const combatHeader = document.createElement('div');
+    combatHeader.style.cssText = 'font-size:9px;color:#76ff03;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;';
+    combatHeader.textContent = '⚔ COMBAT STATS';
+    slidersDiv.appendChild(combatHeader);
+
+    const statSliders: { label: string; field: string; value: number; min: number; max: number; step: number; color: string; isStat: boolean }[] = [
+      { label: 'HP', field: 'maxHealth', value: cfg.stats.maxHealth, min: 1, max: 50, step: 1, color: '#e74c3c', isStat: true },
+      { label: 'ATK', field: 'attack', value: cfg.stats.attack, min: 0, max: 20, step: 1, color: '#ff9800', isStat: true },
+      { label: 'DEF', field: 'defense', value: cfg.stats.defense, min: 0, max: 15, step: 1, color: '#2196f3', isStat: true },
+      { label: 'RNG', field: 'range', value: cfg.stats.range, min: 1, max: 8, step: 1, color: '#9c27b0', isStat: true },
+      { label: 'MOV', field: 'movement', value: cfg.stats.movement, min: 1, max: 6, step: 1, color: '#4caf50', isStat: true },
+    ];
+
+    for (const s of statSliders) {
+      slidersDiv.appendChild(this.buildSliderRow(s.label, s.field, s.value, s.min, s.max, s.step, s.color, s.isStat));
+    }
+
+    // Section: Speed
+    const speedHeader = document.createElement('div');
+    speedHeader.style.cssText = 'font-size:9px;color:#76ff03;text-transform:uppercase;letter-spacing:1px;margin-top:6px;margin-bottom:2px;';
+    speedHeader.textContent = '⚡ SPEED';
+    slidersDiv.appendChild(speedHeader);
+
+    const speedSliders: { label: string; field: string; value: number; min: number; max: number; step: number; color: string; isStat: boolean }[] = [
+      { label: 'Move Spd', field: 'moveSpeed', value: cfg.moveSpeed, min: 0.2, max: 5.0, step: 0.1, color: '#00bcd4', isStat: false },
+      { label: 'Atk Spd', field: 'attackSpeed', value: cfg.attackSpeed, min: 0.1, max: 3.0, step: 0.1, color: '#ff5722', isStat: false },
+    ];
+
+    for (const s of speedSliders) {
+      slidersDiv.appendChild(this.buildSliderRow(s.label, s.field, s.value, s.min, s.max, s.step, s.color, s.isStat));
+    }
+
+    container.appendChild(slidersDiv);
+
+    // ── Reset button ──
+    const resetBtn = document.createElement('div');
+    resetBtn.style.cssText = `
+      margin-top:10px; padding:5px 0; text-align:center; cursor:pointer;
+      font-size:10px; color:#ff4444; border:1px solid rgba(255,50,50,0.3);
+      border-radius:4px; background:rgba(255,50,50,0.08);
+      transition:all 0.15s;
+    `;
+    resetBtn.textContent = '↺ RESET TO DEFAULTS';
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Reset is handled by reloading from initial config — for now just rebuild
+      this.rebuildContent();
+    });
+    resetBtn.addEventListener('mouseenter', () => { resetBtn.style.background = 'rgba(255,50,50,0.2)'; });
+    resetBtn.addEventListener('mouseleave', () => { resetBtn.style.background = 'rgba(255,50,50,0.08)'; });
+    container.appendChild(resetBtn);
+  }
+
+  private buildSliderRow(label: string, field: string, value: number, min: number, max: number, step: number, color: string, isStat: boolean): HTMLElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;height:22px;';
+
+    // Label
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:58px;font-size:10px;color:${color};font-weight:bold;text-align:right;flex-shrink:0;`;
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    // Slider track container
+    const trackWrap = document.createElement('div');
+    trackWrap.style.cssText = 'flex:1;position:relative;height:14px;display:flex;align-items:center;';
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = String(step);
+    slider.value = String(value);
+    slider.style.cssText = `
+      width:100%; height:6px; -webkit-appearance:none; appearance:none;
+      background:linear-gradient(to right, ${color}44, ${color});
+      border-radius:3px; outline:none; cursor:pointer;
+    `;
+    // Webkit thumb styling
+    const thumbStyle = document.createElement('style');
+    const sliderId = `unit-slider-${field}-${Date.now()}`;
+    slider.id = sliderId;
+    thumbStyle.textContent = `
+      #${sliderId}::-webkit-slider-thumb {
+        -webkit-appearance:none; appearance:none; width:12px; height:12px;
+        border-radius:50%; background:${color}; cursor:pointer;
+        box-shadow:0 0 4px ${color}88;
+      }
+    `;
+    document.head.appendChild(thumbStyle);
+    trackWrap.appendChild(slider);
+    row.appendChild(trackWrap);
+
+    // Value display
+    const valDisplay = document.createElement('div');
+    const isFloat = step < 1;
+    valDisplay.style.cssText = `width:32px;font-size:11px;color:#fff;text-align:center;font-weight:bold;flex-shrink:0;`;
+    valDisplay.textContent = isFloat ? Number(value).toFixed(1) : String(value);
+    row.appendChild(valDisplay);
+
+    // On change — apply to UNIT_CONFIG and live units
+    slider.addEventListener('input', (e) => {
+      e.stopPropagation();
+      const newVal = parseFloat(slider.value);
+      valDisplay.textContent = isFloat ? newVal.toFixed(1) : String(Math.round(newVal));
+
+      // Update UNIT_CONFIG directly
+      if (isStat) {
+        (UNIT_CONFIG[this.selectedUnitType].stats as any)[field] = newVal;
+      } else {
+        (UNIT_CONFIG[this.selectedUnitType] as any)[field] = newVal;
+      }
+
+      // Apply to all live units of this type via callback
+      if (this._callbacks) {
+        this._callbacks.applyUnitStatChange(this.selectedUnitType, isStat ? `stats.${field}` : field, newVal);
+      }
+    });
+
+    return row;
+  }
+
+  private initPreview(container: HTMLElement): void {
+    const width = 340;
+    const height = 160;
+
+    // Scene
+    const scene = new THREE.Scene();
+    this.previewScene = scene;
+
+    // Camera
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100);
+    camera.position.set(1.5, 1.8, 2.5);
+    camera.lookAt(0, 0.3, 0);
+    this.previewCamera = camera;
+
+    // Lights
+    const ambient = new THREE.AmbientLight(0x667788, 0.7);
+    scene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(3, 5, 4);
+    scene.add(dirLight);
+    const rimLight = new THREE.DirectionalLight(0x4488ff, 0.4);
+    rimLight.position.set(-3, 2, -4);
+    scene.add(rimLight);
+
+    // Ground plane (subtle grid)
+    const groundGeo = new THREE.PlaneGeometry(3, 3);
+    const groundMat = new THREE.MeshLambertMaterial({ color: 0x1a2332, transparent: true, opacity: 0.6 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.15;
+    scene.add(ground);
+
+    // Unit model
+    const group = new THREE.Group();
+    UnitRenderer.buildUnitModel(group, this.selectedUnitType, 0x3498db);
+    scene.add(group);
+    this.previewGroup = group;
+
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setClearColor(0x000000, 0);
+    container.insertBefore(renderer.domElement, container.firstChild);
+    renderer.domElement.style.cssText = 'border-radius:6px;display:block;';
+    this.previewRenderer = renderer;
+
+    // Animate — slow turntable rotation
+    const animate = () => {
+      if (!this.previewRenderer || !this.previewScene || !this.previewCamera || !this.previewGroup) return;
+      this.previewGroup.rotation.y += 0.008;
+      this.previewRenderer.render(this.previewScene, this.previewCamera);
+      this.previewAnimFrame = requestAnimationFrame(animate);
+    };
+    animate();
+  }
+
   // ---- Destroy/cleanup ----
   private destroy(): void {
     if (this.updateInterval) {
@@ -774,6 +1022,21 @@ export class DebugPanel {
     this.logContainer = null;
     this.statsContainer = null;
     this.lastEventCount = 0;
+    this.cleanupPreview();
+  }
+
+  private cleanupPreview(): void {
+    if (this.previewAnimFrame) {
+      cancelAnimationFrame(this.previewAnimFrame);
+      this.previewAnimFrame = 0;
+    }
+    if (this.previewRenderer) {
+      this.previewRenderer.dispose();
+      this.previewRenderer = null;
+    }
+    this.previewScene = null;
+    this.previewCamera = null;
+    this.previewGroup = null;
   }
 
   dispose(): void {
@@ -803,4 +1066,5 @@ export interface DebugPanelCallbacks {
   spawnEnemy(type: UnitType, count: number): void;
   restartArena(): void;
   getMapType(): string;
+  applyUnitStatChange(type: UnitType, field: string, value: number): void;
 }

@@ -273,6 +273,25 @@ class Cubitopia {
       spawnEnemy: (type, count) => this.debugController.spawnEnemyUnit(type, count),
       restartArena: () => { this.gameMode = 'aivai'; this.mapType = MapType.ARENA; this.restartGame(); },
       getMapType: () => this.mapType,
+      applyUnitStatChange: (type: UnitType, field: string, value: number) => {
+        // Apply to all live units of this type
+        for (const unit of this.allUnits) {
+          if (unit.type !== type) continue;
+          if (field.startsWith('stats.')) {
+            const statKey = field.slice(6);
+            (unit.stats as any)[statKey] = value;
+            // If maxHealth changed, scale currentHealth proportionally
+            if (statKey === 'maxHealth') {
+              unit.currentHealth = Math.min(unit.currentHealth, value);
+              this.unitRenderer.updateHealthBar(unit);
+            }
+          } else if (field === 'moveSpeed') {
+            unit.moveSpeed = value;
+          } else if (field === 'attackSpeed') {
+            unit.attackSpeed = value;
+          }
+        }
+      },
     });
 
     // Squad type toggle: when user clicks a unit type badge in the tooltip, filter the selection
