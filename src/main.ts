@@ -34,6 +34,7 @@ import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
 import CombatEventHandler, { CombatEventOps } from './game/systems/CombatEventHandler';
 import SpawnQueueSystem, { SpawnQueueOps } from './game/systems/SpawnQueueSystem';
+import GarrisonSystem, { GarrisonOps } from './game/systems/GarrisonSystem';
 import MenuController from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
 import SoundManager from './engine/SoundManager';
@@ -128,6 +129,7 @@ class Cubitopia {
   private natureSystem!: NatureSystem;
   private combatEventHandler!: CombatEventHandler;
   private spawnQueueSystem!: SpawnQueueSystem;
+  private garrisonSystem!: GarrisonSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
   private sound: SoundManager;
@@ -627,7 +629,7 @@ class Cubitopia {
                      this.forestryPlaceMode || this.masonryPlaceMode ||
                      this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
                      this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
-                     this.rallyPointSetMode || this.plantCropsMode;
+                     this.rallyPointSetMode || this.plantCropsMode || this.exitPickMode;
       if (!inMode || !this.currentMap) return;
 
       const rect = canvasEl.getBoundingClientRect();
@@ -671,6 +673,19 @@ class Cubitopia {
           canvasEl2.style.cursor = 'default';
         } else if (this.plantCropsMode) {
           this.paintPlantCrop(hexCoord);
+        } else if (this.exitPickMode && this.exitPickSourceKey) {
+          // Exit-pick mode: click a building/gate to ungarrison there
+          const exitKey = `${hexCoord.q},${hexCoord.r}`;
+          const released = this.garrisonSystem.ungarrison(this.exitPickSourceKey, exitKey);
+          if (released.length > 0) {
+            this.hud.showNotification(`🏰 ${released.length} unit(s) exited at (${hexCoord.q},${hexCoord.r})`, '#e67e22');
+          } else {
+            this.hud.showNotification('No units to ungarrison or location not connected', '#e74c3c');
+          }
+          this.exitPickMode = false;
+          this.exitPickSourceKey = null;
+          const canvasEl3 = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
+          canvasEl3.style.cursor = 'default';
         }
       }
     });
@@ -683,7 +698,7 @@ class Cubitopia {
                         this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
                         this.harvestMode || this.farmPatchMode ||
                         this.plantTreeMode || this.mineMode ||
-                        this.plantCropsMode || this.rallyPointSetMode;
+                        this.plantCropsMode || this.rallyPointSetMode || this.exitPickMode;
       if (inAnyMode || !this.currentMap) return;
 
       // Raycast against building meshes to detect building clicks
@@ -741,6 +756,50 @@ class Cubitopia {
             const isOwn = clickedBase.owner === 0;
             this.tooltipController.showBaseTooltip(clickedBase, isOwn, e.clientX, e.clientY);
             return;
+          }
+        }
+      }
+
+      // Check wall/gate meshes for garrison tooltip
+      const allWallGateMeshes: THREE.Object3D[] = [
+        ...this.wallSystem.wallMeshes,
+        ...this.wallSystem.gateMeshes,
+      ];
+      if (allWallGateMeshes.length > 0) {
+        const wgHits = raycaster.intersectObjects(allWallGateMeshes, true);
+        if (wgHits.length > 0) {
+          // Find which wall/gate was clicked
+          let hitMesh: THREE.Object3D | null = wgHits[0].object;
+          let foundKey: string | null = null;
+          let foundType: 'wall' | 'gate' | null = null;
+
+          while (hitMesh) {
+            // Check wall meshes
+            for (const [wKey, wMesh] of this.wallSystem.wallMeshMap) {
+              if (wMesh === hitMesh) { foundKey = wKey; foundType = 'wall'; break; }
+            }
+            if (foundKey) break;
+            // Check gate meshes
+            for (const [gKey, gMesh] of this.wallSystem.gateMeshMap) {
+              if (gMesh === hitMesh) { foundKey = gKey; foundType = 'gate'; break; }
+            }
+            if (foundKey) break;
+            hitMesh = hitMesh.parent;
+          }
+
+          if (foundKey && foundType) {
+            const owner = foundType === 'wall'
+              ? (this.wallSystem.wallOwners.get(foundKey) ?? -1)
+              : (this.wallSystem.gateOwners.get(foundKey) ?? -1);
+            const health = foundType === 'wall'
+              ? (this.wallSystem.wallHealth.get(foundKey) ?? WallSystem.WALL_MAX_HP)
+              : (this.wallSystem.gateHealth.get(foundKey) ?? WallSystem.GATE_MAX_HP);
+            const maxHealth = foundType === 'wall' ? WallSystem.WALL_MAX_HP : WallSystem.GATE_MAX_HP;
+
+            if (owner === 0) {
+              this.tooltipController.showWallGateTooltip(foundKey, foundType, owner, health, maxHealth, e.clientX, e.clientY);
+              return;
+            }
           }
         }
       }
@@ -1587,6 +1646,44 @@ class Cubitopia {
       captureZone: (position) => this.captureZoneFromTooltip(position),
       attackTarget: (position) => this.attackTargetFromTooltip(position),
       setRallyToPosition: (position) => this.setRallyToPositionFromTooltip(position),
+      getGarrisonInfo: (structureKey) => {
+        const slot = this.garrisonSystem.getSlot(structureKey);
+        const cap = this.garrisonSystem.getCapacity(structureKey);
+        if (!cap) return null;
+        return {
+          units: slot?.units ?? [],
+          current: cap.current,
+          max: cap.max,
+          reachableExits: this.garrisonSystem.getReachableExits(structureKey),
+        };
+      },
+      ungarrisonStructure: (structureKey, exitKey?) => {
+        const released = this.garrisonSystem.ungarrison(structureKey, exitKey);
+        if (released.length > 0) {
+          this.hud.showNotification(`🏰 ${released.length} unit(s) ungarrisoned`, '#e67e22');
+        }
+      },
+      garrisonSelected: (structureKey) => {
+        const selected = this.selectionManager.getSelectedUnits();
+        if (selected.length === 0) {
+          this.hud.showNotification('Select units first', '#e74c3c');
+          return;
+        }
+        const garrisoned = this.garrisonSystem.garrison(selected, structureKey);
+        if (garrisoned.length > 0) {
+          this.hud.showNotification(`🏰 ${garrisoned.length} unit(s) garrisoned`, '#e67e22');
+          this.selectionManager.clearSelection();
+        } else {
+          this.hud.showNotification('Cannot garrison — full or wrong owner', '#e74c3c');
+        }
+      },
+      enterExitPickMode: (structureKey) => {
+        this.exitPickMode = true;
+        this.exitPickSourceKey = structureKey;
+        this.hud.showNotification('Click a connected building or gate to choose exit point', '#8e44ad');
+        const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
+        canvasEl.style.cursor = 'crosshair';
+      },
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
 
@@ -1608,6 +1705,43 @@ class Cubitopia {
       hasGrass: (key) => this.terrainDecorator.hasGrass(key),
     };
     this.natureSystem = new NatureSystem(natureOps);
+
+    // Garrison system — handles unit garrisoning in buildings, gates, walls
+    const garrisonOps: GarrisonOps = {
+      getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
+      getWallsBuilt: () => this.wallSystem.wallsBuilt,
+      getGatesBuilt: () => this.wallSystem.gatesBuilt,
+      getWallOwner: (key) => this.wallSystem.wallOwners.get(key) ?? -1,
+      getGateOwner: (key) => this.wallSystem.gateOwners.get(key) ?? -1,
+      hideUnit: (unit) => this.unitRenderer.setVisible(unit.id, false),
+      showUnit: (unit) => {
+        this.unitRenderer.setVisible(unit.id, true);
+        this.unitRenderer.setWorldPosition(unit.id, unit.worldPosition.x, unit.worldPosition.y, unit.worldPosition.z);
+      },
+      fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
+      applyDamage: (target, damage) => {
+        target.currentHealth = Math.max(0, target.currentHealth - damage);
+        if (target.currentHealth <= 0) {
+          target.state = UnitState.DEAD;
+          this.removeUnitFromGame(target);
+        }
+      },
+      updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getAllUnits: () => this.allUnits,
+      getElevation: (pos) => this.getElevation(pos),
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+    };
+    this.garrisonSystem = new GarrisonSystem(garrisonOps);
+
+    // Wire AI garrison ops (after both systems exist)
+    this.aiController.setGarrisonOps({
+      garrison: (units, key) => this.garrisonSystem.garrison(units, key),
+      getCapacity: (key) => this.garrisonSystem.getCapacity(key),
+      getGarrisonedUnits: (owner) => this.garrisonSystem.getGarrisonedUnits(owner),
+      getGatesBuilt: () => this.wallSystem.gatesBuilt,
+      getGateOwner: (key) => this.wallSystem.gateOwners.get(key) ?? -1,
+    });
 
     // Combat event handler
     this.combatEventHandler = new CombatEventHandler({
@@ -1637,6 +1771,7 @@ class Cubitopia {
       damageGate: (pos, dmg) => this.wallSystem.damageGate(pos, dmg),
       damageWall: (pos, dmg) => this.wallSystem.damageWall(pos, dmg),
       isGateAt: (key) => this.wallSystem.gatesBuilt.has(key),
+      onStructureDestroyed: (key) => this.garrisonSystem.onStructureDestroyed(key),
       handleBuildWall: (unit, pos) => this.wallSystem.handleBuildWall(unit, pos),
       handleBuildGate: (unit, pos) => this.wallSystem.handleBuildGate(unit, pos),
       handleChopWood: (unit, pos) => this.handleChopWood(unit, pos),
@@ -1946,6 +2081,7 @@ class Cubitopia {
     this.buildingSystem.cleanup();
     this.tooltipController.cleanup();
     this.spawnQueueSystem.cleanup();
+    this.garrisonSystem.cleanup();
     this.farmhousePlaceMode = false;
     this.siloPlaceMode = false;
     this.farmPatchMode = false;
@@ -2591,6 +2727,9 @@ class Cubitopia {
     // Process combat events (delegated to CombatEventHandler)
     this.combatEventHandler.processEvents(events);
 
+    // Update garrison system (ranged fire from garrisoned units)
+    this.garrisonSystem.update(delta);
+
     // Update unit visual positions and animations
     const gameTime = this.clock.elapsedTime;
     for (const unit of this.allUnits) {
@@ -3143,6 +3282,8 @@ class Cubitopia {
   private rallyLineMeshes: Map<string, THREE.Line> = new Map(); // buildingKey → line mesh
   private rallyPointSetMode = false;
   private rallyPointBuilding: string | null = null; // Which building we're setting rally for
+  private exitPickMode = false;
+  private exitPickSourceKey: string | null = null; // Structure key being ungarrisoned from
 
   // --- Formation state ---
   private selectedFormation: FormationType = FormationType.BOX;

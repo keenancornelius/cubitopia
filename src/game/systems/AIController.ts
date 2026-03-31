@@ -21,6 +21,20 @@ import { UnitAI } from './UnitAI';
 import { UnitFactory } from '../entities/UnitFactory';
 import type { PlacedBuilding, BuildingKind } from '../../types';
 
+/** Slim interface for garrison operations AIController needs */
+export interface AIGarrisonOps {
+  /** Garrison units into a structure */
+  garrison(units: Unit[], structureKey: string): Unit[];
+  /** Get garrison capacity info */
+  getCapacity(structureKey: string): { current: number; max: number } | null;
+  /** Get all garrisoned units for an owner */
+  getGarrisonedUnits(owner: number): Unit[];
+  /** Get all gate hex keys */
+  getGatesBuilt(): Set<string>;
+  /** Get gate owner */
+  getGateOwner(key: string): number;
+}
+
 /** Slim interface for the building operations AIController needs */
 export interface AIBuildingOps {
   aiFindBuildTile(baseQ: number, baseR: number, offsetQ: number, offsetR: number): HexCoord | null;
@@ -39,11 +53,17 @@ export interface AIBuildingOps {
 export default class AIController {
   private ctx: GameContext;
   private buildOps: AIBuildingOps;
+  private garrisonOps: AIGarrisonOps | null = null;
   aiState: [AIBuildState, AIBuildState] = [createAIBuildState(), createAIBuildState()];
 
   constructor(ctx: GameContext, buildOps: AIBuildingOps) {
     this.ctx = ctx;
     this.buildOps = buildOps;
+  }
+
+  /** Wire garrison ops after construction (avoids circular init order) */
+  setGarrisonOps(ops: AIGarrisonOps): void {
+    this.garrisonOps = ops;
   }
 
   // ===================== AI ECONOMY =====================
@@ -579,6 +599,35 @@ export default class AIController {
         // Remove from idle pool
         const idx = idleCombat.indexOf(unit);
         if (idx >= 0) idleCombat.splice(idx, 1);
+      }
+    }
+
+    // ===== PHASE 1.5: Structure garrison — put archers/mages in gates for ranged defense =====
+    if (this.garrisonOps) {
+      const gates = this.garrisonOps.getGatesBuilt();
+      for (const gateKey of gates) {
+        const gateOwner = this.garrisonOps.getGateOwner(gateKey);
+        if (gateOwner !== ownerId) continue;
+        const cap = this.garrisonOps.getCapacity(gateKey);
+        if (!cap || cap.current >= cap.max) continue;
+
+        // Find idle archers/mages near the gate to garrison
+        const [gq, gr] = gateKey.split(',').map(Number);
+        const gatePos: HexCoord = { q: gq, r: gr };
+        const rangedIdle = idleCombat.filter(u =>
+          (u.type === UnitType.ARCHER || u.type === UnitType.MAGE) &&
+          Pathfinder.heuristic(u.position, gatePos) <= 3 && !u._garrisoned
+        );
+
+        if (rangedIdle.length > 0) {
+          const toGarrison = rangedIdle.slice(0, cap.max - cap.current);
+          const garrisoned = this.garrisonOps.garrison(toGarrison, gateKey);
+          // Remove garrisoned units from idle pool
+          for (const u of garrisoned) {
+            const idx = idleCombat.indexOf(u);
+            if (idx >= 0) idleCombat.splice(idx, 1);
+          }
+        }
       }
     }
 

@@ -120,6 +120,7 @@ export class CaptureZoneSystem {
       const baseY = zone.base.worldPosition.y;
       for (const unit of allUnits) {
         if (unit.state === UnitState.DEAD) continue;
+        if (unit._garrisoned) continue; // Garrisoned units don't count for zone capture
         if (unit.owner > 1) continue; // Only player 0 and 1
 
         // Layer check: unit must be on the same vertical layer as the base.

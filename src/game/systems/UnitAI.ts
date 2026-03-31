@@ -115,6 +115,7 @@ export class UnitAI {
     for (const player of players) {
       for (const unit of player.units) {
         if (unit.state === UnitState.DEAD) continue;
+        if (unit._garrisoned) continue; // Skip garrisoned units — they're inside a structure
 
         // Decrease cooldowns
         unit.attackCooldown = Math.max(0, unit.attackCooldown - delta);

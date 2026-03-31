@@ -1862,6 +1862,13 @@ export class UnitRenderer {
     }
   }
 
+  /** Show or hide a unit's mesh group (for garrison) */
+  setVisible(unitId: string, visible: boolean): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    entry.group.visible = visible;
+  }
+
   /**
    * Get the Three.js group for a unit (for raycasting)
    */

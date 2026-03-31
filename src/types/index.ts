@@ -193,6 +193,8 @@ export interface Unit {
   _playerCommanded?: boolean;       // Player issued a direct command
   _underground?: boolean;           // Unit is currently underground (on a tunnel tile)
   _undergroundCommand?: boolean;    // Unit was given an underground move command
+  _garrisoned?: boolean;            // Unit is inside a structure (hidden)
+  _garrisonKey?: string;            // Hex key "q,r" of the structure they're garrisoned in
 }
 
 export enum UnitType {

@@ -47,10 +47,12 @@ export interface CombatEventOps {
 
   // Building/wall system
   getBuildingAt(position: HexCoord): PlacedBuilding | null;
-  damageBarracks(position: HexCoord, damage: number): void;
-  damageGate(position: HexCoord, damage: number): void;
-  damageWall(position: HexCoord, damage: number): void;
+  damageBarracks(position: HexCoord, damage: number): boolean;
+  damageGate(position: HexCoord, damage: number): boolean;
+  damageWall(position: HexCoord, damage: number): boolean;
   isGateAt(key: string): boolean;
+  /** Called when a structure is destroyed — ejects garrisoned units */
+  onStructureDestroyed(structureKey: string): void;
 
   // Worker event handlers
   handleBuildWall(unit: Unit, position: HexCoord): void;
@@ -294,14 +296,17 @@ export default class CombatEventHandler {
         const isSiege = event.unit.isSiege === true;
         const baseDmg = event.unit.stats.attack;
         const pb = ops.getBuildingAt(event.result.position);
+        let destroyed = false;
         if (pb) {
           const dmg = isSiege ? baseDmg : Math.max(1, Math.floor(baseDmg * 0.15));
-          ops.damageBarracks(event.result.position, dmg);
+          destroyed = ops.damageBarracks(event.result.position, dmg);
         } else if (ops.isGateAt(key)) {
-          if (isSiege) ops.damageGate(event.result.position, baseDmg);
+          if (isSiege) destroyed = ops.damageGate(event.result.position, baseDmg);
         } else {
-          if (isSiege) ops.damageWall(event.result.position, baseDmg);
+          if (isSiege) destroyed = ops.damageWall(event.result.position, baseDmg);
         }
+        // Eject garrisoned units when structure is destroyed
+        if (destroyed) ops.onStructureDestroyed(key);
       }
     }
   }
