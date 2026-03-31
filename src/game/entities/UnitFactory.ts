@@ -3,7 +3,7 @@
 // Single config table per unit type — adding a new unit = adding one entry
 // ============================================
 
-import { Unit, UnitType, UnitStats, UnitState, UnitStance, HexCoord } from '../../types';
+import { Unit, UnitType, UnitStats, UnitState, UnitStance, HexCoord, ElementType } from '../../types';
 
 // --- Unified Unit Config Table ---
 // Every per-type value lives here. No switch/ternary chains elsewhere.
@@ -74,7 +74,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
   },
   // --- Advanced combat units ---
   [UnitType.HEALER]: {
-    stats: { maxHealth: 7, attack: 0, defense: 2, movement: 2, range: 2 },
+    stats: { maxHealth: 7, attack: 0, defense: 2, movement: 2, range: 3 },
     moveSpeed: 1.1, attackSpeed: 0.0, color: 0x00e676,
     carryCapacity: 0, isSiege: false,
   },
@@ -89,7 +89,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 0, isSiege: false,
   },
   [UnitType.BERSERKER]: {
-    stats: { maxHealth: 12, attack: 5, defense: 1, movement: 2, range: 1 },
+    stats: { maxHealth: 12, attack: 5, defense: 1, movement: 2, range: 7 },
     moveSpeed: 1.8, attackSpeed: 1.3, color: 0xd50000,
     carryCapacity: 0, isSiege: false,
   },
@@ -141,7 +141,22 @@ export class UnitFactory {
       stance: UnitStance.DEFENSIVE,
       isSiege: cfg.isSiege,
       kills: 0,
+      // Mages get a random elemental affinity
+      ...(type === UnitType.MAGE || type === UnitType.BATTLEMAGE ? {
+        element: UnitFactory._randomElement(),
+      } : {}),
+      // Berserkers start with axe throw ready (one ranged attack per unique target)
+      ...(type === UnitType.BERSERKER ? {
+        _axeThrowReady: true,
+        _axeThrowTargets: new Set<string>(),
+      } : {}),
     };
+  }
+
+  /** Pick a random element from the 5 available */
+  private static _randomElement(): ElementType {
+    const elements = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+    return elements[Math.floor(Math.random() * elements.length)];
   }
 
   static getStats(type: UnitType): UnitStats {

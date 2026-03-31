@@ -33,6 +33,7 @@ import { generateFormation, generateBoxFormation, getUnitFormationPriority, getH
 import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
 import CombatEventHandler, { CombatEventOps } from './game/systems/CombatEventHandler';
+import { CombatSystem } from './game/systems/CombatSystem';
 import SpawnQueueSystem, { SpawnQueueOps } from './game/systems/SpawnQueueSystem';
 import GarrisonSystem, { GarrisonOps } from './game/systems/GarrisonSystem';
 import MenuController from './ui/MenuController';
@@ -60,6 +61,7 @@ import {
   PlacedBuilding,
   BuildingKind,
   MapType,
+  ElementType,
 } from './types';
 import { getPreset, generateArenaMap, generateDesertTunnelsMap, ArenaMap, DesertTunnelsMap } from './game/MapPresets';
 import { CombatLog } from './ui/ArenaDebugConsole';
@@ -273,6 +275,9 @@ class Cubitopia {
       spawnEnemy: (type, count) => this.debugController.spawnEnemyUnit(type, count),
       restartArena: () => { this.gameMode = 'aivai'; this.mapType = MapType.ARENA; this.restartGame(); },
       getMapType: () => this.mapType,
+      animatePreview: (group, unitType, state, time) => {
+        this.unitRenderer.animatePreviewGroup(group, unitType, state, time);
+      },
       applyUnitStatChange: (type: UnitType, field: string, value: number) => {
         // Apply to all live units of this type
         for (const unit of this.allUnits) {
@@ -1197,9 +1202,16 @@ class Cubitopia {
     const toRemove = inRange.slice(0, Math.min(BLOCKS_PER_TICK, inRange.length));
     if (toRemove.length === 0) return;
 
-    // Determine resource from the primary block being mined
+    // Determine resource from the primary block being mined.
+    // If block is generic stone but the tile has a specific resource (iron, gold, crystal),
+    // use the tile's resource metadata as a fallback — ensures terrain-marked resources yield correctly.
     const primaryBlock = toRemove[0].block;
-    const resource = this.blockToResource(primaryBlock.type);
+    let resource = this.blockToResource(primaryBlock.type);
+    if (resource.type === ResourceType.STONE && tile.resource && tile.resource !== ResourceType.STONE) {
+      // Tile metadata says this is an iron/gold/crystal/clay deposit — honor it
+      const tileYield = tile.resource === ResourceType.CRYSTAL ? 3 : 1;
+      resource = { type: tile.resource, yield: tileYield };
+    }
 
     // Remove blocks from the array
     const indicesToRemove = new Set(toRemove.map(t => t.index));
@@ -1840,6 +1852,21 @@ class Cubitopia {
       fireMagicOrb: (from, to, color, id, splash, cb) => this.unitRenderer.fireMagicOrb(from, to, color, id, splash, cb),
       fireBoulder: (from, to, cb) => this.unitRenderer.fireBoulder(from, to, cb),
       fireProjectile: (from, to, color, id, cb) => this.unitRenderer.fireProjectile(from, to, color, id, cb),
+      knockbackUnit: (id, wp) => this.unitRenderer.knockbackUnit(id, wp),
+      spawnBlockSparks: (wp) => this.unitRenderer.spawnBlockSparks(wp),
+      spawnElementalImpact: (wp, element) => this.unitRenderer.spawnElementalImpact(wp, element),
+      getElementOrbColor: (element) => UnitRenderer.elementOrbColor(element),
+      fireAxeThrow: (from, to, id, cb) => this.unitRenderer.fireAxeThrow(from, to, id, cb),
+      spawnDeflectedAxe: (pos) => this.unitRenderer.spawnDeflectedAxe(pos),
+      fireHealOrb: (from, to, id, cb) => this.unitRenderer.fireHealOrb(from, to, id, cb),
+      applyHeal: (healerId, targetId) => {
+        const healer = this.players.flatMap(p => p.units).find(u => u.id === healerId);
+        const target = this.players.flatMap(p => p.units).find(u => u.id === targetId);
+        if (healer && target) {
+          CombatSystem.applyHeal(healer, target);
+          this.unitRenderer.updateHealthBar(target);
+        }
+      },
       showXPText: (wp, xp) => this.unitRenderer.showXPText(wp, xp),
       showLevelUpEffect: (id, wp, lvl) => this.unitRenderer.showLevelUpEffect(id, wp, lvl),
       playSound: (name, vol) => this.sound.play(name as any, vol),
@@ -2901,6 +2928,14 @@ class Cubitopia {
           unit.worldPosition.y,
           unit.worldPosition.z
         );
+      }
+    }
+
+    // Visual-only separation: push overlapping unit meshes apart before strafe/anim
+    this.unitRenderer.applySeparation();
+
+    for (const unit of this.allUnits) {
+      if (unit.state !== UnitState.DEAD) {
         this.unitRenderer.animateUnit(unit.id, unit.state, gameTime, unit.type);
         // Face combat target during attack/chase + melee strafe
         if (unit.command?.targetUnitId) {

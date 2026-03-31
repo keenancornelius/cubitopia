@@ -491,7 +491,7 @@ export default class GarrisonSystem {
 
     for (const unit of allUnits) {
       if (unit.owner === slot.owner) continue;
-      if (unit.state === UnitState.DEAD) continue;
+      if (unit.state === UnitState.DEAD || unit._pendingRangedDeath) continue;
       if (unit._garrisoned) continue;
 
       const dist = Pathfinder.heuristic(unit.position, slot.position);

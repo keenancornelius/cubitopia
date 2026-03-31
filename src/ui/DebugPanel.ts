@@ -5,7 +5,7 @@
 // ============================================
 
 import * as THREE from 'three';
-import { Unit, UnitType, UnitState } from '../types';
+import { Unit, UnitType, UnitState, ElementType } from '../types';
 import { CombatLog, DebugEventType, DebugEvent } from './ArenaDebugConsole';
 import { UNIT_CONFIG } from '../game/entities/UnitFactory';
 import { UnitRenderer } from '../engine/UnitRenderer';
@@ -92,6 +92,8 @@ export class DebugPanel {
   private previewCamera: THREE.PerspectiveCamera | null = null;
   private previewGroup: THREE.Group | null = null;
   private previewAnimFrame: number = 0;
+  private previewAnimMode: 'idle' | 'moving' | 'attacking' | 'hit' | 'block' = 'idle';
+  private previewElement: ElementType = ElementType.FIRE;
 
   // Army composition state
   private armyComp: ArmyComposition = {
@@ -824,6 +826,74 @@ export class DebugPanel {
     // Three.js mini renderer
     this.initPreview(previewContainer);
 
+    // ── Animation Mode Buttons ──
+    const animRow = document.createElement('div');
+    animRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px;';
+    const animModes: { label: string; icon: string; mode: 'idle' | 'moving' | 'attacking' | 'hit' | 'block' }[] = [
+      { label: 'Idle', icon: '🧍', mode: 'idle' },
+      { label: 'Walk', icon: '🚶', mode: 'moving' },
+      { label: 'Attack', icon: '⚔', mode: 'attacking' },
+      { label: 'Hit', icon: '💥', mode: 'hit' },
+      { label: 'Block', icon: '🛡', mode: 'block' },
+    ];
+    for (const am of animModes) {
+      const btn = document.createElement('div');
+      const active = am.mode === this.previewAnimMode;
+      btn.style.cssText = `
+        flex:1; padding:4px 0; text-align:center; cursor:pointer; font-size:10px;
+        border-radius:4px; transition:all 0.15s;
+        background:${active ? 'rgba(118,255,3,0.15)' : 'rgba(255,255,255,0.04)'};
+        color:${active ? '#76ff03' : '#888'};
+        border:1px solid ${active ? 'rgba(118,255,3,0.4)' : 'rgba(255,255,255,0.08)'};
+      `;
+      btn.textContent = `${am.icon} ${am.label}`;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.previewAnimMode = am.mode;
+        this.rebuildContent();
+      });
+      animRow.appendChild(btn);
+    }
+    container.appendChild(animRow);
+
+    // ── Element Selector (mages only) ──
+    const isMageType = this.selectedUnitType === UnitType.MAGE || this.selectedUnitType === UnitType.BATTLEMAGE;
+    if (isMageType) {
+      const elemRow = document.createElement('div');
+      elemRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px;';
+      const elemLabel = document.createElement('div');
+      elemLabel.style.cssText = 'font-size:9px;color:#76ff03;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;line-height:26px;margin-right:4px;';
+      elemLabel.textContent = 'ELEMENT';
+      elemRow.appendChild(elemLabel);
+      const elements: { label: string; icon: string; element: ElementType; color: string }[] = [
+        { label: 'Fire', icon: '🔥', element: ElementType.FIRE, color: '#ff5500' },
+        { label: 'Water', icon: '💧', element: ElementType.WATER, color: '#2288ff' },
+        { label: 'Zap', icon: '⚡', element: ElementType.LIGHTNING, color: '#ccddff' },
+        { label: 'Wind', icon: '🌪', element: ElementType.WIND, color: '#88dd88' },
+        { label: 'Earth', icon: '🪨', element: ElementType.EARTH, color: '#aa8866' },
+      ];
+      for (const el of elements) {
+        const btn = document.createElement('div');
+        const active = this.previewElement === el.element;
+        btn.style.cssText = `
+          flex:1; padding:3px 0; text-align:center; cursor:pointer; font-size:9px;
+          border-radius:4px; transition:all 0.15s;
+          background:${active ? el.color + '33' : 'rgba(255,255,255,0.04)'};
+          color:${active ? el.color : '#666'};
+          border:1px solid ${active ? el.color + '88' : 'rgba(255,255,255,0.08)'};
+        `;
+        btn.textContent = `${el.icon}`;
+        btn.title = el.label;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.previewElement = el.element;
+          this.rebuildContent();
+        });
+        elemRow.appendChild(btn);
+      }
+      container.appendChild(elemRow);
+    }
+
     // ── Stat Sliders ──
     const cfg = UNIT_CONFIG[this.selectedUnitType];
     const slidersDiv = document.createElement('div');
@@ -999,10 +1069,18 @@ export class DebugPanel {
     renderer.domElement.style.cssText = 'border-radius:6px;display:block;';
     this.previewRenderer = renderer;
 
-    // Animate — slow turntable rotation
+    // Animate — turntable rotation + unit animation
     const animate = () => {
       if (!this.previewRenderer || !this.previewScene || !this.previewCamera || !this.previewGroup) return;
-      this.previewGroup.rotation.y += 0.008;
+      const time = performance.now() / 1000;
+      // Slow turntable only in idle mode; pause rotation during walk/attack/hit so the anim is readable
+      if (this.previewAnimMode === 'idle') {
+        this.previewGroup.rotation.y += 0.008;
+      }
+      // Run unit animation via callback
+      if (this._callbacks) {
+        this._callbacks.animatePreview(this.previewGroup, this.selectedUnitType, this.previewAnimMode, time);
+      }
       this.previewRenderer.render(this.previewScene, this.previewCamera);
       this.previewAnimFrame = requestAnimationFrame(animate);
     };
@@ -1067,4 +1145,5 @@ export interface DebugPanelCallbacks {
   restartArena(): void;
   getMapType(): string;
   applyUnitStatChange(type: UnitType, field: string, value: number): void;
+  animatePreview(group: THREE.Group, unitType: UnitType, state: 'idle' | 'moving' | 'attacking' | 'hit' | 'block', time: number): void;
 }

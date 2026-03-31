@@ -61,6 +61,9 @@ export class UnitAI {
   /** Reference to all bases for proximity checks (set by main.ts) */
   static bases: Base[] = [];
 
+  /** Cached player references (set each frame in update) — used by static methods that only receive owner id */
+  static players: Map<number, Player> = new Map();
+
   /** Check if a position is an underground base — used to force tunnel pathing */
   static isUndergroundBase(pos: HexCoord, map: GameMap): boolean {
     const base = UnitAI.bases.find(b => b.position.q === pos.q && b.position.r === pos.r && !b.destroyed);
@@ -108,22 +111,63 @@ export class UnitAI {
   /** Debug flags passed from HUD — controls worker/combat behaviors */
   static debugFlags: UnitAIDebugFlags = {};
 
+  /** True if unit is dead or dying to a ranged projectile still in flight */
+  static isDead(unit: Unit): boolean {
+    return unit.state === UnitState.DEAD || !!unit._pendingRangedDeath;
+  }
+
+  /**
+   * Minimum attack cooldown per unit type (seconds).
+   * Ensures the attack animation has time to complete one full cycle
+   * before the next attack can fire. Calculated from 1/animSpeed.
+   */
+  private static readonly MIN_ATTACK_COOLDOWN: Partial<Record<UnitType, number>> = {
+    [UnitType.WARRIOR]:      0.91, // 1/1.1
+    [UnitType.PALADIN]:      0.83, // 1/1.2
+    [UnitType.RIDER]:        0.83, // 1/1.2
+    [UnitType.SCOUT]:        0.71, // 1/1.4
+    [UnitType.ASSASSIN]:     0.83, // 1/1.2
+    [UnitType.BERSERKER]:    0.91, // 1/1.1
+    [UnitType.SHIELDBEARER]: 1.00, // 1/1.0
+    [UnitType.GREATSWORD]:   1.18, // 1/0.85
+    [UnitType.LUMBERJACK]:   0.71, // 1/1.4
+  };
+
+  /** Get attack cooldown clamped to animation cycle minimum */
+  static getAttackCooldown(unit: Unit): number {
+    const baseCooldown = 1 / unit.attackSpeed;
+    const minCooldown = UnitAI.MIN_ATTACK_COOLDOWN[unit.type] ?? 0.40;
+    return Math.max(baseCooldown, minCooldown);
+  }
+
   static update(players: Player[], map: GameMap, delta: number): UnitEvent[] {
     const events: UnitEvent[] = [];
     const allUnits = players.flatMap(p => p.units);
 
+    // Cache player references for static methods that only receive owner id
+    UnitAI.players.clear();
+    for (const p of players) {
+      UnitAI.players.set(p.id, p);
+    }
+
     for (const player of players) {
       for (const unit of player.units) {
         if (unit.state === UnitState.DEAD) continue;
+        if (unit._pendingRangedDeath) continue; // Dying to ranged — wait for projectile visual
         if (unit._garrisoned) continue; // Skip garrisoned units — they're inside a structure
 
         // Decrease cooldowns
         unit.attackCooldown = Math.max(0, unit.attackCooldown - delta);
         unit.gatherCooldown = Math.max(0, unit.gatherCooldown - delta);
 
-        // Healer passive: heal nearby allies every tick
+        // Healer caster: pick most-injured ally in range, fire heal projectile
         if (unit.type === UnitType.HEALER) {
           const healed = CombatSystem.processHealerTick(unit, allUnits, delta);
+          if (healed.length > 0) {
+            unit.state = UnitState.ATTACKING; // triggers cast animation
+            // Auto-return to idle after cast animation finishes
+            setTimeout(() => { if (unit.state === UnitState.ATTACKING) unit.state = UnitState.IDLE; }, 1200);
+          }
           for (const hid of healed) events.push({ type: 'heal', healerId: unit.id, targetId: hid } as any);
         }
 
@@ -332,6 +376,9 @@ export class UnitAI {
   static commandAttack(unit: Unit, target: HexCoord, targetUnitId: string | null, map: GameMap, preferUnderground = false): void {
     unit.command = { type: CommandType.ATTACK, targetPosition: target, targetUnitId };
 
+    // Berserker: recharge axe throw if this is a new unique target
+    if (targetUnitId) UnitAI.rechargeBerserkerAxeThrow(unit, targetUnitId);
+
     // Determine if we should route underground:
     // - explicit preferUnderground flag, OR
     // - unit is already underground, OR
@@ -444,7 +491,7 @@ export class UnitAI {
 
       // Player builders check mine blueprints first (skip if disableMine)
       let mineTile: HexCoord | null = null;
-      if (!UnitAI.debugFlags.disableMine && unit.owner === 0 && UnitAI.playerMineBlueprint.size > 0) {
+      if (!UnitAI.debugFlags.disableMine && !player.isAI && UnitAI.playerMineBlueprint.size > 0) {
         mineTile = UnitAI.findNearestMineBlueprint(unit, map);
       }
 
@@ -459,8 +506,11 @@ export class UnitAI {
           unit.command = { type: CommandType.GATHER, targetPosition: mineTile, targetUnitId: null };
           unit.gatherCooldown = 0.8;
         } else {
-          // Builders can path through ridges directly — no adjacent-tile workaround needed
-          UnitAI.commandMove(unit, mineTile, map);
+          // Check if mine tile is in a tunnel — route underground if so
+          const bpMineKey = `${mineTile.q},${mineTile.r}`;
+          const bpMineTile = map.tiles.get(bpMineKey);
+          const bpNeedsUnderground = bpMineTile?.hasTunnel === true;
+          UnitAI.commandMove(unit, mineTile, map, bpNeedsUnderground);
         }
         return;
       }
@@ -472,7 +522,7 @@ export class UnitAI {
       const hasGateStone = UnitAI.stoneStockpile[unit.owner] >= 2;
 
       // AI: if there are wall spots AND they have stone, go build
-      if (wallSpot && unit.owner !== 0) {
+      if (wallSpot && player.isAI) {
         // Check if we have enough stone (gates cost 2, walls cost 1)
         const isGate = unit._planIsGate === true;
         const enoughStone = isGate ? hasGateStone : hasStone;
@@ -493,7 +543,7 @@ export class UnitAI {
 
       // Auto-mine: AI builders auto-mine for resources. Player builders only mine
       // player-placed blueprints (handled above), never auto-mine on their own.
-      const shouldAutoMine = !UnitAI.debugFlags.disableMine && unit.owner !== 0;
+      const shouldAutoMine = !UnitAI.debugFlags.disableMine && player.isAI;
       if (shouldAutoMine) {
         const autoMineTile = UnitAI.findNearestMineSite(unit, map);
         if (autoMineTile) {
@@ -506,8 +556,11 @@ export class UnitAI {
             unit.command = { type: CommandType.GATHER, targetPosition: autoMineTile, targetUnitId: null };
             unit.gatherCooldown = 0.8;
           } else {
-            // Builders can path through ridges directly
-            UnitAI.commandMove(unit, autoMineTile, map);
+            // Check if mine tile is in a tunnel — route underground if so
+            const mineTileKey = `${autoMineTile.q},${autoMineTile.r}`;
+            const mineTileData = map.tiles.get(mineTileKey);
+            const needsUnderground = mineTileData?.hasTunnel === true;
+            UnitAI.commandMove(unit, autoMineTile, map, needsUnderground);
             // If pathfinding failed, blacklist this mine temporarily
             if (unit.state === UnitState.IDLE) {
               UnitAI.claimedMines.delete(claimKey);
@@ -519,7 +572,7 @@ export class UnitAI {
       }
 
       // Player builders: check for wall building (skip if disableBuild)
-      if (wallSpot && unit.owner === 0) {
+      if (wallSpot && !player.isAI) {
         const dist = Pathfinder.heuristic(unit.position, wallSpot);
         if (dist <= 1) {
           unit.state = UnitState.BUILDING;
@@ -541,7 +594,7 @@ export class UnitAI {
       // Player lumberjacks: only chop trees (mining is for builders)
       let forestTile: HexCoord | null = null;
 
-      if (unit.owner === 0 && UnitAI.playerHarvestBlueprint.size > 0) {
+      if (!player.isAI && UnitAI.playerHarvestBlueprint.size > 0) {
         forestTile = UnitAI.findNearestHarvestBlueprint(unit, map);
       }
 
@@ -658,8 +711,8 @@ export class UnitAI {
       // Detection ranges per unit type
       const detectionRange = UnitAI.getDetectionRange(unit);
 
-      // PLAYER combat units: behavior depends on stance
-      if (unit.owner === 0) {
+      // PLAYER (human) combat units: behavior depends on stance
+      if (!player.isAI) {
         // PASSIVE: never attack, just stand still
         if (unit.stance === UnitStance.PASSIVE) {
           return;
@@ -949,7 +1002,7 @@ export class UnitAI {
       if (!rallyPoint) return;
 
       const idleCombat = allUnits.filter(u =>
-        u.owner === unit.owner && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
+        u.owner === unit.owner && !UnitAI.isDead(u) && UnitAI.isCombatUnit(u)
       );
       const distToRally = Pathfinder.heuristic(unit.position, rallyPoint);
 
@@ -1381,11 +1434,13 @@ export class UnitAI {
    */
   static generateKeepWallPlan(owner: number, basePos: HexCoord, map: GameMap): void {
     // Only generate auto-plans for AI players
-    if (owner === 0) return;
+    // In AI vs AI mode both players are AI, so check the players map
+    const ownerPlayer = UnitAI.players?.get(owner);
+    if (ownerPlayer && !ownerPlayer.isAI) return;
 
     // Scan from near the base out to just past the map midpoint
     // to find the tightest choke point in mountain passes through ridges
-    const dir = owner === 0 ? 1 : -1;
+    const dir = owner === 0 ? 1 : -1;  // Player 0 scans right, player 1 scans left (toward enemy)
     const SCAN_MIN = 5;
     const midQ = Math.floor(map.width / 2);
     // Scan up to the midpoint of the map (or a bit past it)
@@ -1508,8 +1563,9 @@ export class UnitAI {
   }
 
   private static findWallSpot(unit: Unit, map: GameMap): HexCoord | null {
-    if (unit.owner === 0) {
-      // Player builders: use the player's blueprint queue
+    const ownerPlayer = UnitAI.players.get(unit.owner);
+    if (ownerPlayer && !ownerPlayer.isAI) {
+      // Human player builders: use the player's blueprint queue
       return UnitAI.findBlueprintSpot(unit, map);
     } else {
       // AI builders: use auto-generated plan
@@ -1836,13 +1892,19 @@ export class UnitAI {
       // Classify what this tile yields — check gem blocks in tunnels, tile.resource, then terrain
       let tileResource = 'stone'; // default
 
-      // Tunnel tiles with gem ore blocks → crystal (high value, all maps)
-      const hasGemBlock = tile.hasTunnel && tile.voxelData.blocks.some(b =>
+      // Check actual block types for high-value resources
+      const hasGemBlock = tile.voxelData.blocks.some(b =>
         b.type === BlockType.GEM_RUBY || b.type === BlockType.GEM_EMERALD ||
         b.type === BlockType.GEM_SAPPHIRE || b.type === BlockType.GEM_AMETHYST
       );
+      const hasIronBlock = tile.voxelData.blocks.some(b => b.type === BlockType.IRON);
+      const hasGoldBlock = tile.voxelData.blocks.some(b => b.type === BlockType.GOLD);
       if (hasGemBlock) {
         tileResource = 'crystal';
+      } else if (hasIronBlock) {
+        tileResource = 'iron';
+      } else if (hasGoldBlock) {
+        tileResource = 'gold';
       } else if (tile.resource === ResourceType.CRYSTAL) {
         tileResource = 'crystal';
       } else if (tile.resource === ResourceType.IRON) {
@@ -1925,6 +1987,7 @@ export class UnitAI {
           const threatDist = Pathfinder.heuristic(unit.position, threat.position);
           if (threatDist <= unit.stats.range) {
             // Can fire right now — switch to attacking (leave squad)
+            UnitAI.rechargeBerserkerAxeThrow(unit, threat.id);
             unit.state = UnitState.ATTACKING;
             unit.targetPosition = null;
             unit._path = null;
@@ -1989,7 +2052,7 @@ export class UnitAI {
       // BUT NOT while kiting — kiting archers must complete their flee before re-engaging
       if (unit.stats.range > 1 && unit.command?.type === CommandType.ATTACK && unit.command.targetUnitId && !unit._isKiting) {
         const attackTarget = allUnits.find(u => u.id === unit.command!.targetUnitId);
-        if (attackTarget && attackTarget.state !== UnitState.DEAD) {
+        if (attackTarget && !UnitAI.isDead(attackTarget)) {
           const rangeDist = Pathfinder.heuristic(unit.position, attackTarget.position);
           if (rangeDist <= unit.stats.range) {
             // In range — switch to attacking
@@ -2043,7 +2106,16 @@ export class UnitAI {
       }
     } else {
       // Move toward target — use squad march speed if assigned, otherwise individual speed
-      const effectiveSpeed = (unit._squadId && unit._squadSpeed) ? unit._squadSpeed : unit.moveSpeed;
+      let effectiveSpeed = (unit._squadId && unit._squadSpeed) ? unit._squadSpeed : unit.moveSpeed;
+      // Berserker slow debuff — reduce speed while debuffed
+      const nowMs = performance.now();
+      if (unit._slowUntil && nowMs < unit._slowUntil && unit._slowFactor) {
+        effectiveSpeed *= unit._slowFactor;
+      }
+      // Berserker chase boost — increase speed while chasing slowed target
+      if (unit._chaseBoostUntil && nowMs < unit._chaseBoostUntil) {
+        effectiveSpeed *= 1.6;
+      }
       const speed = effectiveSpeed * delta;
       let moveX = (dx / dist) * Math.min(speed, dist);
       let moveZ = (dz / dist) * Math.min(speed, dist);
@@ -2052,7 +2124,7 @@ export class UnitAI {
       const SEPARATION_RADIUS = 0.8;
       const SEPARATION_FORCE = 0.3;
       for (const other of allUnits) {
-        if (other === unit || other.state === UnitState.DEAD) continue;
+        if (other === unit || UnitAI.isDead(other)) continue;
         const sx = unit.worldPosition.x - other.worldPosition.x;
         const sz = unit.worldPosition.z - other.worldPosition.z;
         const sDist = Math.sqrt(sx * sx + sz * sz);
@@ -2086,13 +2158,14 @@ export class UnitAI {
 
     // Find the target
     const target = allUnits.find(u => u.id === unit.command!.targetUnitId);
-    if (!target || target.state === UnitState.DEAD) {
+    if (!target || UnitAI.isDead(target)) {
       // Target dead — immediately look for another nearby enemy to chain attacks
       const detRange = UnitAI.getDetectionRange(unit);
       const nextEnemy = UnitAI.findBestTarget(unit, allUnits, player.id, detRange);
       if (nextEnemy && map) {
         const nextDist = Pathfinder.heuristic(unit.position, nextEnemy.position);
         if (nextDist <= unit.stats.range) {
+          UnitAI.rechargeBerserkerAxeThrow(unit, nextEnemy.id);
           unit.command = { type: CommandType.ATTACK, targetPosition: nextEnemy.position, targetUnitId: nextEnemy.id };
           // Continue attacking immediately — don't drop to IDLE
           return;
@@ -2115,7 +2188,7 @@ export class UnitAI {
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
         const result = CombatSystem.resolve(unit, target, allUnits, map);
         const applyInfo = CombatSystem.apply(unit, target, result);
-        unit.attackCooldown = 1 / unit.attackSpeed;
+        unit.attackCooldown = UnitAI.getAttackCooldown(unit);
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
         events.push({ type: 'combat', attacker: unit, defender: target, result });
         // XP and level-up events
@@ -2128,7 +2201,7 @@ export class UnitAI {
         const isTileBlocked = (q: number, r: number) => {
           const k = `${q},${r}`;
           if (Pathfinder.blockedTiles.has(k)) return true;
-          return allUnits.some(u => u.position.q === q && u.position.r === r && u.state !== UnitState.DEAD && u !== target);
+          return allUnits.some(u => u.position.q === q && u.position.r === r && !UnitAI.isDead(u) && u !== target);
         };
         const cleaveResults = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked);
         for (const cr of cleaveResults) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
@@ -2136,7 +2209,12 @@ export class UnitAI {
         const bashResult = CombatSystem.applyShieldBash(unit, target, isTileBlocked);
         if (bashResult) events.push({ type: 'combat:cleave', unitId: bashResult.unitId, knockQ: bashResult.knockQ, knockR: bashResult.knockR } as any);
         if (!result.defenderSurvived) {
-          target.state = UnitState.DEAD;
+          // Ranged kills: defer DEAD state until projectile lands (avoids "frozen unit" visual)
+          if (unit.stats.range > 1) {
+            target._pendingRangedDeath = true;
+          } else {
+            target.state = UnitState.DEAD;
+          }
           unit.kills = (unit.kills ?? 0) + 1;
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
@@ -2174,7 +2252,7 @@ export class UnitAI {
       if (unit.attackCooldown <= 0) {
         const result = CombatSystem.resolve(unit, target, allUnits, map);
         const applyInfo2 = CombatSystem.apply(unit, target, result);
-        unit.attackCooldown = 1 / unit.attackSpeed;
+        unit.attackCooldown = UnitAI.getAttackCooldown(unit);
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
 
         events.push({ type: 'combat', attacker: unit, defender: target, result });
@@ -2188,7 +2266,7 @@ export class UnitAI {
         const isTileBlocked2 = (q: number, r: number) => {
           const k = `${q},${r}`;
           if (Pathfinder.blockedTiles.has(k)) return true;
-          return allUnits.some(u => u.position.q === q && u.position.r === r && u.state !== UnitState.DEAD && u !== target);
+          return allUnits.some(u => u.position.q === q && u.position.r === r && !UnitAI.isDead(u) && u !== target);
         };
         const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
         for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
@@ -2197,7 +2275,12 @@ export class UnitAI {
         if (bashResult2) events.push({ type: 'combat:cleave', unitId: bashResult2.unitId, knockQ: bashResult2.knockQ, knockR: bashResult2.knockR } as any);
 
         if (!result.defenderSurvived) {
-          target.state = UnitState.DEAD;
+          // Ranged kills: defer DEAD state until projectile lands (avoids "frozen unit" visual)
+          if (unit.stats.range > 1) {
+            target._pendingRangedDeath = true;
+          } else {
+            target.state = UnitState.DEAD;
+          }
           unit.kills = (unit.kills ?? 0) + 1;
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
@@ -2205,6 +2288,7 @@ export class UnitAI {
           unit.command = null;
         }
         if (!result.attackerSurvived) {
+          // Counter-kill is always "melee retaliation" — set DEAD immediately
           unit.state = UnitState.DEAD;
           target.kills = (target.kills ?? 0) + 1;
           CombatLog.logKill(target, unit);
@@ -2279,7 +2363,7 @@ export class UnitAI {
     const isUnderground = !!unit._underground;
 
     for (const other of allUnits) {
-      if (other.owner === playerId || other.state === UnitState.DEAD) continue;
+      if (other.owner === playerId || UnitAI.isDead(other)) continue;
       // Underground units only see underground enemies, surface only sees surface
       if (!!other._underground !== isUnderground) continue;
       const dist = Pathfinder.heuristic(unit.position, other.position);
@@ -2289,6 +2373,19 @@ export class UnitAI {
       }
     }
     return nearest;
+  }
+
+  /**
+   * Berserker axe throw recharge: if engaging a NEW unique target (not yet thrown at),
+   * set range back to 7 and mark throw as ready. No-op for non-berserkers.
+   */
+  static rechargeBerserkerAxeThrow(unit: Unit, targetId: string): void {
+    if (unit.type !== UnitType.BERSERKER) return;
+    if (!unit._axeThrowTargets) unit._axeThrowTargets = new Set();
+    if (unit._axeThrowTargets.has(targetId)) return; // already thrown at this target
+    // Recharge!
+    unit._axeThrowReady = true;
+    unit.stats.range = 7;
   }
 
   /** Is this unit a combat unit? Exclusion-based — new combat types auto-included */
@@ -2350,7 +2447,7 @@ export class UnitAI {
     // Count how many friendly units are already targeting each enemy
     const focusCount: Map<string, number> = new Map();
     for (const ally of allUnits) {
-      if (ally.owner !== playerId || ally.state === UnitState.DEAD || ally === unit) continue;
+      if (ally.owner !== playerId || UnitAI.isDead(ally) || ally === unit) continue;
       if (ally.command?.targetUnitId) {
         focusCount.set(ally.command.targetUnitId, (focusCount.get(ally.command.targetUnitId) ?? 0) + 1);
       }
@@ -2361,13 +2458,13 @@ export class UnitAI {
     const peelTargets: Set<string> = new Set();
     if (UnitAI.isTankPeeler(unit.type)) {
       for (const ally of allUnits) {
-        if (ally.owner !== playerId || ally.state === UnitState.DEAD || ally === unit) continue;
+        if (ally.owner !== playerId || UnitAI.isDead(ally) || ally === unit) continue;
         if (!UnitAI.isRangedKiter(ally.type) && ally.type !== UnitType.HEALER) continue;
         const allyDist = Pathfinder.heuristic(unit.position, ally.position);
         if (allyDist > 4) continue; // only peel for nearby squishies
         // Find enemies targeting this squishy
         for (const enemy of allUnits) {
-          if (enemy.owner === playerId || enemy.state === UnitState.DEAD) continue;
+          if (enemy.owner === playerId || UnitAI.isDead(enemy)) continue;
           if (enemy.command?.targetUnitId === ally.id) {
             peelTargets.add(enemy.id);
           }
@@ -2379,7 +2476,7 @@ export class UnitAI {
     let bestScore = Infinity;
 
     for (const other of allUnits) {
-      if (other.owner === playerId || other.state === UnitState.DEAD) continue;
+      if (other.owner === playerId || UnitAI.isDead(other)) continue;
       // Underground units only fight underground enemies, surface only fights surface
       if (!!other._underground !== isUnderground) continue;
       const dist = Pathfinder.heuristic(unit.position, other.position);
@@ -2427,7 +2524,7 @@ export class UnitAI {
       if (peelTargets.size > 0 && peelTargets.has(bestEnemy.id)) {
         // Find which squishy we're peeling for
         for (const ally of allUnits) {
-          if (ally.owner !== playerId || ally.state === UnitState.DEAD) continue;
+          if (ally.owner !== playerId || UnitAI.isDead(ally)) continue;
           if (!UnitAI.isRangedKiter(ally.type) && ally.type !== UnitType.HEALER) continue;
           if (bestEnemy.command?.targetUnitId === ally.id) {
             CombatLog.logPeel(unit, bestEnemy, ally);
@@ -2447,7 +2544,7 @@ export class UnitAI {
     let closest: Unit | null = null;
     let closestDist = Infinity;
     for (const other of allUnits) {
-      if (other.owner === unit.owner || other.state === UnitState.DEAD) continue;
+      if (other.owner === unit.owner || UnitAI.isDead(other)) continue;
       if (other.stats.range > 1) continue; // Only melee threats
       const dist = Pathfinder.heuristic(unit.position, other.position);
       if (dist <= kiteRange && dist < closestDist) {

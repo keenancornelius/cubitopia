@@ -1157,6 +1157,30 @@ export class MapGenerator {
         maxNeighborElev,
       );
 
+      // === Iron ore veins: inject BlockType.IRON into mountain tiles with iron resource ===
+      if (tile.resource === ResourceType.IRON && tile.terrain === TerrainType.MOUNTAIN) {
+        const blocks = tile.voxelData.blocks;
+        // Replace ~30% of subsurface stone blocks (y < elevation-2) with iron ore
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const b = blocks[bi];
+          if (b.type === BlockType.STONE && b.localPosition.y < tile.elevation - 2 && this.rng.next() < 0.30) {
+            b.type = BlockType.IRON;
+          }
+        }
+      }
+
+      // === Gold ore veins: inject BlockType.GOLD into desert tiles with gold resource ===
+      if (tile.resource === ResourceType.GOLD && tile.terrain === TerrainType.DESERT) {
+        const blocks = tile.voxelData.blocks;
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const b = blocks[bi];
+          if ((b.type === BlockType.SAND || b.type === BlockType.DIRT || b.type === BlockType.STONE)
+              && b.localPosition.y < tile.elevation - 2 && this.rng.next() < 0.20) {
+            b.type = BlockType.GOLD;
+          }
+        }
+      }
+
       // Recalculate elevation from actual block positions — ridges are real terrain.
       // This means tile.elevation reflects the TRUE highest point including ridges,
       // not just the base surface level.
@@ -1925,7 +1949,7 @@ export class MapGenerator {
         });
 
         // === Gem vein placement: small pockets on tunnel walls ===
-        if (!isCaveMouth && this.rng.next() < 0.12) {
+        if (!isCaveMouth && this.rng.next() < 0.25) {
           // Place a small cluster of gem blocks on the floor or ceiling edge
           const gemType = this.rng.next() < 0.75 ? primaryGem : secondaryGem;
           const isFloor = this.rng.next() < 0.5;

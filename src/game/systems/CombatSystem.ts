@@ -13,6 +13,7 @@ export interface CombatResult {
   defenderSurvived: boolean;
   experienceGained: number;
   deflected?: boolean;  // True when a shield unit deflects a ranged attack
+  blocked?: boolean;    // True when defender parries a melee attack (reduced damage + block anim)
 }
 
 export class CombatSystem {
@@ -50,6 +51,10 @@ export class CombatSystem {
 
     // --- Berserker Rage: bonus attack scaling with missing HP ---
     if (attacker.type === UnitType.BERSERKER) {
+      // Axe throw (ranged opener) deals reduced damage — 40% of base attack
+      if (attacker._axeThrowReady) {
+        atkStat = Math.ceil(atkStat * 0.4);
+      }
       const missingHpRatio = 1 - (attacker.currentHealth / attacker.stats.maxHealth);
       atkStat += Math.round(missingHpRatio * 4); // Up to +4 attack at 1 HP
     }
@@ -59,10 +64,10 @@ export class CombatSystem {
       atkStat += 3; // Ambush bonus
     }
 
-    // --- Shieldbearer Aura: adjacent allies get +2 defense ---
-    if (allUnits && defender.type !== UnitType.SHIELDBEARER) {
+    // --- Paladin Holy Aura: adjacent allies get +2 defense ---
+    if (allUnits && defender.type !== UnitType.PALADIN) {
       for (const ally of allUnits) {
-        if (ally.type === UnitType.SHIELDBEARER && ally.owner === defender.owner &&
+        if (ally.type === UnitType.PALADIN && ally.owner === defender.owner &&
             ally.currentHealth > 0 && ally !== defender) {
           const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
           if (dist <= 2) {
@@ -82,9 +87,28 @@ export class CombatSystem {
 
     let defenderDamage = Math.round(attackerRatio * atkStat * 4.5);
 
-    // --- Shield Deflect: shieldbearers and paladins take 80% reduced damage from ranged attacks ---
+    // --- Shared flags ---
     const isRangedAttacker = attacker.stats.range > 1;
     const isShieldDefender = defender.type === UnitType.SHIELDBEARER || defender.type === UnitType.PALADIN;
+
+    // --- Melee Block/Parry: melee defenders can block melee attacks ---
+    // Block chance scales with defender's defense stat: ~15% at def=1, ~40% at def=6, ~55% at def=10
+    // Shieldbearers/paladins get a flat +15% bonus. Assassins can't be blocked (too fast).
+    const isMeleeAttacker = attacker.stats.range <= 1;
+    const isMeleeDefender = defender.stats.range <= 1 || isShieldDefender;
+    const isUnblockable = attacker.type === UnitType.ASSASSIN;
+    let blocked = false;
+    if (isMeleeAttacker && isMeleeDefender && !isUnblockable) {
+      const baseBlockChance = Math.min(0.55, 0.1 + defStat * 0.05);
+      const shieldBonus = isShieldDefender ? 0.15 : 0;
+      const blockChance = Math.min(0.65, baseBlockChance + shieldBonus);
+      if (Math.random() < blockChance) {
+        blocked = true;
+        defenderDamage = Math.max(1, Math.round(defenderDamage * 0.35)); // 65% damage reduction on block
+      }
+    }
+
+    // --- Shield Deflect: shieldbearers and paladins take 80% reduced damage from ranged attacks ---
     const deflected = isRangedAttacker && isShieldDefender;
     if (deflected) {
       defenderDamage = Math.max(1, Math.round(defenderDamage * 0.2)); // 80% reduction, min 1
@@ -106,6 +130,7 @@ export class CombatSystem {
       defenderSurvived: defenderHealth > 0,
       experienceGained: defenderHealth <= 0 ? 3 : 1,
       deflected,
+      blocked,
     };
   }
 
@@ -137,31 +162,46 @@ export class CombatSystem {
   }
 
   /**
-   * Healer tick — heal adjacent allies each frame.
-   * Returns array of healed unit IDs (for VFX).
+   * Healer tick — caster heal: picks the most-injured ally in range,
+   * fires a heal projectile at them. Returns single-element array with
+   * the target ID (for VFX projectile) or empty if no valid target.
+   * Actual HP is applied on projectile impact (deferred via event).
    */
   static processHealerTick(healer: Unit, allUnits: Unit[], delta: number): string[] {
     if (healer.type !== UnitType.HEALER || healer.currentHealth <= 0) return [];
-    // Heal cooldown reuse: healers "attack" to heal
     healer.attackCooldown -= delta;
     if (healer.attackCooldown > 0) return [];
-    healer.attackCooldown = 1.5; // Heal every 1.5 seconds
 
-    const healed: string[] = [];
     const healRange = healer.stats.range; // 2 hex range
-    const healAmount = 2;
+    let bestTarget: Unit | null = null;
+    let bestScore = -Infinity;
 
     for (const ally of allUnits) {
       if (ally.owner !== healer.owner || ally === healer || ally.currentHealth <= 0) continue;
       if (ally.currentHealth >= ally.stats.maxHealth) continue;
       const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, healer.position.q, healer.position.r);
-      if (dist <= healRange) {
-        ally.currentHealth = Math.min(ally.stats.maxHealth, ally.currentHealth + healAmount);
-        healed.push(ally.id);
-        CombatLog.logHeal(healer, ally, healAmount);
-      }
+      if (dist > healRange) continue;
+      // Score: prioritize lowest HP ratio, break ties by proximity
+      const hpMissing = 1 - (ally.currentHealth / ally.stats.maxHealth);
+      const score = hpMissing * 10 - dist;
+      if (score > bestScore) { bestScore = score; bestTarget = ally; }
     }
-    return healed;
+
+    if (!bestTarget) return [];
+    healer.attackCooldown = 2.0; // Slightly longer cooldown for projectile heal
+    return [bestTarget.id]; // Single target — projectile handles HP on impact
+  }
+
+  /**
+   * Apply heal HP on projectile impact (called when heal orb arrives).
+   */
+  static applyHeal(healer: Unit, target: Unit): number {
+    if (target.currentHealth <= 0 || target.currentHealth >= target.stats.maxHealth) return 0;
+    const healAmount = 3; // Slightly stronger per-cast since it's single-target
+    const actual = Math.min(healAmount, target.stats.maxHealth - target.currentHealth);
+    target.currentHealth += actual;
+    CombatLog.logHeal(healer, target, actual);
+    return actual;
   }
 
   /**

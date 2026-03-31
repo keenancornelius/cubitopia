@@ -2154,7 +2154,7 @@ export class HUD {
               <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">5</div>
               <div>
                 <div class="unit-name" style="color:#3498db;">Paladin</div>
-                <div class="unit-desc">Heavy tank. 12 gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. Holds choke points.</div>
+                <div class="unit-desc">Holy knight. 12 gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. +2 defense aura to nearby allies. Mace smash. Holds choke points.</div>
               </div>
             </div>
             <div class="unit-row">
@@ -2182,14 +2182,14 @@ export class HUD {
               <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. +2 defense aura, shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
+                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. Shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#e74c3c;">🪓</div>
               <div>
                 <div class="unit-name" style="color:#e74c3c;">Berserker</div>
-                <div class="unit-desc">Melee DPS. 7g + 2 steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +4 attack at low HP (rage). Dual axes.</div>
+                <div class="unit-desc">Melee DPS. 7g + 2 steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +4 attack at low HP (rage). Ranged axe throw (range 7) once per unique target — slows enemy &amp; boosts chase speed. Deflected by shields.</div>
               </div>
             </div>
             <div class="unit-row">

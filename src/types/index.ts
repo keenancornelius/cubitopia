@@ -198,7 +198,18 @@ export interface Unit {
   _squadId?: number | null;         // Squad assignment — units in same squad march together
   _squadSpeed?: number;             // Effective march speed (slowest unit in squad)
   _isKiting?: boolean;              // Ranged unit is fleeing from melee threat — don't re-aggro
+  _pendingRangedDeath?: boolean;    // Unit killed by ranged attack — defer DEAD state until projectile lands
   kills: number;                    // Total kills this unit has scored
+  element?: ElementType;            // Elemental affinity (mages only — determines projectile/impact visuals)
+
+  // --- Debuff system ---
+  _slowUntil?: number;              // Timestamp (performance.now ms) until which unit is slowed
+  _slowFactor?: number;             // Movement speed multiplier while slowed (e.g., 0.4 = 40% speed)
+
+  // --- Berserker axe throw ---
+  _axeThrowReady?: boolean;        // true = berserker has ranged axe throw available (range 7, resets to melee after use)
+  _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)
+  _chaseBoostUntil?: number;       // Timestamp until which berserker has chase speed boost
 }
 
 export enum UnitType {
@@ -220,6 +231,15 @@ export enum UnitType {
   BERSERKER = 'berserker',
   BATTLEMAGE = 'battlemage',
   GREATSWORD = 'greatsword',
+}
+
+/** Elemental damage types — mage-only for now */
+export enum ElementType {
+  FIRE = 'fire',
+  WATER = 'water',
+  LIGHTNING = 'lightning',
+  WIND = 'wind',
+  EARTH = 'earth',
 }
 
 export interface ResourceNode {

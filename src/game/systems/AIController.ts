@@ -546,7 +546,7 @@ export default class AIController {
     // ===== Combat unit census =====
     const combatUnits = player.units.filter(u =>
       u.type !== UnitType.BUILDER && u.type !== UnitType.LUMBERJACK && u.type !== UnitType.VILLAGER
-      && u.state !== UnitState.DEAD
+      && !UnitAI.isDead(u)
     );
     const idleCombat = combatUnits.filter(u => u.state === UnitState.IDLE);
     const totalAlive = combatUnits.length;
@@ -800,12 +800,12 @@ export default class AIController {
     if (!base) return;
 
     const combatUnits = player.units.filter(u =>
-      u.state !== UnitState.DEAD &&
+      !UnitAI.isDead(u) &&
       (u.type === UnitType.WARRIOR || u.type === UnitType.PALADIN ||
        u.type === UnitType.ARCHER || u.type === UnitType.RIDER)
     );
     const workers = player.units.filter(u =>
-      u.state !== UnitState.DEAD &&
+      !UnitAI.isDead(u) &&
       (u.type === UnitType.BUILDER || u.type === UnitType.LUMBERJACK || u.type === UnitType.VILLAGER)
     );
 
@@ -823,7 +823,7 @@ export default class AIController {
     // Clean up dead guard assignments
     for (const [uid] of st.guardAssignments) {
       const u = player.units.find(c => c.id === uid);
-      if (!u || u.state === UnitState.DEAD) {
+      if (!u || UnitAI.isDead(u)) {
         st.guardAssignments.delete(uid);
       }
     }

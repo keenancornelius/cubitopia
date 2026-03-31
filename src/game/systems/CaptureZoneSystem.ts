@@ -119,7 +119,7 @@ export class CaptureZoneSystem {
       zone.unitCounts = [0, 0, 0];
       const baseY = zone.base.worldPosition.y;
       for (const unit of allUnits) {
-        if (unit.state === UnitState.DEAD) continue;
+        if (unit.state === UnitState.DEAD || unit._pendingRangedDeath) continue;
         if (unit._garrisoned) continue; // Garrisoned units don't count for zone capture
         if (unit.owner > 1) continue; // Only player 0 and 1
 

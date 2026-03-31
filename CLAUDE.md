@@ -71,6 +71,53 @@ After each commit, pause and run through these checks before moving on. This is 
 - Check if any Mistakes Log entries are now irrelevant (problem fully resolved, code deleted)
 
 If any check fails, fix it before starting the next task. The 5 minutes spent here saves hours of drift.
+
+---
+
+## Unit Model Design Philosophy — HIGHEST PRIORITY
+
+Unit models are the depth of this game. Model design is the single most important iterative step. Every unit must look distinctive, ornate, and visually rich at game zoom. Spare no expense — this is where we flex.
+
+### Geometry Rules
+- **Mixed geometry is allowed and encouraged.** Use BoxGeometry for structural armor/plates (keeps the voxel identity), CylinderGeometry/SphereGeometry/TorusGeometry for decorative and magical elements (halos, staff crystals, aura rings, orbs, shield bosses, mace heads, weapon handles).
+- **No lazy boxes.** A unit model should never be "a box with arms." Every unit needs layered detail: multiple armor plates at slight offsets, trim lines, emblems, weapon ornamentation, back-side detail.
+- **Back matters.** Players see the back of units as often as the front. Every model needs back detail: backplate, spine ridge, cloak drape, embroidered symbols, hood back, etc.
+
+### Model Construction Process (follow this order)
+1. **Silhouette pass** — Lay out big shapes (torso, head, arms, legs). Get proportions right for the unit's role: heavy units are wider/taller, light units are slim.
+2. **Layering pass** — Stack slightly offset boxes on structural surfaces for visual depth. Breastplate over torso, faceplate over helm, cuffs over sleeves.
+3. **Ornamentation pass** — Add gold trim, emblems (rotated box crosses/stars), studs, buckles, belt pouches. Use team color (`playerColor`) on tabards, belts, hoods.
+4. **Weapon pass** — Weapons need handles, grips, pommels, heads, and decorative elements. A mace needs flanges. A staff needs a crystal in a cradle. An axe needs a shaped head.
+5. **Back detail pass** — Backplate, spine/ridge, embroidered symbol, cloak/hood drape, matching trim.
+6. **Magical/aura pass** — If the unit has abilities, add visible aura elements: orbiting motes, floating halos (TorusGeometry or sphere and curve geometries), ground discs, crystal glows. Name these meshes for animation lookup.
+
+### Animation Quality Standards
+- **Every unit type needs unique idle, attack, move, and hit animations.** No falling through to `default` for important units.
+- **Idle must have character:** breathing sway, subtle weapon drift, weight shifting. Shield units hold shield high. Casters have palm glow pulse. Staff-wielders have crystal shimmer.
+- **Attack animations need phases:** wind-up (coil) → strike/release → impact hold (with tremor if melee) → smooth recovery. Use easing functions (ease-out for snappy strikes, smoothstep for recovery).
+- **Per-unit-type strike delay** (`CombatEventHandler.MELEE_STRIKE_DELAY`): damage visuals must sync to the animation frame where the weapon connects. Never use a flat delay.
+- **Per-unit-type cooldown floor** (`UnitAI.MIN_ATTACK_COOLDOWN`): prevent re-attack before the animation cycle completes.
+- **Ambient effects run in ALL states** (not just idle): paladin motes orbit during combat, healer crystal pulses while moving.
+
+### VFX & Sound Standards
+- **Every combat interaction needs visual + audio feedback.** Projectile launch sound + impact sound. Melee hit flash + sound. Heal cast whoosh + impact splash.
+- **Projectiles need personality:** heal orbs are green with 6 shimmer sparkles and gentle arc. Attack orbs match element color. Arrows have fletching.
+- **Impact effects use particle systems:** water splash droplets with gravity, rising sparkle columns, expanding ring waves, damage flashes. Use `requestAnimationFrame` loops with lifetime management and cleanup.
+- **Synthesized sounds** (Web Audio API): layer oscillators + filtered noise for rich effects. Cast sounds = ascending shimmer sweep + bell chime. Impact sounds = choir chord + breath texture.
+
+### Naming Conventions for Animated Parts
+- Arms: `arm-left`, `arm-right` (via `makeArmGroup`)
+- Legs: `leg-left`, `leg-right` (via `makeLegGroup`)
+- Aura motes: `{unit}-mote-{index}` (e.g., `paladin-mote-0`, `healer-mote-2`)
+- Aura rings/halos: `{unit}-aura-ring`, `{unit}-halo`
+- Weapon glows: `heal-crystal`, `heal-palm-orb`, `heal-crystal-glow`
+
+### Optimization Notes
+- Reuse materials across similar geometry (one gold `MeshLambertMaterial` for all trim on a unit).
+- Use `MeshBasicMaterial` only for emissive/glow elements; `MeshLambertMaterial` for everything else (cheaper than Standard).
+- Keep SphereGeometry/CylinderGeometry segment counts low (6-8 segments) — these are voxel-scale objects.
+- Particle systems must self-cleanup via `requestAnimationFrame` loops with bounded lifetimes. Always dispose geometry + material on removal.
+
 ---
 
 ## Project Architecture
@@ -163,7 +210,7 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 | Healer | HEALER | Support | Auto-heals allies in range 2 (2 HP/1.5s) |
 | Assassin | ASSASSIN | Burst DPS | +3 attack from full HP, oversized poison daggers |
 | Shieldbearer | SHIELDBEARER | Tank/Peeler | Heater shield bash + knockback, +2 defense aura, peels for squishies |
-| Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP |
+| Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP, ranged axe throw (range 7) once per unique target (slows + chase boost), deflected by shields |
 | Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
 | Greatsword | GREATSWORD | Cleave melee | Massive claymore, 360° spin hits all adjacent, knockback |
 

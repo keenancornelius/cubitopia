@@ -21,7 +21,7 @@ type SoundName =
   | 'ui_click' | 'ui_hover'
   | 'battle_start' | 'level_up'
   | 'queue_confirm' | 'queue_error' | 'craft_confirm'
-  | 'unit_spawn' | 'shield_deflect';
+  | 'unit_spawn' | 'shield_deflect' | 'heal_cast';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -84,6 +84,7 @@ export default class SoundManager {
       case 'craft_confirm': this.synthCraftConfirm(vol); break;
       case 'unit_spawn':    this.synthUnitSpawn(vol); break;
       case 'shield_deflect': this.synthShieldDeflect(vol); break;
+      case 'heal_cast': this.synthHealCast(vol); break;
     }
   }
 
@@ -490,6 +491,40 @@ export default class SoundManager {
     amGain.gain.setValueAtTime(vol * 0.015, t);
     vibLfo.connect(amGain);
     vibLfo.start(); vibLfo.stop(t + 0.7);
+  }
+
+  /** Heal cast whoosh — short magical ascending shimmer when orb launches */
+  private synthHealCast(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+
+    // Ascending shimmer sweep (filtered noise rising in pitch)
+    const sweepSrc = ctx.createBufferSource();
+    sweepSrc.buffer = this.noiseBuffer!;
+    const sweepFilter = ctx.createBiquadFilter();
+    sweepFilter.type = 'bandpass';
+    sweepFilter.frequency.setValueAtTime(400, t);
+    sweepFilter.frequency.exponentialRampToValueAtTime(2400, t + 0.25); // sweep up
+    sweepFilter.Q.setValueAtTime(3, t);
+    const sweepGain = ctx.createGain();
+    sweepGain.gain.setValueAtTime(0.001, t);
+    sweepGain.gain.linearRampToValueAtTime(vol * 0.08, t + 0.05);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+    sweepSrc.connect(sweepFilter).connect(sweepGain).connect(ctx.destination);
+    sweepSrc.start(); sweepSrc.stop(t + 0.35);
+
+    // Quick bell-like chime (two harmonics)
+    for (const freq of [880, 1320]) { // A5, E6
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.linearRampToValueAtTime(vol * 0.06, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + 0.3);
+    }
   }
 
   /** AoE splash: initial blast + shockwave ring + secondary pops */
