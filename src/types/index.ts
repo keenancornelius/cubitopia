@@ -197,6 +197,7 @@ export interface Unit {
   _garrisonKey?: string;            // Hex key "q,r" of the structure they're garrisoned in
   _squadId?: number | null;         // Squad assignment — units in same squad march together
   _squadSpeed?: number;             // Effective march speed (slowest unit in squad)
+  _isKiting?: boolean;              // Ranged unit is fleeing from melee threat — don't re-aggro
   kills: number;                    // Total kills this unit has scored
 }
 

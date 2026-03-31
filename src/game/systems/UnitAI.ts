@@ -699,6 +699,7 @@ export class UnitAI {
                 if (fleeTile) {
                   CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
                   UnitAI.commandMove(unit, fleeTile, map);
+                  unit._isKiting = true;
                   unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
                   return;
                 } else {
@@ -771,6 +772,7 @@ export class UnitAI {
               if (fleeTile) {
                 CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
                 UnitAI.commandMove(unit, fleeTile, map);
+                unit._isKiting = true;
                 unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
                 return;
               } else {
@@ -877,6 +879,7 @@ export class UnitAI {
             if (fleeTile) {
               CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
               UnitAI.commandMove(unit, fleeTile, map);
+              unit._isKiting = true;
               unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
               return;
             } else {
@@ -1880,12 +1883,14 @@ export class UnitAI {
   private static handleMoving(unit: Unit, allUnits: Unit[], map: GameMap, delta: number, events: UnitEvent[]): void {
     if (!unit.targetPosition) {
       unit.state = UnitState.IDLE;
+      unit._isKiting = false;
       return;
     }
 
     // Re-aggro check: combat units on MOVE (not ATTACK) commands react to nearby threats
     // This gives natural "snap to target" behavior when enemies enter range while marching
-    if (UnitAI.isCombatUnit(unit) && !UnitAI.debugFlags.disableCombat) {
+    // Skip re-aggro when unit is actively kiting — let the flee complete first
+    if (UnitAI.isCombatUnit(unit) && !UnitAI.debugFlags.disableCombat && !unit._isKiting) {
       const isAttackMove = unit.command?.type === CommandType.ATTACK;
       // Aggressive/attack-move units re-aggro on enemies entering weapon range
       // Defensive units only re-aggro if enemy is adjacent (range 1-2)
@@ -1960,7 +1965,8 @@ export class UnitAI {
       }
 
       // Ranged units with attack command: check if we're now in range to stop early
-      if (unit.stats.range > 1 && unit.command?.type === CommandType.ATTACK && unit.command.targetUnitId) {
+      // BUT NOT while kiting — kiting archers must complete their flee before re-engaging
+      if (unit.stats.range > 1 && unit.command?.type === CommandType.ATTACK && unit.command.targetUnitId && !unit._isKiting) {
         const attackTarget = allUnits.find(u => u.id === unit.command!.targetUnitId);
         if (attackTarget && attackTarget.state !== UnitState.DEAD) {
           const rangeDist = Pathfinder.heuristic(unit.position, attackTarget.position);
@@ -1997,6 +2003,7 @@ export class UnitAI {
             unit.state = UnitState.IDLE;
             unit.command = null;
             unit._path = null;
+            unit._isKiting = false;
             events.push({ type: 'unit:arrived', unit });
           }
         } else {
@@ -2004,12 +2011,13 @@ export class UnitAI {
           unit.targetPosition = nextWp;
         }
       } else {
-        // Reached final destination — leave squad
+        // Reached final destination — leave squad, clear kiting
         unit.targetPosition = null;
         unit.state = UnitState.IDLE;
         unit._path = null;
         unit._squadId = null;
         unit._squadSpeed = undefined;
+        unit._isKiting = false;
         events.push({ type: 'unit:arrived', unit });
       }
     } else {
@@ -2128,6 +2136,7 @@ export class UnitAI {
       if (fleeTile) {
         CombatLog.logKite(unit, meleeThreatAtk, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
         UnitAI.commandMove(unit, fleeTile, map!);
+        unit._isKiting = true;
         unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
         return;
       } else {
