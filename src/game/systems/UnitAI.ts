@@ -3,7 +3,6 @@
 // Handles unit movement, combat, and behaviors
 // ============================================
 
-import * as THREE from 'three';
 import { Unit, UnitType, UnitState, UnitStance, CommandType, HexCoord, GameMap, TerrainType, ResourceType, BlockType, Player, Base } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
