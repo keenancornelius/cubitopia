@@ -681,16 +681,16 @@ export class UnitAI {
         // DEFENSIVE stance: zone-defend behavior for ALL combat units
         // Units chase enemies that enter detection range, then return to their
         // command position when no enemies remain in range.
-        // Archers additionally kite melee threats.
+        // Ranged kiters (archers, mages, battlemages) flee melee threats.
         if (unit.stance === UnitStance.DEFENSIVE) {
           const enemy = UnitAI.findBestTarget(unit, allUnits, player.id, detectionRange);
 
           if (enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
 
-            // Ranged kiting: flee from ANY melee enemy within 2 hexes (not just current target)
+            // Ranged kiting: flee from ANY melee enemy within kite trigger range (weapon range + 1)
             if (UnitAI.isRangedKiter(unit.type)) {
-              const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
+              const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit));
               if (meleeThreat) {
                 if (!unit._postPosition) {
                   unit._postPosition = { ...unit.position };
@@ -766,7 +766,7 @@ export class UnitAI {
           if (UnitAI.isRangedKiter(unit.type) && enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
             // Ranged kiters in AGGRESSIVE: engage but still kite ANY melee threat nearby
-            const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
+            const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit));
             if (meleeThreat) {
               const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
               if (fleeTile) {
@@ -873,7 +873,7 @@ export class UnitAI {
 
         // AI ranged kiters flee ANY melee threat nearby (not just current target)
         if (UnitAI.isRangedKiter(unit.type)) {
-          const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
+          const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit));
           if (meleeThreat) {
             const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
             if (fleeTile) {
@@ -2088,7 +2088,7 @@ export class UnitAI {
     const dist = Pathfinder.heuristic(unit.position, target.position);
 
     // Ranged kiting: if ANY melee enemy is too close, fire then reposition
-    const meleeThreatAtk = (UnitAI.isRangedKiter(unit.type) && map) ? UnitAI.findNearestMeleeThreat(unit, allUnits, 4) : null;
+    const meleeThreatAtk = (UnitAI.isRangedKiter(unit.type) && map) ? UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit)) : null;
     if (meleeThreatAtk) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
@@ -2289,6 +2289,12 @@ export class UnitAI {
   static isRangedKiter(t: UnitType): boolean { return UnitAI.RANGED_KITERS.has(t); }
   static isTankPeeler(t: UnitType): boolean { return UnitAI.TANK_PEELERS.has(t); }
 
+  /** Kite trigger range — how close a melee enemy must be before a ranged kiter flees.
+   *  Scales with weapon range so all kiters react proportionally. */
+  private static getKiteTriggerRange(unit: Unit): number {
+    return unit.stats.range + 1;
+  }
+
   /** Get detection range for a unit type — how far it can "see" threats */
   private static getDetectionRange(unit: Unit): number {
     switch (unit.type) {
@@ -2410,10 +2416,12 @@ export class UnitAI {
 
   /**
    * Find a tile to kite to — move away from a melee threat while staying near max range.
-   * Archer flees AWAY from the enemy, trying to land at roughly weapon range distance.
+   * Ranged unit flees AWAY from a melee threat, trying to land at roughly weapon range distance.
+   * Scales with each unit's weapon range so mages, battlemages, and archers all kite correctly.
    */
   private static findKiteTile(unit: Unit, threat: Unit, map: GameMap): HexCoord | null {
     const fleeRange = unit.stats.range; // Try to get to max weapon range
+    const moveRange = unit.stats.movement + 1; // How far the unit can realistically reach
     // Direction away from the threat
     const dq = unit.position.q - threat.position.q;
     const dr = unit.position.r - threat.position.r;
@@ -2422,8 +2430,10 @@ export class UnitAI {
     let bestTile: HexCoord | null = null;
     let bestScore = -Infinity;
 
-    for (let aq = -3; aq <= 3; aq++) {
-      for (let ar = -3; ar <= 3; ar++) {
+    // Search radius scales with weapon range — long-range units can consider wider flee area
+    const searchRadius = Math.max(3, fleeRange);
+    for (let aq = -searchRadius; aq <= searchRadius; aq++) {
+      for (let ar = -searchRadius; ar <= searchRadius; ar++) {
         const q = unit.position.q + aq;
         const r = unit.position.r + ar;
         const key = `${q},${r}`;
@@ -2440,9 +2450,35 @@ export class UnitAI {
         const rangeFit = 1 - Math.abs(distFromThreat - fleeRange) * 0.5; // Prefer landing at weapon range
         const score = awayDot * 2 + rangeFit * 3 - distFromUs * 1.5;
 
-        if (score > bestScore && distFromUs <= 3 && distFromThreat >= 2) {
+        // Must be reachable (within moveRange) and land at least at weapon range from threat
+        if (score > bestScore && distFromUs <= moveRange && distFromThreat >= fleeRange) {
           bestScore = score;
           bestTile = { q, r };
+        }
+      }
+    }
+
+    // Fallback: if no tile at weapon range is reachable, accept anything farther than current position
+    if (!bestTile) {
+      const currentDist = Pathfinder.heuristic(unit.position, threat.position);
+      bestScore = -Infinity;
+      for (let aq = -moveRange; aq <= moveRange; aq++) {
+        for (let ar = -moveRange; ar <= moveRange; ar++) {
+          const q = unit.position.q + aq;
+          const r = unit.position.r + ar;
+          const key = `${q},${r}`;
+          const tile = map.tiles.get(key);
+          if (!tile || tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.MOUNTAIN
+              || tile.terrain === TerrainType.FOREST || Pathfinder.blockedTiles.has(key)) continue;
+          const distFromThreat = Pathfinder.heuristic({ q, r }, threat.position);
+          const distFromUs = Pathfinder.heuristic(unit.position, { q, r });
+          if (distFromUs > moveRange || distFromThreat <= currentDist) continue;
+          const awayDot = aq * Math.sign(dq) + ar * Math.sign(dr);
+          const score = awayDot * 2 + distFromThreat - distFromUs * 1.5;
+          if (score > bestScore) {
+            bestScore = score;
+            bestTile = { q, r };
+          }
         }
       }
     }
