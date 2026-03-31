@@ -76,14 +76,15 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3739 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Reduced from ~4205 after CombatEventHandler + SpawnQueueSystem extractions. Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated.
-- `src/game/systems/AIController.ts` — **AI brain (~1100 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, territory-first 3-phase commander (garrison → capture neutral zones → capital assault), guard tactics. Uses `AIBuildingOps` slim interface for building operations.
+- `src/main.ts` — **Central orchestrator (~3880 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Reduced from ~4205 after CombatEventHandler + SpawnQueueSystem extractions. Grew slightly with GarrisonSystem integration (~140 lines of ops wiring + wall/gate click detection). Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated.
+- `src/game/systems/AIController.ts` — **AI brain (~1149 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, territory-first 3-phase commander (garrison → capture neutral zones → capital assault), guard tactics, structure garrison (auto-garrisons archers/mages in gates). Uses `AIBuildingOps` + `AIGarrisonOps` slim interfaces.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~255 lines)**. Owns `placedBuildings[]`, `wallConnectable`, spawn index. Delegates mesh creation to BuildingMeshFactory. Syncs UnitAI.buildingPositions/buildingOwners on register/unregister.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~447 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
 - `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~346 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber) with collection notifications, crafting (rope, charcoal, steel smelting), stockpile visuals for all 10 resource types.
 - `src/game/systems/BuildingMeshFactory.ts` — **Pure mesh factories (~316 lines)**. Standalone functions for all building types (barracks, forestry, masonry, farmhouse, workshop, silo, smelter, armory, wizard_tower).
 - `src/game/systems/DefenseMeshFactory.ts` — **Pure mesh factories (~341 lines)**. Adaptive wall mesh and gate mesh with hex neighbor connectivity.
-- `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~317 lines)**. Friendly building tooltip (queue/demolish), enemy building tooltip (attack), base tooltip (capture zone/rally). Uses `TooltipOps` slim interface.
+- `src/game/systems/BuildingTooltipController.ts` — **Tooltip UI (~491 lines)**. Friendly building tooltip (queue/demolish/garrison), enemy building tooltip (attack), base tooltip (capture zone/rally), wall/gate tooltip (garrison). Uses `TooltipOps` slim interface.
+- `src/game/systems/GarrisonSystem.ts` — **Garrison mechanics (~539 lines)**. Units enter buildings (cap 10), gates (cap 5), walls (cap 2). Garrisoned units are hidden, fire ranged attacks at enemies, and can ungarrison at any connected exit point via wall network graph. Structure destruction ejects units with 20% HP damage. Uses `GarrisonOps` slim interface.
 - `src/game/systems/BlueprintSystem.ts` — **Visual markers (~392 lines)**. Wall blueprint ghosts, harvest markers, mine markers, farm patch markers, hover ghost lifecycle. Uses `BlueprintOps` slim interface.
 - `src/game/systems/FormationSystem.ts` — **Pure formation functions (~163 lines)**. Box, line, wedge, circle formations + hex ring helper + unit priority sorting. No class state.
 - `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~321 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
@@ -309,7 +310,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3739 after CombatEventHandler + SpawnQueueSystem extractions recovered ~466 lines from the 4205-line peak.
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3880 after CombatEventHandler + SpawnQueueSystem extractions recovered ~466 lines from the 4205-line peak. Garrison integration added ~140 lines (ops wiring + wall/gate click detection).
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -380,8 +381,22 @@ No remaining files to wire. Future extractions will target new code regions.
 - main.ts creates adapter in `initDebugController()` — all HUD debug button callbacks redirect to `this.debugController.*`
 - Methods: spawnUnit, spawnEnemyUnit, giveResources, killAllEnemy, damageBase, healSelected, buffSelected, teleportSelected, instantWin, instantLose, clearTrees, clearStones
 
+### GarrisonSystem Integration Notes
+- `garrison(units, structureKey)` hides units + adds to slot; `ungarrison(key, exitKey?)` releases at position
+- Wall network: BFS over hex-adjacent walls/gates/buildings. `getReachableExits()` returns all connected buildings/gates for exit-pick UI
+- `update(delta)` fires ranged attacks from garrisoned units every 2s. Archers/mages do full damage (3), others do 50%
+- `onStructureDestroyed(key)` ejects all garrisoned units with 20% HP collapse damage — called from CombatEventHandler when damage returns true
+- `cleanup()` on map regeneration — shows all hidden units before clearing
+- Garrisoned units have `_garrisoned = true` + `_garrisonKey` on the Unit interface. Skipped in UnitAI.update(), CaptureZoneSystem, and visual position updates
+- UnitRenderer.setVisible(id, bool) toggles mesh visibility for garrison hide/show
+- Wall/gate click detection added to main.ts terrain-info click handler (raycast against wallMeshes + gateMeshes)
+- Exit pick mode: `exitPickMode` flag + `exitPickSourceKey` — entered from tooltip "Exit At..." button, resolved on next hex click
+- AI Phase 1.5: AIController auto-garrisons idle archers/mages within 3 hex of friendly gates via `AIGarrisonOps.garrison()`
+- Capacity: buildings 10, gates 5, walls 2
+
 ### AIController Integration Notes
 - Uses `AIBuildingOps` slim interface instead of full BuildingSystem dependency
+- `setGarrisonOps()` wired after GarrisonSystem construction (avoids circular init)
 - main.ts provides adapter object delegating mesh builders + `registerBuilding` + `aiFindBuildTile`
 - All AI state lives in `aiController.aiState[pid]` — no AI state left in main.ts
 - `aiController.cleanup()` handles full reset on new game
