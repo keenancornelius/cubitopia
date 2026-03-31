@@ -2140,15 +2140,19 @@ export class UnitAI {
           unit.kills = (unit.kills ?? 0) + 1;
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
-          unit.state = UnitState.IDLE;
-          unit.command = null;
-          return;
         }
+        // Check attacker death too — mutual kills (e.g., rider kills target but dies
+        // to counter-damage) must process BOTH deaths or the attacker mesh lingers
         if (!result.attackerSurvived) {
           unit.state = UnitState.DEAD;
           target.kills = (target.kills ?? 0) + 1;
           CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
+          return;
+        }
+        if (!result.defenderSurvived) {
+          unit.state = UnitState.IDLE;
+          unit.command = null;
           return;
         }
       }

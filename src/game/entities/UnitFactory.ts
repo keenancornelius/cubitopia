@@ -94,7 +94,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 0, isSiege: false,
   },
   [UnitType.BATTLEMAGE]: {
-    stats: { maxHealth: 9, attack: 6, defense: 1, movement: 2, range: 3 },
+    stats: { maxHealth: 9, attack: 6, defense: 1, movement: 2, range: 4 },
     moveSpeed: 1.0, attackSpeed: 0.5, color: 0x7c4dff,
     carryCapacity: 0, isSiege: false,
   },
