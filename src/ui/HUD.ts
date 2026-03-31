@@ -2182,7 +2182,7 @@ export class HUD {
               <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. +2 defense aura, shield bash knockback. Peels for squishies.</div>
+                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. +2 defense aura, shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
               </div>
             </div>
             <div class="unit-row">

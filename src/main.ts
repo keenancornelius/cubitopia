@@ -1817,6 +1817,7 @@ class Cubitopia {
       flashUnit: (id, dur) => this.unitRenderer.flashUnit(id, dur),
       queueDeferredEffect: (delay, cb) => this.unitRenderer.queueDeferredEffect(delay, cb),
       fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
+      fireDeflectedArrow: (from, to, id, cb) => this.unitRenderer.fireDeflectedArrow(from, to, id, cb),
       fireMagicOrb: (from, to, color, id, splash, cb) => this.unitRenderer.fireMagicOrb(from, to, color, id, splash, cb),
       fireBoulder: (from, to, cb) => this.unitRenderer.fireBoulder(from, to, cb),
       fireProjectile: (from, to, color, id, cb) => this.unitRenderer.fireProjectile(from, to, color, id, cb),

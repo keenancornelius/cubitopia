@@ -21,7 +21,7 @@ type SoundName =
   | 'ui_click' | 'ui_hover'
   | 'battle_start' | 'level_up'
   | 'queue_confirm' | 'queue_error' | 'craft_confirm'
-  | 'unit_spawn';
+  | 'unit_spawn' | 'shield_deflect';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -83,6 +83,7 @@ export default class SoundManager {
       case 'queue_error':   this.synthQueueError(vol); break;
       case 'craft_confirm': this.synthCraftConfirm(vol); break;
       case 'unit_spawn':    this.synthUnitSpawn(vol); break;
+      case 'shield_deflect': this.synthShieldDeflect(vol); break;
     }
   }
 
@@ -778,6 +779,36 @@ export default class SoundManager {
     thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
     thud.connect(thudG).connect(ctx.destination);
     thud.start(); thud.stop(t + 0.12);
+  }
+
+  /** Shield deflect: sharp metallic ping + ricochet whine — arrow bouncing off metal */
+  private synthShieldDeflect(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Layer 1: Sharp metallic ping — high sine with fast decay
+    const ping = ctx.createOscillator();
+    ping.type = 'sine';
+    ping.frequency.setValueAtTime(this.vary(3200), t);
+    ping.frequency.exponentialRampToValueAtTime(this.vary(1800), t + 0.06);
+    const pingG = ctx.createGain();
+    pingG.gain.setValueAtTime(vol * 0.3, t);
+    pingG.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    ping.connect(pingG).connect(ctx.destination);
+    ping.start(); ping.stop(t + 0.15);
+    // Layer 2: Metallic resonance — triangle wave overtone
+    const ring = ctx.createOscillator();
+    ring.type = 'triangle';
+    ring.frequency.setValueAtTime(this.vary(4800), t);
+    ring.frequency.exponentialRampToValueAtTime(2400, t + 0.08);
+    const ringG = ctx.createGain();
+    ringG.gain.setValueAtTime(vol * 0.12, t);
+    ringG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+    ring.connect(ringG).connect(ctx.destination);
+    ring.start(); ring.stop(t + 0.12);
+    // Layer 3: Brief clatter (filtered noise — arrow clattering away)
+    this.filteredNoise('bandpass', this.vary(4000), 4, vol * 0.15, 0.01, 0.06);
+    // Layer 4: Low shield thump
+    this.envTone(this.vary(120), 'sine', vol * 0.15, 0.002, 0.08, { freqEnd: 60 });
   }
 
   /** Battle start: war horn fanfare — 3 layered ascending notes with harmonics */

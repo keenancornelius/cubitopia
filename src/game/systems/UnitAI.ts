@@ -690,7 +690,7 @@ export class UnitAI {
 
             // Ranged kiting: flee from ANY melee enemy within 2 hexes (not just current target)
             if (UnitAI.isRangedKiter(unit.type)) {
-              const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+              const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
               if (meleeThreat) {
                 if (!unit._postPosition) {
                   unit._postPosition = { ...unit.position };
@@ -765,7 +765,7 @@ export class UnitAI {
           if (UnitAI.isRangedKiter(unit.type) && enemy) {
             const dist = Pathfinder.heuristic(unit.position, enemy.position);
             // Ranged kiters in AGGRESSIVE: engage but still kite ANY melee threat nearby
-            const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+            const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
             if (meleeThreat) {
               const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
               if (fleeTile) {
@@ -871,7 +871,7 @@ export class UnitAI {
 
         // AI ranged kiters flee ANY melee threat nearby (not just current target)
         if (UnitAI.isRangedKiter(unit.type)) {
-          const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 2);
+          const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, 4);
           if (meleeThreat) {
             const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
             if (fleeTile) {
@@ -2080,7 +2080,7 @@ export class UnitAI {
     const dist = Pathfinder.heuristic(unit.position, target.position);
 
     // Ranged kiting: if ANY melee enemy is too close, fire then reposition
-    const meleeThreatAtk = (UnitAI.isRangedKiter(unit.type) && map) ? UnitAI.findNearestMeleeThreat(unit, allUnits, 2) : null;
+    const meleeThreatAtk = (UnitAI.isRangedKiter(unit.type) && map) ? UnitAI.findNearestMeleeThreat(unit, allUnits, 4) : null;
     if (meleeThreatAtk) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {

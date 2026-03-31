@@ -29,6 +29,7 @@ export interface CombatEventOps {
   flashUnit(unitId: string, duration: number): void;
   queueDeferredEffect(delayMs: number, callback: () => void): void;
   fireArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
+  fireDeflectedArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireMagicOrb(from: any, to: any, color: number, targetId: string, isSplash: boolean, onImpact: () => void): void;
   fireBoulder(from: any, to: any, onImpact: () => void): void;
   fireProjectile(from: any, to: any, color: number, targetId: string, onImpact: () => void): void;
@@ -130,8 +131,11 @@ export default class CombatEventHandler {
         const isRangedAttack = event.attacker.stats.range > 1;
 
         // Determine sound
+        const isDeflected = !!event.result?.deflected;
         let hitSound: string = 'hit_melee';
-        if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
+        if (isDeflected) {
+          hitSound = 'shield_deflect';
+        } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
           hitSound = 'hit_siege';
         } else if (event.attacker.stats.range > 1) {
           hitSound = 'hit_ranged';
@@ -166,7 +170,11 @@ export default class CombatEventHandler {
         if (isRangedAttack) {
           const defId = event.defender.id;
           if (event.attacker.type === UnitType.ARCHER) {
-            ops.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
+            if (isDeflected) {
+              ops.fireDeflectedArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
+            } else {
+              ops.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
+            }
           } else if (event.attacker.type === UnitType.MAGE) {
             ops.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, 0x2980b9, defId, false, applyDamageVisuals);
           } else if (event.attacker.type === UnitType.BATTLEMAGE) {

@@ -12,6 +12,7 @@ export interface CombatResult {
   attackerSurvived: boolean;
   defenderSurvived: boolean;
   experienceGained: number;
+  deflected?: boolean;  // True when a shield unit deflects a ranged attack
 }
 
 export class CombatSystem {
@@ -79,7 +80,15 @@ export class CombatSystem {
     const attackerRatio = attackForce / totalForce;
     const defenderRatio = defenseForce / totalForce;
 
-    const defenderDamage = Math.round(attackerRatio * atkStat * 4.5);
+    let defenderDamage = Math.round(attackerRatio * atkStat * 4.5);
+
+    // --- Shield Deflect: shieldbearers and paladins take 80% reduced damage from ranged attacks ---
+    const isRangedAttacker = attacker.stats.range > 1;
+    const isShieldDefender = defender.type === UnitType.SHIELDBEARER || defender.type === UnitType.PALADIN;
+    const deflected = isRangedAttacker && isShieldDefender;
+    if (deflected) {
+      defenderDamage = Math.max(1, Math.round(defenderDamage * 0.2)); // 80% reduction, min 1
+    }
 
     // Counter-attack: defender can only retaliate if attacker is within defender's range.
     // Ranged units attacking from outside melee range take zero counter-damage.
@@ -96,6 +105,7 @@ export class CombatSystem {
       attackerSurvived: attackerHealth > 0,
       defenderSurvived: defenderHealth > 0,
       experienceGained: defenderHealth <= 0 ? 3 : 1,
+      deflected,
     };
   }
 

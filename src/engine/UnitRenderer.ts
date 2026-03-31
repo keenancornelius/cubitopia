@@ -3171,6 +3171,132 @@ export class UnitRenderer {
   }
 
   /**
+   * Fire an arrow that comically bounces off a shield unit on impact.
+   * The arrow flies normally, then on impact spawns a ricocheting arrow
+   * that tumbles and spins off at a random angle before fading out.
+   */
+  fireDeflectedArrow(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    // Fire a normal arrow first — the deflect visual triggers on impact
+    const wrappedImpact = () => {
+      // Call original impact callback (damage visuals, sound)
+      if (onImpact) onImpact();
+      // Spawn the comical bouncing arrow
+      this.spawnDeflectedArrow(toPos);
+    };
+    this.fireArrow(fromPos, toPos, targetUnitId, wrappedImpact);
+  }
+
+  /**
+   * Spawn a deflected arrow that tumbles away from impact point with spin.
+   * Creates a comedic ricochet effect — arrow flips end over end and fades out.
+   */
+  private spawnDeflectedArrow(impactPos: { x: number; y: number; z: number }): void {
+    const group = new THREE.Group();
+    // Shaft (slightly bent for comedy)
+    const shaft = new THREE.Mesh(
+      new THREE.BoxGeometry(0.03, 0.03, 0.3),
+      new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+    );
+    group.add(shaft);
+    // Bent arrowhead (knocked askew)
+    const head = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.05, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0x666666 })
+    );
+    head.position.z = 0.17;
+    head.rotation.x = 0.3; // Slightly bent
+    group.add(head);
+    // Fletching
+    for (let i = 0; i < 3; i++) {
+      const fin = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.01, 0.05),
+        new THREE.MeshBasicMaterial({ color: 0xFF8800, transparent: true, opacity: 0.9 })
+      );
+      fin.position.z = -0.12;
+      fin.rotation.z = (i / 3) * Math.PI * 2;
+      group.add(fin);
+    }
+
+    // Position at impact, slightly above
+    const startY = impactPos.y + 0.6;
+    group.position.set(impactPos.x, startY, impactPos.z);
+    this.scene.add(group);
+
+    // Random ricochet direction (upward + sideways)
+    const angle = Math.random() * Math.PI * 2;
+    const vx = Math.cos(angle) * (1.5 + Math.random() * 1.5);
+    const vz = Math.sin(angle) * (1.5 + Math.random() * 1.5);
+    const vy = 3 + Math.random() * 2; // Pop upward
+    // Random spin speeds
+    const spinX = (Math.random() - 0.5) * 20;
+    const spinY = (Math.random() - 0.5) * 15;
+    const spinZ = (Math.random() - 0.5) * 25;
+
+    const startTime = performance.now() / 1000;
+    const duration = 0.8 + Math.random() * 0.4; // 0.8–1.2 seconds
+    const gravity = 8;
+
+    // Animate via the trail particles array (reuse existing cleanup)
+    const animateDeflect = () => {
+      const now = performance.now() / 1000;
+      const t = now - startTime;
+      if (t >= duration) {
+        this.scene.remove(group);
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (child.material instanceof THREE.Material) child.material.dispose();
+          }
+        });
+        return;
+      }
+      const progress = t / duration;
+      // Physics: position with gravity
+      group.position.x = impactPos.x + vx * t;
+      group.position.y = startY + vy * t - 0.5 * gravity * t * t;
+      group.position.z = impactPos.z + vz * t;
+      // Tumbling spin
+      group.rotation.x += spinX * (1 / 60);
+      group.rotation.y += spinY * (1 / 60);
+      group.rotation.z += spinZ * (1 / 60);
+      // Fade out in last 40%
+      if (progress > 0.6) {
+        const fade = 1 - (progress - 0.6) / 0.4;
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) {
+            (child.material as any).opacity = fade;
+            child.material.transparent = true;
+          }
+        });
+      }
+      requestAnimationFrame(animateDeflect);
+    };
+    requestAnimationFrame(animateDeflect);
+
+    // Spawn a few spark particles at impact point
+    for (let i = 0; i < 6; i++) {
+      const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0xFFDD44 : 0xFFFFFF,
+        transparent: true, opacity: 0.9,
+      });
+      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      spark.position.set(impactPos.x, impactPos.y + 0.5, impactPos.z);
+      this.scene.add(spark);
+      this.trailParticles.push({
+        mesh: spark,
+        velocity: {
+          x: (Math.random() - 0.5) * 3,
+          y: 1 + Math.random() * 2,
+          z: (Math.random() - 0.5) * 3,
+        },
+        startTime: performance.now() / 1000,
+        duration: 0.3 + Math.random() * 0.2,
+      });
+    }
+  }
+
+  /**
    * Fire a magic orb — glowing sphere + orbiting sparkles + trail
    */
   fireMagicOrb(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number, targetUnitId?: string, isAoE = false, onImpact?: () => void): void {
