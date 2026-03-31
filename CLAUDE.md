@@ -76,8 +76,8 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~3880 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Reduced from ~4205 after CombatEventHandler + SpawnQueueSystem extractions. Grew slightly with GarrisonSystem integration (~140 lines of ops wiring + wall/gate click detection). Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated.
-- `src/game/systems/AIController.ts` — **AI brain (~1149 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), spawn queues for all 17 unit types, territory-first 3-phase commander (garrison → capture neutral zones → capital assault), guard tactics, structure garrison (auto-garrisons archers/mages in gates). Uses `AIBuildingOps` + `AIGarrisonOps` slim interfaces.
+- `src/main.ts` — **Central orchestrator (~4029 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew from ~3880 with underground/surface base creation on standard maps, arena spawn jitter, selection type-toggle wiring, unit stats panel. Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated. Underground/surface base setup (~60 lines) could move to a MapSetup module.
+- `src/game/systems/AIController.ts` — **AI brain (~1187 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), unified weighted roster spawning from all available buildings, squad dispatch system (formation + shared march speed), territory-first 3-phase commander (Phase 1.7 early capture → territory capture → capital assault), guard tactics, structure garrison (auto-garrisons archers/mages in gates). Uses `AIBuildingOps` + `AIGarrisonOps` slim interfaces.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~255 lines)**. Owns `placedBuildings[]`, `wallConnectable`, spawn index. Delegates mesh creation to BuildingMeshFactory. Syncs UnitAI.buildingPositions/buildingOwners on register/unregister.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~447 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
 - `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~346 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber) with collection notifications, crafting (rope, charcoal, steel smelting), stockpile visuals for all 10 resource types.
@@ -95,10 +95,11 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 - `src/game/systems/SpawnQueueSystem.ts` — **Spawn queue management (~430 lines)**. All 7 player spawn queues (barracks, forestry, masonry, farmhouse, workshop, armory, wizard_tower). Queue processing, cost deduction, unit creation, HUD updates. Uses `SpawnQueueOps` slim interface.
 - `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~254 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, battlemage AoE, greatsword cleave + knockback, healer tick.
 - `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~400 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Y-distance layer check for underground bases. Emits CaptureEvent on flip.
+- **Underground elevation safety**: `main.ts hexToWorld(coord, underground?)` now accepts underground parameter. Per-frame Y correction in game loop snaps underground units to tunnel floor if their Y drifts (e.g., from knockback). CombatEventHandler knockback uses underground-aware hexToWorld.
 - `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
-- `src/game/MapPresets.ts` — **Map type configs + arena generators (~625 lines)**. MAP_PRESETS data, generateArenaMap(), generateDesertTunnelsMap(), MapGenParams for generator overrides. Grew significantly with Desert Tunnels map type.
+- `src/game/MapPresets.ts` — **Map type configs + arena generators (~660 lines)**. MAP_PRESETS data, generateArenaMap(), generateDesertTunnelsMap(), MapGenParams for generator overrides. Desert Tunnels: central cavern + 2 side caverns with neutral outposts, 3-4 surface entrances, deep tunnel network.
 - `src/engine/SoundManager.ts` — **Procedural audio (~905 lines)**. Web Audio API synthesized SFX (25 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, death, heal, level_up (triumphant brass fanfare), AoE splash, UI sounds, queue_confirm/queue_error/craft_confirm feedback, unit_spawn pop.
-- `src/ui/HUD.ts` — **All UI (~2519 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel, capture zone HUD cards. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection.
+- `src/ui/HUD.ts` — **All UI (~3061 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel, capture zone HUD cards, unit stats panel (I key toggle), elevation slicer with Web Audio thwip sounds, selection type-toggle badges for squad filtering. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection. `onSelectionFiltered()` callback for type-toggle → SelectionManager integration.
 - `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
 - `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
 - `src/engine/UnitRenderer.ts` — **3D unit rendering (~3447 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs), AoE explosions, combat strafing, trail particles, health bars, labels.
@@ -124,9 +125,10 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
 ### AI System
 - **Owned by `AIController`** — all AI logic extracted from main.ts
 - `AIBuildState` interface — tracks each AI player's buildings, spawn queues, wave state
-- `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units
+- `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units. Uses unified weighted roster that draws from ALL available buildings simultaneously (no more mutually exclusive if/else paths).
 - `updateSmartAISpawnQueue()` — timer-based unit spawning from buildings
-- `updateSmartAICommander()` — territory-first 3-phase strategy: garrison owned outposts → capture neutral zones → assault enemy capital. Idle units always redirect to nearest uncaptured zone.
+- `updateSmartAICommander()` — territory-first multi-phase strategy: Phase 1.7 early capture squads → territory capture → capital assault. Uses `dispatchSquad()` to send units in formation with shared march speed. Idle units always redirect to nearest uncaptured zone.
+- `dispatchSquad()` — groups units by formation priority, assigns squad ID + shared march speed (slowest + 30% blend), generates formation slots around target. Units in a squad march cohesively; squad dissolves on arrival or combat break-off.
 - `updateSmartAITactics()` — guard assignments at choke points, worker escorts, building defense
 - AI uses `guardAssignments: Map<string, HexCoord>` to track which units are posted where
 - Uses `AIBuildingOps` slim interface to access BuildingSystem (mesh builders, registerBuilding, aiFindBuildTile) without direct dependency
@@ -140,7 +142,9 @@ If any check fails, fix it before starting the next task. The 5 minutes spent he
   - `TANK_PEELERS` (Shieldbearer, Paladin) — `findBestTarget()` gives -6 score bonus to enemies attacking nearby squishies within 4 hex, causing tanks to peel for ranged/support allies.
   - All others: standard chase-and-attack melee behavior.
 - **Knockback:** Greatsword cleave + Shieldbearer shield bash push targets 1 hex away. Uses `combat:cleave` event in main.ts to update hex positions + world positions.
+- **High Ground:** CombatSystem.resolve() checks elevation difference. Attacker 3+ elevation above defender → +2 attack bonus. Defender 3+ above attacker → +2 defense bonus. Mountain forts and ridges are key strategic positions.
 - **Re-aggro:** Combat units check for threats while moving (attack-move or aggressive stance units redirect to new targets entering detection range)
+- **Squad March:** Units assigned to a squad (`_squadId`, `_squadSpeed` on Unit interface) use shared march speed instead of individual moveSpeed. Squad dissolves when units arrive or break off to fight.
 
 ### Unit Types (17 total)
 | Type | Enum | Role | Special |
@@ -185,7 +189,7 @@ Building meshes are Three.js Groups with names like `"barracks_0"`, `"forestry_1
 The AI stores its own building references in `AIBuildState` (e.g., `st.barracks`) separate from the class getters (`this.barracks`). Both should point to the same data, but AI builds go through `registerBuilding()` which adds to the global `placedBuildings` array while also setting `st.barracks` for the AI's own tracking.
 
 ### `(unit as any)._path` Pattern
-Unit pathfinding stores the full path as `_path` and current index as `_pathIndex` via `(unit as any)` casts. This is a legacy pattern — the `Unit` interface doesn't include these fields. Same for `_postPosition` (defensive stance return point), `_patrolRoute`, `_patrolIdx`.
+Unit pathfinding stores the full path as `_path` and current index as `_pathIndex` via `(unit as any)` casts. This is a legacy pattern — the `Unit` interface doesn't include these fields. Same for `_postPosition` (defensive stance return point), `_patrolRoute`, `_patrolIdx`. **Note:** `_squadId` and `_squadSpeed` are properly typed optional fields on the Unit interface (added for squad march system).
 
 ### `isTileOccupied` Now Uses `placedBuildings`
 The old version checked individual building refs. Now it loops the `placedBuildings` array. This means ALL buildings (player + AI) are checked.
@@ -310,7 +314,7 @@ No remaining files to wire. Future extractions will target new code regions.
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~3880 after CombatEventHandler + SpawnQueueSystem extractions recovered ~466 lines from the 4205-line peak. Garrison integration added ~140 lines (ops wiring + wall/gate click detection).
+- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~4029 after underground/surface base creation, arena jitter, selection type-toggle wiring, and unit stats panel additions. Next extraction candidates: underground/surface base setup (~60 lines → MapSetup module), arena spawning (~40 lines → ArenaSetup module).
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)
@@ -531,6 +535,7 @@ Capturable map objectives that create contested territory and drive strategic de
 - Uncontested capture takes ~20 seconds; contested zones see tug-of-war progress bar
 - Visual feedback: zone boundary ring in team color, glowing light column, floating progress bar
 - Underground layer check: underground bases only count underground units
+- Desert Tunnels map has 3 underground neutral outposts: 1 central (large cavern, 300 HP) + 2 side caverns (smaller, 200 HP each)
 - **Main base capture = instant defeat** (replaces old damage-to-zero system)
 - **Neutral/outpost capture = flip ownership + inherit all buildings/walls in zone**
 - Bases are never destroyed — they change flags/teams when captured
