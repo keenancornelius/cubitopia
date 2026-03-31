@@ -118,6 +118,48 @@ Unit models are the depth of this game. Model design is the single most importan
 - Keep SphereGeometry/CylinderGeometry segment counts low (6-8 segments) — these are voxel-scale objects.
 - Particle systems must self-cleanup via `requestAnimationFrame` loops with bounded lifetimes. Always dispose geometry + material on removal.
 
+### Practical Guide: How to Update a Unit's Visuals & Animations
+
+When modifying or creating a unit model, you touch up to 5 locations across 3 files. Follow this checklist:
+
+**1. Model mesh — `UnitRenderer.ts` → `createUnitModel(type, playerColor)`**
+This is the geometry factory. Each unit type has a `case UnitType.XXX:` block that builds a `THREE.Group` from boxes, cylinders, etc. Find the unit's case, modify geometry/materials/positions. The returned group is the root mesh.
+- Arms are created via `makeArmGroup(...)` — returns a group named `arm-left` / `arm-right`.
+- Legs via `makeLegGroup(...)` — named `leg-left` / `leg-right`.
+- Aura elements (motes, halos) must be named for animation lookup (see Naming Conventions above).
+- Use `Cubitopia.bm(geo, mat, x, y, z)` helper from main.ts for positioned meshes, or create with `new THREE.Mesh()` + `mesh.position.set()`.
+
+**2. Idle animation — `UnitRenderer.ts` → `animateIdle(mesh, type, time)`**
+Each unit type gets a `case UnitType.XXX:` with per-frame transforms driven by `Math.sin(time * speed)`. Find child meshes by name via `mesh.getObjectByName('arm-right')`. Idle should convey personality: breathing sway, weapon drift, weight shifting. Ambient effects (mote orbits, crystal pulses) run here AND in attack/move animations.
+
+**3. Attack animation — `UnitRenderer.ts` → `animateAttack(mesh, type, progress)`**
+`progress` goes 0→1 over the attack cooldown duration. Phases: wind-up (0–0.3), strike (0.3–0.5), hold (0.5–0.7), recovery (0.7–1.0). Use easing: `Math.pow(p, 2)` for wind-up acceleration, `1 - Math.pow(1-p, 3)` for snappy strikes. Each unit type has its own case block.
+
+**4. Move animation — `UnitRenderer.ts` → `animateMove(mesh, type, time)`**
+Leg swing + arm counter-swing + body bob. Usually simpler than idle/attack. Same `case` structure.
+
+**5. Combat tuning — multiple files:**
+- `UnitFactory.ts` → `UNIT_CONFIG` — stats (health, attack, defense, range, movement), speed, color
+- `CombatSystem.ts` → `resolve()` — special combat mechanics (berserker rage, assassin burst, shield deflect)
+- `CombatEventHandler.ts` → `MELEE_STRIKE_DELAY` — per-unit delay (seconds) before damage triggers, must sync with attack animation's strike frame
+- `UnitAI.ts` → `MIN_ATTACK_COOLDOWN` — minimum attack cycle time per unit type (prevents attacks firing faster than the animation)
+- `SoundManager.ts` — add/modify synthesized sounds for new abilities
+
+**Testing workflow:**
+1. Start dev server: `npx vite dev`
+2. Use Arena mode to spawn specific units quickly (debug panel → ARMY tab)
+3. Use the UNITS debug tab (backtick → click UNITS) for live stat sliders and 3D model preview — lets you inspect models from all angles without gameplay
+4. Check idle animation at game zoom — unit should be recognizable and lively
+5. Trigger attacks via debug commands or enemy proximity
+6. Verify attack animation timing matches `MELEE_STRIKE_DELAY` (damage flash should land when weapon visually connects)
+
+**Common pitfalls:**
+- Forgetting to add a `case` in ALL four animation methods (idle/attack/move/hit) — unit falls through to `default` and looks generic
+- Not naming arm/leg groups — `getObjectByName('arm-right')` returns null and animation silently breaks
+- Using `MeshStandardMaterial` instead of `MeshLambertMaterial` — heavy on GPU for tiny voxel parts
+- Animation time not clamped — attack progress can exceed 1.0 if cooldown drifts; always clamp `Math.min(1, progress)`
+- Ambient effects (motes, halos) only in idle — they should run in ALL states
+
 ---
 
 ## Project Architecture
@@ -169,16 +211,27 @@ Unit models are the depth of this game. Model design is the single most importan
 - No limit on how many of each type can be built (constrained only by resources)
 - Smelter required for steel smelting, Armory spawns advanced melee (steel cost), Wizard Tower spawns magic units (crystal cost)
 
-### AI System
-- **Owned by `AIController`** — all AI logic extracted from main.ts
-- `AIBuildState` interface — tracks each AI player's buildings, spawn queues, wave state
-- `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units. Uses unified weighted roster that draws from ALL available buildings simultaneously (no more mutually exclusive if/else paths).
+### AI Architecture — Two-Layer System (IMPORTANT)
+
+The AI is split into two layers. Understanding which layer handles what is critical for avoiding bugs where one player gets behavior the other doesn't.
+
+**Layer 1: UnitAI.ts — Per-Unit Auto-Behavior (ALL players)**
+Runs every frame for every unit, both human and AI. Handles the individual unit's "instincts":
+- **Workers:** Builder auto-mine fallback, lumberjack auto-chop, villager auto-farm/harvest — all work identically for human and AI players. Human builders additionally check player-placed mine/wall/harvest blueprints before falling back to auto-behavior.
+- **Combat:** Human units use stance system (passive/defensive/aggressive). AI units use rally-and-wave behavior. Both share detection, targeting, kiting, and re-aggro logic.
+- **Gating pattern:** Use `player.isAI` / `!player.isAI` to distinguish human vs AI behavior. Never use `unit.owner === 0` for this — that breaks AI vs AI mode where both owners are AI.
+- **Static `players` map:** Set each frame in `update()`, available to static methods (like `generateKeepWallPlan`) that only receive an owner ID.
+
+**Layer 2: AIController.ts — AI Commander Brain (AI players only)**
+Called from main.ts only for AI players. Makes strategic decisions:
+- `updateSmartAIEconomy()` — build phases 0-8 (Smelter phase 6, Armory phase 7, Wizard Tower phase 8), auto-crafts charcoal/steel, queues workers and combat units. Uses unified weighted roster that draws from ALL available buildings simultaneously.
 - `updateSmartAISpawnQueue()` — timer-based unit spawning from buildings
-- `updateSmartAICommander()` — territory-first multi-phase strategy: Phase 1.7 early capture squads → territory capture → capital assault. Uses `dispatchSquad()` to send units in formation with shared march speed. Idle units always redirect to nearest uncaptured zone.
-- `dispatchSquad()` — groups units by formation priority, assigns squad ID + shared march speed (slowest + 30% blend), generates formation slots around target. Units in a squad march cohesively; squad dissolves on arrival or combat break-off.
+- `updateSmartAICommander()` — territory-first multi-phase strategy: Phase 1.7 early capture squads → territory capture → capital assault. Uses `dispatchSquad()` for formation marching.
 - `updateSmartAITactics()` — guard assignments at choke points, worker escorts, building defense
-- AI uses `guardAssignments: Map<string, HexCoord>` to track which units are posted where
-- Uses `AIBuildingOps` slim interface to access BuildingSystem (mesh builders, registerBuilding, aiFindBuildTile) without direct dependency
+- `dispatchSquad()` — groups units by formation priority, assigns squad ID + shared march speed (slowest + 30% blend), generates formation slots around target.
+- Uses `AIBuildingOps` slim interface to access BuildingSystem without direct dependency.
+
+**The golden rule:** If a behavior should work for human player units too (workers gathering, combat targeting, movement), it belongs in UnitAI.ts with no `player.isAI` gate (or gated to allow both). If it's a strategic decision only the AI commander makes (building placement, spawn priorities, squad dispatch), it belongs in AIController.ts.
 
 ### Combat & Stances
 - **Stances:** PASSIVE (never attack), DEFENSIVE (zone-defend + return to post), AGGRESSIVE (chase + patrol)

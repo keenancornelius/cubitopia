@@ -485,10 +485,11 @@ export class UnitAI {
       // Debug: if both mine and build are disabled, skip all builder AI
       if (UnitAI.debugFlags.disableMine && UnitAI.debugFlags.disableBuild) return;
 
-      // Builders: mine terrain OR build walls — prioritize mine tasks
+      // Builder priority: 1) player mine blueprints  2) wall building  3) auto-mine fallback
+      // Both human and AI builders share the same fallback auto-mine behavior.
       UnitAI.releaseMineClaim(unit.id);
 
-      // Player builders check mine blueprints first (skip if disableMine)
+      // Human builders check mine blueprints first (skip if disableMine)
       let mineTile: HexCoord | null = null;
       if (!UnitAI.debugFlags.disableMine && !player.isAI && UnitAI.playerMineBlueprint.size > 0) {
         mineTile = UnitAI.findNearestMineBlueprint(unit, map);
@@ -514,15 +515,13 @@ export class UnitAI {
         return;
       }
 
-      // AI builders: mine for stone when needed, build when they have stone
-      // Player builders: auto-mine only if no wall blueprints pending
+      // Wall building: both AI and human builders build walls when they have stone.
+      // AI uses auto-generated choke plans; humans use player-placed blueprints.
       const wallSpot = UnitAI.debugFlags.disableBuild ? null : UnitAI.findWallSpot(unit, map);
       const hasStone = UnitAI.stoneStockpile[unit.owner] >= 1;
       const hasGateStone = UnitAI.stoneStockpile[unit.owner] >= 2;
 
-      // AI: if there are wall spots AND they have stone, go build
-      if (wallSpot && player.isAI) {
-        // Check if we have enough stone (gates cost 2, walls cost 1)
+      if (wallSpot) {
         const isGate = unit._planIsGate === true;
         const enoughStone = isGate ? hasGateStone : hasStone;
 
@@ -537,13 +536,13 @@ export class UnitAI {
             return;
           }
         }
-        // Fall through to mining if no stone
+        // Fall through to mining if not enough stone
       }
 
-      // Auto-mine: AI builders auto-mine for resources. Player builders only mine
-      // player-placed blueprints (handled above), never auto-mine on their own.
-      const shouldAutoMine = !UnitAI.debugFlags.disableMine && player.isAI;
-      if (shouldAutoMine) {
+      // Auto-mine: ALL builders auto-mine for resources when idle.
+      // Priority order: mine blueprints (human only, above) → wall building → auto-mine.
+      // This keeps builders productive without requiring constant micromanagement.
+      if (!UnitAI.debugFlags.disableMine) {
         const autoMineTile = UnitAI.findNearestMineSite(unit, map);
         if (autoMineTile) {
           const claimKey = `${autoMineTile.q},${autoMineTile.r}`;
@@ -567,17 +566,6 @@ export class UnitAI {
             }
           }
           return;
-        }
-      }
-
-      // Player builders: check for wall building (skip if disableBuild)
-      if (wallSpot && !player.isAI) {
-        const dist = Pathfinder.heuristic(unit.position, wallSpot);
-        if (dist <= 1) {
-          unit.state = UnitState.BUILDING;
-          unit.gatherCooldown = 1.5;
-        } else {
-          UnitAI.commandMove(unit, wallSpot, map);
         }
       }
       return;
