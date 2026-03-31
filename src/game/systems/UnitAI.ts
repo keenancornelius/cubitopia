@@ -2389,7 +2389,26 @@ export class UnitAI {
       const hpBonus = (1 - hpRatio) * 1.5;
       // Tank peeling bonus: strong priority for enemies attacking our squishies
       const peelBonus = peelTargets.has(other.id) ? 6.0 : 0;
-      const score = dist + focusPenalty - hpBonus - peelBonus;
+
+      // Ranged kiter target priority: prefer high-value squishies over melee tanks.
+      // Kiters should shoot at mages/healers/siege while fleeing from warriors.
+      let kiterBonus = 0;
+      if (UnitAI.isRangedKiter(unit.type)) {
+        // Bonus for high-value targets (squishies, support, siege)
+        if (UnitAI.isRangedKiter(other.type) || other.type === UnitType.HEALER) {
+          kiterBonus = 4.0; // Prioritize enemy ranged/support
+        } else if (other.isSiege) {
+          kiterBonus = 3.0; // Siege is high value too
+        } else if (other.stats.range <= 1) {
+          kiterBonus = -2.0; // Deprioritize melee tanks — let our melee handle them
+        }
+        // Prefer targets already in weapon range (no chase needed)
+        if (dist <= unit.stats.range) {
+          kiterBonus += 2.0;
+        }
+      }
+
+      const score = dist + focusPenalty - hpBonus - peelBonus - kiterBonus;
 
       if (score < bestScore) {
         bestScore = score;
