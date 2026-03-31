@@ -1866,9 +1866,12 @@ export class UnitAI {
       if (UnitAI.isUnreachable(unit.id, key)) return;
 
       const [q, r] = key.split(',').map(Number);
-      // Stay on own half (+3 buffer for rare resources)
-      if (unit.owner === 0 && q > midQ + 3) return;
-      if (unit.owner === 1 && q < midQ - 3) return;
+      // Allow mining up to 70% past the midpoint — rare resources may be on either side.
+      // Uses same generous boundary as lumberjacks (line ~1740) to ensure both players
+      // can reach crystal/iron deposits regardless of map generation RNG.
+      const maxReach = Math.floor(map.width * 0.7);
+      if (unit.owner === 0 && q > midQ + maxReach) return;
+      if (unit.owner === 1 && q < midQ - maxReach) return;
 
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
