@@ -275,6 +275,11 @@ class Cubitopia {
       getMapType: () => this.mapType,
     });
 
+    // Squad type toggle: when user clicks a unit type badge in the tooltip, filter the selection
+    this.hud.onSelectionFiltered((filtered) => {
+      this.selectionManager.setSelection(filtered);
+    });
+
     // Selection changed
     this.selectionManager.onSelect((units) => {
       // In wall build mode, left-click places blueprints instead of selecting
@@ -400,6 +405,7 @@ class Cubitopia {
 
       if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
+      if (e.key === 'i' || e.key === 'I') { this.hud.toggleUnitStatsPanel(); this.hud.updateUnitStatsPanel(this.allUnits); }
     });
 
     // Scroll wheel in mine mode adjusts depth (handled elsewhere);
@@ -1576,10 +1582,10 @@ class Cubitopia {
     return tile.elevation * 0.5;
   }
 
-  private hexToWorld(coord: HexCoord): { x: number; y: number; z: number } {
+  private hexToWorld(coord: HexCoord, underground = false): { x: number; y: number; z: number } {
     const x = coord.q * 1.5;
     const z = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const y = this.getElevation(coord) + 0.25;
+    const y = this.getElevation(coord, underground) + 0.25;
     return { x, y, z };
   }
 
@@ -1819,7 +1825,7 @@ class Cubitopia {
       playSound: (name, vol) => this.sound.play(name as any, vol),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
       updateResources: (player, w, f, s) => this.hud.updateResources(player, w, f, s),
-      hexToWorld: (pos) => this.hexToWorld(pos),
+      hexToWorld: (pos, underground) => this.hexToWorld(pos, underground),
       getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
       damageBarracks: (pos, dmg) => this.wallSystem.damageBarracks(pos, dmg),
       damageGate: (pos, dmg) => this.wallSystem.damageGate(pos, dmg),
@@ -2499,10 +2505,12 @@ class Cubitopia {
         let idx = 0;
         for (const def of defs) {
           for (let i = 0; i < def.count; i++) {
-            // Spread units INWARD toward center from their base
+            // Spread units INWARD toward center from their base with random jitter
             // owner 0 (blue, left) spreads +q; owner 1 (red, right) spreads -q
-            const oq = baseQ + (idx % 5 + 1) * (owner === 0 ? 1 : -1);
-            const or2 = baseR - 4 + Math.floor(idx / 5) * 2;
+            const jitterQ = Math.floor(Math.random() * 3) - 1; // -1, 0, or +1
+            const jitterR = Math.floor(Math.random() * 3) - 1;
+            const oq = baseQ + (idx % 5 + 1) * (owner === 0 ? 1 : -1) + jitterQ;
+            const or2 = baseR - 4 + Math.floor(idx / 5) * 2 + jitterR;
             const pos = this.findSpawnTile(map, oq, or2);
             const unit = UnitFactory.create(def.type, owner, pos);
             const wp = this.hexToWorld(pos);
@@ -2590,7 +2598,7 @@ class Cubitopia {
     this.baseRenderer.addBase(p1Base, this.getElevation(p1BaseCoord));
     this.baseRenderer.addBase(p2Base, this.getElevation(p2BaseCoord));
 
-    // --- Neutral underdark city (Desert Tunnels only) ---
+    // --- Neutral underdark city (Desert Tunnels only — central cavern) ---
     if (this.mapType === MapType.DESERT_TUNNELS) {
       const dtMap = map as DesertTunnelsMap;
       if (dtMap.cavernCenter) {
@@ -2608,6 +2616,69 @@ class Cubitopia {
         this.bases.push(neutralBase);
         this.baseRenderer.addBase(neutralBase, neutralY);
         console.log(`[DesertTunnels] Neutral underdark city at (${neutralCoord.q},${neutralCoord.r}), Y=${neutralY}`);
+      }
+
+      // Extra underground outposts (side caverns)
+      if (dtMap.extraCaverns) {
+        for (let i = 0; i < dtMap.extraCaverns.length; i++) {
+          const cavern = dtMap.extraCaverns[i];
+          const coord = cavern.center;
+          const yLevel = cavern.floorY * 0.5;
+          const extraBase: Base = {
+            id: `base_neutral_${i + 2}`, owner: 2, position: { ...coord },
+            worldPosition: {
+              x: coord.q * 1.5,
+              y: yLevel + 0.25,
+              z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
+            },
+            health: 300, maxHealth: 300, destroyed: false,
+          };
+          this.bases.push(extraBase);
+          this.baseRenderer.addBase(extraBase, yLevel);
+          console.log(`[DesertTunnels] Extra underground outpost ${i + 1} at (${coord.q},${coord.r}), Y=${yLevel}`);
+        }
+      }
+    }
+
+    // --- Generic underground bases (any map type with undergroundBases, e.g. Standard lava tubes) ---
+    if (map.undergroundBases && map.undergroundBases.length > 0 && this.mapType !== MapType.DESERT_TUNNELS) {
+      for (let i = 0; i < map.undergroundBases.length; i++) {
+        const cavern = map.undergroundBases[i];
+        const coord = cavern.center;
+        const yLevel = cavern.floorY * 0.5;
+        const ugBase: Base = {
+          id: `base_neutral_ug_${i}`, owner: 2, position: { q: coord.q, r: coord.r },
+          worldPosition: {
+            x: coord.q * 1.5,
+            y: yLevel + 0.25,
+            z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
+          },
+          health: 300, maxHealth: 300, destroyed: false,
+        };
+        this.bases.push(ugBase);
+        this.baseRenderer.addBase(ugBase, yLevel);
+        console.log(`[Underground] Neutral base ${i} at (${coord.q},${coord.r}), Y=${yLevel}`);
+      }
+    }
+
+    // --- Generic surface neutral bases (desert outposts, mountain forts) ---
+    if (map.surfaceBases && map.surfaceBases.length > 0) {
+      for (let i = 0; i < map.surfaceBases.length; i++) {
+        const sb = map.surfaceBases[i];
+        const coord = sb.center;
+        const surfY = this.getElevation({ q: coord.q, r: coord.r });
+        const surfBase: Base = {
+          id: `base_neutral_surf_${i}`, owner: 2, position: { q: coord.q, r: coord.r },
+          worldPosition: {
+            x: coord.q * 1.5,
+            y: surfY + 0.25,
+            z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
+          },
+          health: 300, maxHealth: 300, destroyed: false,
+        };
+        this.bases.push(surfBase);
+        this.baseRenderer.addBase(surfBase, surfY);
+        console.log(`[Surface] Neutral ${sb.terrain} base ${i} at (${coord.q},${coord.r}), Y=${surfY}`);
       }
     }
 
@@ -2784,6 +2855,22 @@ class Cubitopia {
     // Update garrison system (ranged fire from garrisoned units)
     this.garrisonSystem.update(delta);
 
+    // Underground Y correction: ensure underground units stay at tunnel floor level.
+    // Various systems (knockback, spawning, etc.) may set unit Y via the surface-only
+    // hexToWorld. This defensive pass catches any Y corruption each frame.
+    if (this.currentMap) {
+      for (const unit of this.allUnits) {
+        if (unit.state === UnitState.DEAD || !unit._underground) continue;
+        const tile = this.currentMap.tiles.get(`${unit.position.q},${unit.position.r}`);
+        if (tile?.hasTunnel) {
+          const correctY = (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5 + 0.25;
+          if (Math.abs(unit.worldPosition.y - correctY) > 0.5) {
+            unit.worldPosition.y = correctY;
+          }
+        }
+      }
+    }
+
     // Update unit visual positions and animations
     const gameTime = this.clock.elapsedTime;
     for (const unit of this.allUnits) {
@@ -2857,7 +2944,12 @@ class Cubitopia {
     }
 
     // Update enemy resource bar
-    this.hud.updateEnemyResources(this.players[1], this.woodStockpile[1], this.foodStockpile[1], this.stoneStockpile[1]);
+    this.hud.updateEnemyResources(this.players[1], {
+      wood: this.woodStockpile[1], food: this.foodStockpile[1], stone: this.stoneStockpile[1],
+      iron: this.ironStockpile[1], crystal: this.crystalStockpile[1], grassFiber: this.grassFiberStockpile[1],
+      clay: this.clayStockpile[1], charcoal: this.charcoalStockpile[1], rope: this.ropeStockpile[1],
+      steel: this.steelStockpile[1], gold: this.goldStockpile[1],
+    });
 
     // Nature simulation (tree regrowth, grass growth/spread)
     if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
@@ -2869,6 +2961,9 @@ class Cubitopia {
 
     // Update HUD resource display with wood stockpile
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+
+    // Update unit stats panel (if visible — refreshes every frame for live data)
+    this.hud.updateUnitStatsPanel(this.allUnits);
 
     // Update selection info (lightweight — no panel rebuild, just health/state text)
     const sel = this.selectionManager.getSelectedUnits();

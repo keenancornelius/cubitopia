@@ -34,6 +34,15 @@ export class HUD {
   private _onRespawnUnits: (() => void) | null = null;
   private selectionCommandPanel: HTMLElement | null = null;
 
+  // Squad type toggle state — tracks the full box-selected group and which types are active
+  private _fullSelection: Unit[] = [];           // All units from the original selection
+  private _excludedTypes: Set<string> = new Set(); // Unit types toggled OFF
+  private _onSelectionFiltered: ((units: Unit[]) => void) | null = null;
+  private _isFilterUpdate = false;               // Prevents reset loop when filter triggers onSelect
+
+  /** Register callback for when the user toggles unit types in the selection tooltip */
+  onSelectionFiltered(cb: (units: Unit[]) => void): void { this._onSelectionFiltered = cb; }
+
   onBuildWalls(cb: () => void) { this._onBuildWalls = cb; }
   onHarvest(cb: () => void) { this._onHarvest = cb; }
   onSellWood(cb: () => void) { this._onSellWood = cb; }
@@ -322,7 +331,7 @@ export class HUD {
     // Enemy resource bar (top right) — shows opponent's resources
     const enemyResourceBar = document.createElement('div');
     enemyResourceBar.style.cssText = `
-      position: fixed; top: 16px; right: 120px;
+      position: fixed; top: 16px; right: 140px;
       background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px;
       font-size: 14px; border: 2px solid rgba(255,255,255,0.2);
       pointer-events: auto; z-index: 10000;
@@ -340,7 +349,12 @@ export class HUD {
       position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
       background: rgba(0, 0, 0, 0.7); padding: 12px 24px; border-radius: 8px;
       font-size: 14px; border: 2px solid rgba(255,255,255,0.2); display: none;
+      pointer-events: auto;
     `;
+    // Block clicks on selection info from propagating to the canvas (which would clear the selection)
+    for (const evt of ['mousedown', 'click', 'dblclick'] as const) {
+      selectionInfo.addEventListener(evt, (e) => { e.stopPropagation(); });
+    }
     this.container.appendChild(selectionInfo);
 
     // New Map button (top right)
@@ -396,6 +410,23 @@ export class HUD {
   private enemyResFoodVal: HTMLElement | null = null;
   private enemyResGoldVal: HTMLElement | null = null;
   private enemyResUnitVal: HTMLElement | null = null;
+  private enemyResIronVal: HTMLElement | null = null;
+  private enemyResCrystalVal: HTMLElement | null = null;
+  private enemyResGrassFiberVal: HTMLElement | null = null;
+  private enemyResClayVal: HTMLElement | null = null;
+  private enemyResCharcoalVal: HTMLElement | null = null;
+  private enemyResRopeVal: HTMLElement | null = null;
+  private enemyResSteelVal: HTMLElement | null = null;
+  private enemyEarthGroupBtn: HTMLElement | null = null;
+  private enemyEarthGroupDropdown: HTMLElement | null = null;
+  private enemyEarthGroupVisible = false;
+  private enemyCraftedGroupBtn: HTMLElement | null = null;
+  private enemyCraftedGroupDropdown: HTMLElement | null = null;
+  private enemyCraftedGroupVisible = false;
+  private enemyUnitDropdown: HTMLElement | null = null;
+  private enemyUnitDropdownVisible = false;
+  private enemyUnitDropdownContent: HTMLElement | null = null;
+  private _lastEnemyUnits: Unit[] = [];
   private unitDropdown: HTMLElement | null = null;
   private unitDropdownVisible = false;
   private unitDropdownContent: HTMLElement | null = null;
@@ -426,6 +457,15 @@ export class HUD {
     [UnitType.BUILDER]: '#95a5a6',
     [UnitType.LUMBERJACK]: '#27ae60',
     [UnitType.VILLAGER]: '#bdc3c7',
+  };
+  private static readonly UNIT_NAMES: Record<string, string> = {
+    [UnitType.WARRIOR]: 'Warrior', [UnitType.ARCHER]: 'Archer', [UnitType.RIDER]: 'Rider',
+    [UnitType.PALADIN]: 'Paladin', [UnitType.CATAPULT]: 'Catapult', [UnitType.TREBUCHET]: 'Trebuchet',
+    [UnitType.SCOUT]: 'Scout', [UnitType.MAGE]: 'Mage', [UnitType.HEALER]: 'Healer',
+    [UnitType.ASSASSIN]: 'Assassin', [UnitType.SHIELDBEARER]: 'Shieldbearer',
+    [UnitType.BERSERKER]: 'Berserker', [UnitType.BATTLEMAGE]: 'Battlemage',
+    [UnitType.GREATSWORD]: 'Greatsword', [UnitType.BUILDER]: 'Builder',
+    [UnitType.LUMBERJACK]: 'Lumberjack', [UnitType.VILLAGER]: 'Villager',
   };
   private static readonly COMBAT_TYPES = [
     UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.PALADIN,
@@ -708,7 +748,7 @@ export class HUD {
     return dot;
   }
 
-  /** Build the enemy resource bar DOM — matches player bar layout */
+  /** Build the enemy resource bar DOM — mirrors player bar with all resource groups */
   private buildEnemyResourceBarDOM(bar: HTMLElement): void {
     bar.innerHTML = '';
     const row = document.createElement('div');
@@ -731,50 +771,246 @@ export class HUD {
     row.appendChild(label);
     row.appendChild(this.makeDot());
 
+    // ===== MATERIALS GROUP (dropdown) =====
+    const earthContainer = document.createElement('span');
+    earthContainer.style.cssText = 'position:relative; display:inline-block;';
+    this.enemyEarthGroupBtn = document.createElement('span');
+    this.enemyEarthGroupBtn.style.cssText = `
+      cursor:pointer; padding:3px 8px; border-radius:4px;
+      transition:background 0.15s; white-space:nowrap; user-select:none;
+    `;
+    this.enemyEarthGroupBtn.textContent = '🪨 Materials ▾';
+    earthContainer.appendChild(this.enemyEarthGroupBtn);
+
+    const earthDropdown = document.createElement('div');
+    earthDropdown.style.cssText = `
+      position:absolute; top:100%; right:0; margin-top:6px;
+      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
+      font-size:13px; border:2px solid rgba(255,255,255,0.25);
+      min-width:200px; z-index:1000; pointer-events:auto;
+      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
+      display:none;
+    `;
+    this.enemyEarthGroupDropdown = earthDropdown;
+
+    const earthContent = document.createElement('div');
+    earthContent.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
     const wood = mkRes('🪵', '#f0c040');
     this.enemyResWoodVal = wood.val;
-    row.appendChild(wood.wrapper);
-    row.appendChild(this.makeDot());
+    earthContent.appendChild(wood.wrapper);
 
     const stone = mkRes('🪨', '#aaa');
     this.enemyResStoneVal = stone.val;
-    row.appendChild(stone.wrapper);
+    earthContent.appendChild(stone.wrapper);
+
+    const iron = mkRes('⛏️', '#b0a0a0');
+    this.enemyResIronVal = iron.val;
+    earthContent.appendChild(iron.wrapper);
+
+    const crystal = mkRes('💎', '#6ba3e0');
+    this.enemyResCrystalVal = crystal.val;
+    earthContent.appendChild(crystal.wrapper);
+
+    const grassFiber = mkRes('🌿', '#66bb6a');
+    this.enemyResGrassFiberVal = grassFiber.val;
+    earthContent.appendChild(grassFiber.wrapper);
+
+    const clay = mkRes('🧱', '#bf8040');
+    this.enemyResClayVal = clay.val;
+    earthContent.appendChild(clay.wrapper);
+
+    earthDropdown.appendChild(earthContent);
+    earthContainer.appendChild(earthDropdown);
+    row.appendChild(earthContainer);
     row.appendChild(this.makeDot());
 
+    // ===== CRAFTED GROUP (dropdown) =====
+    const craftedContainer = document.createElement('span');
+    craftedContainer.style.cssText = 'position:relative; display:inline-block;';
+    this.enemyCraftedGroupBtn = document.createElement('span');
+    this.enemyCraftedGroupBtn.style.cssText = `
+      cursor:pointer; padding:3px 8px; border-radius:4px;
+      transition:background 0.15s; white-space:nowrap; user-select:none;
+    `;
+    this.enemyCraftedGroupBtn.textContent = '⚒️ Crafted ▾';
+    craftedContainer.appendChild(this.enemyCraftedGroupBtn);
+
+    const craftedDropdown = document.createElement('div');
+    craftedDropdown.style.cssText = `
+      position:absolute; top:100%; right:0; margin-top:6px;
+      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
+      font-size:13px; border:2px solid rgba(255,255,255,0.25);
+      min-width:200px; z-index:1000; pointer-events:auto;
+      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
+      display:none;
+    `;
+    this.enemyCraftedGroupDropdown = craftedDropdown;
+
+    const craftedContent = document.createElement('div');
+    craftedContent.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+
+    const charcoal = mkRes('🔥', '#ff8c00');
+    this.enemyResCharcoalVal = charcoal.val;
+    craftedContent.appendChild(charcoal.wrapper);
+
+    const rope = mkRes('🪢', '#c9a96e');
+    this.enemyResRopeVal = rope.val;
+    craftedContent.appendChild(rope.wrapper);
+
+    const steel = mkRes('⚔️', '#c0c0c0');
+    this.enemyResSteelVal = steel.val;
+    craftedContent.appendChild(steel.wrapper);
+
+    craftedDropdown.appendChild(craftedContent);
+    craftedContainer.appendChild(craftedDropdown);
+    row.appendChild(craftedContainer);
+    row.appendChild(this.makeDot());
+
+    // ===== FOOD (standalone) =====
     const food = mkRes('🌾', '#8bc34a');
     this.enemyResFoodVal = food.val;
     row.appendChild(food.wrapper);
     row.appendChild(this.makeDot());
 
+    // ===== GOLD (standalone) =====
     const gold = mkRes('💰', '#f0c040');
     this.enemyResGoldVal = gold.val;
     row.appendChild(gold.wrapper);
     row.appendChild(this.makeDot());
 
-    const units = document.createElement('span');
-    units.style.cssText = 'white-space:nowrap;';
-    const unitVal = document.createElement('span');
-    unitVal.style.cssText = 'color:#ff8a80;font-weight:bold;';
-    units.textContent = '⚔️ ';
-    units.appendChild(unitVal);
-    const unitLabel = document.createTextNode(' units');
-    units.appendChild(unitLabel);
-    this.enemyResUnitVal = unitVal;
-    row.appendChild(units);
+    // ===== UNITS (standalone with dropdown) =====
+    const unitContainer = document.createElement('span');
+    unitContainer.style.cssText = 'position:relative; display:inline-block;';
+    const unitBtn = document.createElement('span');
+    unitBtn.style.cssText = `
+      cursor:pointer; padding:3px 8px; border-radius:4px;
+      transition:background 0.15s; white-space:nowrap; user-select:none;
+    `;
+    const unitValSpan = document.createElement('span');
+    unitValSpan.style.fontWeight = 'bold';
+    unitBtn.textContent = '⚔️ ';
+    unitBtn.appendChild(unitValSpan);
+    const arrow = document.createTextNode(' units ▾');
+    unitBtn.appendChild(arrow);
+    this.enemyResUnitVal = unitValSpan;
+    unitContainer.appendChild(unitBtn);
+
+    const dropdown = document.createElement('div');
+    dropdown.style.cssText = `
+      position:absolute; top:100%; right:0; margin-top:6px;
+      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
+      font-size:13px; border:2px solid rgba(255,255,255,0.25);
+      min-width:180px; z-index:1000; pointer-events:auto;
+      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
+      display:none;
+    `;
+    this.enemyUnitDropdownContent = document.createElement('div');
+    dropdown.appendChild(this.enemyUnitDropdownContent);
+    unitContainer.appendChild(dropdown);
+    this.enemyUnitDropdown = dropdown;
+    row.appendChild(unitContainer);
 
     bar.appendChild(row);
+
+    // ===== EVENT LISTENERS =====
+    const closeAllEnemy = () => {
+      if (this.enemyEarthGroupVisible) {
+        this.enemyEarthGroupDropdown!.style.display = 'none';
+        this.enemyEarthGroupVisible = false;
+        this.enemyEarthGroupBtn!.style.background = 'none';
+      }
+      if (this.enemyCraftedGroupVisible) {
+        this.enemyCraftedGroupDropdown!.style.display = 'none';
+        this.enemyCraftedGroupVisible = false;
+        this.enemyCraftedGroupBtn!.style.background = 'none';
+      }
+      if (this.enemyUnitDropdownVisible) {
+        this.enemyUnitDropdown!.style.display = 'none';
+        this.enemyUnitDropdownVisible = false;
+        unitBtn.style.background = 'none';
+      }
+    };
+
+    this.enemyEarthGroupBtn.addEventListener('mouseenter', () => { this.enemyEarthGroupBtn!.style.background = 'rgba(255,255,255,0.1)'; });
+    this.enemyEarthGroupBtn.addEventListener('mouseleave', () => { if (!this.enemyEarthGroupVisible) this.enemyEarthGroupBtn!.style.background = 'none'; });
+    const toggleEnemyEarth = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyEarthGroupVisible; closeAllEnemy(); if (!was) { this.enemyEarthGroupDropdown!.style.display = 'block'; this.enemyEarthGroupVisible = true; this.enemyEarthGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
+    this.enemyEarthGroupBtn.addEventListener('click', toggleEnemyEarth);
+    this.enemyEarthGroupBtn.addEventListener('contextmenu', toggleEnemyEarth);
+    earthDropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    this.enemyCraftedGroupBtn.addEventListener('mouseenter', () => { this.enemyCraftedGroupBtn!.style.background = 'rgba(255,255,255,0.1)'; });
+    this.enemyCraftedGroupBtn.addEventListener('mouseleave', () => { if (!this.enemyCraftedGroupVisible) this.enemyCraftedGroupBtn!.style.background = 'none'; });
+    const toggleEnemyCrafted = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyCraftedGroupVisible; closeAllEnemy(); if (!was) { this.enemyCraftedGroupDropdown!.style.display = 'block'; this.enemyCraftedGroupVisible = true; this.enemyCraftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
+    this.enemyCraftedGroupBtn.addEventListener('click', toggleEnemyCrafted);
+    this.enemyCraftedGroupBtn.addEventListener('contextmenu', toggleEnemyCrafted);
+    craftedDropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    unitBtn.addEventListener('mouseenter', () => { unitBtn.style.background = 'rgba(255,255,255,0.1)'; });
+    unitBtn.addEventListener('mouseleave', () => { if (!this.enemyUnitDropdownVisible) unitBtn.style.background = 'none'; });
+    const toggleEnemyUnits = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyUnitDropdownVisible; closeAllEnemy(); if (!was) { this.refreshEnemyDropdownContent(); this.enemyUnitDropdown!.style.display = 'block'; this.enemyUnitDropdownVisible = true; unitBtn.style.background = 'rgba(255,255,255,0.15)'; } };
+    unitBtn.addEventListener('click', toggleEnemyUnits);
+    unitBtn.addEventListener('contextmenu', toggleEnemyUnits);
+    dropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    document.addEventListener('click', () => { closeAllEnemy(); });
   }
 
-  updateEnemyResources(player: Player, woodStockpile?: number, foodStockpile?: number, stoneStockpile?: number): void {
-    const wood = woodStockpile ?? player.resources.wood;
-    const food = foodStockpile ?? player.resources.food;
-    const stone = stoneStockpile ?? 0;
+  private refreshEnemyDropdownContent(): void {
+    if (!this.enemyUnitDropdownContent) return;
+    const units = this._lastEnemyUnits;
+    const unitCounts = new Map<UnitType, number>();
+    for (const unit of units) {
+      unitCounts.set(unit.type, (unitCounts.get(unit.type) || 0) + 1);
+    }
+    const sortByCount = (types: UnitType[]) =>
+      types.filter(t => (unitCounts.get(t) || 0) > 0)
+           .sort((a, b) => (unitCounts.get(b) || 0) - (unitCounts.get(a) || 0));
 
-    if (this.enemyResWoodVal) this.enemyResWoodVal.textContent = `${wood}`;
-    if (this.enemyResStoneVal) this.enemyResStoneVal.textContent = `${stone}`;
-    if (this.enemyResFoodVal) this.enemyResFoodVal.textContent = `${food}`;
-    if (this.enemyResGoldVal) this.enemyResGoldVal.textContent = `${player.resources.gold}`;
+    const activeCombat = sortByCount(HUD.COMBAT_TYPES);
+    const activeWorkers = sortByCount(HUD.WORKER_TYPES);
+    let html = '';
+    if (activeCombat.length > 0) {
+      html += '<div style="color:#ff8a80;font-size:11px;text-transform:uppercase;margin-bottom:4px;">Combat</div>';
+      for (const t of activeCombat) {
+        const emoji = HUD.UNIT_EMOJI[t] || '?';
+        const color = HUD.UNIT_COLOR[t] || '#ccc';
+        const name = HUD.UNIT_NAMES[t] || t;
+        html += `<div style="display:flex;justify-content:space-between;gap:12px;padding:1px 0;"><span>${emoji} ${name}</span><span style="color:${color};font-weight:bold;">${unitCounts.get(t)}</span></div>`;
+      }
+    }
+    if (activeWorkers.length > 0) {
+      if (activeCombat.length > 0) html += '<div style="border-top:1px solid rgba(255,255,255,0.1);margin:6px 0;"></div>';
+      html += '<div style="color:#81c784;font-size:11px;text-transform:uppercase;margin-bottom:4px;">Workers</div>';
+      for (const t of activeWorkers) {
+        const emoji = HUD.UNIT_EMOJI[t] || '?';
+        const color = HUD.UNIT_COLOR[t] || '#ccc';
+        const name = HUD.UNIT_NAMES[t] || t;
+        html += `<div style="display:flex;justify-content:space-between;gap:12px;padding:1px 0;"><span>${emoji} ${name}</span><span style="color:${color};font-weight:bold;">${unitCounts.get(t)}</span></div>`;
+      }
+    }
+    if (html === '') html = '<div style="color:#777;">No units</div>';
+    this.enemyUnitDropdownContent.innerHTML = html;
+  }
+
+  updateEnemyResources(player: Player, stockpiles: {
+    wood: number; food: number; stone: number; iron: number;
+    crystal: number; grassFiber: number; clay: number;
+    charcoal: number; rope: number; steel: number; gold: number;
+  }): void {
+    if (this.enemyResWoodVal) this.enemyResWoodVal.textContent = `${stockpiles.wood}`;
+    if (this.enemyResStoneVal) this.enemyResStoneVal.textContent = `${stockpiles.stone}`;
+    if (this.enemyResFoodVal) this.enemyResFoodVal.textContent = `${stockpiles.food}`;
+    if (this.enemyResGoldVal) this.enemyResGoldVal.textContent = `${stockpiles.gold}`;
+    if (this.enemyResIronVal) this.enemyResIronVal.textContent = `${stockpiles.iron}`;
+    if (this.enemyResCrystalVal) this.enemyResCrystalVal.textContent = `${stockpiles.crystal}`;
+    if (this.enemyResGrassFiberVal) this.enemyResGrassFiberVal.textContent = `${stockpiles.grassFiber}`;
+    if (this.enemyResClayVal) this.enemyResClayVal.textContent = `${stockpiles.clay}`;
+    if (this.enemyResCharcoalVal) this.enemyResCharcoalVal.textContent = `${stockpiles.charcoal}`;
+    if (this.enemyResRopeVal) this.enemyResRopeVal.textContent = `${stockpiles.rope}`;
+    if (this.enemyResSteelVal) this.enemyResSteelVal.textContent = `${stockpiles.steel}`;
     if (this.enemyResUnitVal) this.enemyResUnitVal.textContent = `${player.units.length}`;
+    this._lastEnemyUnits = player.units;
   }
 
   private hideUnitDropdown(): void {
@@ -1321,7 +1557,7 @@ export class HUD {
     if (!this.captureZoneContainer) {
       this.captureZoneContainer = document.createElement('div');
       this.captureZoneContainer.style.cssText = `
-        position:absolute; top:50px; right:10px;
+        position:absolute; top:64px; right:10px;
         display:flex; flex-direction:column; gap:4px; align-items:flex-end;
         pointer-events:none; z-index:500;
       `;
@@ -1439,6 +1675,8 @@ export class HUD {
   updateSelectionInfo(units: Unit[]): void {
     if (units.length === 0) {
       this.elements.selectionInfo.style.display = 'none';
+      this._fullSelection = [];
+      this._excludedTypes.clear();
       this.hideUnitInfo();
       if (this.selectionCommandPanel) {
         this.selectionCommandPanel.style.display = 'none';
@@ -1449,6 +1687,8 @@ export class HUD {
     this.elements.selectionInfo.style.display = 'block';
 
     if (units.length === 1) {
+      this._fullSelection = units;
+      this._excludedTypes.clear();
       const unit = units[0];
       const healthPct = Math.round((unit.currentHealth / unit.stats.maxHealth) * 100);
       const healthColor = healthPct > 50 ? '#2ecc71' : healthPct > 25 ? '#f39c12' : '#e74c3c';
@@ -1469,27 +1709,94 @@ export class HUD {
         <div style="margin-top:4px; color:#ccc; font-size:11px;">Stance: ${stanceLabel}</div>
       `;
     } else {
-      // Multiple units selected
+      // Multiple units selected — show clickable type badges for squad filtering
+      // _fullSelection and _excludedTypes are managed by updateSelection(), not here
+
+      // Count types from the FULL selection (so excluded types still show)
       const typeCounts: Record<string, number> = {};
-      for (const u of units) {
+      for (const u of this._fullSelection) {
         typeCounts[u.type] = (typeCounts[u.type] || 0) + 1;
       }
-      const summary = Object.entries(typeCounts)
-        .map(([type, count]) => `${count}x ${type}`)
-        .join(' · ');
 
-      this.elements.selectionInfo.innerHTML = `
-        <div style="font-size:16px; font-weight:bold; margin-bottom:4px;">
-          ${units.length} UNITS SELECTED
-        </div>
-        <div>${summary}</div>
-      `;
+      // Active count (included types only)
+      const activeCount = this._fullSelection.filter(u => !this._excludedTypes.has(u.type)).length;
+
+      // Build header
+      const header = document.createElement('div');
+      header.style.cssText = 'font-size:16px; font-weight:bold; margin-bottom:6px;';
+      header.textContent = activeCount + ' UNITS SELECTED';
+
+      // Build type badges container
+      const badgeContainer = document.createElement('div');
+      badgeContainer.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px;';
+
+      for (const [type, count] of Object.entries(typeCounts)) {
+        const isExcluded = this._excludedTypes.has(type);
+        const badge = document.createElement('div');
+        badge.style.cssText = `
+          padding: 3px 8px; border-radius: 4px; font-size: 12px; cursor: pointer;
+          border: 1px solid ${isExcluded ? '#555' : '#4a9eff'}; user-select: none;
+          background: ${isExcluded ? 'rgba(80,80,80,0.3)' : 'rgba(74,158,255,0.2)'};
+          color: ${isExcluded ? '#666' : '#fff'};
+          transition: all 0.1s ease;
+          ${isExcluded ? 'text-decoration: line-through;' : ''}
+        `;
+        badge.textContent = count + 'x ' + type;
+        badge.title = isExcluded ? 'Click to include ' + type : 'Click to exclude ' + type;
+
+        badge.addEventListener('mouseenter', () => {
+          badge.style.background = isExcluded ? 'rgba(74,158,255,0.15)' : 'rgba(255,100,100,0.2)';
+          badge.style.borderColor = isExcluded ? '#4a9eff' : '#ff6666';
+        });
+        badge.addEventListener('mouseleave', () => {
+          badge.style.background = isExcluded ? 'rgba(80,80,80,0.3)' : 'rgba(74,158,255,0.2)';
+          badge.style.borderColor = isExcluded ? '#555' : '#4a9eff';
+        });
+
+        badge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          // Don't allow excluding ALL types
+          const typesArray = Object.keys(typeCounts);
+          if (!isExcluded && typesArray.filter(t => !this._excludedTypes.has(t)).length <= 1) return;
+
+          if (isExcluded) {
+            this._excludedTypes.delete(type);
+          } else {
+            this._excludedTypes.add(type);
+          }
+          // Filter the full selection and push the update
+          const filtered = this._fullSelection.filter(u => !this._excludedTypes.has(u.type));
+          this._isFilterUpdate = true;
+          this._onSelectionFiltered?.(filtered);
+        });
+
+        badgeContainer.appendChild(badge);
+      }
+
+      // Hint text
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#888; font-size:10px; margin-top:4px;';
+      hint.textContent = 'Click types to toggle selection';
+
+      this.elements.selectionInfo.innerHTML = '';
+      this.elements.selectionInfo.appendChild(header);
+      this.elements.selectionInfo.appendChild(badgeContainer);
+      this.elements.selectionInfo.appendChild(hint);
     }
   }
 
   /** Full selection update: refreshes info AND rebuilds command panel. Call only when selection actually changes. */
   updateSelection(units: Unit[]): void {
-    this.updateSelectionInfo(units);
+    // If this was triggered by a type-filter toggle, don't reset _fullSelection
+    if (this._isFilterUpdate) {
+      this._isFilterUpdate = false;
+      this.updateSelectionInfo(units);
+    } else {
+      // Fresh selection — reset filter state
+      this._fullSelection = units;
+      this._excludedTypes.clear();
+      this.updateSelectionInfo(units);
+    }
 
     if (units.length === 0) return;
 
@@ -1984,6 +2291,11 @@ export class HUD {
             <strong>Rally Points <span class="key" style="font-size:9px;">Y</span>:</strong> Set where new units from a building go after spawning. Press Y to cycle buildings, click a tile to place the flag.
             <strong>Kill:</strong> Permanently remove selected units from the game.
           </div>
+          <div style="margin-top: 10px; font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Squad Selection</div>
+          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;">●</span> <span><strong style="color:#4a9eff;">Type Toggle</strong> — When multiple units are selected, click unit type badges in the tooltip to include/exclude types from the selection. Quickly filter to just melee, just ranged, etc.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;">●</span> <span><strong style="color:#4a9eff;">Double-Click</strong> — Double-click a unit to select all units of that type on the map.</span></div>
+          <div style="margin-top: 10px; font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">High Ground</div>
+          <div class="tip"><span class="tip-bullet" style="color:#d35400;">●</span> <span><strong style="color:#d35400;">Elevation Bonus</strong> — Units with 3+ elevation advantage get +2 attack. Defenders on high ground get +2 defense. Mountain forts are key strategic positions!</span></div>
         </div>
 
         <!-- TIPS -->
@@ -2006,6 +2318,9 @@ export class HUD {
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Catapult, Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Unit Stats <span class="key" style="font-size:9px;">I</span>:</strong> Press I to toggle a live unit stats panel showing both teams' alive units with kill counts, levels, HP, and current state.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>AI Squads:</strong> AI commanders group units into formation squads that march together at a shared speed. Tanks lead, ranged units stay behind, siege follows. This creates cohesive army movements instead of scattered charges.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Surface Bases:</strong> Standard maps feature neutral desert outposts and mountain forts. Mountain forts perch on peaks with walkable paths — capture them for high ground advantage!</span></div>
         </div>
 
         <!-- Footer -->
@@ -2354,8 +2669,59 @@ export class HUD {
   private _slicerMaxY = 25;
   private _slicerValue: number | null = null; // null = ALL
   private _slicerDragging = false;
+  private _slicerAudioCtx: AudioContext | null = null;
+  private _slicerRafPending = false;
+  private _slicerPendingY: number | null | undefined = undefined; // undefined = no pending
 
   set onSliceChange(cb: ((y: number | null) => void) | null) { this._onSliceChange = cb; }
+
+  /** Play a short satisfying "thwip" tick sound pitched to current elevation.
+   *  High elevations → bright high pitch, deep underground → low rumble. */
+  private playSlicerThwip(): void {
+    try {
+      if (!this._slicerAudioCtx) {
+        this._slicerAudioCtx = new AudioContext();
+      }
+      const ctx = this._slicerAudioCtx;
+      const now = ctx.currentTime;
+
+      // Map current slicer Y to 0..1 range (0 = deepest, 1 = highest)
+      const y = this._slicerValue ?? this._slicerMaxY;
+      const t = Math.max(0, Math.min(1,
+        (y - this._slicerMinY) / (this._slicerMaxY - this._slicerMinY)
+      ));
+
+      // Frequency spectrum: 800 Hz (deep lava) → 2800 Hz (bright sun)
+      const baseFreq = 800 + t * 2000;
+      const endFreq = Math.max(400, baseFreq * 0.35);
+
+      // Quick pitched click — snappy thwip with elevation-mapped pitch
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(baseFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.04);
+      gain.gain.setValueAtTime(0.07, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.06);
+
+      // Tiny noise burst for texture — heavier at low elevations
+      const noiseDur = 0.01 + (1 - t) * 0.015;
+      const bufSize = Math.floor(ctx.sampleRate * noiseDur);
+      const buf = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < bufSize; i++) data[i] = (Math.random() * 2 - 1) * 0.3;
+      const noise = ctx.createBufferSource();
+      const nGain = ctx.createGain();
+      noise.buffer = buf;
+      nGain.gain.setValueAtTime(0.02 + (1 - t) * 0.04, now);
+      nGain.gain.exponentialRampToValueAtTime(0.001, now + noiseDur + 0.01);
+      noise.connect(nGain).connect(ctx.destination);
+      noise.start(now);
+    } catch { /* Audio not available — silent fallback */ }
+  }
 
   private slicerYFromMouseY(clientY: number): number | null {
     if (!this.slicerTrack) return null;
@@ -2372,9 +2738,30 @@ export class HUD {
 
   private applySlicerValue(y: number | null): void {
     if (y === this._slicerValue) return;
+    this.playSlicerThwip();
     this._slicerValue = y;
     this.updateSlicerVisuals();
     this._onSliceChange?.(y);
+  }
+
+  /** Drag-optimized: thumb + label update instantly, heavy slice callback is RAF-batched */
+  private applySlicerValueSmooth(y: number | null): void {
+    if (y === this._slicerValue) return;
+    // Instant visual feedback — thumb follows mouse with zero delay
+    this.playSlicerThwip();
+    this._slicerValue = y;
+    this.updateSlicerVisuals();
+    // Batch the expensive world-slice callback to once per frame
+    this._slicerPendingY = y;
+    if (this._slicerRafPending) return;
+    this._slicerRafPending = true;
+    requestAnimationFrame(() => {
+      this._slicerRafPending = false;
+      if (this._slicerPendingY !== undefined) {
+        this._onSliceChange?.(this._slicerPendingY as number | null);
+        this._slicerPendingY = undefined;
+      }
+    });
   }
 
   private updateSlicerVisuals(): void {
@@ -2405,16 +2792,14 @@ export class HUD {
     if (!this.slicerContainer) {
       this.slicerContainer = document.createElement('div');
       this.slicerContainer.style.cssText = `
-        position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
-        display: flex; flex-direction: column; align-items: center; gap: 6px;
-        background: rgba(0,0,0,0.75); padding: 10px 8px; border-radius: 8px;
+        position: absolute; right: 180px; bottom: 80px;
+        display: flex; flex-direction: column; align-items: center; gap: 4px;
+        background: rgba(0,0,0,0.8); padding: 10px 8px; border-radius: 10px;
         border: 2px solid #ff8c00; z-index: 100; user-select: none;
         pointer-events: auto;
       `;
 
       // Block mouse events from propagating through to the game canvas.
-      // NOTE: mousemove/mouseup are NOT blocked — they must bubble to window
-      // so the drag listener works when scrubbing the slider.
       for (const evt of ['mousedown', 'click', 'dblclick', 'contextmenu', 'wheel'] as const) {
         this.slicerContainer.addEventListener(evt, (e) => { e.stopPropagation(); });
       }
@@ -2427,26 +2812,72 @@ export class HUD {
 
       // Current Y label
       this.slicerLabel = document.createElement('div');
-      this.slicerLabel.style.cssText = 'color: #ff8c00; font-size: 16px; font-weight: bold; min-width: 36px; text-align: center;';
+      this.slicerLabel.style.cssText = 'color: #ff8c00; font-size: 16px; font-weight: bold; width: 52px; text-align: center;';
       this.slicerLabel.textContent = 'ALL';
       this.slicerContainer.appendChild(this.slicerLabel);
 
-      // Custom vertical track
+      // Custom vertical track — themed gradient representing world layers:
+      // Top: sun/sky → clouds → treetops → grass → dirt → stone → deep rock → gems/lava
       this.slicerTrack = document.createElement('div');
       this.slicerTrack.style.cssText = `
-        position: relative; width: 24px; height: 240px; cursor: pointer;
-        border-radius: 12px; border: 1px solid #555;
-        background: linear-gradient(to bottom, #4a90d9 0%, #5cb85c 15%, #8b6e4e 40%, #8a8278 60%, #9aabb8 80%, #ffc107 100%);
+        position: relative; width: 28px; height: 260px; cursor: pointer;
+        border-radius: 14px; border: 1px solid #555;
+        background: linear-gradient(to bottom,
+          #FFD700 0%,
+          #FFA500 3%,
+          #87CEEB 8%,
+          #6CB4EE 13%,
+          #B0C4DE 17%,
+          #9E9E9E 21%,
+          #8D8D8D 25%,
+          #A9A9A9 28%,
+          #228B22 33%,
+          #2E8B57 38%,
+          #3CB371 42%,
+          #8B7355 50%,
+          #A0522D 56%,
+          #6B4226 62%,
+          #808080 70%,
+          #696969 76%,
+          #505050 82%,
+          #383838 86%,
+          #4B0082 91%,
+          #9400D3 95%,
+          #FF4500 98%,
+          #FF2200 100%
+        );
       `;
+
+      // Layer icons along the track (positioned absolutely)
+      const icons = [
+        { emoji: '☀️', top: '2%' },
+        { emoji: '☁️', top: '15%' },
+        { emoji: '⛰️', top: '25%' },
+        { emoji: '🌲', top: '36%' },
+        { emoji: '🌿', top: '46%' },
+        { emoji: '🪨', top: '58%' },
+        { emoji: '⛏️', top: '73%' },
+        { emoji: '💎', top: '88%' },
+        { emoji: '🔥', top: '98%' },
+      ];
+      for (const icon of icons) {
+        const el = document.createElement('div');
+        el.style.cssText = `
+          position: absolute; left: -18px; top: ${icon.top}; transform: translateY(-50%);
+          font-size: 12px; pointer-events: none; filter: drop-shadow(0 0 2px rgba(0,0,0,0.8));
+        `;
+        el.textContent = icon.emoji;
+        this.slicerTrack.appendChild(el);
+      }
 
       // Thumb indicator
       this.slicerThumb = document.createElement('div');
       this.slicerThumb.style.cssText = `
-        position: absolute; left: -4px; width: 32px; height: 6px;
+        position: absolute; left: -6px; width: 40px; height: 6px;
         background: #00ccff; border-radius: 3px; pointer-events: none;
         transform: translateY(-50%); top: 0%;
-        box-shadow: 0 0 6px rgba(0, 204, 255, 0.6);
-        transition: top 0.05s linear;
+        box-shadow: 0 0 8px rgba(0, 204, 255, 0.7), 0 0 3px rgba(0, 204, 255, 0.4);
+        transition: top 0.08s cubic-bezier(0.22, 1, 0.36, 1);
       `;
       this.slicerTrack.appendChild(this.slicerThumb);
 
@@ -2454,10 +2885,12 @@ export class HUD {
       const onDrag = (e: MouseEvent) => {
         if (!this._slicerDragging) return;
         e.preventDefault();
-        this.applySlicerValue(this.slicerYFromMouseY(e.clientY));
+        this.applySlicerValueSmooth(this.slicerYFromMouseY(e.clientY));
       };
       const onUp = () => {
         this._slicerDragging = false;
+        // Re-enable smooth transition after drag ends
+        if (this.slicerThumb) this.slicerThumb.style.transition = 'top 0.08s cubic-bezier(0.22, 1, 0.36, 1)';
         window.removeEventListener('mousemove', onDrag);
         window.removeEventListener('mouseup', onUp);
       };
@@ -2465,7 +2898,9 @@ export class HUD {
         e.preventDefault();
         e.stopPropagation();
         this._slicerDragging = true;
-        this.applySlicerValue(this.slicerYFromMouseY(e.clientY));
+        // Kill transition during drag — thumb tracks mouse instantly
+        if (this.slicerThumb) this.slicerThumb.style.transition = 'none';
+        this.applySlicerValueSmooth(this.slicerYFromMouseY(e.clientY));
         window.addEventListener('mousemove', onDrag);
         window.addEventListener('mouseup', onUp);
       });
@@ -2476,10 +2911,10 @@ export class HUD {
       const labelBar = document.createElement('div');
       labelBar.style.cssText = 'display: flex; justify-content: space-between; width: 100%; padding: 0 2px;';
       const topNum = document.createElement('span');
-      topNum.style.cssText = 'color: #666; font-size: 9px;';
+      topNum.style.cssText = 'color: #888; font-size: 9px;';
       topNum.textContent = `${maxY}`;
       const botNum = document.createElement('span');
-      botNum.style.cssText = 'color: #666; font-size: 9px;';
+      botNum.style.cssText = 'color: #888; font-size: 9px;';
       botNum.textContent = `${minY}`;
       labelBar.appendChild(topNum);
       labelBar.appendChild(botNum);
@@ -2496,8 +2931,120 @@ export class HUD {
 
   /** Programmatically set the slicer value (e.g. from Shift+scroll) */
   setSlicerValue(y: number | null, _maxY = 25): void {
+    if (y !== this._slicerValue) {
+      this.playSlicerThwip();
+    }
     this._slicerValue = y;
     this.updateSlicerVisuals();
+  }
+
+  // --- Unit Stats Panel (toggleable with 'I' key) ---
+  private unitStatsPanel: HTMLElement | null = null;
+  private unitStatsPanelVisible = false;
+
+  toggleUnitStatsPanel(): void {
+    this.unitStatsPanelVisible = !this.unitStatsPanelVisible;
+    if (this.unitStatsPanel) {
+      this.unitStatsPanel.style.display = this.unitStatsPanelVisible ? 'block' : 'none';
+    }
+  }
+
+  updateUnitStatsPanel(allUnits: Unit[]): void {
+    if (!this.unitStatsPanelVisible) return;
+
+    if (!this.unitStatsPanel) {
+      this.unitStatsPanel = document.createElement('div');
+      this.unitStatsPanel.style.cssText = `
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.92); padding: 16px; border-radius: 10px;
+        font-size: 12px; border: 2px solid rgba(255,255,255,0.3); color: #ddd;
+        min-width: 600px; max-height: 80vh; overflow-y: auto; pointer-events: auto; z-index: 500;
+        font-family: 'Courier New', monospace;
+      `;
+      document.body.appendChild(this.unitStatsPanel);
+    }
+    this.unitStatsPanel.style.display = 'block';
+
+    // Build team data
+    const teams: { [owner: number]: { alive: Unit[]; dead: Unit[]; totalKills: number } } = {
+      0: { alive: [], dead: [], totalKills: 0 },
+      1: { alive: [], dead: [], totalKills: 0 },
+    };
+
+    for (const u of allUnits) {
+      if (u.owner !== 0 && u.owner !== 1) continue;
+      const team = teams[u.owner];
+      if (u.state === 'dead') {
+        team.dead.push(u);
+      } else {
+        team.alive.push(u);
+      }
+      team.totalKills += (u.kills ?? 0);
+    }
+
+    // Sort alive units: combat first (by kills desc), then workers
+    const workerTypes = new Set([UnitType.BUILDER, UnitType.LUMBERJACK, UnitType.VILLAGER]);
+    const sortUnits = (units: Unit[]) => units.sort((a, b) => {
+      const aWorker = workerTypes.has(a.type) ? 1 : 0;
+      const bWorker = workerTypes.has(b.type) ? 1 : 0;
+      if (aWorker !== bWorker) return aWorker - bWorker;
+      return (b.kills ?? 0) - (a.kills ?? 0);
+    });
+
+    const typeColors: Record<string, string> = {
+      warrior: '#c0392b', archer: '#8e44ad', rider: '#d35400', paladin: '#3498db',
+      mage: '#2980b9', trebuchet: '#5d4037', catapult: '#795548', scout: '#1abc9c',
+      healer: '#27ae60', assassin: '#2c3e50', shieldbearer: '#7f8c8d', berserker: '#e74c3c',
+      battlemage: '#9b59b6', greatsword: '#546e7a', builder: '#b8860b', lumberjack: '#6d4c41',
+      villager: '#daa520',
+    };
+
+    const renderTeam = (owner: number, label: string, color: string) => {
+      const team = teams[owner];
+      sortUnits(team.alive);
+      let html = `<div style="margin-bottom:12px;">`;
+      html += `<div style="font-size:14px;font-weight:bold;color:${color};margin-bottom:6px;border-bottom:1px solid ${color}44;padding-bottom:4px;">`;
+      html += `${label} — ${team.alive.length} alive, ${team.dead.length} dead — ${team.totalKills} total kills</div>`;
+
+      if (team.alive.length === 0) {
+        html += `<div style="color:#666;font-style:italic;">No units alive</div>`;
+      } else {
+        html += `<table style="width:100%;border-collapse:collapse;">`;
+        html += `<tr style="color:#888;font-size:11px;text-align:left;">`;
+        html += `<th style="padding:2px 6px;">Type</th><th style="padding:2px 4px;">Lv</th>`;
+        html += `<th style="padding:2px 4px;">HP</th><th style="padding:2px 4px;">Kills</th>`;
+        html += `<th style="padding:2px 4px;">State</th></tr>`;
+
+        for (const u of team.alive) {
+          const tc = typeColors[u.type] || '#aaa';
+          const hpPct = Math.round((u.currentHealth / u.stats.maxHealth) * 100);
+          const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
+          const killStr = (u.kills ?? 0) > 0 ? `<span style="color:#e74c3c;font-weight:bold;">${u.kills}</span>` : '0';
+          const stateStr = u.state === 'idle' ? '<span style="color:#666;">idle</span>' :
+                           u.state === 'attacking' ? '<span style="color:#e74c3c;">fighting</span>' :
+                           u.state === 'moving' ? '<span style="color:#3498db;">moving</span>' :
+                           `<span style="color:#888;">${u.state}</span>`;
+          html += `<tr style="border-bottom:1px solid #222;">`;
+          html += `<td style="padding:2px 6px;color:${tc};">${u.type}</td>`;
+          html += `<td style="padding:2px 4px;text-align:center;">${u.level}</td>`;
+          html += `<td style="padding:2px 4px;color:${hpColor};">${u.currentHealth}/${u.stats.maxHealth} (${hpPct}%)</td>`;
+          html += `<td style="padding:2px 4px;text-align:center;">${killStr}</td>`;
+          html += `<td style="padding:2px 4px;">${stateStr}</td></tr>`;
+        }
+        html += `</table>`;
+      }
+      html += `</div>`;
+      return html;
+    };
+
+    let panelHtml = `<div style="text-align:center;font-size:16px;font-weight:bold;color:#fff;margin-bottom:8px;">
+      UNIT STATS <span style="font-size:11px;color:#666;">(press I to close)</span></div>`;
+    panelHtml += `<div style="display:flex;gap:16px;">`;
+    panelHtml += `<div style="flex:1;">${renderTeam(0, 'BLUE TEAM (P1)', '#3498db')}</div>`;
+    panelHtml += `<div style="flex:1;">${renderTeam(1, 'RED TEAM (P2)', '#e74c3c')}</div>`;
+    panelHtml += `</div>`;
+
+    this.unitStatsPanel.innerHTML = panelHtml;
   }
 
   dispose(): void {

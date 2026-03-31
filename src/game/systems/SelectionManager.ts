@@ -72,6 +72,12 @@ export class SelectionManager {
     this.onSelectionChange?.(this.selectedUnits);
   }
 
+  /** Replace the current selection with a filtered subset (e.g. type toggle) */
+  setSelection(units: Unit[]): void {
+    this.selectedUnits = units;
+    this.onSelectionChange?.(this.selectedUnits);
+  }
+
   private setupListeners(): void {
     let mouseDownTime = 0;
     let mouseDownPos = { x: 0, y: 0 };

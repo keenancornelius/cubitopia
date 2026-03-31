@@ -273,7 +273,10 @@ export class MapGenerator {
     this.computeShellBlocks(gameMap, width, height);
 
     // === PASS 6b: Carve lava tubes — underground tunnels connecting map features ===
-    this.carveLavaTubes(gameMap, elevationMap, width, height);
+    gameMap.undergroundBases = this.carveLavaTubes(gameMap, elevationMap, width, height);
+
+    // === PASS 6c: Find surface neutral base locations (desert outposts + mountain forts) ===
+    gameMap.surfaceBases = this.findSurfaceBaseLocations(gameMap, width, height);
 
     // === PASS 7: Balance resources across both player sides ===
     this.balanceResources(tiles, width, height);
@@ -1258,12 +1261,242 @@ export class MapGenerator {
   }
 
   // =====================================================
+  // SURFACE NEUTRAL BASE LOCATION FINDER
+  // Scans map for desert and mountain-top tiles suitable for neutral outposts
+  // =====================================================
+
+  private findSurfaceBaseLocations(map: GameMap, w: number, h: number): Array<{ center: { q: number; r: number }; terrain: string }> {
+    const EDGE = 6;
+    const centerQ = Math.floor(w / 2);
+    const centerR = Math.floor(h / 2);
+    const MIN_DIST_FROM_EDGE = 8;
+    const MIN_DIST_BETWEEN = 10;
+    const RIDGE_THRESHOLD = 10; // Elevation >= this is impassable
+
+    // Collect candidate tiles: desert and mountain/high terrain
+    const desertCandidates: { q: number; r: number; elev: number }[] = [];
+    const mountainCandidates: { q: number; r: number; elev: number }[] = [];
+
+    map.tiles.forEach((tile, key) => {
+      const [q, r] = key.split(',').map(Number);
+      if (q < EDGE || q >= w - EDGE || r < EDGE || r >= h - EDGE) return;
+      if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.LAKE ||
+          tile.terrain === TerrainType.RIVER || tile.terrain === TerrainType.WATERFALL) return;
+      if (tile.hasTunnel) return;
+
+      if (tile.terrain === TerrainType.DESERT) {
+        desertCandidates.push({ q, r, elev: tile.elevation });
+      } else if (tile.terrain === TerrainType.MOUNTAIN && tile.elevation >= 7) {
+        // Accept mountains with elevation 7+ — we'll carve paths to make them reachable
+        mountainCandidates.push({ q, r, elev: tile.elevation });
+      }
+    });
+
+    desertCandidates.sort((a, b) => {
+      const da = Math.sqrt((a.q - centerQ) ** 2 + (a.r - centerR) ** 2);
+      const db = Math.sqrt((b.q - centerQ) ** 2 + (b.r - centerR) ** 2);
+      return da - db;
+    });
+    // Prefer highest mountains — mountain forts should be dramatic
+    mountainCandidates.sort((a, b) => b.elev - a.elev);
+
+    const results: Array<{ center: { q: number; r: number }; terrain: string }> = [];
+    const allPlaced: { q: number; r: number }[] = [];
+
+    if (map.undergroundBases) {
+      for (const ub of map.undergroundBases) {
+        allPlaced.push(ub.center);
+      }
+    }
+
+    const tryPlace = (candidates: { q: number; r: number; elev: number }[], terrain: string, maxCount: number) => {
+      let placed = 0;
+      for (const c of candidates) {
+        if (placed >= maxCount) break;
+        const distFromP1 = Math.sqrt((c.q - EDGE) ** 2 + (c.r - centerR) ** 2);
+        const distFromP2 = Math.sqrt((c.q - (w - EDGE)) ** 2 + (c.r - centerR) ** 2);
+        if (distFromP1 < MIN_DIST_FROM_EDGE || distFromP2 < MIN_DIST_FROM_EDGE) continue;
+
+        const tooClose = allPlaced.some(p => {
+          const d = Math.sqrt((c.q - p.q) ** 2 + (c.r - p.r) ** 2);
+          return d < MIN_DIST_BETWEEN;
+        });
+        if (tooClose) continue;
+
+        // For mountain forts: verify there's lower terrain nearby to build a path FROM
+        if (terrain === 'mountain') {
+          const neighbors = this.hexNeighbors(c.q, c.r);
+          // Need at least one neighbor chain that connects to lower terrain (< 8)
+          let hasLowAccess = false;
+          for (const [nq, nr] of neighbors) {
+            const nt = map.tiles.get(`${nq},${nr}`);
+            if (!nt) continue;
+            if (nt.elevation < 8 && nt.terrain !== TerrainType.WATER && nt.terrain !== TerrainType.LAKE) {
+              hasLowAccess = true;
+              break;
+            }
+            // Check second ring — path can go through one high neighbor to reach low terrain
+            for (const [nnq, nnr] of this.hexNeighbors(nq, nr)) {
+              const nnt = map.tiles.get(`${nnq},${nnr}`);
+              if (nnt && nnt.elevation < 8 && nnt.terrain !== TerrainType.WATER && nnt.terrain !== TerrainType.LAKE) {
+                hasLowAccess = true;
+                break;
+              }
+            }
+            if (hasLowAccess) break;
+          }
+          if (!hasLowAccess) continue;
+        } else {
+          // Desert: just check walkable neighbors
+          const neighbors = this.hexNeighbors(c.q, c.r);
+          const walkableNeighbors = neighbors.filter(([nq, nr]) => {
+            const nt = map.tiles.get(`${nq},${nr}`);
+            return nt && nt.terrain !== TerrainType.WATER && nt.terrain !== TerrainType.LAKE;
+          });
+          if (walkableNeighbors.length < 4) continue;
+        }
+
+        results.push({ center: { q: c.q, r: c.r }, terrain });
+        allPlaced.push({ q: c.q, r: c.r });
+        placed++;
+      }
+    };
+
+    // Place 1-2 desert outposts and 1-2 mountain forts
+    tryPlace(desertCandidates, 'desert', 2);
+    tryPlace(mountainCandidates, 'mountain', 2);
+
+    // --- Carve walkable ramp paths to mountain forts ---
+    for (const base of results) {
+      if (base.terrain !== 'mountain') continue;
+      this.carveMountainPath(map, base.center, w, h, RIDGE_THRESHOLD);
+    }
+
+    const baseDescs = results.map(r => {
+      const t = map.tiles.get(r.center.q + ',' + r.center.r);
+      return r.terrain + '(' + r.center.q + ',' + r.center.r + ') elev=' + (t?.elevation ?? '?');
+    });
+    console.log('[SurfaceBases] Found ' + results.length + ' surface base locations: ' + baseDescs.join(', '));
+    return results;
+  }
+
+  /** Carve a walkable ramp path from low terrain up to a mountain fort.
+   *  - Sets the fort tile + immediate area to elevation 9 (high but below ridge threshold)
+   *  - Traces a path downhill, lowering ridge tiles to create a passable route */
+  private carveMountainPath(map: GameMap, fortCenter: { q: number; r: number }, w: number, h: number, ridgeThreshold: number): void {
+    const FORT_ELEVATION = 9; // High but walkable (below ridge threshold of 10)
+    const PATH_WIDTH = 1; // Center tile + some neighbors
+
+    // Step 1: Flatten the fort area — set center + neighbors to exactly FORT_ELEVATION
+    const fortTile = map.tiles.get(`${fortCenter.q},${fortCenter.r}`);
+    if (fortTile) {
+      fortTile.elevation = FORT_ELEVATION;
+      fortTile.walkableFloor = FORT_ELEVATION;
+    }
+    const fortNeighbors = this.hexNeighbors(fortCenter.q, fortCenter.r);
+    for (const [nq, nr] of fortNeighbors) {
+      const nt = map.tiles.get(`${nq},${nr}`);
+      if (!nt || nt.terrain === TerrainType.WATER || nt.terrain === TerrainType.LAKE) continue;
+      // Set to fort elevation or keep if already lower (natural slope)
+      if (nt.elevation >= ridgeThreshold) {
+        nt.elevation = FORT_ELEVATION;
+        nt.walkableFloor = FORT_ELEVATION;
+      }
+    }
+
+    // Step 2: Find nearest low-terrain tile (elevation < 7) to build a path toward
+    let bestTarget: { q: number; r: number } | null = null;
+    let bestDist = Infinity;
+    const searchRadius = 12;
+    for (let dq = -searchRadius; dq <= searchRadius; dq++) {
+      for (let dr = -searchRadius; dr <= searchRadius; dr++) {
+        const tq = fortCenter.q + dq;
+        const tr = fortCenter.r + dr;
+        if (tq < 2 || tq >= w - 2 || tr < 2 || tr >= h - 2) continue;
+        const tile = map.tiles.get(`${tq},${tr}`);
+        if (!tile) continue;
+        if (tile.elevation >= 7) continue; // Not low enough
+        if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.LAKE) continue;
+        const d = Math.sqrt(dq * dq + dr * dr);
+        if (d < bestDist) {
+          bestDist = d;
+          bestTarget = { q: tq, r: tr };
+        }
+      }
+    }
+
+    if (!bestTarget) {
+      console.log(`[MountainPath] No low terrain found near fort (${fortCenter.q},${fortCenter.r})`);
+      return;
+    }
+
+    // Step 3: Trace a path from fort to low terrain, lowering any ridge tiles along the way
+    // Use greedy stepping: each step moves toward target, picking the neighbor closest to goal
+    let cq = fortCenter.q;
+    let cr = fortCenter.r;
+    const visited = new Set<string>();
+    visited.add(`${cq},${cr}`);
+    const maxSteps = 20;
+
+    for (let step = 0; step < maxSteps; step++) {
+      const tile = map.tiles.get(`${cq},${cr}`);
+      if (!tile) break;
+      // Reached low terrain — done
+      if (tile.elevation < 7) break;
+
+      // Lower this tile if it's a ridge
+      if (tile.elevation >= ridgeThreshold) {
+        // Gradual ramp: interpolate between fort elevation and target elevation based on progress
+        const distToTarget = Math.sqrt((cq - bestTarget.q) ** 2 + (cr - bestTarget.r) ** 2);
+        const totalDist = Math.sqrt((fortCenter.q - bestTarget.q) ** 2 + (fortCenter.r - bestTarget.r) ** 2);
+        const progress = 1 - (totalDist > 0 ? distToTarget / totalDist : 0);
+        const rampElev = Math.round(FORT_ELEVATION - progress * (FORT_ELEVATION - 5));
+        tile.elevation = Math.min(tile.elevation, Math.max(rampElev, 5));
+        tile.walkableFloor = tile.elevation;
+        tile.terrain = TerrainType.MOUNTAIN; // Keep as mountain terrain
+      }
+
+      // Also widen the path slightly — lower immediate neighbors that are ridges
+      for (const [nq, nr] of this.hexNeighbors(cq, cr)) {
+        const nt = map.tiles.get(`${nq},${nr}`);
+        if (!nt || nt.terrain === TerrainType.WATER || nt.terrain === TerrainType.LAKE) continue;
+        if (nt.elevation >= ridgeThreshold && PATH_WIDTH > 0) {
+          nt.elevation = Math.min(nt.elevation, tile.elevation + 1);
+          nt.walkableFloor = nt.elevation;
+        }
+      }
+
+      // Pick next step: neighbor closest to target that we haven't visited
+      let bestNeighbor: [number, number] | null = null;
+      let bestNDist = Infinity;
+      for (const [nq, nr] of this.hexNeighbors(cq, cr)) {
+        const nKey = `${nq},${nr}`;
+        if (visited.has(nKey)) continue;
+        const nt = map.tiles.get(nKey);
+        if (!nt || nt.terrain === TerrainType.WATER || nt.terrain === TerrainType.LAKE) continue;
+        const nd = Math.sqrt((nq - bestTarget.q) ** 2 + (nr - bestTarget.r) ** 2);
+        if (nd < bestNDist) {
+          bestNDist = nd;
+          bestNeighbor = [nq, nr];
+        }
+      }
+
+      if (!bestNeighbor) break;
+      cq = bestNeighbor[0];
+      cr = bestNeighbor[1];
+      visited.add(`${cq},${cr}`);
+    }
+
+    console.log(`[MountainPath] Carved ramp from (${fortCenter.q},${fortCenter.r}) toward (${bestTarget.q},${bestTarget.r}), ${visited.size} tiles modified`);
+  }
+
+  // =====================================================
   // LAVA TUBE GENERATION
   // Worm-like underground tunnels connecting map features:
   //   cave entrance → sub-terrain → hill base / waterfall / mountain exit
   // =====================================================
 
-  private carveLavaTubes(map: GameMap, elevMap: Map<string, number>, w: number, h: number): void {
+  private carveLavaTubes(map: GameMap, elevMap: Map<string, number>, w: number, h: number): Array<{ center: { q: number; r: number }; floorY: number }> {
     // --- Step 1: Find candidate entrance/exit points ---
     const highPoints: { q: number; r: number; elev: number }[] = [];
     const lowPoints: { q: number; r: number; elev: number }[] = [];
@@ -1292,13 +1525,14 @@ export class MapGenerator {
     console.log(`[LavaTubes] Candidates: ${highPoints.length} high, ${lowPoints.length} low, ${waterfallPoints.length} waterfall`);
     if (highPoints.length === 0 || (lowPoints.length === 0 && waterfallPoints.length === 0)) {
       console.log('[LavaTubes] Not enough endpoints, skipping tube generation');
-      return;
+      return [];
     }
 
     // --- Step 2: Generate 2-4 tubes connecting high→low points ---
-    const numTubes = 2 + Math.floor(this.rng.next() * 3); // 2-4 tubes
+    const numTubes = 4 + Math.floor(this.rng.next() * 3); // 4-6 tubes
     const usedStarts = new Set<string>();
     const usedEnds = new Set<string>();
+    const tubeMidpoints: Array<{ q: number; r: number; floorY: number }> = [];
 
     for (let t = 0; t < numTubes; t++) {
       // Pick a random high point as entrance
@@ -1320,7 +1554,7 @@ export class MapGenerator {
       let end: { q: number; r: number; elev: number } | null = null;
       const candidates = this.rng.next() < 0.4 && waterfallPoints.length > 0
         ? waterfallPoints : lowPoints;
-      const minDist = Math.max(12, Math.min(w, h) * 0.35); // at least 35% of map
+      const minDist = Math.max(10, Math.min(w, h) * 0.25); // at least 25% of map
 
       for (let attempt = 0; attempt < 50; attempt++) {
         const idx = Math.floor(this.rng.next() * candidates.length);
@@ -1351,7 +1585,148 @@ export class MapGenerator {
       // --- Step 4: Carve tunnel blocks and set tile properties ---
       this.carveTunnelBlocks(tubePath, map);
       console.log(`[LavaTubes] Tube ${t}: carved ${tubePath.length} tiles`);
+
+      // Record the midpoint for cavern placement — take the deepest point (~40-60% along tube)
+      if (tubePath.length >= 6) {
+        const midIdx = Math.floor(tubePath.length * (0.4 + this.rng.next() * 0.2));
+        const midTile = map.tiles.get(`${tubePath[midIdx].q},${tubePath[midIdx].r}`);
+        if (midTile?.hasTunnel && midTile.tunnelFloorY !== undefined) {
+          tubeMidpoints.push({ q: tubePath[midIdx].q, r: tubePath[midIdx].r, floorY: midTile.tunnelFloorY });
+        }
+      }
     }
+
+    // --- Step 5: Carve caverns at tube midpoints for underground outpost placement ---
+    // Pick up to 4 midpoints that are well-separated from each other
+    const CAVERN_RADIUS = 5;
+    const CAVERN_HEIGHT = 8;
+    const cavernResults: Array<{ center: { q: number; r: number }; floorY: number }> = [];
+    const mapCenter = { q: Math.floor(w / 2), r: Math.floor(h / 2) };
+
+    // Greedy selection: pick midpoints that maximize spread across the map
+    // First pick goes to the midpoint closest to map center, then each subsequent pick
+    // goes to the midpoint farthest from all already-selected caverns
+    console.log(`[LavaTubes] ${tubeMidpoints.length} tube midpoints available for cavern placement`);
+    const remaining = [...tubeMidpoints];
+    while (cavernResults.length < 4 && remaining.length > 0) {
+      let bestIdx = -1;
+      let bestScore = -Infinity;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const mp = remaining[i];
+        let score: number;
+        if (cavernResults.length === 0) {
+          // First cavern: prefer closer to center (strategic position)
+          score = -Math.sqrt((mp.q - mapCenter.q) ** 2 + (mp.r - mapCenter.r) ** 2);
+        } else {
+          // Subsequent caverns: maximize minimum distance to all existing caverns
+          score = Infinity;
+          for (const c of cavernResults) {
+            const d = Math.sqrt((mp.q - c.center.q) ** 2 + (mp.r - c.center.r) ** 2);
+            if (d < score) score = d;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = i;
+        }
+      }
+
+      if (bestIdx < 0) break;
+      const picked = remaining.splice(bestIdx, 1)[0];
+
+      // Still enforce a minimum separation of 8 hex
+      if (cavernResults.length > 0 && bestScore < 8) {
+        console.log(`[LavaTubes] Best remaining midpoint (${picked.q},${picked.r}) only ${bestScore.toFixed(1)} hex from nearest cavern, stopping`);
+        break;
+      }
+
+      const cavernFloorY = picked.floorY - 2;
+      this.carveCavern({ q: picked.q, r: picked.r }, CAVERN_RADIUS, cavernFloorY, CAVERN_HEIGHT, map);
+      cavernResults.push({ center: { q: picked.q, r: picked.r }, floorY: cavernFloorY });
+      console.log(`[LavaTubes] Cavern carved at (${picked.q},${picked.r}), floorY=${cavernFloorY}, radius=${CAVERN_RADIUS}, minDist=${bestScore === -Infinity ? 'first' : bestScore.toFixed(1)}`);
+    }
+
+    // --- Step 6: Deep underground tunnel network ---
+    // Add extra deep-only tunnels between random points to create a sprawling network
+    const EDGE_BUF = 5;
+    const numDeepTubes = 3 + Math.floor(this.rng.next() * 4); // 3-6 deep tunnels
+    const deepEndpoints: { q: number; r: number }[] = [];
+    for (let i = 0; i < numDeepTubes * 2 + 4; i++) {
+      const dq = EDGE_BUF + Math.floor(this.rng.next() * (w - EDGE_BUF * 2));
+      const dr = EDGE_BUF + Math.floor(this.rng.next() * (h - EDGE_BUF * 2));
+      const tile = map.tiles.get(`${dq},${dr}`);
+      if (tile) deepEndpoints.push({ q: dq, r: dr });
+    }
+    let deepCarved = 0;
+    for (let dt = 0; dt < numDeepTubes; dt++) {
+      if (deepEndpoints.length < 2) break;
+      const si = Math.floor(this.rng.next() * deepEndpoints.length);
+      const dStart = deepEndpoints.splice(si, 1)[0];
+      const ei = Math.floor(this.rng.next() * deepEndpoints.length);
+      const dEnd = deepEndpoints.splice(ei, 1)[0];
+      const dd = Math.sqrt((dEnd.q - dStart.q) ** 2 + (dEnd.r - dStart.r) ** 2);
+      if (dd < 8) continue;
+      const dPath = this.traceTubePath(dStart, dEnd, map, w, h);
+      if (dPath.length >= 6) {
+        this.carveTunnelBlocks(dPath, map, true); // deep only — no surface openings
+        deepCarved++;
+      }
+    }
+    console.log(`[LavaTubes] Deep tunnels carved: ${deepCarved}`);
+
+    // --- Step 7: Connect caverns to nearby tunnel tiles ---
+    // Route deep tunnels from each cavern outward to ensure connectivity
+    for (const cavern of cavernResults) {
+      const numConnections = 2 + Math.floor(this.rng.next() * 2); // 2-3 connections per cavern
+      for (let c = 0; c < numConnections; c++) {
+        const angle = this.rng.next() * Math.PI * 2;
+        const dist = 10 + Math.floor(this.rng.next() * 12); // 10-22 hex away
+        const targetQ = Math.round(cavern.center.q + Math.cos(angle) * dist);
+        const targetR = Math.round(cavern.center.r + Math.sin(angle) * dist);
+        if (targetQ < EDGE_BUF || targetQ >= w - EDGE_BUF || targetR < EDGE_BUF || targetR >= h - EDGE_BUF) continue;
+        const edgeQ = Math.round(cavern.center.q + Math.cos(angle) * (CAVERN_RADIUS - 1));
+        const edgeR = Math.round(cavern.center.r + Math.sin(angle) * (CAVERN_RADIUS - 1));
+        const cPath = this.traceTubePath({ q: edgeQ, r: edgeR }, { q: targetQ, r: targetR }, map, w, h);
+        if (cPath.length >= 4) {
+          this.carveTunnelBlocks(cPath, map, true);
+        }
+      }
+    }
+
+    // --- Step 8: Cross-connect tunnel branches ---
+    // Find existing tunnel tiles and add branch connections for a web-like network
+    const allTunnelTiles: { q: number; r: number }[] = [];
+    map.tiles.forEach((tile, key) => {
+      if (tile.hasTunnel) {
+        const [tq, tr] = key.split(',').map(Number);
+        allTunnelTiles.push({ q: tq, r: tr });
+      }
+    });
+    const numBranches = 2 + Math.floor(this.rng.next() * 3); // 2-4 branches
+    for (let b = 0; b < numBranches; b++) {
+      if (allTunnelTiles.length < 20) break;
+      const si = Math.floor(this.rng.next() * allTunnelTiles.length);
+      const src = allTunnelTiles[si];
+      let bestDist = Infinity;
+      let bestTarget: { q: number; r: number } | null = null;
+      for (const tt of allTunnelTiles) {
+        const d = Math.sqrt((tt.q - src.q) ** 2 + (tt.r - src.r) ** 2);
+        if (d > 6 && d < 18 && d < bestDist) {
+          bestDist = d;
+          bestTarget = tt;
+        }
+      }
+      if (bestTarget) {
+        const bPath = this.traceTubePath(src, bestTarget, map, w, h);
+        if (bPath.length >= 4) {
+          this.carveTunnelBlocks(bPath, map, true);
+        }
+      }
+    }
+    console.log(`[LavaTubes] Total tunnel tiles: ${allTunnelTiles.length}, caverns: ${cavernResults.length}`);
+
+    return cavernResults;
   }
 
   /** Trace a winding path for a lava tube using noise-biased stepping.

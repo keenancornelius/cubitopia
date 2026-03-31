@@ -195,6 +195,9 @@ export interface Unit {
   _undergroundCommand?: boolean;    // Unit was given an underground move command
   _garrisoned?: boolean;            // Unit is inside a structure (hidden)
   _garrisonKey?: string;            // Hex key "q,r" of the structure they're garrisoned in
+  _squadId?: number | null;         // Squad assignment — units in same squad march together
+  _squadSpeed?: number;             // Effective march speed (slowest unit in squad)
+  kills: number;                    // Total kills this unit has scored
 }
 
 export enum UnitType {
@@ -321,6 +324,10 @@ export interface GameMap {
   tiles: Map<string, Tile>;  // key = "q,r"
   seed: number;
   mapType?: MapType;
+  /** Underground cavern locations for neutral base placement (any map type) */
+  undergroundBases?: Array<{ center: { q: number; r: number }; floorY: number }>;
+  /** Surface locations for neutral base placement (desert outposts, mountain forts, etc.) */
+  surfaceBases?: Array<{ center: { q: number; r: number }; terrain: string }>;
 }
 
 // --- Map Types ---

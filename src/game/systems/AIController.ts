@@ -55,6 +55,7 @@ export default class AIController {
   private buildOps: AIBuildingOps;
   private garrisonOps: AIGarrisonOps | null = null;
   aiState: [AIBuildState, AIBuildState] = [createAIBuildState(), createAIBuildState()];
+  private _nextSquadId = 1;
 
   constructor(ctx: GameContext, buildOps: AIBuildingOps) {
     this.ctx = ctx;
@@ -304,71 +305,53 @@ export default class AIController {
     const crystal = player.resources.crystal;
 
     if (st.barracks && gold >= 5 && st.spawnQueue.length < maxQueue) {
-      const roll = Math.random();
       const wave = st.waveNumber;
+      const rope = player.resources.rope;
 
-      // Armory units (require steel)
+      // Build a weighted roster from ALL available buildings
+      const roster: Array<{ type: UnitType; cost: number; weight: number }> = [];
+
+      // --- Barracks core (always available) ---
+      roster.push({ type: UnitType.WARRIOR, cost: 5, weight: 20 });
+      roster.push({ type: UnitType.ARCHER, cost: 8, weight: 15 });
+      roster.push({ type: UnitType.SCOUT, cost: 6, weight: 10 });
+      if (steel >= 1 && gold >= 12) {
+        roster.push({ type: UnitType.PALADIN, cost: 12, weight: 8 });
+      }
+
+      // --- Armory units (require steel) ---
       if (st.armory && steel >= 1) {
-        if (roll < 0.08 && gold >= 12 && steel >= 1) {
-          st.spawnQueue.push({ type: UnitType.GREATSWORD, cost: 12 });
-        } else if (roll < 0.16 && gold >= 14 && steel >= 1) {
-          st.spawnQueue.push({ type: UnitType.BERSERKER, cost: 14 });
-        } else if (roll < 0.24 && gold >= 11 && steel >= 1) {
-          st.spawnQueue.push({ type: UnitType.SHIELDBEARER, cost: 11 });
-        } else if (roll < 0.30 && gold >= 13 && steel >= 1) {
-          st.spawnQueue.push({ type: UnitType.ASSASSIN, cost: 13 });
-        }
-        // Fall through to barracks units
-        else if (roll < 0.45 && gold >= 8) {
-          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-        } else if (roll < 0.55 && gold >= 6) {
-          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
-        } else {
-          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
-        }
+        if (gold >= 12) roster.push({ type: UnitType.GREATSWORD, cost: 12, weight: 7 });
+        if (gold >= 14) roster.push({ type: UnitType.BERSERKER, cost: 14, weight: 6 });
+        if (gold >= 11) roster.push({ type: UnitType.SHIELDBEARER, cost: 11, weight: 7 });
+        if (gold >= 13) roster.push({ type: UnitType.ASSASSIN, cost: 13, weight: 5 });
       }
-      // Wizard Tower units (require crystal)
-      else if (st.wizard_tower && crystal >= 1) {
-        if (roll < 0.10 && gold >= 9 && crystal >= 1) {
-          st.spawnQueue.push({ type: UnitType.MAGE, cost: 9 });
-        } else if (roll < 0.20 && gold >= 15 && crystal >= 1) {
-          st.spawnQueue.push({ type: UnitType.BATTLEMAGE, cost: 15 });
-        } else if (roll < 0.30 && gold >= 10 && crystal >= 1) {
-          st.spawnQueue.push({ type: UnitType.HEALER, cost: 10 });
-        }
-        // Fall through to barracks units
-        else if (roll < 0.50 && gold >= 8) {
-          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-        } else if (roll < 0.60 && gold >= 6) {
-          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
-        } else {
-          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
-        }
+
+      // --- Wizard Tower units (require crystal) ---
+      if (st.wizard_tower && crystal >= 1) {
+        if (gold >= 9) roster.push({ type: UnitType.MAGE, cost: 9, weight: 7 });
+        if (gold >= 15) roster.push({ type: UnitType.BATTLEMAGE, cost: 15, weight: 5 });
+        if (gold >= 10) roster.push({ type: UnitType.HEALER, cost: 10, weight: 8 });
       }
-      // Workshop units (require rope and stone)
-      else if (st.workshop && wave >= 2) {
-        const rope = player.resources.rope;
-        if (roll < 0.12 && gold >= 18 && rope >= 2) {
-          st.spawnQueue.push({ type: UnitType.CATAPULT, cost: 18 });
-        } else if (roll < 0.20 && gold >= 15) {
-          st.spawnQueue.push({ type: UnitType.TREBUCHET, cost: 15 });
-        } else if (roll < 0.35 && gold >= 10) {
-          st.spawnQueue.push({ type: UnitType.RIDER, cost: 10 });
-        } else if (roll < 0.55 && gold >= 8) {
-          st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-        } else if (roll < 0.65 && gold >= 6) {
-          st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
-        } else {
-          st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
-        }
-      } else if (roll < 0.38 && gold >= 12 && steel >= 1) {
-        st.spawnQueue.push({ type: UnitType.PALADIN, cost: 12 });
-      } else if (roll < 0.50 && gold >= 8) {
-        st.spawnQueue.push({ type: UnitType.ARCHER, cost: 8 });
-      } else if (roll < 0.62 && gold >= 6) {
-        st.spawnQueue.push({ type: UnitType.SCOUT, cost: 6 });
-      } else {
-        st.spawnQueue.push({ type: UnitType.WARRIOR, cost: 5 });
+
+      // --- Workshop units (wave 2+) ---
+      if (st.workshop && wave >= 2) {
+        if (gold >= 10) roster.push({ type: UnitType.RIDER, cost: 10, weight: 8 });
+        if (gold >= 15) roster.push({ type: UnitType.TREBUCHET, cost: 15, weight: 4 });
+        if (gold >= 18 && rope >= 2) roster.push({ type: UnitType.CATAPULT, cost: 18, weight: 3 });
+      }
+
+      // Weighted random selection from the full roster
+      const totalWeight = roster.reduce((sum, r) => sum + r.weight, 0);
+      let roll = Math.random() * totalWeight;
+      let pick = roster[roster.length - 1]; // fallback
+      for (const entry of roster) {
+        roll -= entry.weight;
+        if (roll <= 0) { pick = entry; break; }
+      }
+
+      if (gold >= pick.cost) {
+        st.spawnQueue.push({ type: pick.type, cost: pick.cost });
       }
     }
 
@@ -635,47 +618,64 @@ export default class AIController {
     // Strategy: while unclaimed territory exists, send waves to capture those FIRST.
     // Only attack enemy capital once all outposts are secured or army is large enough to split.
 
-    const minArmySize = Math.min(3 + st.waveNumber, 6);
+    // Require larger army before capital rush when neutral territory still exists
+    const baseArmySize = Math.min(3 + st.waveNumber, 6);
+    const minArmySize = hasUnclaimedTerritory ? Math.max(baseArmySize, 4) : baseArmySize;
+
+    // ===== PHASE 1.7: Early capture squads — send pairs to neutral bases ASAP =====
+    // Don't wait for mustering: as soon as we have idle combat units and neutrals exist, send capture pairs
+    if (hasUnclaimedTerritory && idleCombat.length >= 2) {
+      for (const target of captureTargets) {
+        if (target.owner !== 2) continue; // Only proactively send to neutrals
+        const alreadyThere = unitsInZone.get(target.id) ?? 0;
+        if (alreadyThere >= 2) continue; // Already have enough units there
+        const toSend = Math.min(2 - alreadyThere, idleCombat.length);
+        if (toSend <= 0) continue;
+        // Send nearest idle units as a mini-squad
+        const nearest = [...idleCombat].sort((a, b) =>
+          Pathfinder.heuristic(a.position, target.position) - Pathfinder.heuristic(b.position, target.position)
+        );
+        const pairUnits = nearest.slice(0, toSend);
+        this.dispatchSquad(pairUnits, target.position, UnitStance.DEFENSIVE, st, FormationType.BOX);
+        for (const unit of pairUnits) {
+          const idx = idleCombat.indexOf(unit);
+          if (idx >= 0) idleCombat.splice(idx, 1);
+        }
+        if (idleCombat.length < 2) break; // Conserve remaining units
+      }
+    }
 
     if (st.mustering && st.armySize >= minArmySize) {
       st.mustering = false;
       st.waveNumber++;
 
       if (hasUnclaimedTerritory) {
-        // ---- TERRITORY MODE: send army to capture nearest unclaimed zones ----
-        // Distribute units across up to 2 capture targets (spread the army)
-        const targets = captureTargets.slice(0, 2);
+        // ---- TERRITORY MODE: send squads to capture nearest unclaimed zones ----
+        const targets = captureTargets.slice(0, Math.min(3, captureTargets.length));
         const unitsPerTarget = Math.max(2, Math.ceil(idleCombat.length / targets.length));
 
         let unitIdx = 0;
         for (const target of targets) {
           const alreadyThere = unitsInZone.get(target.id) ?? 0;
           const toSend = Math.max(0, unitsPerTarget - alreadyThere);
-          for (let i = 0; i < toSend && unitIdx < idleCombat.length; i++, unitIdx++) {
-            const unit = idleCombat[unitIdx];
-            unit.stance = UnitStance.DEFENSIVE;
-            unit._playerCommanded = true;
-            unit._postPosition = null;
-            st.guardAssignments.delete(unit.id);
-            UnitAI.commandMove(unit, target.position, this.ctx.currentMap!);
+          const squadUnits = idleCombat.slice(unitIdx, unitIdx + toSend);
+          if (squadUnits.length > 0) {
+            this.dispatchSquad(squadUnits, target.position, UnitStance.DEFENSIVE, st, FormationType.BOX);
           }
+          unitIdx += toSend;
         }
 
-        // Any remaining idle units: send scouts toward enemy capital for pressure
-        if (enemyCapital) {
-          for (let i = unitIdx; i < idleCombat.length; i++) {
-            const unit = idleCombat[i];
-            // Fast units (riders/scouts) go harass; slow units stay for captures
-            if (unit.type === UnitType.RIDER || unit.type === UnitType.SCOUT) {
-              unit.stance = UnitStance.AGGRESSIVE;
-              unit._postPosition = null;
-              UnitAI.commandMove(unit, enemyCapital.position, this.ctx.currentMap!);
-            } else if (targets.length > 0) {
-              // Send extra infantry to reinforce capture targets
-              const t = targets[i % targets.length];
-              unit.stance = UnitStance.DEFENSIVE;
-              unit._playerCommanded = true;
-              UnitAI.commandMove(unit, t.position, this.ctx.currentMap!);
+        // Any remaining idle units: reinforce capture targets as additional squads
+        if (unitIdx < idleCombat.length && targets.length > 0) {
+          const remaining = idleCombat.slice(unitIdx);
+          // Group remainders into per-target squads
+          const perTarget: Unit[][] = targets.map(() => []);
+          for (let i = 0; i < remaining.length; i++) {
+            perTarget[i % targets.length].push(remaining[i]);
+          }
+          for (let i = 0; i < targets.length; i++) {
+            if (perTarget[i].length > 0) {
+              this.dispatchSquad(perTarget[i], targets[i].position, UnitStance.DEFENSIVE, st, FormationType.BOX);
             }
           }
         }
@@ -684,24 +684,7 @@ export default class AIController {
         // ---- ALL TERRITORY SECURED: full assault on enemy capital ----
         const mainTarget = enemyCapital || allNonOwnBases[0];
         if (mainTarget) {
-          const archerCount = idleCombat.filter(u => u.type === UnitType.ARCHER).length;
-          let formation: FormationType;
-          if (archerCount > idleCombat.length * 0.5) formation = FormationType.LINE;
-          else if (idleCombat.length >= 5) formation = FormationType.WEDGE;
-          else formation = FormationType.BOX;
-
-          const sortedCombat = [...idleCombat].sort((a, b) =>
-            this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
-          );
-          const formationSlots = this.generateFormationTyped(mainTarget.position, sortedCombat.length, formation);
-
-          for (let i = 0; i < sortedCombat.length; i++) {
-            sortedCombat[i].stance = UnitStance.AGGRESSIVE;
-            sortedCombat[i]._postPosition = null;
-            st.guardAssignments.delete(sortedCombat[i].id);
-            const dest = formationSlots[i] || mainTarget.position;
-            UnitAI.commandMove(sortedCombat[i], dest, this.ctx.currentMap!);
-          }
+          this.dispatchSquad(idleCombat, mainTarget.position, UnitStance.AGGRESSIVE, st);
         }
       }
 
@@ -711,35 +694,37 @@ export default class AIController {
       const idleRatio = totalCombat > 0 ? idleCombat.length / totalCombat : 1;
       if (idleRatio > 0.6 || totalCombat <= 2) st.mustering = true;
 
-      // Meanwhile, redirect idle units to useful tasks
+      // Meanwhile, redirect idle units — prioritize zone capture over enemy chasing
       for (const unit of idleCombat) {
-        const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
-        if (enemy) {
-          UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
+        // Capture zones first if any exist
+        const zoneTarget = hasUnclaimedTerritory ? this.findNearestCaptureTarget(unit.position, ownerId) : null;
+        if (zoneTarget) {
+          unit.stance = UnitStance.DEFENSIVE;
+          unit._playerCommanded = true;
+          UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
         } else {
-          // No nearby enemies — head to nearest non-owned zone
-          const zoneTarget = this.findNearestCaptureTarget(unit.position, ownerId);
-          if (zoneTarget) {
-            unit.stance = UnitStance.DEFENSIVE;
-            unit._playerCommanded = true;
-            UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
+          // No capture targets — fight nearby enemies
+          const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
+          if (enemy) {
+            UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
           }
         }
       }
     } else {
-      // Mustering phase — don't just sit at barracks; send idle units to capture zones while waiting
-      // This fires every commander tick (3s) so units stay productive while the army builds up
+      // Mustering phase — prioritize capturing neutral zones while building army
+      // Only fight enemies that are very close (4 hex) to avoid getting pulled away from captures
       for (const unit of idleCombat) {
-        const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
-        if (enemy && Pathfinder.heuristic(unit.position, enemy.position) <= 8) {
-          UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
+        // Prioritize capture zones over chasing enemies during mustering
+        const zoneTarget = this.findNearestCaptureTarget(unit.position, ownerId);
+        if (zoneTarget) {
+          unit.stance = UnitStance.DEFENSIVE;
+          unit._playerCommanded = true;
+          UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
         } else {
-          // While mustering, send units to capture nearby zones — don't waste time sitting idle
-          const zoneTarget = this.findNearestCaptureTarget(unit.position, ownerId);
-          if (zoneTarget) {
-            unit.stance = UnitStance.DEFENSIVE;
-            unit._playerCommanded = true;
-            UnitAI.commandMove(unit, zoneTarget.position, this.ctx.currentMap!);
+          // No capture targets — fight nearby enemies or rally
+          const enemy = UnitAI.findNearestEnemy(unit, this.ctx.allUnits, ownerId);
+          if (enemy && Pathfinder.heuristic(unit.position, enemy.position) <= 4) {
+            UnitAI.commandAttack(unit, enemy.position, enemy.id, this.ctx.currentMap!);
           } else if (st.barracks) {
             const rallyQ = st.barracks.position.q + (st.barracks.position.q > centerQ ? -2 : 2);
             const rallyPos: HexCoord = { q: rallyQ, r: st.barracks.position.r };
@@ -1037,6 +1022,59 @@ export default class AIController {
       }
     }
     return slots;
+  }
+
+  /**
+   * Dispatch a group of units toward a target in formation squads.
+   * Units are sorted by formation priority, assigned to a squad, and given
+   * a shared march speed (the slowest member's speed) so they move cohesively.
+   * Formation slots are generated around the target so units fan out on arrival.
+   */
+  private dispatchSquad(
+    units: Unit[],
+    target: HexCoord,
+    stance: UnitStance,
+    st: AIBuildState,
+    formation?: FormationType,
+  ): void {
+    if (units.length === 0) return;
+
+    // Sort by formation priority: tanks first, ranged middle, siege last
+    const sorted = [...units].sort((a, b) =>
+      this.getUnitFormationPriority(a) - this.getUnitFormationPriority(b)
+    );
+
+    // Pick formation type if not specified
+    if (!formation) {
+      const archerCount = sorted.filter(u =>
+        u.type === UnitType.ARCHER || u.type === UnitType.MAGE || u.type === UnitType.BATTLEMAGE
+      ).length;
+      if (archerCount > sorted.length * 0.5) formation = FormationType.LINE;
+      else if (sorted.length >= 5) formation = FormationType.WEDGE;
+      else formation = FormationType.BOX;
+    }
+
+    // Generate formation slots around target
+    const slots = this.generateFormationTyped(target, sorted.length, formation);
+
+    // Assign squad ID and compute shared march speed (slowest member)
+    const squadId = this._nextSquadId++;
+    const slowestSpeed = Math.min(...sorted.map(u => u.moveSpeed));
+    // March speed is slowest unit + 30% so the group isn't painfully slow,
+    // but still slow enough that fast units don't outrun heavies
+    const marchSpeed = slowestSpeed + (sorted[0].moveSpeed - slowestSpeed) * 0.3;
+
+    for (let i = 0; i < sorted.length; i++) {
+      const unit = sorted[i];
+      unit.stance = stance;
+      unit._playerCommanded = true;
+      unit._postPosition = null;
+      unit._squadId = squadId;
+      unit._squadSpeed = marchSpeed;
+      st.guardAssignments.delete(unit.id);
+      const dest = slots[i] || target;
+      UnitAI.commandMove(unit, dest, this.ctx.currentMap!);
+    }
   }
 
   private generateLineFormation(center: HexCoord, count: number): HexCoord[] {

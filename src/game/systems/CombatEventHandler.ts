@@ -43,7 +43,7 @@ export interface CombatEventOps {
   updateResources(player: Player, wood: number, food: number, stone: number): void;
 
   // Hex helpers
-  hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
+  hexToWorld(pos: HexCoord, underground?: boolean): { x: number; y: number; z: number };
 
   // Building/wall system
   getBuildingAt(position: HexCoord): PlacedBuilding | null;
@@ -204,7 +204,7 @@ export default class CombatEventHandler {
         const victim = ops.getAllUnits().find(u => u.id === ce.unitId);
         if (victim && victim.state !== UnitState.DEAD) {
           victim.position = { q: ce.knockQ, r: ce.knockR };
-          const wp = ops.hexToWorld(victim.position);
+          const wp = ops.hexToWorld(victim.position, !!victim._underground);
           victim.worldPosition = { x: wp.x, y: wp.y, z: wp.z };
           ops.updateHealthBar(victim);
           ops.showDamageEffect(victim.worldPosition);

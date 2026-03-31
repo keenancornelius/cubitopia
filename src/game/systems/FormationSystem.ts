@@ -63,8 +63,7 @@ export function generateBoxFormation(center: HexCoord, count: number, tiles: Til
       const key = `${hex.q},${hex.r}`;
       const tile = tiles.get(key);
       if (!tile) continue;
-      if (isWaterTerrain(tile.terrain) || tile.terrain === TerrainType.FOREST ||
-          tile.elevation >= 10) continue;
+      if (isWaterTerrain(tile.terrain) || tile.terrain === TerrainType.FOREST) continue;
       if (Pathfinder.blockedTiles.has(key)) continue;
       slots.push(hex);
     }

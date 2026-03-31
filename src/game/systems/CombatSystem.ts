@@ -3,7 +3,7 @@
 // Handles unit-vs-unit combat resolution + ability modifiers
 // ============================================
 
-import { Unit, UnitType } from '../../types';
+import { Unit, UnitType, GameMap } from '../../types';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 
 export interface CombatResult {
@@ -27,9 +27,25 @@ export class CombatSystem {
    * Resolve combat between an attacker and defender.
    * Accounts for berserker rage, shieldbearer aura, assassin burst.
    */
-  static resolve(attacker: Unit, defender: Unit, allUnits?: Unit[]): CombatResult {
+  static resolve(attacker: Unit, defender: Unit, allUnits?: Unit[], map?: GameMap): CombatResult {
     let atkStat = attacker.stats.attack;
     let defStat = defender.stats.defense;
+
+    // --- High Ground Bonus: elevation advantage gives +2 attack or +2 defense ---
+    if (map) {
+      const atkTile = map.tiles.get(`${attacker.position.q},${attacker.position.r}`);
+      const defTile = map.tiles.get(`${defender.position.q},${defender.position.r}`);
+      if (atkTile && defTile) {
+        const atkElev = atkTile.walkableFloor ?? atkTile.elevation;
+        const defElev = defTile.walkableFloor ?? defTile.elevation;
+        const elevDiff = atkElev - defElev;
+        if (elevDiff >= 3) {
+          atkStat += 2; // Attacker has high ground — bonus attack
+        } else if (elevDiff <= -3) {
+          defStat += 2; // Defender has high ground — bonus defense
+        }
+      }
+    }
 
     // --- Berserker Rage: bonus attack scaling with missing HP ---
     if (attacker.type === UnitType.BERSERKER) {

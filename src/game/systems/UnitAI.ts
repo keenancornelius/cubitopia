@@ -163,7 +163,7 @@ export class UnitAI {
    */
   static commandMove(unit: Unit, target: HexCoord, map: GameMap, preferUnderground = false): void {
     const canTraverseForest = unit.type === UnitType.LUMBERJACK;
-    const canTraverseRidge = unit.type === UnitType.BUILDER;
+    const canTraverseRidge = true; // All units can climb ridges (steep cost but passable)
 
     // Auto-detect underground bases — always route through tunnels
     if (!preferUnderground && UnitAI.isUndergroundBase(target, map)) {
@@ -1193,8 +1193,12 @@ export class UnitAI {
       const moveZ = (dz / dist) * Math.min(speed, dist);
       unit.worldPosition.x += moveX;
       unit.worldPosition.z += moveZ;
-      const t = 1 - (dist - speed) / dist;
-      unit.worldPosition.y = unit.worldPosition.y + (targetWorld.y - unit.worldPosition.y) * Math.min(t, 1);
+      if (unit._underground) {
+        unit.worldPosition.y = targetWorld.y;
+      } else {
+        const t = 1 - (dist - speed) / dist;
+        unit.worldPosition.y = unit.worldPosition.y + (targetWorld.y - unit.worldPosition.y) * Math.min(t, 1);
+      }
     }
   }
 
@@ -1894,10 +1898,12 @@ export class UnitAI {
         if (threat) {
           const threatDist = Pathfinder.heuristic(unit.position, threat.position);
           if (threatDist <= unit.stats.range) {
-            // Can fire right now — switch to attacking
+            // Can fire right now — switch to attacking (leave squad)
             unit.state = UnitState.ATTACKING;
             unit.targetPosition = null;
             unit._path = null;
+            unit._squadId = null;
+            unit._squadSpeed = undefined;
             unit.command = { type: CommandType.ATTACK, targetPosition: threat.position, targetUnitId: threat.id };
             return;
           } else if (isAttackMove || unit.stance === UnitStance.AGGRESSIVE) {
@@ -1905,6 +1911,8 @@ export class UnitAI {
             // Re-pathing to the same target every frame resets _pathIndex and freezes the unit.
             const alreadyChasingThis = unit.command?.targetUnitId === threat.id;
             if (!alreadyChasingThis) {
+              unit._squadId = null;
+              unit._squadSpeed = undefined;
               UnitAI.commandAttack(unit, threat.position, threat.id, map);
               return;
             }
@@ -1996,15 +2004,18 @@ export class UnitAI {
           unit.targetPosition = nextWp;
         }
       } else {
-        // Reached final destination
+        // Reached final destination — leave squad
         unit.targetPosition = null;
         unit.state = UnitState.IDLE;
         unit._path = null;
+        unit._squadId = null;
+        unit._squadSpeed = undefined;
         events.push({ type: 'unit:arrived', unit });
       }
     } else {
-      // Move toward target
-      const speed = unit.moveSpeed * delta;
+      // Move toward target — use squad march speed if assigned, otherwise individual speed
+      const effectiveSpeed = (unit._squadId && unit._squadSpeed) ? unit._squadSpeed : unit.moveSpeed;
+      const speed = effectiveSpeed * delta;
       let moveX = (dx / dist) * Math.min(speed, dist);
       let moveZ = (dz / dist) * Math.min(speed, dist);
 
@@ -2026,9 +2037,15 @@ export class UnitAI {
       unit.worldPosition.x += moveX;
       unit.worldPosition.z += moveZ;
 
-      // Interpolate Y based on terrain
-      const t = 1 - (dist - speed) / dist;
-      unit.worldPosition.y = unit.worldPosition.y + (targetWorld.y - unit.worldPosition.y) * Math.min(t, 1);
+      // Underground units: snap to tunnel floor (no interpolation — prevents
+      // rising over gem blocks or other floor objects)
+      if (unit._underground) {
+        unit.worldPosition.y = targetWorld.y;
+      } else {
+        // Surface: interpolate Y based on terrain slope
+        const t = 1 - (dist - speed) / dist;
+        unit.worldPosition.y = unit.worldPosition.y + (targetWorld.y - unit.worldPosition.y) * Math.min(t, 1);
+      }
     }
   }
 
@@ -2067,7 +2084,7 @@ export class UnitAI {
     if (meleeThreatAtk) {
       // Fire first if we can
       if (unit.attackCooldown <= 0 && dist <= unit.stats.range) {
-        const result = CombatSystem.resolve(unit, target, allUnits);
+        const result = CombatSystem.resolve(unit, target, allUnits, map);
         const applyInfo = CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
@@ -2091,6 +2108,7 @@ export class UnitAI {
         if (bashResult) events.push({ type: 'combat:cleave', unitId: bashResult.unitId, knockQ: bashResult.knockQ, knockR: bashResult.knockR } as any);
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
+          unit.kills = (unit.kills ?? 0) + 1;
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
           unit.state = UnitState.IDLE;
@@ -2099,6 +2117,7 @@ export class UnitAI {
         }
         if (!result.attackerSurvived) {
           unit.state = UnitState.DEAD;
+          target.kills = (target.kills ?? 0) + 1;
           CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
           return;
@@ -2119,7 +2138,7 @@ export class UnitAI {
     if (dist <= unit.stats.range) {
       // In range — attack if cooldown is ready
       if (unit.attackCooldown <= 0) {
-        const result = CombatSystem.resolve(unit, target, allUnits);
+        const result = CombatSystem.resolve(unit, target, allUnits, map);
         const applyInfo2 = CombatSystem.apply(unit, target, result);
         unit.attackCooldown = 1 / unit.attackSpeed;
         CombatLog.logDamage(unit, target, result.defenderDamage, result.attackerDamage);
@@ -2145,6 +2164,7 @@ export class UnitAI {
 
         if (!result.defenderSurvived) {
           target.state = UnitState.DEAD;
+          unit.kills = (unit.kills ?? 0) + 1;
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
           unit.state = UnitState.IDLE;
@@ -2152,6 +2172,7 @@ export class UnitAI {
         }
         if (!result.attackerSurvived) {
           unit.state = UnitState.DEAD;
+          target.kills = (target.kills ?? 0) + 1;
           CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
         }
@@ -2456,7 +2477,7 @@ export class UnitAI {
           const tile = map.tiles.get(key);
           if (!tile) continue;
           if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.FOREST ||
-              tile.terrain === TerrainType.MOUNTAIN || tile.elevation >= 10) continue;
+              tile.terrain === TerrainType.MOUNTAIN) continue;
           if (Pathfinder.blockedTiles.has(key)) continue;
           slots.push({ q, r });
         }

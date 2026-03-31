@@ -40,12 +40,8 @@ export class Pathfinder {
       if (goalTile.terrain === TerrainType.WATER) {
         return [];
       }
-      // Ridge tiles (elevation >= 10) are impassable rocky crags — builders can traverse them
-      // Tunnel tiles bypass this check (walkableFloor is underground, always < 10)
-      const goalWalkable = goalTile.walkableFloor ?? goalTile.elevation;
-      if (goalWalkable >= 10 && !canTraverseRidge) {
-        return [];
-      }
+      // Ridge tiles (elevation >= 10) have steep climbing cost but are passable
+      // (walkable paths are carved to mountain forts for accessibility)
     }
     // If goal is forest, path to an adjacent clear tile instead
     const goalIsForest = goalTile.terrain === TerrainType.FOREST;
@@ -59,7 +55,7 @@ export class Pathfinder {
         const nKey = `${n.q},${n.r}`;
         const nTile = map.tiles.get(nKey);
         const nw = nTile ? (nTile.walkableFloor ?? nTile.elevation) : 999;
-        if (nTile && nTile.terrain !== TerrainType.WATER && (nw < 10 || canTraverseRidge)
+        if (nTile && nTile.terrain !== TerrainType.WATER
             && nTile.terrain !== TerrainType.FOREST && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
           if (dist < bestDist) {
@@ -116,10 +112,7 @@ export class Pathfinder {
           if (tile.terrain === TerrainType.WATER) {
             continue;
           }
-          // Ridge tiles (elevation >= 10) are impassable rocky crags
-          if (nWalkable >= 10 && !canTraverseRidge) {
-            continue;
-          }
+          // Ridge tiles (elevation >= 10) are passable but costly (steep climb)
           if (tile.terrain === TerrainType.FOREST && !canTraverseForest) {
             continue;
           }
@@ -138,7 +131,7 @@ export class Pathfinder {
 
         let moveCost = isTunnelTile ? 0.5 : Pathfinder.getMoveCost(tile.terrain);
         // Ridge tiles are slow to traverse — steep climbing cost (not in tunnel mode)
-        if (!isTunnelTile && nWalkable >= 10) moveCost += 4;
+        if (!isTunnelTile && nWalkable >= 10) moveCost += 3;
         // Tunnel shortcut: reduce cost to encourage pathfinder to use tunnels (ONLY in tunnel mode)
         // In surface mode, tunnel tiles use normal terrain cost — no bonus for cutting through ground
         if (tunnelMode && tile.hasTunnel) moveCost = Math.max(0.1, moveCost - 0.5);

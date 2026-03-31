@@ -70,6 +70,7 @@ export interface ArenaMap extends GameMap {
 export interface DesertTunnelsMap extends GameMap {
   cavernCenter: { q: number; r: number };  // Central underground cavern position
   cavernFloorY: number;                     // Floor Y level of the cavern
+  extraCaverns?: Array<{ center: { q: number; r: number }; floorY: number }>;  // Additional underground outposts
 }
 
 export function generateArenaMap(size: number, seed?: number): ArenaMap {
@@ -429,12 +430,13 @@ export function generateDesertTunnelsMap(size: number, seed?: number): GameMap {
   const shellGen = new MapGenerator(actualSeed);
   shellGen.computeShellBlocks(desertMap, size, size);
 
-  // --- Tunnel network: 3-4 surface openings, deep underground connections, central cavern ---
-  const { cavernCenter, cavernFloorY } = carveDesertTunnels(desertMap, shellGen, rng, noise, size);
+  // --- Tunnel network: 3-4 surface openings, deep underground connections, central cavern + side caverns ---
+  const { cavernCenter, cavernFloorY, extraCaverns } = carveDesertTunnels(desertMap, shellGen, rng, noise, size);
 
   // Store cavern info on the map for neutral city placement
   (desertMap as DesertTunnelsMap).cavernCenter = cavernCenter;
   (desertMap as DesertTunnelsMap).cavernFloorY = cavernFloorY;
+  (desertMap as DesertTunnelsMap).extraCaverns = extraCaverns;
 
   return desertMap;
 }
@@ -444,10 +446,11 @@ export function generateDesertTunnelsMap(size: number, seed?: number): GameMap {
  *  - Deep underground-only tunnels connecting everything
  *  - Central cavern for battle staging
  *  - Underdark neutral city in the cavern
+ *  - 2 smaller side caverns with additional neutral outposts
  *  Returns cavern center info for neutral city placement. */
 function carveDesertTunnels(
   map: GameMap, gen: MapGenerator, rng: DesertRng, noise: SimpleDesertNoise, size: number
-): { cavernCenter: { q: number; r: number }; cavernFloorY: number } {
+): { cavernCenter: { q: number; r: number }; cavernFloorY: number; extraCaverns: Array<{ center: { q: number; r: number }; floorY: number }> } {
   const EDGE = 5;
   const center = Math.floor(size / 2);
 
@@ -587,7 +590,37 @@ function carveDesertTunnels(
     }
   }
 
-  return { cavernCenter, cavernFloorY: CAVERN_FLOOR_Y };
+  // --- Step 7: Carve 2 smaller side caverns for additional underground outposts ---
+  const SIDE_CAVERN_RADIUS = 5;
+  const SIDE_CAVERN_FLOOR_Y = -12;
+  const SIDE_CAVERN_HEIGHT = 8;
+  const extraCaverns: Array<{ center: { q: number; r: number }; floorY: number }> = [];
+
+  // Place side caverns far from center — roughly 1/3 of map from each player base
+  // NW quadrant (closer to blue base side) and SE quadrant (closer to red base side)
+  const sideCavernOffsets = [
+    { dq: -Math.floor(size * 0.3), dr: -Math.floor(size * 0.25) },
+    { dq: Math.floor(size * 0.3), dr: Math.floor(size * 0.25) },
+  ];
+  for (const offset of sideCavernOffsets) {
+    const scCenter = {
+      q: Math.max(SIDE_CAVERN_RADIUS + 2, Math.min(size - SIDE_CAVERN_RADIUS - 2, center + offset.dq)),
+      r: Math.max(SIDE_CAVERN_RADIUS + 2, Math.min(size - SIDE_CAVERN_RADIUS - 2, center + offset.dr)),
+    };
+    gen.carveCavern(scCenter, SIDE_CAVERN_RADIUS, SIDE_CAVERN_FLOOR_Y, SIDE_CAVERN_HEIGHT, map);
+    console.log(`[DesertTunnels] Side cavern at (${scCenter.q},${scCenter.r}), floorY=${SIDE_CAVERN_FLOOR_Y}, radius=${SIDE_CAVERN_RADIUS}`);
+
+    // Connect side cavern to central cavern via deep tunnel
+    const connPath = gen.traceTubePath(scCenter, cavernCenter, map, size, size);
+    if (connPath.length >= 3) {
+      gen.carveTunnelBlocks(connPath, map, true); // Deep only, no surface opening
+      console.log(`[DesertTunnels] Connected side cavern (${scCenter.q},${scCenter.r}) to central cavern`);
+    }
+
+    extraCaverns.push({ center: scCenter, floorY: SIDE_CAVERN_FLOOR_Y });
+  }
+
+  return { cavernCenter, cavernFloorY: CAVERN_FLOOR_Y, extraCaverns };
 }
 
 function makeTile(q: number, r: number, terrain: TerrainType, elevation: number, topBlock: BlockType, resource: ResourceType | null): Tile {

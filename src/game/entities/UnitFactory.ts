@@ -140,6 +140,7 @@ export class UnitFactory {
       carryType: null,
       stance: UnitStance.DEFENSIVE,
       isSiege: cfg.isSiege,
+      kills: 0,
     };
   }
 
