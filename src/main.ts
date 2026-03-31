@@ -690,6 +690,60 @@ class Cubitopia {
       }
     });
 
+    // --- Pre-detect building/wall/gate clicks on mousedown to suppress selection clearing ---
+    // This fires BEFORE SelectionManager.mouseup, preserving unit selection for garrison
+    canvasEl.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return; // Left click only
+      const inAnyMode = this.wallBuildMode || this.barracksPlaceMode ||
+                        this.forestryPlaceMode || this.masonryPlaceMode ||
+                        this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
+                        this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
+                        this.harvestMode || this.farmPatchMode ||
+                        this.plantTreeMode || this.mineMode ||
+                        this.plantCropsMode || this.rallyPointSetMode || this.exitPickMode;
+      if (inAnyMode || !this.currentMap) return;
+
+      const rect = canvasEl.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, this.camera.camera);
+
+      // Check building meshes
+      const buildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
+      if (buildingMeshes.length > 0) {
+        const hits = raycaster.intersectObjects(buildingMeshes, true);
+        if (hits.length > 0) {
+          SelectionManager.suppressNextClear = true;
+          return;
+        }
+      }
+      // Check base meshes
+      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
+      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
+      if (baseMeshObjects.length > 0) {
+        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
+        if (baseHits.length > 0) {
+          SelectionManager.suppressNextClear = true;
+          return;
+        }
+      }
+      // Check wall/gate meshes
+      const allWgMeshes: THREE.Object3D[] = [
+        ...this.wallSystem.wallMeshes,
+        ...this.wallSystem.gateMeshes,
+      ];
+      if (allWgMeshes.length > 0) {
+        const wgHits = raycaster.intersectObjects(allWgMeshes, true);
+        if (wgHits.length > 0) {
+          SelectionManager.suppressNextClear = true;
+          return;
+        }
+      }
+    });
+
     // --- Terrain info: click on any tile when not in a special mode to see info ---
     canvasEl.addEventListener('click', (e) => {
       const inAnyMode = this.wallBuildMode || this.barracksPlaceMode ||

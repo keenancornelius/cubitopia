@@ -18,6 +18,8 @@ export class SelectionManager {
   static suppressBoxSelect = false;
   /** When true, suppress right-click commands (mine mode — right-click rotates camera) */
   static suppressRightClick = false;
+  /** When true, skip clearing selection on the next single-click (building/wall click) */
+  static suppressNextClear = false;
 
   // Box selection state
   private isBoxSelecting = false;
@@ -177,6 +179,13 @@ export class SelectionManager {
   }
 
   private handleClick(e: MouseEvent): void {
+    // If a building/wall/gate was clicked, keep the current selection intact
+    // so garrison operations can read it from the tooltip
+    if (SelectionManager.suppressNextClear) {
+      SelectionManager.suppressNextClear = false;
+      return; // Don't change selection at all
+    }
+
     const closestUnit = this.unitUnderCursor(e);
 
     if (closestUnit) {
