@@ -695,6 +695,13 @@ export class UnitAI {
                 if (!unit._postPosition) {
                   unit._postPosition = { ...unit.position };
                 }
+                // If target is in weapon range, transition to ATTACKING — handleAttacking
+                // will fire first THEN kite, preventing the no-fire kite loop
+                if (dist <= unit.stats.range) {
+                  unit.state = UnitState.ATTACKING;
+                  unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
+                  return;
+                }
                 const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
                 if (fleeTile) {
                   CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
@@ -768,6 +775,13 @@ export class UnitAI {
             // Ranged kiters in AGGRESSIVE: engage but still kite ANY melee threat nearby
             const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit));
             if (meleeThreat) {
+              // If target is in weapon range, transition to ATTACKING — handleAttacking
+              // will fire first THEN kite, preventing the no-fire kite loop
+              if (dist <= unit.stats.range) {
+                unit.state = UnitState.ATTACKING;
+                unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
+                return;
+              }
               const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
               if (fleeTile) {
                 CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
@@ -875,6 +889,13 @@ export class UnitAI {
         if (UnitAI.isRangedKiter(unit.type)) {
           const meleeThreat = UnitAI.findNearestMeleeThreat(unit, allUnits, UnitAI.getKiteTriggerRange(unit));
           if (meleeThreat) {
+            // If target is in weapon range, transition to ATTACKING — handleAttacking
+            // will fire first THEN kite, preventing the no-fire kite loop
+            if (dist <= unit.stats.range) {
+              unit.state = UnitState.ATTACKING;
+              unit.command = { type: CommandType.ATTACK, targetPosition: enemy.position, targetUnitId: enemy.id };
+              return;
+            }
             const fleeTile = UnitAI.findKiteTile(unit, meleeThreat, map);
             if (fleeTile) {
               CombatLog.logKite(unit, meleeThreat, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
