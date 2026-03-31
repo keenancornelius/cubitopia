@@ -323,8 +323,8 @@ export class HUD {
     const enemyResourceBar = document.createElement('div');
     enemyResourceBar.style.cssText = `
       position: fixed; top: 16px; right: 120px;
-      background: rgba(80, 0, 0, 0.7); padding: 10px 14px; border-radius: 8px;
-      font-size: 12px; border: 2px solid rgba(255,80,80,0.3);
+      background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px;
+      font-size: 14px; border: 2px solid rgba(255,255,255,0.2);
       pointer-events: auto; z-index: 10000;
       font-family: 'Courier New', monospace; color: white;
     `;
@@ -708,16 +708,11 @@ export class HUD {
     return dot;
   }
 
-  /** Build the enemy resource bar DOM (compact, read-only) */
+  /** Build the enemy resource bar DOM — matches player bar layout */
   private buildEnemyResourceBarDOM(bar: HTMLElement): void {
     bar.innerHTML = '';
-    const header = document.createElement('div');
-    header.style.cssText = 'font-size:10px;color:#ff6b6b;font-weight:bold;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;text-align:center;';
-    header.textContent = '🔴 ENEMY';
-    bar.appendChild(header);
-
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
 
     const mkRes = (emoji: string, color: string): { wrapper: HTMLElement; val: HTMLElement } => {
       const w = document.createElement('span');
@@ -729,32 +724,32 @@ export class HUD {
       return { wrapper: w, val: v };
     };
 
-    const dot = () => {
-      const d = document.createElement('span');
-      d.style.cssText = 'color:#553;';
-      d.textContent = '·';
-      return d;
-    };
+    // Red enemy label
+    const label = document.createElement('span');
+    label.style.cssText = 'color:#ff6b6b;font-weight:bold;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;padding-right:2px;';
+    label.textContent = '🔴 Enemy';
+    row.appendChild(label);
+    row.appendChild(this.makeDot());
 
     const wood = mkRes('🪵', '#f0c040');
     this.enemyResWoodVal = wood.val;
     row.appendChild(wood.wrapper);
-    row.appendChild(dot());
+    row.appendChild(this.makeDot());
 
     const stone = mkRes('🪨', '#aaa');
     this.enemyResStoneVal = stone.val;
     row.appendChild(stone.wrapper);
-    row.appendChild(dot());
+    row.appendChild(this.makeDot());
 
     const food = mkRes('🌾', '#8bc34a');
     this.enemyResFoodVal = food.val;
     row.appendChild(food.wrapper);
-    row.appendChild(dot());
+    row.appendChild(this.makeDot());
 
     const gold = mkRes('💰', '#f0c040');
     this.enemyResGoldVal = gold.val;
     row.appendChild(gold.wrapper);
-    row.appendChild(dot());
+    row.appendChild(this.makeDot());
 
     const units = document.createElement('span');
     units.style.cssText = 'white-space:nowrap;';
