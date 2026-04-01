@@ -2410,10 +2410,10 @@ export class HUD {
     if (!this.terrainInfoPanel) {
       this.terrainInfoPanel = document.createElement('div');
       this.terrainInfoPanel.style.cssText = `
-        position: absolute; top: 80px; right: 16px;
+        position: absolute; bottom: 80px; left: 16px;
         background: rgba(0, 0, 0, 0.9); padding: 12px 16px; border-radius: 8px;
         font-size: 13px; border: 1px solid rgba(255,255,255,0.2); color: #ddd;
-        min-width: 180px; pointer-events: none; z-index: 1000;
+        min-width: 180px; pointer-events: none; z-index: 100;
         transition: opacity 0.2s;
       `;
       this.container.appendChild(this.terrainInfoPanel);
