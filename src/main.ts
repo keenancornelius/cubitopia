@@ -35,6 +35,8 @@ import type { NatureOps } from './game/systems/NatureSystem';
 import CombatEventHandler, { CombatEventOps } from './game/systems/CombatEventHandler';
 import { CombatSystem } from './game/systems/CombatSystem';
 import SpawnQueueSystem, { SpawnQueueOps } from './game/systems/SpawnQueueSystem';
+import { BaseUpgradeSystem } from './game/systems/BaseUpgradeSystem';
+import { PopulationSystem, FOOD_PER_COMBAT_UNIT, STARTING_FOOD } from './game/systems/PopulationSystem';
 import GarrisonSystem, { GarrisonOps } from './game/systems/GarrisonSystem';
 import MenuController from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
@@ -62,6 +64,7 @@ import {
   BuildingKind,
   MapType,
   ElementType,
+  BaseTier,
 } from './types';
 import { getPreset, generateArenaMap, generateDesertTunnelsMap, ArenaMap, DesertTunnelsMap } from './game/MapPresets';
 import { CombatLog } from './ui/ArenaDebugConsole';
@@ -131,6 +134,17 @@ class Cubitopia {
   private natureSystem!: NatureSystem;
   private combatEventHandler!: CombatEventHandler;
   private spawnQueueSystem!: SpawnQueueSystem;
+  private baseUpgradeSystem!: BaseUpgradeSystem;
+  private populationSystem!: PopulationSystem;
+  private _tierCheckTimer = 0;
+  private _popInfoCache: { current: number; cap: number } | undefined;
+  private _popInfoTimer = 0;
+  private _unitById: Map<string, Unit> | null = null;
+  private _aggroList: Array<{ attackerId: string; targetId: string }> | null = null;
+  private _unitStatsPanelTimer = 0;
+  private _selInfoTimer = 0;
+  private _spawnQueueHudTimer = 0;
+  private _deadCleanupTimer = 0;
   private garrisonSystem!: GarrisonSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
@@ -313,7 +327,7 @@ class Cubitopia {
       this.tileHighlighter.clearAll();
 
       for (const u of this.allUnits) {
-        this.unitRenderer.setSelected(u.id, units.includes(u));
+        this.unitRenderer.setSelected(u.id, units.includes(u), u.stats.range);
       }
 
       for (const u of units) {
@@ -346,8 +360,65 @@ class Cubitopia {
       this.issueCommand(worldPos);
     });
 
-    // Keyboard shortcuts — nested menu system + global actions
+    // Right-click ping (even without selection)
+    this.selectionManager.onPing((worldPos) => {
+      this.spawnClickIndicator(worldPos, 0xaaaaaa, 0.5); // Grey for ping
+    });
+
+    // Attack-move left-click handler
     const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
+    canvasEl.addEventListener('click', (e: MouseEvent) => {
+      if (!this._attackMoveMode) return;
+      this._attackMoveMode = false;
+      (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = '';
+
+      const selected = this.selectionManager.getSelectedUnits();
+      if (selected.length === 0 || !this.currentMap) return;
+
+      // Raycast to world position
+      const rect = canvasEl.getBoundingClientRect();
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.setFromCamera(mouse, this.camera.camera);
+      const intersects = raycaster.intersectObjects(this.renderer.scene.children, true);
+      if (intersects.length === 0) return;
+      const worldPos = intersects[0].point;
+      const hexCoord = this.worldToHex(worldPos);
+      if (!hexCoord) return;
+
+      const preferUnderground = this.commandYLevel !== null && this.commandYLevel < 0;
+
+      // Issue attack-move command: units move to position but re-aggro on enemies in range
+      for (const unit of selected) {
+        unit._playerCommanded = true;
+        unit._forceMove = true; // Still force-move to override stance until arrival
+        unit._focusTarget = undefined;
+        UnitAI.commandAttack(unit, hexCoord, null, this.currentMap!, preferUnderground);
+      }
+
+      // Show attack-move indicator (orange flag)
+      this.hud.showNotification('Attack-moving!', '#ff9800');
+      const elev = this.getElevation(hexCoord);
+      this.tileHighlighter.showAttackIndicator(hexCoord, elev);
+
+      // Visual click indicator
+      this.spawnClickIndicator(worldPos, 0xff9900, 1.0); // Orange for attack-move
+
+      // Prevent this click from being handled as selection
+      e.stopPropagation();
+    }, true); // Use capture phase to intercept before selection
+
+    // Mousedown handler to set suppressNextClick flag for attack-move
+    canvasEl.addEventListener('mousedown', (e: MouseEvent) => {
+      if (e.button === 0 && this._attackMoveMode) {
+        SelectionManager.suppressNextClick = true;
+      }
+    }, true);
+
+    // Keyboard shortcuts — nested menu system + global actions
     window.addEventListener('keydown', (e) => {
       if (this.hud.isHelpVisible()) return;
 
@@ -364,6 +435,17 @@ class Cubitopia {
         if (hadMode) {
           e.preventDefault();
           this.closeMenu();   // Clears menu + calls clearAllModes
+          return;
+        }
+      }
+
+      // A-key: one-shot attack-move mode entry (auto-exits on click)
+      if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.altKey && this.menuCategory === 0) {
+        const selected = this.selectionManager.getSelectedUnits();
+        if (selected.length > 0) {
+          this._attackMoveMode = true;
+          this.hud.showNotification('ATTACK MOVE — Left-click target', '#ff9800');
+          (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = 'crosshair';
           return;
         }
       }
@@ -430,6 +512,13 @@ class Cubitopia {
       if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
       if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
       if (e.key === 'i' || e.key === 'I') { this.hud.toggleUnitStatsPanel(); this.hud.updateUnitStatsPanel(this.allUnits); }
+
+      // Escape cancels attack-move mode
+      if (e.key === 'Escape' && this._attackMoveMode) {
+        this._attackMoveMode = false;
+        (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = '';
+        return;
+      }
     });
 
     // Scroll wheel in mine mode adjusts depth (handled elsewhere);
@@ -1163,6 +1252,21 @@ class Cubitopia {
     }
   }
 
+  /** Handle a construction tick from a builder working on a blueprint building */
+  private handleConstructTick(_unit: Unit, buildingId: string, amount: number): void {
+    const pb = this.buildingSystem.placedBuildings.find(b => b.id === buildingId);
+    if (!pb || !pb.isBlueprint) return;
+
+    const completed = this.buildingSystem.advanceConstruction(pb, amount);
+    if (completed) {
+      // Fire the post-placement hooks that were deferred when the blueprint was placed
+      const cfg = this.BUILDING_PLACEMENT_CONFIG[pb.kind];
+      if (cfg?.unitAIHook) cfg.unitAIHook(pb.position);
+      this.hud.showNotification(`${pb.kind} construction complete!`, '#2ecc71');
+      console.log(`[Construction] ${pb.kind} at (${pb.position.q},${pb.position.r}) completed for player ${pb.owner}`);
+    }
+  }
+
   /** Per-block mining: remove blocks from a tile based on mine mode, yield resources */
   private handleMineTerrain(unit: Unit, minePos: HexCoord): void {
     if (!this.currentMap) return;
@@ -1411,27 +1515,47 @@ class Cubitopia {
     const hexCoord = this.worldToHex(worldPos);
     if (!hexCoord) return;
 
-    // Underground command: if slicer is set below surface level, prefer tunnel routing
     const preferUnderground = this.commandYLevel !== null && this.commandYLevel < 0;
-
     const enemyAtTarget = this.findEnemyAt(hexCoord, selected[0].owner);
+    const friendlyAtTarget = this.findFriendlyAt(hexCoord, selected[0].owner);
 
+    // --- Right-click on ENEMY: focus-target that enemy ---
     if (enemyAtTarget) {
-      // Attack command: all units converge on the enemy
       for (const unit of selected) {
         unit._playerCommanded = true;
+        unit._forceMove = false;
+        unit._focusTarget = enemyAtTarget.id;
         UnitAI.commandAttack(unit, hexCoord, enemyAtTarget.id, this.currentMap!);
       }
+      this.spawnClickIndicator(worldPos, 0xff2222, 1.0); // Red for attack
       return;
     }
 
-    // Check for enemy/neutral base at click target — send units to capture its zone
+    // --- Right-click on FRIENDLY unit: healer → heal, others → ignore friendly ---
+    if (friendlyAtTarget && !selected.includes(friendlyAtTarget)) {
+      const healers = selected.filter(u => u.type === UnitType.HEALER);
+      if (healers.length > 0) {
+        for (const healer of healers) {
+          healer._playerCommanded = true;
+          healer._healTarget = friendlyAtTarget.id;
+          healer._forceMove = false;
+          UnitAI.commandMove(healer, friendlyAtTarget.position, this.currentMap!, preferUnderground);
+        }
+        this.hud.showNotification(`Healing ${friendlyAtTarget.type}!`, '#2ecc71');
+        this.spawnClickIndicator(worldPos, 0x44ff44, 0.8); // Green for heal
+        return;
+      }
+      // Non-healers: fall through to move command (move to that position)
+    }
+
+    // Check for enemy/neutral base at click target
     const baseAtTarget = this.findBaseAt(hexCoord, selected[0].owner);
     if (baseAtTarget) {
-      // commandMove auto-detects underground bases via UnitAI.isUndergroundBase
       for (const unit of selected) {
         unit._playerCommanded = true;
-        unit.stance = UnitStance.DEFENSIVE; // Hold the zone, don't get lured out
+        unit._forceMove = true;
+        unit._focusTarget = undefined;
+        unit.stance = UnitStance.DEFENSIVE;
         UnitAI.commandMove(unit, baseAtTarget.position, this.currentMap!, preferUnderground);
       }
       this.hud.showNotification(`Capturing zone — hold position!`, '#3498db');
@@ -1440,11 +1564,13 @@ class Cubitopia {
       return;
     }
 
-    // Check for enemy building or wall at click target — attack-move to it
+    // Check for enemy structure at click target
     const enemyStructure = this.findEnemyStructureAt(hexCoord, selected[0].owner);
     if (enemyStructure) {
       for (const unit of selected) {
         unit._playerCommanded = true;
+        unit._forceMove = false;
+        unit._focusTarget = undefined;
         UnitAI.commandAttack(unit, enemyStructure, null, this.currentMap!, preferUnderground);
       }
       this.hud.showNotification(`Attacking structure!`, '#e74c3c');
@@ -1453,26 +1579,100 @@ class Cubitopia {
       return;
     }
 
+    // --- Right-click on BLUEPRINT: assign builders to construct/mine/wall ---
+    {
+      const builders = selected.filter(u => u.type === UnitType.BUILDER);
+      if (builders.length > 0) {
+        const hexKey = `${hexCoord.q},${hexCoord.r}`;
+
+        // 1) Building blueprint at target hex
+        const blueprint = this.buildingSystem.placedBuildings.find(
+          pb => pb.isBlueprint && pb.owner === builders[0].owner
+            && pb.position.q === hexCoord.q && pb.position.r === hexCoord.r
+        );
+        if (blueprint) {
+          for (const builder of builders) {
+            // Clear any previous assignment on other blueprints
+            for (const pb of this.buildingSystem.placedBuildings) {
+              if (pb.assignedBuilderId === builder.id) pb.assignedBuilderId = null;
+            }
+            // Release any mine claims
+            UnitAI.releaseMineClaim(builder.id);
+            blueprint.assignedBuilderId = builder.id;
+            builder._playerCommanded = true;
+            builder._assignedBlueprintId = blueprint.id;
+            builder._forceMove = false;
+            builder.state = UnitState.IDLE; // interrupt current task
+            builder.command = null;
+            UnitAI.commandMove(builder, blueprint.position, this.currentMap!, preferUnderground);
+          }
+          this.hud.showNotification(`Builder assigned to ${blueprint.kind}!`, '#f39c12');
+          this.spawnClickIndicator(worldPos, 0xf39c12, 0.8); // Orange for build
+          return;
+        }
+
+        // 2) Mine blueprint at target hex
+        if (UnitAI.playerMineBlueprint.has(hexKey)) {
+          for (const builder of builders) {
+            UnitAI.releaseMineClaim(builder.id);
+            UnitAI.claimedMines.set(hexKey, builder.id);
+            builder._playerCommanded = true;
+            builder._assignedBlueprintId = undefined; // clear building assignment
+            builder._forceMove = false;
+            builder.state = UnitState.IDLE;
+            builder.command = null;
+            UnitAI.commandMove(builder, hexCoord, this.currentMap!, preferUnderground);
+          }
+          this.hud.showNotification(`Builder assigned to mine!`, '#f39c12');
+          this.spawnClickIndicator(worldPos, 0xf39c12, 0.8);
+          return;
+        }
+
+        // 3) Wall blueprint at target hex
+        if (UnitAI.playerWallBlueprint.has(hexKey) || UnitAI.playerGateBlueprint.has(hexKey)) {
+          for (const builder of builders) {
+            builder._playerCommanded = true;
+            builder._assignedBlueprintId = undefined; // clear building assignment
+            builder._forceMove = false;
+            builder.state = UnitState.IDLE;
+            builder.command = null;
+            UnitAI.commandMove(builder, hexCoord, this.currentMap!, preferUnderground);
+          }
+          this.hud.showNotification(`Builder assigned to wall!`, '#f39c12');
+          this.spawnClickIndicator(worldPos, 0xf39c12, 0.8);
+          return;
+        }
+      }
+    }
+
+    // --- Right-click on ground: PURE MOVE (no re-aggro) ---
     if (selected.length === 1) {
-      // Single unit: move directly to the target hex
       selected[0]._playerCommanded = true;
+      selected[0]._forceMove = true;
+      selected[0]._focusTarget = undefined;
+      selected[0]._healTarget = undefined;
+      selected[0]._assignedBlueprintId = undefined;
       UnitAI.commandMove(selected[0], hexCoord, this.currentMap!, preferUnderground);
     } else {
-      // Group move: sort by unit type priority, then spread into formation
       const sortedSelected = [...selected].sort((a, b) =>
         getUnitFormationPriority(a) - getUnitFormationPriority(b)
       );
-
       const formationSlots = generateFormation(hexCoord, sortedSelected.length, this.selectedFormation, this.currentMap!.tiles);
       for (let i = 0; i < sortedSelected.length; i++) {
         const unit = sortedSelected[i];
         unit._playerCommanded = true;
+        unit._forceMove = true;
+        unit._focusTarget = undefined;
+        unit._healTarget = undefined;
+        unit._assignedBlueprintId = undefined;
         const slot = formationSlots[i] || hexCoord;
         UnitAI.commandMove(unit, slot, this.currentMap!, preferUnderground);
       }
     }
 
-    // Flash move indicator
+    // Visual click indicator
+    this.spawnClickIndicator(worldPos, 0x4488ff, 0.8); // Blue for move
+    // Keep existing movement range flash
     const elev = this.getElevation(hexCoord);
     this.tileHighlighter.showMovementRange([hexCoord], () => elev);
     setTimeout(() => this.tileHighlighter.clearMovementRange(), 500);
@@ -1501,6 +1701,24 @@ class Cubitopia {
     let closestDist = 2; // within 1.5 tiles
     for (const u of this.allUnits) {
       if (u.owner !== playerId && u.state !== UnitState.DEAD) {
+        const dq = Math.abs(u.position.q - coord.q);
+        const dr = Math.abs(u.position.r - coord.r);
+        const dist = dq + dr;
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = u;
+        }
+      }
+    }
+    return closest;
+  }
+
+  /** Find a friendly unit at or near the target hex */
+  private findFriendlyAt(coord: HexCoord, playerId: number): Unit | null {
+    let closest: Unit | null = null;
+    let closestDist = 2;
+    for (const u of this.allUnits) {
+      if (u.owner === playerId && u.state !== UnitState.DEAD) {
         const dq = Math.abs(u.position.q - coord.q);
         const dr = Math.abs(u.position.r - coord.r);
         const dist = dq + dr;
@@ -1724,7 +1942,7 @@ class Cubitopia {
       buildSmelterMesh: (pos, owner) => this.buildingSystem.buildSmelterMesh(pos, owner),
       buildArmoryMesh: (pos, owner) => this.buildingSystem.buildArmoryMesh(pos, owner),
       buildWizardTowerMesh: (pos, owner) => this.buildingSystem.buildWizardTowerMesh(pos, owner),
-      registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.buildingSystem.registerBuilding(kind, owner, pos, mesh, maxHealth),
+      registerBuilding: (kind, owner, pos, mesh, maxHealth?) => this.buildingSystem.registerBuilding(kind, owner, pos, mesh, maxHealth, false),
     };
     this.aiController = new AIController(ctx, buildOps);
 
@@ -1850,6 +2068,13 @@ class Cubitopia {
       fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
       fireDeflectedArrow: (from, to, id, cb) => this.unitRenderer.fireDeflectedArrow(from, to, id, cb),
       fireMagicOrb: (from, to, color, id, splash, cb) => this.unitRenderer.fireMagicOrb(from, to, color, id, splash, cb),
+      fireLightningBolt: (from, to, id, cb) => this.unitRenderer.fireLightningBolt(from, to, id, cb),
+      fireLightningChain: (from, to, id) => this.unitRenderer.fireLightningChain(from, to, id),
+      spawnElectrocuteEffect: (id) => this.unitRenderer.spawnElectrocuteEffect(id),
+      fireFlamethrower: (from, to, id, cb) => this.unitRenderer.fireFlamethrower(from, to, id, cb),
+      fireStoneColumn: (from, to, id, cb) => this.unitRenderer.fireStoneColumn(from, to, id, cb),
+      fireWaterWave: (from, to, id, cb) => this.unitRenderer.fireWaterWave(from, to, id, cb),
+      fireWindTornado: (from, to, id, cb) => this.unitRenderer.fireWindTornado(from, to, id, cb),
       fireBoulder: (from, to, cb) => this.unitRenderer.fireBoulder(from, to, cb),
       fireProjectile: (from, to, color, id, cb) => this.unitRenderer.fireProjectile(from, to, color, id, cb),
       knockbackUnit: (id, wp) => this.unitRenderer.knockbackUnit(id, wp),
@@ -1894,6 +2119,7 @@ class Cubitopia {
       handleHarvestGrass: (unit, pos) => this.handleHarvestGrass(unit, pos),
       handleFoodDeposit: (unit) => this.resourceManager.handleFoodDeposit(unit),
       isPlayerGateBlueprint: (key) => UnitAI.playerGateBlueprint.has(key),
+      handleConstructTick: (unit, buildingId, amount) => this.handleConstructTick(unit, buildingId, amount),
     });
 
     // Spawn queue system
@@ -1930,6 +2156,45 @@ class Cubitopia {
       playSound: (name, vol) => this.sound.play(name as any, vol),
       getDebugFlags: () => this.hud.debugFlags,
       toggleBuildingPlaceMode: (kind) => this.toggleBuildingPlaceMode(kind),
+      canSpawnCombatUnit: (owner) => {
+        if (this.populationSystem) return this.populationSystem.canSpawnCombatUnit(owner);
+        return true;
+      },
+      getCombatPopInfo: (owner) => {
+        if (this.populationSystem) {
+          return {
+            current: this.populationSystem.getCombatUnitCount(owner),
+            cap: this.populationSystem.getPopulationCap(owner),
+          };
+        }
+        return { current: 0, cap: 999 };
+      },
+    });
+
+    // Base Upgrade System — checks tier requirements (population + unique buildings)
+    this.baseUpgradeSystem = new BaseUpgradeSystem({
+      getBases: () => this.bases,
+      getPlacedBuildings: () => this.buildingSystem.placedBuildings,
+      getTotalUnitCount: (owner) => {
+        // Inline loop — zero allocation (no .filter())
+        let count = 0;
+        for (let i = 0, len = this.allUnits.length; i < len; i++) {
+          const u = this.allUnits[i];
+          if (u.owner === owner && u.currentHealth > 0) count++;
+        }
+        return count;
+      },
+      hexDistance: (a, b) => {
+        const dq = a.q - b.q;
+        const dr = a.r - b.r;
+        return (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
+      },
+    });
+
+    // Population System — food-based population cap
+    this.populationSystem = new PopulationSystem({
+      getFoodStockpile: (owner) => this.foodStockpile[owner] ?? 0,
+      getAllUnits: () => this.allUnits,
     });
   }
 
@@ -2631,6 +2896,7 @@ class Cubitopia {
       id: 'base_0', owner: 0, position: p1BaseCoord,
       worldPosition: p1BaseWP,
       health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
+      tier: BaseTier.CAMP, ogresSpawned: 0,
     };
 
     const p2BaseCoord = isArena ? { q: b2Q, r: b2R } : this.findSpawnTile(map, b2Q, b2R);
@@ -2639,6 +2905,7 @@ class Cubitopia {
       id: 'base_1', owner: 1, position: p2BaseCoord,
       worldPosition: p2BaseWP,
       health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
+      tier: BaseTier.CAMP, ogresSpawned: 0,
     };
 
     this.bases = [p1Base, p2Base];
@@ -2659,6 +2926,7 @@ class Cubitopia {
             z: neutralCoord.r * 1.5 + (neutralCoord.q % 2 === 1 ? 0.75 : 0),
           },
           health: 300, maxHealth: 300, destroyed: false,
+          tier: BaseTier.CAMP, ogresSpawned: 0,
         };
         this.bases.push(neutralBase);
         this.baseRenderer.addBase(neutralBase, neutralY);
@@ -2679,6 +2947,7 @@ class Cubitopia {
               z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
             },
             health: 300, maxHealth: 300, destroyed: false,
+            tier: BaseTier.CAMP, ogresSpawned: 0,
           };
           this.bases.push(extraBase);
           this.baseRenderer.addBase(extraBase, yLevel);
@@ -2701,6 +2970,7 @@ class Cubitopia {
             z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
           },
           health: 300, maxHealth: 300, destroyed: false,
+          tier: BaseTier.CAMP, ogresSpawned: 0,
         };
         this.bases.push(ugBase);
         this.baseRenderer.addBase(ugBase, yLevel);
@@ -2709,10 +2979,29 @@ class Cubitopia {
     }
 
     // --- Generic surface neutral bases (desert outposts, mountain forts) ---
+    // Filter out any that overlap with player capitals (need 2*ZONE_RADIUS+1 = 11 hex gap)
+    const MIN_DIST_FROM_CAPITAL = 12;
     if (map.surfaceBases && map.surfaceBases.length > 0) {
       for (let i = 0; i < map.surfaceBases.length; i++) {
         const sb = map.surfaceBases[i];
         const coord = sb.center;
+        // Skip if too close to either player capital
+        const distP1 = (Math.abs(coord.q - p1BaseCoord.q) + Math.abs(coord.r - p1BaseCoord.r) + Math.abs((-coord.q - coord.r) - (-p1BaseCoord.q - p1BaseCoord.r))) / 2;
+        const distP2 = (Math.abs(coord.q - p2BaseCoord.q) + Math.abs(coord.r - p2BaseCoord.r) + Math.abs((-coord.q - coord.r) - (-p2BaseCoord.q - p2BaseCoord.r))) / 2;
+        if (distP1 < MIN_DIST_FROM_CAPITAL || distP2 < MIN_DIST_FROM_CAPITAL) {
+          console.log(`[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d1=${distP1}, d2=${distP2})`);
+          continue;
+        }
+        // Also skip if too close to any existing neutral base
+        const tooCloseToOther = this.bases.some(b => {
+          if (b.owner !== 2) return false;
+          const d = (Math.abs(coord.q - b.position.q) + Math.abs(coord.r - b.position.r) + Math.abs((-coord.q - coord.r) - (-b.position.q - b.position.r))) / 2;
+          return d < MIN_DIST_FROM_CAPITAL;
+        });
+        if (tooCloseToOther) {
+          console.log(`[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to another neutral base`);
+          continue;
+        }
         const surfY = this.getElevation({ q: coord.q, r: coord.r });
         const surfBase: Base = {
           id: `base_neutral_surf_${i}`, owner: 2, position: { q: coord.q, r: coord.r },
@@ -2722,6 +3011,7 @@ class Cubitopia {
             z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
           },
           health: 300, maxHealth: 300, destroyed: false,
+          tier: BaseTier.CAMP, ogresSpawned: 0,
         };
         this.bases.push(surfBase);
         this.baseRenderer.addBase(surfBase, surfY);
@@ -2840,35 +3130,48 @@ class Cubitopia {
     // --- Spawn queue processing (delegated to SpawnQueueSystem) ---
     this.spawnQueueSystem.update(delta);
 
-    // Update unified spawn queue HUD with progress bars (player + AI)
-    const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags);
-    // Add AI queues for all players
-    for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
-      const st = this.aiController.aiState[pid];
-      const label = this.players.length > 1 ? `P${pid + 1} ` : '';
-      if (st.spawnQueue.length > 0) {
-        allQueueEntries.push({
-          kind: `${label}barracks`,
-          color: pid === 0 ? '#3498db' : '#e74c3c',
-          items: st.spawnQueue.map(q => ({ type: q.type })),
-          timerProgress: st.spawnTimer / 5,
-        });
+    // Update unified spawn queue HUD with progress bars — throttled to every 0.25s
+    if (!this._spawnQueueHudTimer) this._spawnQueueHudTimer = 0;
+    this._spawnQueueHudTimer += delta;
+    if (this._spawnQueueHudTimer >= 0.25) {
+      this._spawnQueueHudTimer = 0;
+      const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags);
+      // Add AI queues for all players
+      for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
+        const st = this.aiController.aiState[pid];
+        const label = this.players.length > 1 ? `P${pid + 1} ` : '';
+        if (st.spawnQueue.length > 0) {
+          allQueueEntries.push({
+            kind: `${label}barracks`,
+            color: pid === 0 ? '#3498db' : '#e74c3c',
+            items: st.spawnQueue.map(q => ({ type: q.type })),
+            timerProgress: st.spawnTimer / 5,
+          });
+        }
+        if (st.workerSpawnQueue.length > 0) {
+          allQueueEntries.push({
+            kind: `${label}workers`,
+            color: pid === 0 ? '#2ecc71' : '#e67e22',
+            items: st.workerSpawnQueue.map(q => ({ type: q.type })),
+            timerProgress: st.workerSpawnTimer / 4,
+          });
+        }
       }
-      if (st.workerSpawnQueue.length > 0) {
-        allQueueEntries.push({
-          kind: `${label}workers`,
-          color: pid === 0 ? '#2ecc71' : '#e67e22',
-          items: st.workerSpawnQueue.map(q => ({ type: q.type })),
-          timerProgress: st.workerSpawnTimer / 4,
-        });
-      }
+      this.hud.updateAllSpawnQueues(allQueueEntries);
     }
-    this.hud.updateAllSpawnQueues(allQueueEntries);
+
+    // ── Build unit-ID lookup map (avoids O(n) .find() in combat loop) ──
+    // Reuse the same map object to avoid GC pressure
+    if (!this._unitById) this._unitById = new Map<string, Unit>();
+    const unitById = this._unitById;
+    unitById.clear();
 
     // Update occupied tiles for pathfinder (units prefer unoccupied paths)
     Pathfinder.occupiedTiles.clear();
-    for (const unit of this.allUnits) {
+    for (let i = 0, len = this.allUnits.length; i < len; i++) {
+      const unit = this.allUnits[i];
       if (unit.state !== UnitState.DEAD) {
+        unitById.set(unit.id, unit);
         Pathfinder.occupiedTiles.add(`${unit.position.q},${unit.position.r}`);
       }
     }
@@ -2892,6 +3195,7 @@ class Cubitopia {
     UnitAI.goldStockpile = this.goldStockpile;
     UnitAI.charcoalStockpile = this.charcoalStockpile;
     UnitAI.steelStockpile = this.steelStockpile;
+    UnitAI.placedBuildings = this.buildingSystem.placedBuildings;
 
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
@@ -2902,13 +3206,21 @@ class Cubitopia {
     // Update garrison system (ranged fire from garrisoned units)
     this.garrisonSystem.update(delta);
 
-    // Underground Y correction: ensure underground units stay at tunnel floor level.
-    // Various systems (knockback, spawning, etc.) may set unit Y via the surface-only
-    // hexToWorld. This defensive pass catches any Y corruption each frame.
-    if (this.currentMap) {
-      for (const unit of this.allUnits) {
-        if (unit.state === UnitState.DEAD || !unit._underground) continue;
-        const tile = this.currentMap.tiles.get(`${unit.position.q},${unit.position.r}`);
+    // ── SINGLE CONSOLIDATED LOOP: Y-fix + position + animate + strafe + aggro ──
+    const gameTime = this.clock.elapsedTime;
+    const hasMap = !!this.currentMap;
+    // Reuse aggro array — clear instead of reallocating
+    if (!this._aggroList) this._aggroList = [] as Array<{ attackerId: string; targetId: string }>;
+    const aggroList = this._aggroList;
+    aggroList.length = 0;
+
+    for (let i = 0, len = this.allUnits.length; i < len; i++) {
+      const unit = this.allUnits[i];
+      if (unit.state === UnitState.DEAD) continue;
+
+      // Underground Y correction
+      if (hasMap && unit._underground) {
+        const tile = this.currentMap!.tiles.get(`${unit.position.q},${unit.position.r}`);
         if (tile?.hasTunnel) {
           const correctY = (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5 + 0.25;
           if (Math.abs(unit.worldPosition.y - correctY) > 0.5) {
@@ -2916,51 +3228,37 @@ class Cubitopia {
           }
         }
       }
-    }
 
-    // Update unit visual positions and animations
-    const gameTime = this.clock.elapsedTime;
-    for (const unit of this.allUnits) {
-      if (unit.state !== UnitState.DEAD) {
-        this.unitRenderer.setWorldPosition(
-          unit.id,
-          unit.worldPosition.x,
-          unit.worldPosition.y,
-          unit.worldPosition.z
-        );
-      }
-    }
+      // Set visual position
+      this.unitRenderer.setWorldPosition(
+        unit.id,
+        unit.worldPosition.x,
+        unit.worldPosition.y,
+        unit.worldPosition.z
+      );
 
-    // Visual-only separation: push overlapping unit meshes apart before strafe/anim
-    this.unitRenderer.applySeparation();
+      // Animate
+      this.unitRenderer.animateUnit(unit.id, unit.state, gameTime, unit.type);
 
-    for (const unit of this.allUnits) {
-      if (unit.state !== UnitState.DEAD) {
-        this.unitRenderer.animateUnit(unit.id, unit.state, gameTime, unit.type);
-        // Face combat target during attack/chase + melee strafe
-        if (unit.command?.targetUnitId) {
-          const target = this.allUnits.find(u => u.id === unit.command!.targetUnitId);
-          if (target && target.state !== UnitState.DEAD) {
-            // Apply circle-strafe for melee units in attack range
-            if (unit.state === UnitState.ATTACKING) {
-              this.unitRenderer.applyCombatStrafe(unit.id, target.worldPosition, gameTime);
-            }
-            this.unitRenderer.faceTarget(unit.id, target.worldPosition);
+      // Face target + strafe (uses Map lookup instead of .find())
+      if (unit.command?.targetUnitId) {
+        const target = unitById.get(unit.command.targetUnitId);
+        if (target && target.state !== UnitState.DEAD) {
+          if (unit.state === UnitState.ATTACKING) {
+            this.unitRenderer.applyCombatStrafe(unit.id, target.worldPosition, gameTime);
           }
+          this.unitRenderer.faceTarget(unit.id, target.worldPosition);
+        }
+        // Build aggro list inline
+        if (unit.state === UnitState.ATTACKING || unit.state === UnitState.MOVING) {
+          aggroList.push({ attackerId: unit.id, targetId: unit.command.targetUnitId });
         }
       }
     }
-
-    // Build aggro list and update visual indicators
-    const aggroList: Array<{ attackerId: string; targetId: string }> = [];
-    for (const unit of this.allUnits) {
-      if (unit.state === UnitState.DEAD) continue;
-      if ((unit.state === UnitState.ATTACKING || unit.state === UnitState.MOVING)
-          && unit.command?.targetUnitId) {
-        aggroList.push({ attackerId: unit.id, targetId: unit.command.targetUnitId });
-      }
-    }
     this.unitRenderer.updateAggroIndicators(aggroList, gameTime);
+
+    // Visual-only separation: push overlapping unit meshes apart AFTER position sync
+    this.unitRenderer.applySeparation();
 
     // Update attack target hover ring (pulse + follow)
     this.unitRenderer.updateAttackTargetRing(gameTime);
@@ -3014,16 +3312,107 @@ class Cubitopia {
     // Update base health bar billboards
     this.baseRenderer.updateBillboards(this.camera.camera);
 
-    // Update HUD resource display with wood stockpile
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+    // Update HUD resource display with wood stockpile + population cap info
+    // Throttle popInfo to every 0.5s to avoid per-frame .filter() allocations
+    this._popInfoTimer += delta;
+    if (this._popInfoTimer >= 0.5 || !this._popInfoCache) {
+      this._popInfoTimer = 0;
+      if (this.populationSystem) {
+        this._popInfoCache = {
+          current: this.populationSystem.getCombatUnitCount(0),
+          cap: this.populationSystem.getPopulationCap(0),
+        };
+      }
+    }
+    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0], this._popInfoCache);
 
-    // Update unit stats panel (if visible — refreshes every frame for live data)
-    this.hud.updateUnitStatsPanel(this.allUnits);
+    // --- Base Upgrade System: check tier upgrades (throttled to every 2s) ---
+    this._tierCheckTimer += delta;
+    if (this._tierCheckTimer >= 2 && this.baseUpgradeSystem) {
+      this._tierCheckTimer = 0;
+      for (let pid = 0; pid < this.players.length; pid++) {
+        const upgrades = this.baseUpgradeSystem.checkAllUpgrades(pid);
+        for (const evt of upgrades) {
+          const base = this.bases.find(b => b.id === evt.baseId);
+          if (base) {
+            base.tier = evt.newTier;
+            const tierNames = ['Camp', 'Fort', 'Castle'];
+            const msg = `🏰 Base upgraded to ${tierNames[evt.newTier]}!`;
+            if (pid === 0) {
+              this.hud.showNotification(msg, '#f1c40f');
+              this.sound.play('queue_confirm' as any, 0.8);
+            }
+            console.log(`[BaseUpgrade] Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
 
-    // Update selection info (lightweight — no panel rebuild, just health/state text)
-    const sel = this.selectionManager.getSelectedUnits();
-    if (sel.length > 0) {
-      this.hud.updateSelectionInfo(sel);
+            // Spawn reward Ogre at the upgraded base
+            const ogresForTier = evt.newTier;
+            if (base.ogresSpawned < ogresForTier) {
+              const spawnCoord = this.findSpawnTile(this.currentMap!, base.position.q, base.position.r);
+              const ogre = UnitFactory.create(UnitType.OGRE, pid, spawnCoord);
+              ogre.worldPosition = this.hexToWorld(spawnCoord);
+              ogre.isSiege = true;
+              this.players[pid].units.push(ogre);
+              this.allUnits.push(ogre);
+              const elev = this.getElevation(spawnCoord);
+              this.unitRenderer.addUnit(ogre, elev);
+              base.ogresSpawned = ogresForTier;
+              if (pid === 0) {
+                this.hud.showNotification('👹 An Ogre has joined your army!', '#4e342e');
+                this.selectionManager.setPlayerUnits(this.allUnits, 0);
+              }
+              console.log(`[BaseUpgrade] Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
+            }
+          }
+        }
+      }
+    }
+
+    // ── Safety net: clean up dead unit meshes that linger ──
+    // If a unit is DEAD or has _pendingRangedDeath for too long (projectile lost),
+    // force-remove it to prevent ghost meshes on the battlefield.
+    if (!this._deadCleanupTimer) this._deadCleanupTimer = 0;
+    this._deadCleanupTimer += delta;
+    if (this._deadCleanupTimer >= 1.0) {
+      this._deadCleanupTimer = 0;
+      const now = performance.now();
+      for (let i = this.allUnits.length - 1; i >= 0; i--) {
+        const u = this.allUnits[i];
+        if (u.state === UnitState.DEAD) {
+          // Unit is DEAD but still in allUnits — removeUnitFromGame was never called
+          console.warn(`[DeadCleanup] Force-removing dead unit ${u.type}(${u.id})`);
+          this.removeUnitFromGame(u);
+        } else if (u._pendingRangedDeath) {
+          // Track how long it's been pending — if too long, force-kill
+          if (!u._pendingDeathTimestamp) {
+            u._pendingDeathTimestamp = now;
+          } else if (now - u._pendingDeathTimestamp > 3000) {
+            // 3 seconds is far longer than any projectile flight time
+            console.warn(`[DeadCleanup] Force-removing stale pending-death unit ${u.type}(${u.id})`);
+            u.state = UnitState.DEAD;
+            u._pendingRangedDeath = false;
+            this.removeUnitFromGame(u);
+          }
+        }
+      }
+    }
+
+    // Update unit stats panel (if visible — throttled to every 0.5s)
+    if (!this._unitStatsPanelTimer) this._unitStatsPanelTimer = 0;
+    this._unitStatsPanelTimer += delta;
+    if (this._unitStatsPanelTimer >= 0.5) {
+      this._unitStatsPanelTimer = 0;
+      this.hud.updateUnitStatsPanel(this.allUnits);
+    }
+
+    // Update selection info — throttled to every 0.3s
+    if (!this._selInfoTimer) this._selInfoTimer = 0;
+    this._selInfoTimer += delta;
+    if (this._selInfoTimer >= 0.3) {
+      this._selInfoTimer = 0;
+      const sel = this.selectionManager.getSelectedUnits();
+      if (sel.length > 0) {
+        this.hud.updateSelectionInfo(sel);
+      }
     }
   }
 
@@ -3307,6 +3696,10 @@ class Cubitopia {
   // --- Wizard Tower & Magic Unit Spawning ---
   private wizardTowerPlaceMode = false;
   private wizardTowerRotation = 0;
+
+  // --- Attack-Move Mode (League-style) ---
+  private _attackMoveMode = false;
+  private _attackMoveIndicator: THREE.Mesh | null = null;
 
   // --- Grass Fiber, Clay, Rope Stockpiles ---
   private grassFiberStockpile: number[] = [0, 0];
@@ -3621,15 +4014,15 @@ class Cubitopia {
       : `build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh`;
     const meshBuilder = this.buildingSystem[meshMethodName as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
     const mesh = meshBuilder.call(this.buildingSystem, coord, 0);
-    this.buildingSystem.registerBuilding(kind, 0, coord, mesh, cfg.maxHealth);
+    this.buildingSystem.registerBuilding(kind, 0, coord, mesh, cfg.maxHealth, true);
 
-    // Post-placement hooks
-    if (cfg.unitAIHook) cfg.unitAIHook(coord);
+    // Post-placement hooks are DEFERRED until construction completes
+    // (handled in handleConstructTick when progress reaches 1.0)
 
     // Exit placement mode
     this.exitPlacementMode(kind);
     this.resourceManager.updateStockpileVisual(0);
-    if (cfg.notification) this.hud.showNotification(cfg.notification, '#2ecc71');
+    this.hud.showNotification(`${kind} blueprint placed — builder needed!`, '#3498db');
   }
 
   /** Exit placement mode for a specific building kind */
@@ -4076,6 +4469,65 @@ class Cubitopia {
     for (const [id, lbl] of this.debugOverlayLabels) {
       if (!activeIds.has(id)) { lbl.remove(); this.debugOverlayLabels.delete(id); }
     }
+  }
+
+  /**
+   * Spawn a 3D click indicator at a world position — a colored ring/circle that fades out
+   */
+  private spawnClickIndicator(worldPos: THREE.Vector3, color: number, size = 0.8): void {
+    // Outer ring
+    const ringGeo = new THREE.RingGeometry(size * 0.6, size, 16);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(worldPos);
+    ring.position.y += 0.1;
+    this.renderer.scene.add(ring);
+
+    // Inner dot
+    const dotGeo = new THREE.CircleGeometry(size * 0.15, 8);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.copy(worldPos);
+    dot.position.y += 0.12;
+    this.renderer.scene.add(dot);
+
+    // Vertical line (flag pole)
+    const poleGeo = new THREE.BoxGeometry(0.03, 0.6, 0.03);
+    const poleMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.8,
+    });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.copy(worldPos);
+    pole.position.y += 0.4;
+    this.renderer.scene.add(pole);
+
+    // Animate: expand ring slightly, then fade out
+    let life = 1.0;
+    const animate = () => {
+      life -= 0.025;
+      if (life <= 0) {
+        this.renderer.scene.remove(ring);
+        this.renderer.scene.remove(dot);
+        this.renderer.scene.remove(pole);
+        ringGeo.dispose(); ringMat.dispose();
+        dotGeo.dispose(); dotMat.dispose();
+        poleGeo.dispose(); poleMat.dispose();
+        return;
+      }
+      ringMat.opacity = life * 0.7;
+      dotMat.opacity = life * 0.9;
+      poleMat.opacity = life * 0.8;
+      const scale = 1 + (1 - life) * 0.3;
+      ring.scale.set(scale, scale, scale);
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
   }
 }
 

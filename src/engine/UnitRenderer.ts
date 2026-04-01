@@ -349,10 +349,13 @@ export class UnitRenderer {
         const armRight = makeArmGroup('arm-right', 0x9e9e9e, 0.3, 0.55);
         const wElbowR = armRight.getObjectByName('arm-right-elbow')!;
         const wSwordGrp = new THREE.Group();
-        wSwordGrp.rotation.x = 0.436; // 25° forward tilt
+        wSwordGrp.name = 'sword-group';
+        wSwordGrp.position.set(-0.0100, 0.0100, 0.3000);
+        wSwordGrp.rotation.set(0.8684, 1.5584, 0.0000);
         wElbowR.add(wSwordGrp);
         // Blade — broad, imposing
         const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.85, 0.05), wBladeMat);
+        blade.name = 'sword-blade';
         blade.position.set(0, 0.28, 0);
         wSwordGrp.add(blade);
         // Fuller groove
@@ -371,6 +374,7 @@ export class UnitRenderer {
         wSwordGrp.add(wTip);
         // Crossguard (gold, ornate)
         const crossguard = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.06, 0.06), wGoldBright);
+        crossguard.name = 'sword-crossguard';
         crossguard.position.set(0, -0.16, 0);
         wSwordGrp.add(crossguard);
         // Guard tips (downturned)
@@ -408,6 +412,7 @@ export class UnitRenderer {
         const wElbowL = armLeft.getObjectByName('arm-left-elbow')!;
         // Buckler face (team color, multi-layered)
         const bucklerMain = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.30, 0.30), wTeamMat);
+        bucklerMain.name = 'shield-buckler';
         bucklerMain.position.set(-0.08, -0.12, 0.08);
         wElbowL.add(bucklerMain);
         // Buckler rim (steel edge)
@@ -483,66 +488,327 @@ export class UnitRenderer {
         break;
       }
       case UnitType.ARCHER: {
-        // Green-tinted leather body
-        const bodyGeo = new THREE.BoxGeometry(0.45, 0.55, 0.4);
-        const bodyMat = new THREE.MeshLambertMaterial({ color: 0x567d46 });
-        const body = new THREE.Mesh(bodyGeo, bodyMat);
-        body.position.y = 0.28;
-        body.castShadow = true;
-        group.add(body);
+        // ════════════════════════════════════════════════════════
+        // ARCHER — Elite Forest Ranger
+        // Layered studded leather, deep hood, ornate recurve bow,
+        // fletched quiver, back cloak, team-color accents
+        // ════════════════════════════════════════════════════════
 
-        // Team color sash across chest
-        const sashGeo = new THREE.BoxGeometry(0.47, 0.06, 0.42);
-        const sashMat = new THREE.MeshLambertMaterial({ color: playerColor });
-        const sash = new THREE.Mesh(sashGeo, sashMat);
-        sash.position.y = 0.42;
-        group.add(sash);
+        // Shared materials
+        const aLeatherMat = new THREE.MeshLambertMaterial({ color: 0x4a6b3a }); // forest green leather
+        const aLeatherDkMat = new THREE.MeshLambertMaterial({ color: 0x3a5530 }); // dark green
+        const aLeatherLtMat = new THREE.MeshLambertMaterial({ color: 0x5d8248 }); // lighter green
+        const aBrownMat = new THREE.MeshLambertMaterial({ color: 0x6b4226 }); // rich brown leather
+        const aBrownDkMat = new THREE.MeshLambertMaterial({ color: 0x4a2e1a }); // dark brown
+        const aBrownLtMat = new THREE.MeshLambertMaterial({ color: 0x8b5e3c }); // light brown
+        const aTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const aGoldMat = new THREE.MeshLambertMaterial({ color: 0xc8a832 }); // brass fittings
+        const aSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        const aBlackMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+        const aBowWoodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b }); // yew wood
+        const aBowDarkMat = new THREE.MeshLambertMaterial({ color: 0x5c3a1e }); // bow limb tips
+        const aStringMat = new THREE.MeshLambertMaterial({ color: 0xd4c8a0 }); // bowstring
 
-        // Head with hood
-        const headGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
-        const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
-        const head = new THREE.Mesh(headGeo, headMat);
-        head.position.y = 0.78;
-        group.add(head);
+        // ─── PASS 1: SILHOUETTE — lean, agile build ───
+        // Core torso (studded leather vest)
+        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.52, 0.38), aLeatherMat);
+        aBody.position.y = 0.30; aBody.castShadow = true;
+        group.add(aBody);
 
-        const hoodGeo = new THREE.BoxGeometry(0.38, 0.2, 0.38);
-        const hoodMat = new THREE.MeshLambertMaterial({ color: 0x3d5c2e });
-        const hood = new THREE.Mesh(hoodGeo, hoodMat);
-        hood.position.y = 0.92;
-        group.add(hood);
+        // ─── PASS 2: LAYERING — leather armor layers ───
+        // Upper chest plate (hardened leather, raised)
+        const aChest = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.22, 0.30), aLeatherDkMat);
+        aChest.position.set(0, 0.44, 0.03);
+        group.add(aChest);
+        // Lower belly guard
+        const aBelly = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.14, 0.28), aLeatherLtMat);
+        aBelly.position.set(0, 0.28, 0.04);
+        group.add(aBelly);
+        // Side leather panels (visible at flanks)
+        for (const sx of [-0.21, 0.21]) {
+          const sidePanel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.22), aBrownMat);
+          sidePanel.position.set(sx, 0.36, 0);
+          group.add(sidePanel);
+        }
+        // Studded rivets across chest (2 rows of 3)
+        for (const sy of [0.38, 0.48]) {
+          for (const sx2 of [-0.10, 0, 0.10]) {
+            const stud = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.025), aGoldMat);
+            stud.position.set(sx2, sy, 0.20);
+            group.add(stud);
+          }
+        }
 
-        // Hood trim (team color)
-        const hoodTrimGeo = new THREE.BoxGeometry(0.39, 0.04, 0.39);
-        const hoodTrimMat = new THREE.MeshLambertMaterial({ color: playerColor });
-        const hoodTrim = new THREE.Mesh(hoodTrimGeo, hoodTrimMat);
-        hoodTrim.position.y = 0.83;
-        group.add(hoodTrim);
+        // Belt with buckle
+        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.40), aBrownMat);
+        aBelt.position.y = 0.18;
+        group.add(aBelt);
+        const aBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.04), aGoldMat);
+        aBuckle.position.set(0, 0.18, 0.22);
+        group.add(aBuckle);
+        // Belt pouches (small utility bags on sides)
+        for (const px of [-0.20, 0.18]) {
+          const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.06), aBrownDkMat);
+          pouch.position.set(px, 0.16, 0.16);
+          group.add(pouch);
+          const pouchFlap = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.07), aBrownLtMat);
+          pouchFlap.position.set(px, 0.20, 0.16);
+          group.add(pouchFlap);
+        }
 
-        // Quiver on back
-        const quiverGeo = new THREE.BoxGeometry(0.12, 0.4, 0.12);
-        const quiverMat = new THREE.MeshLambertMaterial({ color: 0x654321 });
-        const quiver = new THREE.Mesh(quiverGeo, quiverMat);
-        quiver.position.set(-0.15, 0.5, -0.25);
-        group.add(quiver);
+        // Team color sash (diagonal across chest)
+        const aSash = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.50, 0.42), aTeamMat);
+        aSash.position.set(-0.06, 0.38, 0.01);
+        aSash.rotation.z = 0.25;
+        group.add(aSash);
+        // Sash clasp (gold, at shoulder)
+        const aClasp = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.05), aGoldMat);
+        aClasp.position.set(-0.16, 0.56, 0.10);
+        group.add(aClasp);
 
-        // Left arm (holds bow — bow faces forward, attached at hand)
+        // ─── HEAD with deep ranger hood ───
+        const aHead = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.30, 0.30), aSkinMat);
+        aHead.position.y = 0.76;
+        group.add(aHead);
+        // Eyes (dark, narrowed — ranger's focus)
+        for (const ex of [-0.06, 0.06]) {
+          const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.03), aBlackMat);
+          eye.position.set(ex, 0.78, 0.16);
+          group.add(eye);
+        }
+        // ─── Robin Hood hat — pointed cap with upturned brim & feather ───
+        // Hat base / brim (wide, upturned at front)
+        const aHatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.05, 0.44), aLeatherDkMat);
+        aHatBrim.position.set(0, 0.90, 0.0);
+        aHatBrim.rotation.x = -0.08; // slight forward tilt
+        group.add(aHatBrim);
+        // Upturned front brim flap
+        const aHatFrontFlap = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.08, 0.06), aLeatherDkMat);
+        aHatFrontFlap.position.set(0, 0.94, 0.20);
+        aHatFrontFlap.rotation.x = 0.35; // flipped up
+        group.add(aHatFrontFlap);
+        // Hat crown — tall cone shape built from stacked boxes tapering to point
+        const aHatBase = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.10, 0.34), aLeatherMat);
+        aHatBase.position.set(0, 0.96, -0.01);
+        group.add(aHatBase);
+        const aHatMid = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.10, 0.26), aLeatherMat);
+        aHatMid.position.set(0, 1.05, -0.02);
+        group.add(aHatMid);
+        const aHatUpper = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.10, 0.18), aLeatherMat);
+        aHatUpper.position.set(0, 1.14, -0.04);
+        group.add(aHatUpper);
+        // Pointed tip — leans backward like a classic Robin Hood cap
+        const aHatTip = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.12, 0.10), aLeatherMat);
+        aHatTip.position.set(0, 1.22, -0.10);
+        aHatTip.rotation.x = 0.4; // leans back
+        group.add(aHatTip);
+        // Hat band — team color ribbon wrapped around base
+        const aHatBand = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.04, 0.36), aTeamMat);
+        aHatBand.position.set(0, 0.93, -0.01);
+        group.add(aHatBand);
+        // Feather — tall, sticking out the side at a jaunty angle
+        const aFeatherQuill = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.28, 0.015), new THREE.MeshLambertMaterial({ color: 0xf5f5f0 }));
+        aFeatherQuill.position.set(-0.18, 1.10, -0.02);
+        aFeatherQuill.rotation.z = 0.25; // angled outward
+        group.add(aFeatherQuill);
+        // Feather vane (colored plume)
+        const aFeatherVane = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.02), new THREE.MeshLambertMaterial({ color: 0xcc3333 }));
+        aFeatherVane.position.set(-0.20, 1.14, -0.02);
+        aFeatherVane.rotation.z = 0.25;
+        group.add(aFeatherVane);
+        // Feather tip accent
+        const aFeatherTip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.06, 0.015), aTeamMat);
+        aFeatherTip.position.set(-0.22, 1.26, -0.02);
+        aFeatherTip.rotation.z = 0.25;
+        group.add(aFeatherTip);
+
+        // Shoulder guards (hardened leather pauldrons, asymmetric)
+        // Left shoulder — larger (bow arm needs protection)
+        const aShoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.18), aBrownMat);
+        aShoulderL.position.set(-0.28, 0.58, 0);
+        group.add(aShoulderL);
+        const aShoulderLTrim = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.03, 0.19), aGoldMat);
+        aShoulderLTrim.position.set(-0.28, 0.55, 0);
+        group.add(aShoulderLTrim);
+        // Right shoulder — smaller (draw arm needs range of motion)
+        const aShoulderR = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.14), aBrownMat);
+        aShoulderR.position.set(0.28, 0.58, 0);
+        group.add(aShoulderR);
+
+        // ─── PASS 3: QUIVER (detailed, on back-right) ───
+        // Main quiver body (tall cylinder shape via box)
+        const aQuiver = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.38, 0.10), aBrownMat);
+        aQuiver.position.set(0.14, 0.46, -0.22);
+        aQuiver.rotation.z = -0.08; // slight angle
+        group.add(aQuiver);
+        // Quiver top rim
+        const aQuiverRim = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.12), aGoldMat);
+        aQuiverRim.position.set(0.14, 0.66, -0.22);
+        group.add(aQuiverRim);
+        // Quiver bottom cap
+        const aQuiverCap = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.03, 0.08), aBrownDkMat);
+        aQuiverCap.position.set(0.14, 0.27, -0.22);
+        group.add(aQuiverCap);
+        // Quiver strap (crosses chest diagonally)
+        const aStrap = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.50, 0.04), aBrownLtMat);
+        aStrap.position.set(0.04, 0.40, -0.05);
+        aStrap.rotation.z = 0.20;
+        group.add(aStrap);
+        // Arrow fletching tips poking out (3 arrows visible)
+        for (let ai = 0; ai < 3; ai++) {
+          const fletchX = 0.12 + (ai - 1) * 0.025;
+          const fletchZ = -0.20 + (ai - 1) * 0.02;
+          const arrowShaft = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.10, 0.015), aBrownLtMat);
+          arrowShaft.position.set(fletchX, 0.70, fletchZ);
+          group.add(arrowShaft);
+          // Fletching (small colored fan)
+          const fletch = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.005), aTeamMat);
+          fletch.position.set(fletchX, 0.73, fletchZ + 0.01);
+          group.add(fletch);
+        }
+        // Quiver decorative emblem (team color)
+        const aQuiverEmblem = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.02), aTeamMat);
+        aQuiverEmblem.position.set(0.14, 0.50, -0.16);
+        group.add(aQuiverEmblem);
+
+        // ─── PASS 4: BACK DETAIL — short ranger cloak ───
+        const aCloak = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.06), aLeatherDkMat);
+        aCloak.position.set(0, 0.38, -0.22);
+        group.add(aCloak);
+        // Cloak clasp at neck (gold leaf)
+        const aCloakClasp = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.04, 0.04), aGoldMat);
+        aCloakClasp.position.set(0, 0.58, -0.20);
+        group.add(aCloakClasp);
+        // Cloak hem trim (team color)
+        const aCloakHem = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.03, 0.07), aTeamMat);
+        aCloakHem.position.set(0, 0.20, -0.22);
+        group.add(aCloakHem);
+
+        // ─── PASS 5: ARMS with detailed recurve bow ───
+        // Left arm (bow arm)
         const archerArmLeft = makeArmGroup('arm-left', 0xffdbac, -0.3, 0.52);
+        // Leather vambrace on forearm
+        const aVambraceL = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.10, 0.11), aBrownMat);
+        aVambraceL.position.set(0, -0.10, 0);
         const archerElbowL = archerArmLeft.getObjectByName('arm-left-elbow')!;
-        const bowGeo = new THREE.TorusGeometry(0.22, 0.03, 4, 8, Math.PI);
-        const bowMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-        const bow = new THREE.Mesh(bowGeo, bowMat);
-        bow.position.set(0, -0.16, 0.15);
-        bow.rotation.x = Math.PI / 2;
-        archerElbowL.add(bow);
+        archerElbowL.add(aVambraceL);
+
+        // ─── BIG recurve bow — prominent, curved, held out front ───
+        // Bow frame group (so we can name it for animation access)
+        const aBowGroup = new THREE.Group();
+        aBowGroup.name = 'bow-group';
+        aBowGroup.position.set(0.0000, 0.0000, 0.1450);
+        aBowGroup.rotation.set(-0.0816, -3.1416, 0.0000);
+        archerElbowL.add(aBowGroup);
+
+        // Main bow stave — tall and thick, prominent at game zoom
+        const aBowStave = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.80, 0.06), aBowWoodMat);
+        aBowStave.position.set(0, 0, 0);
+        aBowGroup.add(aBowStave);
+
+        // Upper limb — curves forward (recurve shape)
+        const aBowUpperMid = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.07), aBowWoodMat);
+        aBowUpperMid.position.set(0, 0.38, 0.04);
+        aBowUpperMid.rotation.x = -0.20;
+        aBowGroup.add(aBowUpperMid);
+        const aBowUpperTip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.08), aBowDarkMat);
+        aBowUpperTip.position.set(0, 0.48, 0.10);
+        aBowUpperTip.rotation.x = -0.45; // recurve kick
+        aBowGroup.add(aBowUpperTip);
+        // Upper nock (string notch)
+        const aBowUpperNock = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.04), aGoldMat);
+        aBowUpperNock.position.set(0, 0.52, 0.12);
+        aBowGroup.add(aBowUpperNock);
+
+        // Lower limb — curves forward (recurve shape, mirror)
+        const aBowLowerMid = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.14, 0.07), aBowWoodMat);
+        aBowLowerMid.position.set(0, -0.38, 0.04);
+        aBowLowerMid.rotation.x = 0.20;
+        aBowGroup.add(aBowLowerMid);
+        const aBowLowerTip = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.08), aBowDarkMat);
+        aBowLowerTip.position.set(0, -0.48, 0.10);
+        aBowLowerTip.rotation.x = 0.45; // recurve kick
+        aBowGroup.add(aBowLowerTip);
+        // Lower nock
+        const aBowLowerNock = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.04), aGoldMat);
+        aBowLowerNock.position.set(0, -0.52, 0.12);
+        aBowGroup.add(aBowLowerNock);
+
+        // Grip — wrapped leather at center
+        const aBowGrip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.08), aBrownDkMat);
+        aBowGrip.position.set(0, 0, 0);
+        aBowGroup.add(aBowGrip);
+        // Grip accent bands (gold)
+        for (const gy of [-0.05, 0.05]) {
+          const gripBand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.02, 0.085), aGoldMat);
+          gripBand.position.set(0, gy, 0);
+          aBowGroup.add(gripBand);
+        }
+        // Arrow rest (small shelf above grip)
+        const aArrowRest = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.02, 0.06), aBrownLtMat);
+        aArrowRest.position.set(0, 0.08, 0.04);
+        aBowGroup.add(aArrowRest);
+
+        // Bowstring — connects upper nock to lower nock
+        // Resting position: straight line at Z offset behind stave
+        const aBowString = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.96, 0.012), aStringMat);
+        aBowString.position.set(0.0000, 0.0000, 0.1450);
+        aBowString.rotation.set(-0.0816, -3.1416, 0.0000);
+        aBowString.name = 'bowstring';
+        aBowGroup.add(aBowString);
+
+        // Nocked arrow (hidden by default — shown during attack draw animation)
+        const aNockedArrow = new THREE.Group();
+        aNockedArrow.name = 'nocked-arrow';
+        aNockedArrow.visible = false;
+        // Arrow shaft
+        const aArrowShaft = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.55), aBrownLtMat);
+        aArrowShaft.position.set(0, 0, -0.10);
+        aNockedArrow.add(aArrowShaft);
+        // Arrowhead
+        const aArrowHead = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.08), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
+        aArrowHead.position.set(0, 0, 0.20);
+        aNockedArrow.add(aArrowHead);
+        // Fletching
+        const aArrowFletch = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.06), aTeamMat);
+        aArrowFletch.position.set(0, 0, -0.32);
+        aNockedArrow.add(aArrowFletch);
+        aNockedArrow.position.set(0, 0.04, -0.06); // sits at bowstring
+        aBowGroup.add(aNockedArrow);
+
         group.add(archerArmLeft);
 
-        // Right arm (draws string)
+        // Right arm (draw arm) with leather vambrace
         const archerArmRight = makeArmGroup('arm-right', 0xffdbac, 0.3, 0.52);
+        const archerElbowR = archerArmRight.getObjectByName('arm-right-elbow')!;
+        const aVambraceR = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.09, 0.10), aBrownMat);
+        aVambraceR.position.set(0, -0.10, 0);
+        archerElbowR.add(aVambraceR);
+        // Finger tab / draw glove
+        const aFingerTab = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.06), aBrownDkMat);
+        aFingerTab.position.set(0, -0.18, 0);
+        archerElbowR.add(aFingerTab);
         group.add(archerArmRight);
 
-        // Legs
-        group.add(makeLegGroup('leg-left', 0x567d46, -0.12, 0));
-        group.add(makeLegGroup('leg-right', 0x567d46, 0.12, 0));
+        // ─── LEGS (leather greaves with knee guards) ───
+        const aLegL = makeLegGroup('leg-left', 0x4a6b3a, -0.12, 0);
+        const aLegR = makeLegGroup('leg-right', 0x4a6b3a, 0.12, 0);
+        // Knee guards
+        for (const lg of [aLegL, aLegR]) {
+          const kneeName = lg === aLegL ? 'leg-left' : 'leg-right';
+          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.06, 0.08), aBrownMat);
+          knee.position.set(0, 0.02, 0.06);
+          const kneeCap = lg.getObjectByName(kneeName);
+          if (kneeCap) kneeCap.add(knee);
+        }
+        group.add(aLegL);
+        group.add(aLegR);
+        // Boots (dark leather, slightly oversized)
+        for (const bx of [-0.12, 0.12]) {
+          const boot = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.04, 0.16), aBrownDkMat);
+          boot.position.set(bx, -0.02, 0.02);
+          group.add(boot);
+        }
         break;
       }
       case UnitType.RIDER: {
@@ -586,15 +852,19 @@ export class UnitRenderer {
         const riderArmRight = makeArmGroup('arm-right', 0xb0b0b0, 0.25, 0.55);
         const riderElbowR = riderArmRight.getObjectByName('arm-right-elbow')!;
         const lanceShaft = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.2), new THREE.MeshLambertMaterial({ color: 0xbdc3c7 }));
+        lanceShaft.name = 'lance-shaft';
         lanceShaft.position.set(0, -0.16, 0.55);
         riderElbowR.add(lanceShaft);
         const lanceTip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.2), new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }));
+        lanceTip.name = 'lance-tip';
         lanceTip.position.set(0, -0.16, 1.2);
         riderElbowR.add(lanceTip);
         const vamplate = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.04), new THREE.MeshLambertMaterial({ color: playerColor }));
+        vamplate.name = 'lance-vamplate';
         vamplate.position.set(0, -0.16, 0.1);
         riderElbowR.add(vamplate);
         const pennant = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.1, 0.02), new THREE.MeshLambertMaterial({ color: playerColor }));
+        pennant.name = 'lance-pennant';
         pennant.position.set(0.08, -0.16, 1.0);
         riderElbowR.add(pennant);
         group.add(riderArmRight);
@@ -603,9 +873,11 @@ export class UnitRenderer {
         const riderArmLeft = makeArmGroup('arm-left', 0xb0b0b0, -0.25, 0.55);
         const riderElbowL = riderArmLeft.getObjectByName('arm-left-elbow')!;
         const kiteShield = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.35, 0.25), new THREE.MeshLambertMaterial({ color: playerColor }));
+        kiteShield.name = 'shield-kite';
         kiteShield.position.set(-0.06, -0.16, 0.08);
         riderElbowL.add(kiteShield);
         const kiteBoss = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.1, 0.1), new THREE.MeshLambertMaterial({ color: 0xf1c40f }));
+        kiteBoss.name = 'shield-boss';
         kiteBoss.position.set(-0.08, -0.16, 0.08);
         riderElbowL.add(kiteBoss);
         group.add(riderArmLeft);
@@ -769,6 +1041,7 @@ export class UnitRenderer {
         const shZ = 0.32; // shield Z offset — farther out from body
         const shX = 0.18; // shield X offset
         const pShield = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.1), new THREE.MeshLambertMaterial({ color: playerColor }));
+        pShield.name = 'shield-tower';
         pShield.position.set(shX, -0.05, shZ);
         pArmL.add(pShield);
         // Steel rim — top
@@ -817,6 +1090,7 @@ export class UnitRenderer {
         const pElbowR = pArmR.getObjectByName('arm-right-elbow')!;
         // Long mace handle (dark wood with gold wrap)
         const pMHandle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.55), new THREE.MeshLambertMaterial({ color: 0x5d4037 }));
+        pMHandle.name = 'mace-shaft';
         pMHandle.position.set(0, -0.16, 0.28);
         pElbowR.add(pMHandle);
         // Gold grip wrapping (two bands)
@@ -831,6 +1105,7 @@ export class UnitRenderer {
         pElbowR.add(pPommel);
         // Mace head — large ornate flanged ball (bright steel)
         const pMHead = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }));
+        pMHead.name = 'mace-head';
         pMHead.position.set(0, -0.16, 0.57);
         pElbowR.add(pMHead);
         // 6 big flanges radiating from mace head
@@ -838,11 +1113,13 @@ export class UnitRenderer {
         const flangePositions: [number, number][] = [[0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12], [0.08, 0.08], [-0.08, -0.08]];
         for (const [fx, fy] of flangePositions) {
           const fl = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.16), flMat);
+          fl.name = 'mace-flange';
           fl.position.set(fx, -0.16 + fy, 0.57);
           pElbowR.add(fl);
         }
         // Gold cap on mace tip
         const pMTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
+        pMTip.name = 'mace-tip';
         pMTip.position.set(0, -0.16, 0.68);
         pElbowR.add(pMTip);
         group.add(pArmR);
@@ -944,11 +1221,13 @@ export class UnitRenderer {
         const handleGeo = new THREE.BoxGeometry(0.06, 0.06, 0.4);
         const handleMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
         const handle = new THREE.Mesh(handleGeo, handleMat);
+        handle.name = 'hammer-shaft';
         handle.position.set(0, -0.16, 0.2); // hand end, extending forward
         bldArmRightElbow.add(handle);
         const hammerGeo = new THREE.BoxGeometry(0.15, 0.12, 0.12);
         const hammerMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
         const hammer = new THREE.Mesh(hammerGeo, hammerMat);
+        hammer.name = 'hammer-head';
         hammer.position.set(0, -0.16, 0.42); // head at end of handle
         bldArmRightElbow.add(hammer);
         group.add(bldArmRight);
@@ -999,11 +1278,13 @@ export class UnitRenderer {
         const axeHandleGeo = new THREE.BoxGeometry(0.06, 0.06, 0.5);
         const axeHandleMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
         const axeHandle = new THREE.Mesh(axeHandleGeo, axeHandleMat);
+        axeHandle.name = 'axe-shaft';
         axeHandle.position.set(0, -0.16, 0.25); // hand end, extending forward
         lumArmRightElbow.add(axeHandle);
         const axeHeadGeo = new THREE.BoxGeometry(0.2, 0.15, 0.06);
         const axeHeadMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
         const axeHead = new THREE.Mesh(axeHeadGeo, axeHeadMat);
+        axeHead.name = 'axe-head';
         axeHead.position.set(0, -0.16, 0.5); // blade at end of handle
         lumArmRightElbow.add(axeHead);
         group.add(lumArmRight);
@@ -1062,11 +1343,13 @@ export class UnitRenderer {
         const scytheHandleGeo = new THREE.BoxGeometry(0.05, 0.05, 0.6);
         const scytheHandleMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
         const scytheHandle = new THREE.Mesh(scytheHandleGeo, scytheHandleMat);
+        scytheHandle.name = 'scythe-shaft';
         scytheHandle.position.set(0, -0.16, 0.3); // hand end, extending forward
         vilArmRightElbow.add(scytheHandle);
         const bladeGeo = new THREE.BoxGeometry(0.28, 0.04, 0.08);
         const bladeMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa });
         const blade = new THREE.Mesh(bladeGeo, bladeMat);
+        blade.name = 'scythe-blade';
         blade.position.set(0.12, -0.16, 0.6); // curved blade at tip
         blade.rotation.y = 0.3; // angled outward like a scythe
         vilArmRightElbow.add(blade);
@@ -1598,14 +1881,17 @@ export class UnitRenderer {
         const daggerPoisonMat = new THREE.MeshLambertMaterial({ color: 0x76ff03, emissive: 0x76ff03, emissiveIntensity: 0.3 });
         // Left dagger blade (extends forward from hand)
         const ldBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.4), daggerBladeMat);
+        ldBlade.name = 'dagger-blade-left';
         ldBlade.position.set(0, -0.16, 0.25);
         aArmLElbow.add(ldBlade);
         // Left poison edge
         const ldPoison = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.35), daggerPoisonMat);
+        ldPoison.name = 'dagger-poison-left';
         ldPoison.position.set(-0.03, -0.16, 0.25);
         aArmLElbow.add(ldPoison);
         // Left grip
         const ldGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
+        ldGrip.name = 'dagger-grip-left';
         ldGrip.position.set(0, -0.16, 0.02);
         aArmLElbow.add(ldGrip);
         group.add(aArmL);
@@ -1613,12 +1899,15 @@ export class UnitRenderer {
         const aArmR = makeArmGroup('arm-right', 0x1a0033, 0.24, 0.48);
         const aArmRElbow = aArmR.getObjectByName('arm-right-elbow')!;
         const rdBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.4), daggerBladeMat);
+        rdBlade.name = 'dagger-blade-right';
         rdBlade.position.set(0, -0.16, 0.25);
         aArmRElbow.add(rdBlade);
         const rdPoison = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.35), daggerPoisonMat);
+        rdPoison.name = 'dagger-poison-right';
         rdPoison.position.set(0.03, -0.16, 0.25);
         aArmRElbow.add(rdPoison);
         const rdGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
+        rdGrip.name = 'dagger-grip-right';
         rdGrip.position.set(0, -0.16, 0.02);
         aArmRElbow.add(rdGrip);
         group.add(aArmR);
@@ -1706,6 +1995,8 @@ export class UnitRenderer {
         const sbArmLeftElbow = sbArmLeft.getObjectByName('arm-left-elbow')!;
         const shieldGroup = new THREE.Group();
         shieldGroup.name = 'shield-group';
+        shieldGroup.position.set(0.1450, -0.3750, 0.2900);
+        shieldGroup.rotation.set(0.6584, 0.0184, -0.0716);
         // Main shield body — tall rectangle
         const shMain = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         shMain.position.set(0, 0.05, 0);
@@ -1989,10 +2280,12 @@ export class UnitRenderer {
         bkElbowL.add(bkBracerStudL);
         // Left axe in tilted wrapper group — blade UP (above hand), handle hangs down
         const lAxeGrp = new THREE.Group();
+        lAxeGrp.name = 'axe-group-left';
         lAxeGrp.rotation.x = 0.436; // ~25° forward tilt (same as other weapons)
         lAxeGrp.position.set(0, -0.18, 0.06);
         // Handle (dark ash wood, runs along Y — extends upward from hand)
         const lAxeHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.70, 6), bkLeatherDark);
+        lAxeHandle.name = 'axe-shaft-left';
         lAxeHandle.position.y = 0.20;
         lAxeGrp.add(lAxeHandle);
         // Leather grip wrap at bottom of handle (where hand grips)
@@ -2001,18 +2294,22 @@ export class UnitRenderer {
         lAxeGrp.add(lAxeGrip);
         // Bearded axe head — blade at TOP, extends forward (Z) with cutting edge
         const lAxeBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.22), bkIronMat);
+        lAxeBlade.name = 'axe-head-left';
         lAxeBlade.position.set(0, 0.42, 0.08);
         lAxeGrp.add(lAxeBlade);
         // Cutting edge (bright steel, thin, extends further forward)
         const lAxeEdge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.08), bkSteelMat);
+        lAxeEdge.name = 'axe-edge-left';
         lAxeEdge.position.set(0, 0.42, 0.22);
         lAxeGrp.add(lAxeEdge);
         // Beard extension (the characteristic hook, now upward)
         const lAxeBeard = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.16), bkIronMat);
+        lAxeBeard.name = 'axe-beard-left';
         lAxeBeard.position.set(0, 0.52, 0.10);
         lAxeGrp.add(lAxeBeard);
         // Back spike (opposite side of blade)
         const lAxeSpike = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.10), bkIronMat);
+        lAxeSpike.name = 'axe-spike-left';
         lAxeSpike.position.set(0, 0.42, -0.10);
         lAxeGrp.add(lAxeSpike);
         // Bronze binding band where head meets handle
@@ -2038,10 +2335,12 @@ export class UnitRenderer {
         bkElbowR.add(bkBracerStudR);
         // Right axe in tilted wrapper group
         const rAxeGrp = new THREE.Group();
+        rAxeGrp.name = 'axe-group-right';
         rAxeGrp.rotation.x = 0.436; // ~25° forward tilt
         rAxeGrp.position.set(0, -0.18, 0.06);
         // Handle
         const rAxeHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 0.70, 6), bkLeatherDark);
+        rAxeHandle.name = 'axe-shaft-right';
         rAxeHandle.position.y = 0.20;
         rAxeGrp.add(rAxeHandle);
         // Leather grip wrap at bottom (hand position)
@@ -2050,18 +2349,22 @@ export class UnitRenderer {
         rAxeGrp.add(rAxeGrip);
         // Bearded axe head at TOP — blade extends forward (Z)
         const rAxeBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.22), bkIronMat);
+        rAxeBlade.name = 'axe-head-right';
         rAxeBlade.position.set(0, 0.42, 0.08);
         rAxeGrp.add(rAxeBlade);
         // Cutting edge
         const rAxeEdge = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.16, 0.08), bkSteelMat);
+        rAxeEdge.name = 'axe-edge-right';
         rAxeEdge.position.set(0, 0.42, 0.22);
         rAxeGrp.add(rAxeEdge);
         // Beard extension (upward hook)
         const rAxeBeard = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.16), bkIronMat);
+        rAxeBeard.name = 'axe-beard-right';
         rAxeBeard.position.set(0, 0.52, 0.10);
         rAxeGrp.add(rAxeBeard);
         // Back spike
         const rAxeSpike = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.10), bkIronMat);
+        rAxeSpike.name = 'axe-spike-right';
         rAxeSpike.position.set(0, 0.42, -0.10);
         rAxeGrp.add(rAxeSpike);
         // Bronze binding band
@@ -2313,11 +2616,13 @@ export class UnitRenderer {
         const bmArmRElbow = bmArmR.getObjectByName('arm-right-elbow')!;
         // Staff wrapper group — tilted forward 25° to clear shoulder plates
         const bmStaffGrp = new THREE.Group();
+        bmStaffGrp.name = 'staff-group';
         bmStaffGrp.rotation.x = 0.436; // 25 degrees forward tilt
         bmArmRElbow.add(bmStaffGrp);
         // Staff shaft (dark wood, vertical)
         const bmStaffMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
         const bmStaff = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.3, 0.06), bmStaffMat);
+        bmStaff.name = 'staff-shaft';
         bmStaff.position.set(0, 0.20, 0.08);
         bmStaffGrp.add(bmStaff);
         // Staff grip wrapping (gold spiral bands along shaft)
@@ -2637,12 +2942,14 @@ export class UnitRenderer {
         const gsArmL = makeArmGroup('arm-left', 0x455a64, -0.35, 0.55);
         // --- THE CLAYMORE (held vertically, tilted 25° forward to clear shoulders) ---
         const claymoreGrp = new THREE.Group();
+        claymoreGrp.name = 'sword-group';
         claymoreGrp.rotation.x = 0.85; // ~49 degrees forward tilt
         claymoreGrp.rotation.y = Math.PI / 2; // 90° along length axis — edges face left/right
         claymoreGrp.position.set(0.06, 0.10, 0.26);
         gsArmRElbow.add(claymoreGrp);
         // Blade — massive, nearly as tall as the unit
         const clayBlade = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.35, 0.06), gsBladeMat);
+        clayBlade.name = 'sword-blade';
         clayBlade.position.set(0, 0.48, 0.08);
         claymoreGrp.add(clayBlade);
         // Fuller groove (recessed channel down blade center)
@@ -2652,15 +2959,18 @@ export class UnitRenderer {
         // Blade edges (both sides, razor bright)
         for (const ex of [-0.085, 0.085]) {
           const edge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 1.25, 0.07), gsEdgeMat);
+          edge.name = 'sword-edge';
           edge.position.set(ex, 0.50, 0.08);
           claymoreGrp.add(edge);
         }
         // Blade tip (tapers slightly — smaller box at top)
         const clayTip = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.12, 0.05), gsBladeMat);
+        clayTip.name = 'sword-tip';
         clayTip.position.set(0, 1.18, 0.08);
         claymoreGrp.add(clayTip);
         // Crossguard — wide, ornate quillons
         const clayGuard = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.08, 0.08), gsGoldBright);
+        clayGuard.name = 'sword-crossguard';
         clayGuard.position.set(0, -0.20, 0.08);
         claymoreGrp.add(clayGuard);
         // Guard quillon tips (angled down like real claymores)
@@ -2814,15 +3124,18 @@ export class UnitRenderer {
         const scoutArmRight = makeArmGroup('arm-right', 0x5D4037, 0.28, 0.50);
         const scoutArmRightElbow = scoutArmRight.getObjectByName('arm-right-elbow')!;
         const scimBlade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.05, 0.55), new THREE.MeshLambertMaterial({ color: 0xd0d0d0 }));
+        scimBlade.name = 'sword-blade';
         scimBlade.position.set(0, -0.16, 0.3);
         scimBlade.rotation.y = 0.15; // slight curve
         scoutArmRightElbow.add(scimBlade);
         // Sharp edge highlight
         const scimEdge = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.02, 0.5), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+        scimEdge.name = 'sword-edge';
         scimEdge.position.set(0, -0.16, 0.3);
         scimEdge.rotation.y = 0.15;
         scoutArmRightElbow.add(scimEdge);
         const scimGuard = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), new THREE.MeshLambertMaterial({ color: 0xB8860B }));
+        scimGuard.name = 'sword-crossguard';
         scimGuard.position.set(0, -0.16, 0.04);
         scoutArmRightElbow.add(scimGuard);
         group.add(scoutArmRight);
@@ -2840,110 +3153,533 @@ export class UnitRenderer {
         break;
       }
       case UnitType.MAGE: {
-        // Arcane mage — flowing blue robe, pointed hat, staff with crystal, rune accents
-        const mageBody = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.65, 0.45),
-          new THREE.MeshLambertMaterial({ color: 0x1565C0 }) // deep blue robe
+        // ═══ ELABORATE ARCANE MAGE — Flowing robed wizard with mystical staff ═══
+        // PASS 1 — SILHOUETTE (flowing robed figure)
+        const innerRobe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.48, 0.68, 0.42),
+          new THREE.MeshLambertMaterial({ color: 0x1a237e }) // dark indigo inner robe
         );
-        mageBody.position.y = 0.32; mageBody.castShadow = true;
-        group.add(mageBody);
-        // Robe hem (wider at bottom — gives flowing robe look)
+        innerRobe.position.y = 0.32; innerRobe.castShadow = true;
+        group.add(innerRobe);
+        const outerRobe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.52, 0.68, 0.46),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 }) // deep blue outer robe
+        );
+        outerRobe.position.y = 0.32; outerRobe.castShadow = true;
+        group.add(outerRobe);
+        // Side panels for depth and flowing effect
+        for (const sx of [-0.32, 0.32]) {
+          const sidePanel = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.65, 0.48),
+            new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker blue for sides
+          );
+          sidePanel.position.set(sx, 0.3, 0);
+          group.add(sidePanel);
+        }
+        // Robe hem — wider at bottom with decorative trim, slight taper
         const robeHem = new THREE.Mesh(
-          new THREE.BoxGeometry(0.58, 0.15, 0.52),
-          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+          new THREE.BoxGeometry(0.62, 0.18, 0.56),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker hem
         );
-        robeHem.position.y = 0.07;
+        robeHem.position.y = 0.05;
         group.add(robeHem);
-        // Golden trim at waist
-        const mageWaist = new THREE.Mesh(
-          new THREE.BoxGeometry(0.52, 0.04, 0.47),
-          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+        // Decorative trim at hem edge
+        const hemTrim = new THREE.Mesh(
+          new THREE.BoxGeometry(0.65, 0.03, 0.59),
+          new THREE.MeshLambertMaterial({ color: 0xc8a832 }) // brass trim
         );
-        mageWaist.position.y = 0.55;
-        group.add(mageWaist);
-        // Team color sash/belt
-        const mageSash = new THREE.Mesh(
-          new THREE.BoxGeometry(0.52, 0.06, 0.47),
+        hemTrim.position.y = 0.15;
+        group.add(hemTrim);
+        // PASS 2 — LAYERING (armor and cloth detail)
+        // Leather chest harness
+        const chestHarness = new THREE.Mesh(
+          new THREE.BoxGeometry(0.48, 0.5, 0.38),
+          new THREE.MeshLambertMaterial({ color: 0x4e342e }) // dark brown leather
+        );
+        chestHarness.position.y = 0.45;
+        group.add(chestHarness);
+        // Brass buckles on harness
+        for (let bi = 0; bi < 3; bi++) {
+          const buckle = new THREE.Mesh(
+            new THREE.BoxGeometry(0.06, 0.06, 0.02),
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
+          );
+          buckle.position.set(0, 0.65 - bi * 0.12, 0.21);
+          group.add(buckle);
+        }
+        // Ornate belt with gold buckle
+        const belt = new THREE.Mesh(
+          new THREE.BoxGeometry(0.54, 0.08, 0.48),
+          new THREE.MeshLambertMaterial({ color: 0x4e342e }) // dark brown belt
+        );
+        belt.position.y = 0.28;
+        group.add(belt);
+        const beltBuckle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.08, 0.02),
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 }) // gold buckle
+        );
+        beltBuckle.position.set(0, 0.28, 0.25);
+        group.add(beltBuckle);
+        // Hanging pouches on belt (component bags)
+        for (const px of [-0.15, 0.15]) {
+          const pouch = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.12, 0.08),
+            new THREE.MeshLambertMaterial({ color: 0x4e342e })
+          );
+          pouch.position.set(px, 0.18, 0.2);
+          group.add(pouch);
+          const pouchAccent = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.03, 0.08),
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
+          );
+          pouchAccent.position.set(px, 0.25, 0.2);
+          group.add(pouchAccent);
+        }
+        // Decorative sash across chest in team color
+        const sash = new THREE.Mesh(
+          new THREE.BoxGeometry(0.52, 0.08, 0.47),
           new THREE.MeshLambertMaterial({ color: playerColor })
         );
-        mageSash.position.y = 0.15;
-        group.add(mageSash);
-        // Team color shoulder marks
-        for (const sx of [-0.28, 0.28]) {
-          const mMark = new THREE.Mesh(
-            new THREE.BoxGeometry(0.12, 0.08, 0.2),
-            new THREE.MeshLambertMaterial({ color: playerColor })
+        sash.position.y = 0.5;
+        group.add(sash);
+        // Layered collar/cowl around neck area
+        const collar = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4, 0.12, 0.38),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker shade
+        );
+        collar.position.y = 0.7;
+        group.add(collar);
+        const innerCollar = new THREE.Mesh(
+          new THREE.BoxGeometry(0.35, 0.08, 0.33),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
+        );
+        innerCollar.position.y = 0.68;
+        group.add(innerCollar);
+        // Embroidered cuff trim on robe edges (gold)
+        for (const cx of [-0.27, 0.27]) {
+          const cuff = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.68, 0.02),
+            new THREE.MeshLambertMaterial({ color: 0xFFD700 })
           );
-          mMark.position.set(sx, 0.6, 0);
-          group.add(mMark);
+          cuff.position.set(cx, 0.32, 0.24);
+          group.add(cuff);
         }
-        // Head
+        // PASS 3 — HEAD (mysterious wizard)
         const mageHead = new THREE.Mesh(
           new THREE.BoxGeometry(0.3, 0.3, 0.3),
-          new THREE.MeshLambertMaterial({ color: 0xffdbac })
+          new THREE.MeshLambertMaterial({ color: 0xffdbac }) // skin tone
         );
         mageHead.position.y = 0.82;
         group.add(mageHead);
-        // Pointed wizard hat — brim + cone
-        const hatBrim = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.04, 0.5),
-          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+        // Eyes (tiny dark boxes)
+        for (const ex of [-0.08, 0.08]) {
+          const eye = new THREE.Mesh(
+            new THREE.BoxGeometry(0.04, 0.04, 0.02),
+            new THREE.MeshLambertMaterial({ color: 0x000000 })
+          );
+          eye.position.set(ex, 0.88, 0.16);
+          group.add(eye);
+        }
+        // Short beard — pointed goatee
+        const goatee = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.12, 0.06),
+          new THREE.MeshLambertMaterial({ color: 0x5d4037 }) // beard brown
         );
-        hatBrim.position.y = 0.95;
+        goatee.position.set(0, 0.72, 0.18);
+        group.add(goatee);
+        // ELABORATE WIZARD HAT — tall, dramatic, with bends/tilts
+        const hatBrim = new THREE.Mesh(
+          new THREE.BoxGeometry(0.54, 0.05, 0.54),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // dark blue brim
+        );
+        hatBrim.position.y = 0.98;
         group.add(hatBrim);
-        const hatCone = new THREE.Mesh(
-          new THREE.BoxGeometry(0.25, 0.35, 0.25),
+        // Wide cone base
+        const hatConeLower = new THREE.Mesh(
+          new THREE.BoxGeometry(0.32, 0.25, 0.32),
           new THREE.MeshLambertMaterial({ color: 0x1565C0 })
         );
-        hatCone.position.y = 1.15;
-        group.add(hatCone);
+        hatConeLower.position.y = 1.18;
+        group.add(hatConeLower);
+        // Tall cone upper section
+        const hatConeUpper = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.35, 0.22),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
+        );
+        hatConeUpper.position.y = 1.48;
+        group.add(hatConeUpper);
+        // Drooping tip (bends/tilts slightly)
         const hatTip = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.15, 0.12),
+          new THREE.BoxGeometry(0.14, 0.18, 0.14),
           new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
         );
-        hatTip.position.y = 1.35;
+        hatTip.position.set(0.08, 1.72, 0.06);
+        hatTip.rotation.z = 0.3; // slight tilt
         group.add(hatTip);
-        // Hat star (golden accent on front)
-        const hatStar = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, 0.08, 0.02),
+        // Gold band around hat base
+        const hatBand = new THREE.Mesh(
+          new THREE.BoxGeometry(0.54, 0.04, 0.54),
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+        );
+        hatBand.position.y = 1.02;
+        group.add(hatBand);
+        // Small star/rune on front of hat
+        const hatRune = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.1, 0.03),
           new THREE.MeshBasicMaterial({ color: 0xFFD700 })
         );
-        hatStar.position.set(0, 1.1, 0.13);
-        group.add(hatStar);
-        // Staff in right hand — tall wooden staff with crystal orb
+        hatRune.position.set(0, 1.2, 0.17);
+        group.add(hatRune);
+        // PASS 4 — WEAPON (Arcane Staff)
+        // Tall staff with twisted/gnarled appearance
         const staffShaft = new THREE.Mesh(
-          new THREE.BoxGeometry(0.05, 0.9, 0.05),
-          new THREE.MeshLambertMaterial({ color: 0x5D4037 })
+          new THREE.BoxGeometry(0.06, 1.0, 0.06),
+          new THREE.MeshLambertMaterial({ color: 0x4a2e1a }) // dark wood
         );
+        staffShaft.name = 'staff-shaft';
         staffShaft.position.set(0, 0.1, 0);
-        // Crystal orb at top (glowing blue, emissive)
+        staffShaft.castShadow = true;
+        // Gnarled sections along shaft (twisted appearance)
+        for (let gi = 0; gi < 5; gi++) {
+          const gnarl = new THREE.Mesh(
+            new THREE.BoxGeometry(0.09, 0.08, 0.09),
+            new THREE.MeshLambertMaterial({ color: 0x3e2723 }) // darker wood
+          );
+          gnarl.position.y = 0.15 + gi * 0.18;
+          staffShaft.add(gnarl);
+        }
+        // Golden bands/rings at intervals
+        for (let bi = 0; bi < 4; bi++) {
+          const band = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.05, 0.08),
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
+          );
+          band.position.y = 0.2 + bi * 0.25;
+          staffShaft.add(band);
+        }
+        // Rune engravings (small gold boxes along shaft)
+        for (let ri = 1; ri < 5; ri++) {
+          const rune = new THREE.Mesh(
+            new THREE.BoxGeometry(0.03, 0.03, 0.02),
+            new THREE.MeshBasicMaterial({ color: 0xFFD700 })
+          );
+          rune.position.set(0.04, 0.2 + ri * 0.2, 0.04);
+          staffShaft.add(rune);
+        }
+        // Crystal orb at top (glowing blue, transparent)
         const crystal = new THREE.Mesh(
-          new THREE.SphereGeometry(0.1, 6, 6),
-          new THREE.MeshBasicMaterial({ color: 0x42A5F5, transparent: true, opacity: 0.85 })
+          new THREE.SphereGeometry(0.12, 8, 8),
+          new THREE.MeshBasicMaterial({ color: 0x42A5F5, transparent: true, opacity: 0.8 })
         );
-        crystal.position.set(0, 0.6, 0);
-        // Crystal cage (golden prongs holding the orb)
-        for (let ci = 0; ci < 3; ci++) {
+        crystal.name = 'staff-crystal';
+        crystal.position.set(0, 0.65, 0);
+        // 4 golden prongs holding the crystal in a cage
+        for (let pi = 0; pi < 4; pi++) {
           const prong = new THREE.Mesh(
-            new THREE.BoxGeometry(0.02, 0.15, 0.02),
+            new THREE.BoxGeometry(0.03, 0.18, 0.03),
             new THREE.MeshLambertMaterial({ color: 0xFFD700 })
           );
-          const cAngle = (ci / 3) * Math.PI * 2;
-          prong.position.set(Math.cos(cAngle) * 0.06, 0.55, Math.sin(cAngle) * 0.06);
+          const pAngle = (pi / 4) * Math.PI * 2;
+          prong.position.set(Math.cos(pAngle) * 0.08, 0.55, Math.sin(pAngle) * 0.08);
           staffShaft.add(prong);
         }
+        // Secondary crystal below main one
+        const secondaryCrystal = new THREE.Mesh(
+          new THREE.SphereGeometry(0.08, 6, 6),
+          new THREE.MeshBasicMaterial({ color: 0x42A5F5, transparent: true, opacity: 0.6 })
+        );
+        secondaryCrystal.position.set(0, 0.35, 0);
+        staffShaft.add(secondaryCrystal);
         staffShaft.add(crystal);
-        const mageRightArm = makeArmGroup('arm-right', 0x1565C0, 0.3, 0.52);
+        // Right arm with staff
+        const mageRightArm = makeArmGroup('arm-right', 0x1565C0, 0.32, 0.52);
         const mageRightArmElbow = mageRightArm.getObjectByName('arm-right-elbow')!;
-        // Staff wrapper group — tilted forward 25° to clear shoulder
-        const mageStaffGrp = new THREE.Group();
-        mageStaffGrp.rotation.x = 0.436;
-        mageStaffGrp.add(staffShaft);
-        mageRightArmElbow.add(mageStaffGrp);
+        // Staff wrapper group — tilted forward 25°
+        const staffGroup = new THREE.Group();
+        staffGroup.name = 'staff-group';
+        staffGroup.rotation.x = 0.436;
+        staffGroup.add(staffShaft);
+        mageRightArmElbow.add(staffGroup);
         group.add(mageRightArm);
-        group.add(makeArmGroup('arm-left', 0x1565C0, -0.3, 0.52));
+        // PASS 5 — LEFT ARM (spell hand)
+        const mageLeftArm = makeArmGroup('arm-left', 0x1565C0, -0.32, 0.52);
+        const mageLeftArmElbow = mageLeftArm.getObjectByName('arm-left-elbow')!;
+        // Open palm gesture positioning
+        const leftArmHand = mageLeftArm.getObjectByName('arm-left-hand')!;
+        leftArmHand.rotation.z = 0.3; // palm-up gesture
+        group.add(mageLeftArm);
+        // Glowing orb floating near left hand
+        const spellOrb = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 8, 8),
+          new THREE.MeshBasicMaterial({ color: 0x42A5F5, transparent: true, opacity: 0.75 })
+        );
+        spellOrb.name = 'orb-spell';
+        spellOrb.position.set(-0.35, 0.55, 0.1);
+        group.add(spellOrb);
+        // Arcane bracelet/cuff on forearm (gold)
+        const forearmCuff = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.06, 0.1),
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
+        );
+        forearmCuff.position.set(-0.32, 0.4, 0);
+        group.add(forearmCuff);
+        // PASS 6 — BACK DETAIL (cape/cloak)
+        const capeLayer1 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4, 0.65, 0.08),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // dark blue
+        );
+        capeLayer1.position.set(0, 0.4, -0.28);
+        group.add(capeLayer1);
+        const capeLayer2 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4, 0.65, 0.06),
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
+        );
+        capeLayer2.position.set(0, 0.4, -0.34);
+        group.add(capeLayer2);
+        const capeLayer3 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.4, 0.65, 0.05),
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
+        );
+        capeLayer3.position.set(0, 0.4, -0.39);
+        group.add(capeLayer3);
+        // Small scroll/tome strapped to back (brown)
+        const backTome = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.16, 0.04),
+          new THREE.MeshLambertMaterial({ color: 0x5d4037 }) // brown
+        );
+        backTome.position.set(0, 0.45, -0.27);
+        group.add(backTome);
+        const tomeAccent = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.14, 0.02),
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 }) // gold clasp
+        );
+        tomeAccent.position.set(0, 0.45, -0.29);
+        group.add(tomeAccent);
+        // PASS 7 — LEGS
         group.add(makeLegGroup('leg-left', 0x0D47A1, -0.12, 0));
         group.add(makeLegGroup('leg-right', 0x0D47A1, 0.12, 0));
+        break;
+      }
+      case UnitType.OGRE: {
+        // ═══ OGRE — Massive brute with bone armor and an enormous club ═══
+        // Significantly larger than other units (1.4x scale). Crude tribal aesthetic.
+        const ogreSkin = new THREE.MeshLambertMaterial({ color: 0x6d4c41 }); // dark brown skin
+        const ogreBone = new THREE.MeshLambertMaterial({ color: 0xd7ccc8 }); // bone/ivory
+        const ogreArmor = new THREE.MeshLambertMaterial({ color: 0x4e342e }); // dark leather
+        const ogreTeam = new THREE.MeshLambertMaterial({ color: playerColor });
+        const ogreWood = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // club wood
+        const ogreMetal = new THREE.MeshLambertMaterial({ color: 0x616161 }); // crude iron bands
+
+        // --- Core body (extra wide and tall) ---
+        const oBody = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.75, 0.55), ogreSkin);
+        oBody.position.y = 0.45;
+        oBody.name = 'body';
+        group.add(oBody);
+
+        // Chest armor plate (crude leather)
+        const oChest = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.40, 0.58), ogreArmor);
+        oChest.position.y = 0.55;
+        group.add(oChest);
+
+        // Team-color war paint stripe across chest
+        const oPaint = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.59), ogreTeam);
+        oPaint.position.y = 0.60;
+        group.add(oPaint);
+
+        // Belt with bone buckle
+        const oBelt = new THREE.Mesh(new THREE.BoxGeometry(0.67, 0.08, 0.57), ogreMetal);
+        oBelt.position.y = 0.22;
+        group.add(oBelt);
+        const oBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.10, 0.58), ogreBone);
+        oBuckle.position.y = 0.22;
+        group.add(oBuckle);
+
+        // --- Head (large, brutish) ---
+        const oHead = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.32, 0.36), ogreSkin);
+        oHead.position.y = 0.98;
+        oHead.name = 'head';
+        group.add(oHead);
+
+        // Jaw / underbite
+        const oJaw = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.10, 0.30), ogreSkin);
+        oJaw.position.set(0, 0.82, 0.06);
+        group.add(oJaw);
+
+        // Tusks (two small bone protrusions)
+        const oTuskL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.04), ogreBone);
+        oTuskL.position.set(-0.10, 0.84, 0.18);
+        oTuskL.rotation.z = 0.2;
+        group.add(oTuskL);
+        const oTuskR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.08, 0.04), ogreBone);
+        oTuskR.position.set(0.10, 0.84, 0.18);
+        oTuskR.rotation.z = -0.2;
+        group.add(oTuskR);
+
+        // Eyes (small, deep-set)
+        const oEyeMat = new THREE.MeshLambertMaterial({ color: 0xff6f00 }); // orange glow
+        const oEyeL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.04), oEyeMat);
+        oEyeL.position.set(-0.09, 0.98, 0.19);
+        group.add(oEyeL);
+        const oEyeR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.04), oEyeMat);
+        oEyeR.position.set(0.09, 0.98, 0.19);
+        group.add(oEyeR);
+
+        // Bone headpiece / crown
+        const oHeadBone = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.06, 0.38), ogreBone);
+        oHeadBone.position.y = 1.14;
+        group.add(oHeadBone);
+        // Bone spikes on crown
+        for (let si = -1; si <= 1; si++) {
+          const spike = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.10, 0.04), ogreBone);
+          spike.position.set(si * 0.14, 1.22, 0);
+          group.add(spike);
+        }
+
+        // --- Massive pauldrons (bone + team color) ---
+        const oShoulderL = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.14, 0.22), ogreBone);
+        oShoulderL.position.set(-0.42, 0.72, 0);
+        group.add(oShoulderL);
+        const oShoulderLTeam = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.06, 0.24), ogreTeam);
+        oShoulderLTeam.position.set(-0.42, 0.80, 0);
+        group.add(oShoulderLTeam);
+
+        const oShoulderR = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.14, 0.22), ogreBone);
+        oShoulderR.position.set(0.42, 0.72, 0);
+        group.add(oShoulderR);
+        const oShoulderRTeam = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.06, 0.24), ogreTeam);
+        oShoulderRTeam.position.set(0.42, 0.80, 0);
+        group.add(oShoulderRTeam);
+
+        // --- Right arm (club arm) — arm group with massive club weapon ---
+        const oArmR = new THREE.Group();
+        oArmR.name = 'arm-right';
+        oArmR.position.set(0.38, 0.62, 0);
+        // Upper arm
+        const oUpperR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.16), ogreSkin);
+        oUpperR.position.y = -0.06;
+        oUpperR.name = 'arm-right-upper';
+        oArmR.add(oUpperR);
+        // Elbow
+        const oElbowR = new THREE.Group();
+        oElbowR.name = 'arm-right-elbow';
+        oElbowR.position.y = -0.18;
+        // Forearm
+        const oForearmR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.20, 0.14), ogreSkin);
+        oForearmR.position.y = -0.10;
+        oForearmR.name = 'arm-right-forearm';
+        oElbowR.add(oForearmR);
+        // Hand
+        const oHandR = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.12), ogreSkin);
+        oHandR.position.y = -0.22;
+        oElbowR.add(oHandR);
+
+        // === THE CLUB — massive crude weapon ===
+        const clubGrp = new THREE.Group();
+        clubGrp.name = 'club-group';
+        clubGrp.position.y = -0.26;
+        clubGrp.rotation.x = 0.3; // angled forward slightly
+        // Shaft (thick log)
+        const clubShaft = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.60, 0.10), ogreWood);
+        clubShaft.name = 'club-shaft';
+        clubShaft.position.y = -0.30;
+        clubGrp.add(clubShaft);
+        // Club head (massive block of wood with iron bands)
+        const clubHead = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.20), ogreWood);
+        clubHead.name = 'club-head';
+        clubHead.position.y = -0.62;
+        clubGrp.add(clubHead);
+        // Iron band around club head
+        const clubBand1 = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.04, 0.22), ogreMetal);
+        clubBand1.position.y = -0.54;
+        clubGrp.add(clubBand1);
+        const clubBand2 = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.04, 0.22), ogreMetal);
+        clubBand2.position.y = -0.70;
+        clubGrp.add(clubBand2);
+        // Bone spikes on club head
+        const clubSpike1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.08), ogreBone);
+        clubSpike1.name = 'club-spike';
+        clubSpike1.position.set(0.12, -0.62, 0);
+        clubGrp.add(clubSpike1);
+        const clubSpike2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.08), ogreBone);
+        clubSpike2.name = 'club-spike';
+        clubSpike2.position.set(-0.12, -0.62, 0);
+        clubGrp.add(clubSpike2);
+        const clubSpike3 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.04), ogreBone);
+        clubSpike3.name = 'club-spike';
+        clubSpike3.position.set(0, -0.62, 0.12);
+        clubGrp.add(clubSpike3);
+
+        oElbowR.add(clubGrp);
+        oArmR.add(oElbowR);
+        group.add(oArmR);
+
+        // --- Left arm (free arm) ---
+        const oArmL = new THREE.Group();
+        oArmL.name = 'arm-left';
+        oArmL.position.set(-0.38, 0.62, 0);
+        const oUpperL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.16), ogreSkin);
+        oUpperL.position.y = -0.06;
+        oUpperL.name = 'arm-left-upper';
+        oArmL.add(oUpperL);
+        const oElbowL = new THREE.Group();
+        oElbowL.name = 'arm-left-elbow';
+        oElbowL.position.y = -0.18;
+        const oForearmL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.20, 0.14), ogreSkin);
+        oForearmL.position.y = -0.10;
+        oForearmL.name = 'arm-left-forearm';
+        oElbowL.add(oForearmL);
+        const oHandL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.12), ogreSkin);
+        oHandL.position.y = -0.22;
+        oElbowL.add(oHandL);
+        oArmL.add(oElbowL);
+        group.add(oArmL);
+
+        // --- Legs (thick, powerful) ---
+        const oLegL = new THREE.Group();
+        oLegL.name = 'leg-left';
+        oLegL.position.set(-0.16, 0.08, 0);
+        const oThighL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.18), ogreSkin);
+        oThighL.position.y = -0.04;
+        oLegL.add(oThighL);
+        const oShinL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.20, 0.16), ogreArmor);
+        oShinL.position.y = -0.22;
+        oLegL.add(oShinL);
+        const oFootL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.22), ogreSkin);
+        oFootL.position.set(0, -0.36, 0.03);
+        oLegL.add(oFootL);
+        group.add(oLegL);
+
+        const oLegR = new THREE.Group();
+        oLegR.name = 'leg-right';
+        oLegR.position.set(0.16, 0.08, 0);
+        const oThighR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.18), ogreSkin);
+        oThighR.position.y = -0.04;
+        oLegR.add(oThighR);
+        const oShinR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.20, 0.16), ogreArmor);
+        oShinR.position.y = -0.22;
+        oLegR.add(oShinR);
+        const oFootR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.22), ogreSkin);
+        oFootR.position.set(0, -0.36, 0.03);
+        oLegR.add(oFootR);
+        group.add(oLegR);
+
+        // Back detail: bone spine ridge
+        for (let bi = 0; bi < 3; bi++) {
+          const backBone = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), ogreBone);
+          backBone.position.set(0, 0.72 - bi * 0.14, -0.30);
+          group.add(backBone);
+        }
+
+        // Team-color loincloth / tabard
+        const oTabard = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.18, 0.04), ogreTeam);
+        oTabard.position.set(0, 0.14, 0.28);
+        group.add(oTabard);
+        const oTabardBack = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.18, 0.04), ogreTeam);
+        oTabardBack.position.set(0, 0.14, -0.28);
+        group.add(oTabardBack);
+
+        // Scale the whole group up — Ogre is 1.4x normal unit size
+        group.scale.set(1.4, 1.4, 1.4);
         break;
       }
       default: {
@@ -3206,7 +3942,7 @@ export class UnitRenderer {
   /**
    * Highlight a unit (selection glow)
    */
-  setSelected(unitId: string, selected: boolean): void {
+  setSelected(unitId: string, selected: boolean, attackRange?: number): void {
     const entry = this.unitMeshes.get(unitId);
     if (!entry) return;
 
@@ -3224,6 +3960,25 @@ export class UnitRenderer {
       ring.position.y = 0.02;
       ring.name = 'selection-ring';
       entry.group.add(ring);
+
+      // Add attack range indicator circle (faint red ring on the ground)
+      if (attackRange && attackRange > 1) {
+        const HEX_SPACING = 1.5; // world units per hex tile
+        const radius = attackRange * HEX_SPACING;
+        const rangeGeo = new THREE.RingGeometry(radius - 0.06, radius + 0.06, 48);
+        const rangeMat = new THREE.MeshBasicMaterial({
+          color: 0xff4444,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.18,
+          depthWrite: false,
+        });
+        const rangeRing = new THREE.Mesh(rangeGeo, rangeMat);
+        rangeRing.rotation.x = -Math.PI / 2;
+        rangeRing.position.y = 0.01;
+        rangeRing.name = 'range-ring';
+        entry.group.add(rangeRing);
+      }
     } else {
       // Remove selection ring
       const ring = entry.group.getObjectByName('selection-ring');
@@ -3232,6 +3987,15 @@ export class UnitRenderer {
         if (ring instanceof THREE.Mesh) {
           ring.geometry.dispose();
           (ring.material as THREE.Material).dispose();
+        }
+      }
+      // Remove range ring
+      const rangeRing = entry.group.getObjectByName('range-ring');
+      if (rangeRing) {
+        entry.group.remove(rangeRing);
+        if (rangeRing instanceof THREE.Mesh) {
+          rangeRing.geometry.dispose();
+          (rangeRing.material as THREE.Material).dispose();
         }
       }
     }
@@ -3543,36 +4307,81 @@ export class UnitRenderer {
    * Call once per frame AFTER setWorldPosition for all units.
    * Does NOT modify game-state positions (unit.worldPosition), only mesh group.position.
    */
-  applySeparation(): void {
-    const MIN_DIST = 0.55;       // minimum distance between unit centers
-    const PUSH_STRENGTH = 0.12;  // how hard to push apart per frame
-    const entries = Array.from(this.unitMeshes.values());
-    const len = entries.length;
+  // Reusable spatial grid for separation — avoids per-frame allocation
+  private _sepGrid: Map<string, UnitMeshGroup[]> = new Map();
 
-    for (let i = 0; i < len; i++) {
-      const a = entries[i];
-      for (let j = i + 1; j < len; j++) {
-        const b = entries[j];
-        const dx = a.group.position.x - b.group.position.x;
-        const dz = a.group.position.z - b.group.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
-        if (dist < MIN_DIST && dist > 0.001) {
-          // Push both units away from each other equally
-          const overlap = (MIN_DIST - dist) * PUSH_STRENGTH;
-          const nx = dx / dist;
-          const nz = dz / dist;
-          a.group.position.x += nx * overlap;
-          a.group.position.z += nz * overlap;
-          b.group.position.x -= nx * overlap;
-          b.group.position.z -= nz * overlap;
-        } else if (dist <= 0.001) {
-          // Exactly overlapping — nudge in a random direction
-          const angle = Math.random() * Math.PI * 2;
-          const nudge = MIN_DIST * PUSH_STRENGTH;
-          a.group.position.x += Math.cos(angle) * nudge;
-          a.group.position.z += Math.sin(angle) * nudge;
+  /**
+   * Spatial-hash separation — O(n) average instead of O(n²).
+   * Buckets units into a grid of cell size >= MIN_DIST, then only checks neighbors.
+   */
+  applySeparation(): void {
+    const MIN_DIST = 0.65;
+    const PUSH_STRENGTH = 0.25;
+    const CELL = 1.0; // cell size — must be >= MIN_DIST
+    const INV_CELL = 1.0 / CELL;
+    const grid = this._sepGrid;
+    grid.clear();
+
+    // Phase 1: bucket all units into grid cells
+    for (const entry of this.unitMeshes.values()) {
+      const cx = (entry.group.position.x * INV_CELL) | 0;
+      const cz = (entry.group.position.z * INV_CELL) | 0;
+      const key = `${cx},${cz}`;
+      let bucket = grid.get(key);
+      if (!bucket) { bucket = []; grid.set(key, bucket); }
+      bucket.push(entry);
+    }
+
+    // Phase 2: for each cell, check only same-cell + 3 forward neighbors (avoid double-checking)
+    const NEIGHBOR_OFFSETS = [[0, 0], [1, 0], [0, 1], [1, 1]] as const;
+    for (const [key, bucket] of grid) {
+      const [cxStr, czStr] = key.split(',');
+      const cx = +cxStr;
+      const cz = +czStr;
+
+      // Same-cell pairs
+      for (let i = 0, bLen = bucket.length; i < bLen; i++) {
+        const a = bucket[i];
+        for (let j = i + 1; j < bLen; j++) {
+          this._separatePair(a, bucket[j], MIN_DIST, PUSH_STRENGTH);
         }
       }
+
+      // Neighbor-cell pairs (right, below, diagonal-right-below)
+      for (let n = 1; n < 4; n++) {
+        const nKey = `${cx + NEIGHBOR_OFFSETS[n][0]},${cz + NEIGHBOR_OFFSETS[n][1]}`;
+        const nBucket = grid.get(nKey);
+        if (!nBucket) continue;
+        for (let i = 0, bLen = bucket.length; i < bLen; i++) {
+          const a = bucket[i];
+          for (let j = 0, nLen = nBucket.length; j < nLen; j++) {
+            this._separatePair(a, nBucket[j], MIN_DIST, PUSH_STRENGTH);
+          }
+        }
+      }
+    }
+  }
+
+  private _separatePair(a: UnitMeshGroup, b: UnitMeshGroup, minDist: number, strength: number): void {
+    const dx = a.group.position.x - b.group.position.x;
+    const dz = a.group.position.z - b.group.position.z;
+    const distSq = dx * dx + dz * dz;
+    if (distSq >= minDist * minDist) return;
+    if (distSq > 0.000001) {
+      const dist = Math.sqrt(distSq);
+      const overlap = (minDist - dist) * strength;
+      const nx = dx / dist;
+      const nz = dz / dist;
+      a.group.position.x += nx * overlap;
+      a.group.position.z += nz * overlap;
+      b.group.position.x -= nx * overlap;
+      b.group.position.z -= nz * overlap;
+    } else {
+      // Exactly overlapping — nudge randomly
+      const angle = Math.random() * Math.PI * 2;
+      const nudge = minDist * strength;
+      a.group.position.x += Math.cos(angle) * nudge;
+      a.group.position.z += Math.sin(angle) * nudge;
     }
   }
 
@@ -3633,6 +4442,8 @@ export class UnitRenderer {
       this.animateAttacking(entry, type, armLeft, armRight, legLeft, legRight, time, unitId);
     } else if (effectiveState === 'building') {
       this.animateBuilding(entry, type, armLeft, armRight, time);
+    } else if (effectiveState === 'constructing') {
+      this.animateConstructing(entry, armLeft, armRight, legLeft, legRight, time);
     } else if (effectiveState === 'returning') {
       this.animateReturning(entry, armLeft, armRight, legLeft, legRight, time);
       this.showCarryVisual(entry, true);
@@ -3846,28 +4657,82 @@ export class UnitRenderer {
         break;
       }
       case UnitType.ARCHER: {
-        // Bowstring draw and release cycle
-        const speed = 0.95;
+        // Bow cycle with visible draw-back: raise → nock → draw string → aim → release → follow-through
+        const speed = 0.75; // slightly slower for dramatic draw
         const cycle = (time * speed) % 1;
-        if (cycle < 0.6) {
-          // Draw: left arm extends forward (holding bow), right arm pulls back
-          const p = cycle / 0.6;
-          if (armLeft) {
-            armLeft.rotation.x = 0.8; // hold bow forward and steady
-          }
-          if (armRight) {
-            armRight.rotation.x = -0.6 * p; // pull string back
-          }
-        } else if (cycle < 0.7) {
-          // Release: right arm snaps forward
-          const p = (cycle - 0.6) / 0.1;
+
+        // Grab bowstring + nocked arrow for animation
+        const bowstring = entry.group.getObjectByName('bowstring');
+        const nockedArrow = entry.group.getObjectByName('nocked-arrow');
+
+        // Body: slight lean forward (aiming stance)
+        entry.group.rotation.x = 0.04;
+
+        // Max bowstring pull-back distance (Z offset from resting -0.06)
+        const stringRestZ = -0.06;
+        const stringDrawZ = -0.34; // pulled way back toward archer
+
+        if (cycle < 0.10) {
+          // Phase 1: STANCE — bow arm rises, draw hand reaches for string, nock arrow
+          const p = cycle / 0.10;
+          const ease = p * p;
+          if (armLeft) armLeft.rotation.x = -0.2 + 1.0 * ease; // bow arm rises to ~0.8
+          if (armRight) armRight.rotation.x = 0.2 * ease;
+          // Show nocked arrow partway through
+          if (nockedArrow) nockedArrow.visible = p > 0.5;
+          // Bowstring at rest
+          if (bowstring) bowstring.position.z = stringRestZ;
+          if (nockedArrow) nockedArrow.position.z = stringRestZ;
+        } else if (cycle < 0.45) {
+          // Phase 2: DRAW — bow arm locked, draw hand pulls string back to cheek
+          // Bowstring visibly bends backward, nocked arrow follows
+          const p = (cycle - 0.10) / 0.35;
+          const ease = 1 - (1 - p) * (1 - p); // ease-out (smooth pull)
           if (armLeft) armLeft.rotation.x = 0.8;
-          if (armRight) armRight.rotation.x = -0.6 + 1.0 * p; // snap to 0.4
+          if (armRight) armRight.rotation.x = 0.2 - 0.9 * ease; // pull back to -0.7
+          // Bowstring + arrow pulled back
+          const drawZ = stringRestZ + (stringDrawZ - stringRestZ) * ease;
+          if (bowstring) bowstring.position.z = drawZ;
+          if (nockedArrow) { nockedArrow.visible = true; nockedArrow.position.z = drawZ; }
+          // Body tension — lean back into draw
+          entry.group.rotation.x = 0.04 - 0.04 * ease;
+        } else if (cycle < 0.55) {
+          // Phase 3: AIM HOLD — full draw, micro-adjustments, string taut
+          const p = (cycle - 0.45) / 0.10;
+          if (armLeft) armLeft.rotation.x = 0.8 + Math.sin(p * Math.PI * 2) * 0.01;
+          if (armRight) armRight.rotation.x = -0.7;
+          // String held at full draw
+          if (bowstring) bowstring.position.z = stringDrawZ;
+          if (nockedArrow) { nockedArrow.visible = true; nockedArrow.position.z = stringDrawZ; }
+          entry.group.rotation.x = 0.0;
+          if (legLeft) legLeft.rotation.x = -0.05;
+          if (legRight) legRight.rotation.x = 0.05;
+        } else if (cycle < 0.62) {
+          // Phase 4: RELEASE — string snaps forward, arrow vanishes (fired), draw hand snaps
+          const p = (cycle - 0.55) / 0.07;
+          const snap = p * p * p; // cubic ease-in — explosive snap
+          // Bowstring snaps forward past rest position (vibration overshoot)
+          const releaseZ = stringDrawZ + (stringRestZ + 0.04 - stringDrawZ) * snap;
+          if (bowstring) bowstring.position.z = releaseZ;
+          // Arrow disappears at the moment of release
+          if (nockedArrow) nockedArrow.visible = false;
+          if (armRight) armRight.rotation.x = -0.7 + 1.2 * snap;
+          if (armLeft) armLeft.rotation.x = 0.8 - 0.15 * snap;
+          entry.group.rotation.x = 0.0 + 0.06 * snap;
+          if (cycle >= 0.57 && cycle < 0.60) this.trySpawnTrail(unitId, 'stab', time, 0.58);
         } else {
-          // Reset draw arm
-          const p = (cycle - 0.7) / 0.3;
-          if (armLeft) armLeft.rotation.x = 0.8 * (1 - p * 0.3); // slight relax
-          if (armRight) armRight.rotation.x = 0.4 * (1 - p);
+          // Phase 5: FOLLOW-THROUGH — string settles back to rest, arms relax
+          const p = (cycle - 0.62) / 0.38;
+          const ease = 1 - Math.pow(1 - p, 2);
+          // String vibration — oscillates then settles
+          const vibration = Math.sin(p * Math.PI * 6) * 0.03 * (1 - ease);
+          if (bowstring) bowstring.position.z = stringRestZ + vibration;
+          if (nockedArrow) nockedArrow.visible = false;
+          if (armLeft) armLeft.rotation.x = 0.65 + (0.8 - 0.65) * (1 - ease);
+          if (armRight) armRight.rotation.x = 0.5 * (1 - ease);
+          entry.group.rotation.x = 0.06 * (1 - ease) + 0.04 * ease;
+          if (legLeft) legLeft.rotation.x = -0.05 * (1 - ease);
+          if (legRight) legRight.rotation.x = 0.05 * (1 - ease);
         }
         break;
       }
@@ -4406,6 +5271,77 @@ export class UnitRenderer {
         }
         break;
       }
+      case UnitType.OGRE: {
+        // MASSIVE OVERHEAD CLUB SMASH — wind up high, slam down with ground-shaking impact.
+        // Slowest, heaviest attack in the game. AOE knockback on impact.
+        const speed = 0.6; // very slow — sell the massive weight
+        const cycle = (time * speed) % 1;
+
+        if (cycle < 0.35) {
+          // Phase 1: Wind-up — club rises overhead, body leans way back
+          const p = cycle / 0.35;
+          const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          if (armRight) {
+            armRight.rotation.x = -2.0 * ease; // massive overhead wind-up
+            armRight.rotation.z = -0.2 * ease;
+          }
+          if (armLeft) {
+            armLeft.rotation.x = -0.8 * ease; // off-hand braces
+            armLeft.rotation.z = 0.3 * ease;
+          }
+          entry.group.rotation.x = -0.15 * ease; // lean back under club weight
+          if (legLeft) legLeft.rotation.x = -0.25 * ease; // back leg plants
+          if (legRight) legRight.rotation.x = 0.15 * ease; // front leg braces
+        } else if (cycle < 0.50) {
+          // Phase 2: SLAM — explosive downward smash
+          const p = (cycle - 0.35) / 0.15;
+          const smash = p * p; // accelerating impact
+          if (armRight) {
+            armRight.rotation.x = -2.0 + 3.5 * smash; // huge arc overhead to ground
+            armRight.rotation.z = -0.2 * (1 - smash);
+          }
+          if (armLeft) {
+            armLeft.rotation.x = -0.8 + 1.2 * smash;
+            armLeft.rotation.z = 0.3 * (1 - smash);
+          }
+          entry.group.rotation.x = -0.15 + 0.35 * smash; // lunge forward
+          entry.group.position.y = -0.08 * smash; // body drops with impact
+          if (legLeft) legLeft.rotation.x = -0.25 + 0.55 * smash;
+          if (legRight) legRight.rotation.x = 0.15 - 0.35 * smash;
+          // Smash trail at peak
+          if (p > 0.5) this.trySpawnTrail(unitId, 'smash', time, 0.46);
+        } else if (cycle < 0.65) {
+          // Phase 3: Ground impact hold — tremor effect, club stuck in ground
+          const p = (cycle - 0.50) / 0.15;
+          if (armRight) armRight.rotation.x = 1.5;
+          if (armLeft) armLeft.rotation.x = 0.4;
+          // Heavy tremor shaking the ogre
+          const tremor = Math.sin(time * 50) * 0.012 * (1 - p);
+          entry.group.rotation.x = 0.20 + tremor;
+          entry.group.position.y = -0.08 + tremor * 2;
+          entry.group.rotation.z = tremor * 0.5;
+          if (legLeft) legLeft.rotation.x = 0.30;
+          if (legRight) legRight.rotation.x = -0.20;
+        } else {
+          // Phase 4: Recovery — slow, labored pull back to ready stance
+          const p = (cycle - 0.65) / 0.35;
+          const sp = p * p * (3 - 2 * p); // smoothstep
+          if (armRight) {
+            armRight.rotation.x = 1.5 * (1 - sp);
+            armRight.rotation.z = 0;
+          }
+          if (armLeft) {
+            armLeft.rotation.x = 0.4 * (1 - sp);
+            armLeft.rotation.z = 0;
+          }
+          entry.group.rotation.x = 0.20 * (1 - sp);
+          entry.group.position.y = -0.08 * (1 - sp);
+          entry.group.rotation.z = 0;
+          if (legLeft) legLeft.rotation.x = 0.30 * (1 - sp);
+          if (legRight) legRight.rotation.x = -0.20 * (1 - sp);
+        }
+        break;
+      }
       default: {
         // Generic melee: simple arm swing
         const speed = 1.5;
@@ -4542,6 +5478,54 @@ export class UnitRenderer {
     entry.group.rotation.x = cycle >= 0.5 && cycle < 0.65 ? 0.04 : 0;
   }
 
+  // ─── CONSTRUCTING (builder working on blueprint building) ───
+  private animateConstructing(
+    entry: UnitMeshGroup,
+    armLeft: THREE.Object3D | undefined, armRight: THREE.Object3D | undefined,
+    legLeft: THREE.Object3D | undefined, legRight: THREE.Object3D | undefined,
+    time: number
+  ): void {
+    // Scaffolding animation: alternating hammer swings with a wider, more energetic motion
+    // than normal building (walls). Builder looks like they're constructing a structure.
+    const speed = 2.5;
+    const cycle = (time * speed) % 1;
+
+    // Right arm: big overhead hammer swing
+    let rightAngle: number;
+    if (cycle < 0.3) {
+      rightAngle = -0.8 * (cycle / 0.3); // wind up high
+    } else if (cycle < 0.45) {
+      const p = (cycle - 0.3) / 0.15;
+      rightAngle = -0.8 + 1.6 * p; // slam down
+    } else if (cycle < 0.55) {
+      rightAngle = 0.8; // impact hold
+    } else {
+      rightAngle = 0.8 * (1 - (cycle - 0.55) / 0.45); // return
+    }
+
+    // Left arm: holding/steadying — slight offset motion
+    let leftAngle: number;
+    if (cycle < 0.45) {
+      leftAngle = -0.2 + Math.sin(cycle * Math.PI * 2) * 0.15;
+    } else {
+      leftAngle = -0.2 + Math.sin(cycle * Math.PI * 2 + 1) * 0.1;
+    }
+
+    if (armRight) armRight.rotation.x = rightAngle;
+    if (armLeft) armLeft.rotation.x = leftAngle;
+
+    // Slight bob on impact
+    const impactBob = (cycle >= 0.45 && cycle < 0.55) ? -0.02 : 0;
+    entry.group.position.y += impactBob;
+
+    // Very slight body lean forward during work
+    entry.group.rotation.x = 0.06;
+
+    // Subtle weight shift between legs
+    if (legLeft) legLeft.rotation.x = Math.sin(time * 1.5) * 0.08;
+    if (legRight) legRight.rotation.x = Math.sin(time * 1.5 + Math.PI) * 0.08;
+  }
+
   // ─── RETURNING (carrying resources) ────────────────────
   private animateReturning(
     entry: UnitMeshGroup,
@@ -4599,7 +5583,23 @@ export class UnitRenderer {
         if (armRight) armRight.rotation.x = Math.sin(time * marchSpeed) * 0.15;
         break;
       }
-      case UnitType.ARCHER:
+      case UnitType.ARCHER: {
+        // Agile ranger run: bow held across body, fast light footwork, forward lean
+        const aRunSpeed = 9;
+        const aRunCycle = Math.sin(time * aRunSpeed);
+        // Legs: quick, light stride
+        if (legLeft) legLeft.rotation.x = aRunCycle * 0.50;
+        if (legRight) legRight.rotation.x = -aRunCycle * 0.50;
+        // Bow arm: held steady across body (not swinging wildly)
+        if (armLeft) armLeft.rotation.x = 0.35 + Math.sin(time * aRunSpeed + Math.PI) * 0.10;
+        // Draw arm: swings naturally but shorter arc (hand near quiver)
+        if (armRight) armRight.rotation.x = Math.sin(time * aRunSpeed) * 0.30;
+        // Forward lean for speed
+        entry.group.rotation.x = 0.06;
+        // Subtle bob (light on feet)
+        entry.group.position.y += Math.abs(Math.sin(time * aRunSpeed)) * 0.01;
+        break;
+      }
       case UnitType.SCOUT: {
         // Light quick jog: fast legs, loose arm swing
         const jogSpeed = 9;
@@ -4637,6 +5637,23 @@ export class UnitRenderer {
         // Catapult rolling: subtle rocking
         entry.group.rotation.z = Math.sin(time * 3) * 0.04;
         entry.group.rotation.x = Math.sin(time * 2.3) * 0.02;
+        break;
+      }
+      case UnitType.OGRE: {
+        // Heavy lumbering walk — slow, ground-shaking cadence
+        const ogreWalkSpd = 4; // slower than standard (7)
+        if (legLeft && legRight) {
+          legLeft.rotation.x = Math.sin(time * ogreWalkSpd) * 0.35;
+          legRight.rotation.x = Math.sin(time * ogreWalkSpd + Math.PI) * 0.35;
+        }
+        if (armLeft) armLeft.rotation.x = Math.sin(time * ogreWalkSpd + Math.PI) * 0.2;
+        if (armRight) {
+          armRight.rotation.x = Math.sin(time * ogreWalkSpd) * 0.15; // reduced swing (holding club)
+        }
+        // Heavy side-to-side sway
+        entry.group.rotation.z = Math.sin(time * ogreWalkSpd * 0.5) * 0.04;
+        // Subtle ground-shake bob
+        entry.group.position.y = Math.abs(Math.sin(time * ogreWalkSpd)) * 0.02 - 0.01;
         break;
       }
       default: {
@@ -4766,9 +5783,30 @@ export class UnitRenderer {
         break;
       }
       case UnitType.ARCHER: {
-        // Idle: bow arm slightly forward, draw arm relaxed
-        if (armLeft) armLeft.rotation.x = armLeft.rotation.x * 0.9 + 0.15 * 0.1;
-        if (armRight) armRight.rotation.x *= 0.9;
+        // Idle: alert ranger stance — bow held low-ready, weight shifting, scanning
+        const aBreathe = Math.sin(time * 1.1) * 0.015;
+        const aShift = Math.sin(time * 0.6) * 0.008;
+
+        // Bow arm: held at low-ready angle, slight drift like holding a real bow
+        if (armLeft) {
+          armLeft.rotation.x = armLeft.rotation.x * 0.88 + 0.25 * 0.12 + aBreathe;
+          // Subtle lateral sway — bow hand drifts with weight
+          armLeft.rotation.z = armLeft.rotation.z * 0.92 + (Math.sin(time * 0.7) * 0.02) * 0.08;
+        }
+        // Draw arm: relaxed at side, fingers near quiver (ready to nock)
+        if (armRight) {
+          armRight.rotation.x = armRight.rotation.x * 0.90 + (-0.10) * 0.10;
+          armRight.rotation.z = armRight.rotation.z * 0.92 + (-0.04) * 0.08;
+          // Occasional fidget — fingers brush arrow fletching
+          armRight.rotation.x += Math.sin(time * 1.8 + 2.0) * 0.012;
+        }
+        // Weight shift — rangers don't stand still, they shift between feet
+        entry.group.rotation.z = entry.group.rotation.z * 0.92 + aShift;
+        // Subtle forward lean (always ready to move)
+        entry.group.rotation.x = entry.group.rotation.x * 0.94 + 0.02 * 0.06;
+        // Legs: very subtle weight alternation
+        if (legLeft) legLeft.rotation.x = legLeft.rotation.x * 0.92 + (Math.sin(time * 0.6) * 0.03) * 0.08;
+        if (legRight) legRight.rotation.x = legRight.rotation.x * 0.92 + (Math.sin(time * 0.6 + Math.PI) * 0.03) * 0.08;
         break;
       }
       case UnitType.PALADIN: {
@@ -4882,6 +5920,22 @@ export class UnitRenderer {
         entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.45) * 0.008;
         // Subtle forward lean (menacing stance)
         entry.group.rotation.x = entry.group.rotation.x * 0.95 + 0.015 * 0.05;
+        break;
+      }
+      case UnitType.OGRE: {
+        // Ogre idle: slow breathing, club resting, menacing weight shifts
+        const breathe = Math.sin(time * 0.6) * 0.008;
+        if (armRight) {
+          armRight.rotation.x = armRight.rotation.x * 0.90 + (0.15 + breathe) * 0.10; // club rests forward
+        }
+        if (armLeft) {
+          armLeft.rotation.x = armLeft.rotation.x * 0.90 + (-0.1 + breathe) * 0.10;
+          armLeft.rotation.z = armLeft.rotation.z * 0.90 + 0.08 * 0.10; // slight outward
+        }
+        // Slow, heavy weight-shift sway
+        entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.3) * 0.012;
+        // Deep breathing chest expand
+        entry.group.rotation.x = entry.group.rotation.x * 0.95 + breathe * 0.5;
         break;
       }
       default: {
@@ -5749,6 +6803,45 @@ export class UnitRenderer {
     duration: number;
   }> = [];
 
+  // ─── Particle pool (avoids per-frame geometry/material allocation) ───
+  private _particlePool: THREE.Mesh[] = [];
+  private _sharedParticleGeo: THREE.BoxGeometry | null = null;
+  private _particleMatCache: Map<number, THREE.MeshBasicMaterial> = new Map();
+
+  private getPooledParticle(color: number, opacity = 0.9): THREE.Mesh {
+    if (!this._sharedParticleGeo) {
+      this._sharedParticleGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
+    }
+    let mat = this._particleMatCache.get(color);
+    if (!mat) {
+      mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity });
+      this._particleMatCache.set(color, mat);
+    }
+    let mesh: THREE.Mesh;
+    if (this._particlePool.length > 0) {
+      mesh = this._particlePool.pop()!;
+      (mesh.material as THREE.MeshBasicMaterial).color.setHex(color);
+      (mesh.material as THREE.MeshBasicMaterial).opacity = opacity;
+      mesh.visible = true;
+      mesh.scale.set(1, 1, 1);
+    } else {
+      mesh = new THREE.Mesh(this._sharedParticleGeo, mat.clone());
+      (mesh.material as THREE.MeshBasicMaterial).transparent = true;
+    }
+    return mesh;
+  }
+
+  private returnParticleToPool(mesh: THREE.Mesh): void {
+    mesh.visible = false;
+    this.scene.remove(mesh);
+    if (this._particlePool.length < 200) { // cap pool size
+      this._particlePool.push(mesh);
+    } else {
+      mesh.geometry?.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+  }
+
   // ─── PREVIEW ANIMATION (for debug panel) ──────────────────────────
   // Persistent fake entry used by animatePreviewGroup so the private
   // animation methods (animateAttacking, animateMoving, animateIdle)
@@ -5957,14 +7050,9 @@ export class UnitRenderer {
     };
     requestAnimationFrame(animateDeflect);
 
-    // Spawn a few spark particles at impact point
+    // Spawn a few spark particles at impact point (pooled)
     for (let i = 0; i < 6; i++) {
-      const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
-      const sparkMat = new THREE.MeshBasicMaterial({
-        color: i % 2 === 0 ? 0xFFDD44 : 0xFFFFFF,
-        transparent: true, opacity: 0.9,
-      });
-      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      const spark = this.getPooledParticle(i % 2 === 0 ? 0xFFDD44 : 0xFFFFFF, 0.9);
       spark.position.set(impactPos.x, impactPos.y + 0.5, impactPos.z);
       this.scene.add(spark);
       this.trailParticles.push({
@@ -6059,14 +7147,9 @@ export class UnitRenderer {
     };
     requestAnimationFrame(animateDeflect);
 
-    // Spark particles at impact
+    // Spark particles at impact (pooled)
     for (let i = 0; i < 8; i++) {
-      const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
-      const sparkMat = new THREE.MeshBasicMaterial({
-        color: i % 2 === 0 ? 0xFFDD44 : 0xFFFFFF,
-        transparent: true, opacity: 0.9,
-      });
-      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      const spark = this.getPooledParticle(i % 2 === 0 ? 0xFFDD44 : 0xFFFFFF, 0.9);
       spark.position.set(impactPos.x, impactPos.y + 0.5, impactPos.z);
       this.scene.add(spark);
       this.trailParticles.push({
@@ -6118,6 +7201,541 @@ export class UnitRenderer {
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
     this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.6, targetUnitId, onImpact });
+  }
+
+  /**
+   * Fire a lightning bolt — jagged electric arc from caster to target
+   */
+  fireLightningBolt(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    const group = new THREE.Group();
+    const start = new THREE.Vector3(fromPos.x, fromPos.y + 1.2, fromPos.z);
+    const end = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
+    const dir = end.clone().sub(start);
+    const dist = dir.length();
+    const segments = Math.max(5, Math.floor(dist * 4));
+
+    // Build jagged bolt from segments
+    const boltMat = new THREE.MeshBasicMaterial({ color: 0xffff88, transparent: true, opacity: 0.95 });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.4 });
+
+    for (let i = 0; i < segments; i++) {
+      const t0 = i / segments;
+      const t1 = (i + 1) / segments;
+      const p0 = start.clone().lerp(end.clone(), t0);
+      const p1 = start.clone().lerp(end.clone(), t1);
+      // Add random jitter to middle segments (not first/last)
+      if (i > 0 && i < segments - 1) {
+        const jitter = 0.15;
+        p0.x += (Math.random() - 0.5) * jitter;
+        p0.y += (Math.random() - 0.5) * jitter;
+        p0.z += (Math.random() - 0.5) * jitter;
+      }
+      if (i + 1 > 0 && i + 1 < segments - 1) {
+        const jitter = 0.15;
+        p1.x += (Math.random() - 0.5) * jitter;
+        p1.y += (Math.random() - 0.5) * jitter;
+        p1.z += (Math.random() - 0.5) * jitter;
+      }
+      const segDir = p1.clone().sub(p0);
+      const segLen = segDir.length();
+      // Core bolt segment
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, segLen), boltMat);
+      seg.position.copy(p0.clone().add(p1).multiplyScalar(0.5));
+      seg.lookAt(p1);
+      group.add(seg);
+      // Glow around bolt
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, segLen), glowMat);
+      glow.position.copy(seg.position);
+      glow.lookAt(p1);
+      group.add(glow);
+    }
+    // Bright flash at origin
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 })
+    );
+    flash.position.copy(start);
+    group.add(flash);
+    // Impact flash at end
+    const impactFlash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0.8 })
+    );
+    impactFlash.position.copy(end);
+    group.add(impactFlash);
+
+    (group as any)._lightningBolt = true;
+    (group as any)._spawnTime = performance.now() / 1000;
+    (group as any)._duration = 0.35;
+    this.scene.add(group);
+
+    // Lightning is instant — no projectile travel, just display then impact
+    setTimeout(() => {
+      if (onImpact) onImpact();
+      // Fade and remove
+      setTimeout(() => {
+        this.scene.remove(group);
+        group.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+      }, 250);
+    }, 80);
+  }
+
+  /**
+   * Fire a secondary chain lightning arc between two positions (no projectile travel)
+   */
+  fireLightningChain(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, _targetUnitId?: string): void {
+    const group = new THREE.Group();
+    const start = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
+    const end = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
+    const dir = end.clone().sub(start);
+    const dist = dir.length();
+    const segments = Math.max(3, Math.floor(dist * 3));
+
+    const boltMat = new THREE.MeshBasicMaterial({ color: 0xccddff, transparent: true, opacity: 0.85 });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x6688ff, transparent: true, opacity: 0.3 });
+
+    for (let i = 0; i < segments; i++) {
+      const t0 = i / segments;
+      const t1 = (i + 1) / segments;
+      const p0 = start.clone().lerp(end.clone(), t0);
+      const p1 = start.clone().lerp(end.clone(), t1);
+      if (i > 0) {
+        p0.x += (Math.random() - 0.5) * 0.12;
+        p0.y += (Math.random() - 0.5) * 0.12;
+        p0.z += (Math.random() - 0.5) * 0.12;
+      }
+      if (i + 1 < segments) {
+        p1.x += (Math.random() - 0.5) * 0.12;
+        p1.y += (Math.random() - 0.5) * 0.12;
+        p1.z += (Math.random() - 0.5) * 0.12;
+      }
+      const segLen = p1.clone().sub(p0).length();
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, segLen), boltMat);
+      seg.position.copy(p0.clone().add(p1).multiplyScalar(0.5));
+      seg.lookAt(p1);
+      group.add(seg);
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, segLen), glowMat);
+      glow.position.copy(seg.position);
+      glow.lookAt(p1);
+      group.add(glow);
+    }
+
+    this.scene.add(group);
+    // Auto-remove after brief display
+    setTimeout(() => {
+      this.scene.remove(group);
+      group.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    }, 300);
+  }
+
+  /**
+   * Spawn electrocute visual on a unit — yellow flicker, sparks, mini lightning bolts
+   */
+  spawnElectrocuteEffect(unitId: string): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    const pos = entry.group.position;
+    const startTime = performance.now();
+    const duration = 600; // ms
+
+    // Create sparks group
+    const sparksGroup = new THREE.Group();
+    sparksGroup.position.copy(pos);
+    sparksGroup.position.y += 0.5;
+    this.scene.add(sparksGroup);
+
+    // 8-12 electric sparks
+    const sparkCount = 8 + Math.floor(Math.random() * 5);
+    const sparks: { mesh: THREE.Mesh; vx: number; vy: number; vz: number }[] = [];
+    for (let i = 0; i < sparkCount; i++) {
+      const spark = new THREE.Mesh(
+        new THREE.BoxGeometry(0.03, 0.03, 0.08),
+        new THREE.MeshBasicMaterial({ color: Math.random() > 0.5 ? 0xffff44 : 0x88ccff, transparent: true, opacity: 0.9 })
+      );
+      spark.position.set(
+        (Math.random() - 0.5) * 0.3,
+        (Math.random() - 0.5) * 0.6,
+        (Math.random() - 0.5) * 0.3
+      );
+      spark.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      sparksGroup.add(spark);
+      sparks.push({ mesh: spark, vx: (Math.random() - 0.5) * 3, vy: Math.random() * 2 + 1, vz: (Math.random() - 0.5) * 3 });
+    }
+
+    // 3-4 mini lightning bolts shooting out from unit
+    for (let b = 0; b < 3 + Math.floor(Math.random() * 2); b++) {
+      const angle = Math.random() * Math.PI * 2;
+      const boltLen = 0.3 + Math.random() * 0.3;
+      const bolt = new THREE.Mesh(
+        new THREE.BoxGeometry(0.02, 0.02, boltLen),
+        new THREE.MeshBasicMaterial({ color: 0xffff88, transparent: true, opacity: 0.8 })
+      );
+      bolt.position.set(
+        Math.cos(angle) * 0.15,
+        (Math.random() - 0.5) * 0.4,
+        Math.sin(angle) * 0.15
+      );
+      bolt.lookAt(new THREE.Vector3(
+        Math.cos(angle) * (0.15 + boltLen),
+        bolt.position.y + (Math.random() - 0.5) * 0.2,
+        Math.sin(angle) * (0.15 + boltLen)
+      ));
+      sparksGroup.add(bolt);
+    }
+
+    // Yellow flicker on the unit itself
+    const origMaterials: Map<THREE.Mesh, THREE.Material> = new Map();
+    const flickerMat = new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0.6 });
+    entry.group.traverse((child: any) => {
+      if (child.isMesh && child.material) {
+        origMaterials.set(child, child.material);
+      }
+    });
+
+    let flickerFrame = 0;
+    const flickerInterval = setInterval(() => {
+      flickerFrame++;
+      const showFlicker = flickerFrame % 3 < 2;
+      entry.group.traverse((child: any) => {
+        if (child.isMesh && origMaterials.has(child)) {
+          child.material = showFlicker ? flickerMat : origMaterials.get(child);
+        }
+      });
+    }, 50);
+
+    // Animate sparks outward
+    const animSparks = () => {
+      const elapsed = performance.now() - startTime;
+      if (elapsed > duration) {
+        clearInterval(flickerInterval);
+        // Restore original materials
+        entry.group.traverse((child: any) => {
+          if (child.isMesh && origMaterials.has(child)) {
+            child.material = origMaterials.get(child);
+          }
+        });
+        this.scene.remove(sparksGroup);
+        sparksGroup.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+        return;
+      }
+      const dt = 0.016;
+      const fade = 1 - elapsed / duration;
+      for (const s of sparks) {
+        s.mesh.position.x += s.vx * dt;
+        s.mesh.position.y += s.vy * dt;
+        s.mesh.position.z += s.vz * dt;
+        s.vy -= 4 * dt; // gravity
+        (s.mesh.material as THREE.MeshBasicMaterial).opacity = fade * 0.9;
+      }
+      requestAnimationFrame(animSparks);
+    };
+    requestAnimationFrame(animSparks);
+  }
+
+  /**
+   * Fire a flamethrower stream — multiple flame particles with black smoke trail
+   */
+  /**
+   * Fire a flamethrower stream — long arcing flame with black smoke and dramatic fire trail
+   */
+  fireFlamethrower(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    const group = new THREE.Group();
+
+    // Bright muzzle flash core at staff
+    const muzzle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffff44, transparent: true, opacity: 0.9 })
+    );
+    group.add(muzzle);
+
+    // Core flame mass — large elongated fire blob
+    const flameCoreInner = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.9 })
+    );
+    flameCoreInner.position.z = 0.15;
+    group.add(flameCoreInner);
+
+    const flameCoreOuter = new THREE.Mesh(
+      new THREE.SphereGeometry(0.3, 6, 6),
+      new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.6 })
+    );
+    flameCoreOuter.position.z = 0.1;
+    flameCoreOuter.scale.set(1.2, 0.8, 1.5);
+    group.add(flameCoreOuter);
+
+    // Flame tendrils — 8-10 elongated fire pieces trailing behind
+    const tendrilColors = [0xff2200, 0xff4400, 0xff6600, 0xff8800, 0xffaa00, 0xffcc00];
+    for (let t = 0; t < 10; t++) {
+      const color = tendrilColors[Math.floor(Math.random() * tendrilColors.length)];
+      const size = 0.08 + Math.random() * 0.12;
+      const tendril = new THREE.Mesh(
+        new THREE.BoxGeometry(size, size * 0.6, size * 2),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.6 + Math.random() * 0.3 })
+      );
+      tendril.name = `tendril-${t}`;
+      const angle = Math.random() * Math.PI * 2;
+      const r = Math.random() * 0.15;
+      tendril.position.set(
+        Math.cos(angle) * r,
+        Math.sin(angle) * r,
+        -0.1 - Math.random() * 0.3
+      );
+      tendril.rotation.set(Math.random() * 0.3, Math.random() * 0.3, Math.random() * 0.3);
+      group.add(tendril);
+    }
+
+    // Black smoke plume — 6-8 dark particles trailing above flame
+    for (let s = 0; s < 8; s++) {
+      const smokeSize = 0.1 + Math.random() * 0.15;
+      const smoke = new THREE.Mesh(
+        new THREE.BoxGeometry(smokeSize, smokeSize, smokeSize),
+        new THREE.MeshBasicMaterial({ color: 0x111111, transparent: true, opacity: 0.35 - s * 0.03 })
+      );
+      smoke.name = `smoke-${s}`;
+      smoke.position.set(
+        (Math.random() - 0.5) * 0.15,
+        0.1 + s * 0.06,
+        -0.15 - s * 0.05
+      );
+      group.add(smoke);
+    }
+
+    // Ember sparks — tiny bright particles that fly off
+    for (let e = 0; e < 6; e++) {
+      const ember = new THREE.Mesh(
+        new THREE.BoxGeometry(0.025, 0.025, 0.025),
+        new THREE.MeshBasicMaterial({ color: 0xffdd00, transparent: true, opacity: 0.8 })
+      );
+      ember.name = `ember-${e}`;
+      ember.position.set(
+        (Math.random() - 0.5) * 0.2,
+        (Math.random() - 0.5) * 0.2,
+        Math.random() * 0.1
+      );
+      group.add(ember);
+    }
+
+    (group as any)._flamethrower = true;
+    (group as any)._magicColor = 0xff5500;
+    group.position.set(fromPos.x, fromPos.y + 0.8, fromPos.z);
+    this.scene.add(group);
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.8, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
+
+    // Use the projectile system with a moderate arc
+    this.projectiles.push({
+      mesh: group as any, startPos, endPos,
+      startTime: performance.now() / 1000, duration: 0.55,
+      arcHeight: 1.2, targetUnitId, onImpact
+    });
+  }
+
+  /**
+   * Fire a massive stone column projectile — tumbling boulder that arcs toward target
+   */
+  fireStoneColumn(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    const group = new THREE.Group();
+    // Main stone column — rectangular pillar
+    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
+    const stoneDkMat = new THREE.MeshLambertMaterial({ color: 0x6b5340 });
+    const column = new THREE.Mesh(new THREE.BoxGeometry(0.55, 1.6, 0.55), stoneMat);
+    group.add(column);
+    // Stone texture detail — smaller blocks overlaid
+    const detail1 = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.35, 0.60), stoneDkMat);
+    detail1.position.y = 0.50;
+    group.add(detail1);
+    const detail2 = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.35, 0.60), stoneDkMat);
+    detail2.position.y = -0.50;
+    group.add(detail2);
+    // Cracks/lines (thin dark strips)
+    for (let i = 0; i < 3; i++) {
+      const crack = new THREE.Mesh(
+        new THREE.BoxGeometry(0.03, 0.24 + Math.random() * 0.3, 0.28),
+        new THREE.MeshBasicMaterial({ color: 0x3a2a1a })
+      );
+      crack.position.set((Math.random() - 0.5) * 0.24, (Math.random() - 0.5) * 0.9, 0.28);
+      group.add(crack);
+    }
+    // Dirt/dust particles orbiting
+    for (let d = 0; d < 4; d++) {
+      const dust = new THREE.Mesh(
+        new THREE.BoxGeometry(0.10, 0.10, 0.10),
+        new THREE.MeshBasicMaterial({ color: 0xaa9070, transparent: true, opacity: 0.6 })
+      );
+      dust.name = `dust-${d}`;
+      const angle = (d / 4) * Math.PI * 2;
+      dust.position.set(Math.cos(angle) * 0.5, Math.sin(angle) * 0.5, 0);
+      group.add(dust);
+    }
+
+    (group as any)._stoneColumn = true;
+    group.position.set(fromPos.x, fromPos.y + 1.0, fromPos.z);
+    this.scene.add(group);
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 1.0, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
+    this.projectiles.push({
+      mesh: group as any, startPos, endPos,
+      startTime: performance.now() / 1000, duration: 0.7,
+      arcHeight: 4.0, targetUnitId, onImpact
+    });
+  }
+
+  /**
+   * Fire a water wave/splash projectile — flowing water stream
+   */
+  fireWaterWave(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    const group = new THREE.Group();
+    const waterMat = new THREE.MeshBasicMaterial({ color: 0x2288ff, transparent: true, opacity: 0.7 });
+    const waterLightMat = new THREE.MeshBasicMaterial({ color: 0x66bbff, transparent: true, opacity: 0.5 });
+    const foamMat = new THREE.MeshBasicMaterial({ color: 0xcceeFF, transparent: true, opacity: 0.6 });
+    // Core water mass
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), waterMat);
+    group.add(core);
+    // Outer wave shape
+    const wave = new THREE.Mesh(new THREE.SphereGeometry(0.25, 6, 4), waterLightMat);
+    wave.scale.set(1.3, 0.7, 1.0);
+    group.add(wave);
+    // Foam/spray on leading edge
+    for (let f = 0; f < 5; f++) {
+      const foam = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), foamMat);
+      foam.name = `foam-${f}`;
+      foam.position.set((Math.random() - 0.5) * 0.15, (Math.random() - 0.5) * 0.1 + 0.1, 0.15 + Math.random() * 0.1);
+      group.add(foam);
+    }
+    // Trailing water droplets
+    for (let d = 0; d < 4; d++) {
+      const drop = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.03), waterMat);
+      drop.name = `drop-${d}`;
+      drop.position.set((Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.15, -0.1 - Math.random() * 0.15);
+      group.add(drop);
+    }
+    (group as any)._waterWave = true;
+    (group as any)._magicColor = 0x2288ff;
+    group.position.set(fromPos.x, fromPos.y + 0.6, fromPos.z);
+    this.scene.add(group);
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.6, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
+    this.projectiles.push({
+      mesh: group as any, startPos, endPos,
+      startTime: performance.now() / 1000, duration: 0.5,
+      arcHeight: 0.5, targetUnitId, onImpact
+    });
+  }
+
+  /**
+   * Fire a wind tornado — spinning vortex that travels toward the target
+   */
+  fireWindTornado(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
+    const group = new THREE.Group();
+
+    // Build tornado from stacked rings that get wider toward the top
+    const ringCount = 8;
+    const windMat = new THREE.MeshBasicMaterial({ color: 0x88dd88, transparent: true, opacity: 0.35 });
+    const windLightMat = new THREE.MeshBasicMaterial({ color: 0xccffcc, transparent: true, opacity: 0.25 });
+    const debrisMat = new THREE.MeshBasicMaterial({ color: 0x886644, transparent: true, opacity: 0.7 });
+    const leafMat = new THREE.MeshBasicMaterial({ color: 0x44aa44, transparent: true, opacity: 0.6 });
+
+    // Funnel shape — rings of boxes forming a cone
+    for (let r = 0; r < ringCount; r++) {
+      const t = r / ringCount;
+      const radius = 0.08 + t * 0.25; // wider at top
+      const y = t * 1.2 - 0.3; // bottom to top
+      const segCount = 6 + Math.floor(t * 4);
+      for (let s = 0; s < segCount; s++) {
+        const angle = (s / segCount) * Math.PI * 2;
+        const size = 0.06 + t * 0.04;
+        const ring = new THREE.Mesh(
+          new THREE.BoxGeometry(size, 0.08, size),
+          r % 2 === 0 ? windMat : windLightMat
+        );
+        ring.position.set(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+        ring.name = `ring-${r}-${s}`;
+        group.add(ring);
+      }
+    }
+
+    // Debris particles orbiting inside (leaves, dirt, small rocks)
+    for (let d = 0; d < 10; d++) {
+      const isLeaf = Math.random() > 0.4;
+      const debris = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.02, isLeaf ? 0.06 : 0.04),
+        isLeaf ? leafMat : debrisMat
+      );
+      debris.name = `debris-${d}`;
+      const angle = Math.random() * Math.PI * 2;
+      const r = 0.05 + Math.random() * 0.2;
+      const y = Math.random() * 1.0 - 0.2;
+      debris.position.set(Math.cos(angle) * r, y, Math.sin(angle) * r);
+      debris.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      group.add(debris);
+    }
+
+    // Dust cloud at base
+    for (let dc = 0; dc < 5; dc++) {
+      const dust = new THREE.Mesh(
+        new THREE.BoxGeometry(0.1, 0.05, 0.1),
+        new THREE.MeshBasicMaterial({ color: 0xccbb99, transparent: true, opacity: 0.3 })
+      );
+      const a = (dc / 5) * Math.PI * 2;
+      dust.position.set(Math.cos(a) * 0.15, -0.35, Math.sin(a) * 0.15);
+      group.add(dust);
+    }
+
+    // White swirl lines (visible wind streaks)
+    for (let w = 0; w < 4; w++) {
+      const streak = new THREE.Mesh(
+        new THREE.BoxGeometry(0.015, 0.5 + Math.random() * 0.4, 0.015),
+        new THREE.MeshBasicMaterial({ color: 0xeeffee, transparent: true, opacity: 0.4 })
+      );
+      const a = (w / 4) * Math.PI * 2;
+      streak.position.set(Math.cos(a) * 0.12, 0.2, Math.sin(a) * 0.12);
+      streak.rotation.z = 0.3 + Math.random() * 0.4;
+      streak.name = `streak-${w}`;
+      group.add(streak);
+    }
+
+    (group as any)._tornado = true;
+    (group as any)._spawnTime = performance.now() / 1000;
+    group.position.set(fromPos.x, fromPos.y + 0.3, fromPos.z);
+    this.scene.add(group);
+
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.3, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
+    const travelStart = performance.now() / 1000;
+    const duration = 0.65;
+
+    const animTornado = () => {
+      const elapsed = performance.now() / 1000 - travelStart;
+      if (elapsed > duration) {
+        if (onImpact) onImpact();
+        // Brief linger then remove
+        setTimeout(() => {
+          this.scene.remove(group);
+          group.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+        }, 200);
+        return;
+      }
+      const progress = elapsed / duration;
+      // Move toward target
+      group.position.lerpVectors(startPos, endPos, progress);
+      group.position.y += Math.sin(progress * Math.PI) * 0.3; // slight arc
+      // Spin the whole tornado
+      group.rotation.y += 0.25;
+      // Animate debris orbiting
+      group.children.forEach((child: any) => {
+        if (child.name?.startsWith('debris-')) {
+          const a = performance.now() / 1000 * 5 + parseFloat(child.name.split('-')[1]) * 0.7;
+          const r = 0.08 + Math.sin(a * 0.5) * 0.12;
+          child.position.x = Math.cos(a) * r;
+          child.position.z = Math.sin(a) * r;
+          child.rotation.x += 0.15;
+          child.rotation.z += 0.1;
+        }
+      });
+      requestAnimationFrame(animTornado);
+    };
+    requestAnimationFrame(animTornado);
   }
 
   /**
@@ -6340,11 +7958,9 @@ export class UnitRenderer {
     // === PHASE 2: Firecracker sparks shooting out from center ===
     const sparkCount = 25 + radius * 15;
     for (let i = 0; i < sparkCount; i++) {
-      const sparkGeo = new THREE.BoxGeometry(0.04, 0.04, 0.04);
       const isWhite = Math.random() > 0.5;
       const sparkColor = isWhite ? 0xFFFFCC : color;
-      const sparkMat = new THREE.MeshBasicMaterial({ color: sparkColor, transparent: true, opacity: 1.0 });
-      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      const spark = this.getPooledParticle(sparkColor, 1.0);
       spark.position.set(cx, cy + 0.5, cz);
       this.scene.add(spark);
 
@@ -6416,15 +8032,11 @@ export class UnitRenderer {
       fire.position.set(hp.x, cy + 0.2, hp.z);
       this.scene.add(fire);
 
-      // Ember particles shooting up from each hex
+      // Ember particles shooting up from each hex (pooled)
       const emberCount = 3 + Math.floor(Math.random() * 3);
       for (let ei = 0; ei < emberCount; ei++) {
-        const emberGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
-        const emberMat = new THREE.MeshBasicMaterial({
-          color: Math.random() > 0.3 ? color : 0xFFCC00,
-          transparent: true, opacity: 1.0,
-        });
-        const ember = new THREE.Mesh(emberGeo, emberMat);
+        const emberColor = Math.random() > 0.3 ? color : 0xFFCC00;
+        const ember = this.getPooledParticle(emberColor, 1.0);
         ember.position.set(hp.x + (Math.random() - 0.5) * 0.5, cy + 0.3, hp.z + (Math.random() - 0.5) * 0.5);
         this.scene.add(ember);
         this.trailParticles.push({
@@ -6471,9 +8083,7 @@ export class UnitRenderer {
       if (elapsed < 0) continue; // not started yet (delayed spawn)
       const progress = elapsed / tp.duration;
       if (progress >= 1) {
-        this.scene.remove(tp.mesh);
-        tp.mesh.geometry?.dispose();
-        (tp.mesh.material as THREE.Material).dispose();
+        this.returnParticleToPool(tp.mesh);
         this.trailParticles.splice(i, 1);
         continue;
       }
@@ -6649,12 +8259,8 @@ export class UnitRenderer {
           }
           // Emit trail sparkles behind the projectile
           if (Math.random() < 0.4) {
-            const tGeo = new THREE.BoxGeometry(0.03, 0.03, 0.03);
-            const tMat = new THREE.MeshBasicMaterial({
-              color: Math.random() > 0.5 ? magicColor : 0xFFFFCC,
-              transparent: true, opacity: 0.8,
-            });
-            const tParticle = new THREE.Mesh(tGeo, tMat);
+            const tColor = Math.random() > 0.5 ? magicColor : 0xFFFFCC;
+            const tParticle = this.getPooledParticle(tColor, 0.8);
             tParticle.position.copy(proj.mesh.position);
             this.scene.add(tParticle);
             this.trailParticles.push({
@@ -7049,9 +8655,15 @@ export class UnitRenderer {
    * Each entry: { attackerId, targetId }.
    * This manages the lifecycle of all aggro lines + target rings.
    */
+  // Reusable sets for aggro indicator cleanup — avoids per-frame allocation
+  private _activeAttackerIds: Set<string> = new Set();
+  private _activeTargetIds: Set<string> = new Set();
+
   updateAggroIndicators(aggroList: Array<{ attackerId: string; targetId: string }>, time: number): void {
-    const activeAttackerIds = new Set<string>();
-    const activeTargetIds = new Set<string>();
+    const activeAttackerIds = this._activeAttackerIds;
+    const activeTargetIds = this._activeTargetIds;
+    activeAttackerIds.clear();
+    activeTargetIds.clear();
 
     for (const { attackerId, targetId } of aggroList) {
       activeAttackerIds.add(attackerId);

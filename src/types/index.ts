@@ -126,6 +126,7 @@ export enum UnitState {
   ATTACKING = 'attacking',
   GATHERING = 'gathering',
   BUILDING = 'building',
+  CONSTRUCTING = 'constructing',
   RETURNING = 'returning',
   DEAD = 'dead',
 }
@@ -135,6 +136,7 @@ export enum CommandType {
   ATTACK = 'attack',
   GATHER = 'gather',
   BUILD = 'build',
+  CONSTRUCT = 'construct',
   PATROL = 'patrol',
   STOP = 'stop',
 }
@@ -191,6 +193,10 @@ export interface Unit {
   _patrolIdx?: number;
   _planIsGate?: boolean;            // Builder: planned build is a gate
   _playerCommanded?: boolean;       // Player issued a direct command
+  _assignedBlueprintId?: string;    // Builder: player-assigned building blueprint ID (overrides auto-assign)
+  _forceMove?: boolean;             // Unit is executing a direct move command — suppress re-aggro until arrival
+  _healTarget?: string;             // Healer: manually assigned heal target unit ID
+  _focusTarget?: string;            // Combat: manually assigned attack focus target unit ID
   _underground?: boolean;           // Unit is currently underground (on a tunnel tile)
   _undergroundCommand?: boolean;    // Unit was given an underground move command
   _garrisoned?: boolean;            // Unit is inside a structure (hidden)
@@ -199,8 +205,10 @@ export interface Unit {
   _squadSpeed?: number;             // Effective march speed (slowest unit in squad)
   _isKiting?: boolean;              // Ranged unit is fleeing from melee threat — don't re-aggro
   _pendingRangedDeath?: boolean;    // Unit killed by ranged attack — defer DEAD state until projectile lands
+  _pendingDeathTimestamp?: number;  // Timestamp when _pendingRangedDeath was first detected (for safety cleanup)
   kills: number;                    // Total kills this unit has scored
   element?: ElementType;            // Elemental affinity (mages only — determines projectile/impact visuals)
+  _elementCycleIndex?: number;      // Current index in element cycle (0-4, advances after each attack)
 
   // --- Debuff system ---
   _slowUntil?: number;              // Timestamp (performance.now ms) until which unit is slowed
@@ -231,6 +239,7 @@ export enum UnitType {
   BERSERKER = 'berserker',
   BATTLEMAGE = 'battlemage',
   GREATSWORD = 'greatsword',
+  OGRE = 'ogre',
 }
 
 /** Elemental damage types — mage-only for now */
@@ -251,6 +260,12 @@ export interface ResourceNode {
 
 // --- Base (Win Condition) ---
 
+export enum BaseTier {
+  CAMP = 0,
+  FORT = 1,
+  CASTLE = 2,
+}
+
 export interface Base {
   id: string;
   owner: number;
@@ -259,6 +274,9 @@ export interface Base {
   health: number;
   maxHealth: number;
   destroyed: boolean;
+  // --- Base upgrade system ---
+  tier: BaseTier;
+  ogresSpawned: number;  // How many Ogres this base has granted (max = tier)
 }
 
 // --- Players & Cities ---
@@ -414,6 +432,12 @@ export interface PlacedBuilding {
   mesh: THREE.Group;
   health: number;
   maxHealth: number;
+  /** 0..1 — building is a blueprint until constructionProgress reaches 1.0 */
+  constructionProgress: number;
+  /** true while building is still being constructed by a builder */
+  isBlueprint: boolean;
+  /** ID of builder currently constructing this building (null if none) */
+  assignedBuilderId?: string | null;
 }
 
 // --- AI State Types ---
