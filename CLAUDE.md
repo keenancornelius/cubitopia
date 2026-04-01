@@ -300,6 +300,74 @@ The old version checked individual building refs. Now it loops the `placedBuildi
 ### HUD Help Overlay
 The help menu is a single giant HTML string in `createHelpOverlay()` in `src/ui/HUD.ts` starting around line 1287. It must be updated manually when gameplay changes. The defensive stance description, Paladin unit, building click tooltip, and archer kiting are features that need to be kept in sync.
 
+### HUD Layout Map — Avoid Overlaps When Adding New UI
+
+The HUD uses absolute/fixed positioning. Before adding any new element, check this map to avoid collisions. All positions reference the game viewport (not the browser window).
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  TOP-LEFT              TOP-CENTER            TOP-RIGHT       │
+│  Resource bar (P1)     "CUBITOPIA" logo      Enemy resources │
+│  top:16 left:16        top:16 center         top:16 right:140│
+│  ~540×50  z:10000      ~149×60  z:auto       ~623×50  z:10000│
+│                                              ☰ MENU button   │
+│                                              top:16 right:16 │
+│──────────────────────────────────────────────────────────────│
+│  LEFT-BELOW-RESOURCES                 RIGHT-BELOW-RESOURCES  │
+│  Terrain info tooltip                 Capture zone cards     │
+│  top:80 left:16                       top:64 right:10        │
+│  ~180×var  z:10001                    flex-col  z:500        │
+│                                                              │
+│  Debug panel (backtick)               Selection panel        │
+│  top:56 left:16                       (cursor-following)     │
+│  ~400×var  z:auto                     z:9999                 │
+│                                                              │
+│                    MID-CENTER                                │
+│                    Notification toast                        │
+│                    top:120 center                            │
+│                    z:auto                                    │
+│                                                              │
+│                                                              │
+│                                                              │
+│                                       RIGHT-MID              │
+│                                       Elevation slicer      │
+│                                       right:180 bottom:80   │
+│                                       ~30×336  z:100        │
+│──────────────────────────────────────────────────────────────│
+│  BOT-LEFT              BOT-CENTER            BOT-RIGHT       │
+│  Action menu           Spawn queue bars      Unit stats panel│
+│  bottom:16 left:16     bottom:60 center      bottom:16 right│
+│  ~337×167  z:101       ~var  z:auto          ~170×var z:10000│
+│                        Wall mode banner                      │
+│                        bottom:60 center                      │
+│                        z:auto (hidden)                       │
+│  Help overlay (? key): full-screen z:300                     │
+│  Menu overlay: full-screen z:20000                           │
+│  Building tooltips: cursor-following z:9999                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**Z-index layers (from back to front):**
+- 50: Stance indicator badges
+- 100: Game container, elevation slicer
+- 101: Action menu (bottom-left)
+- 300: Help overlay (full screen)
+- 500: Capture zone cards (top-right)
+- 1000: Resource dropdown menus (expand from resource bar)
+- 9999: Building/wall/base tooltips (cursor-following)
+- 10000: Resource bars (top), unit stats panel (bottom-right), ☰ menu
+- 10001: Terrain info tooltip (top-left, below resource bar)
+- 20000: Main menu overlay (full screen, above everything)
+
+**Rules for adding new HUD elements:**
+1. Check this map for collisions at the intended position
+2. Use z-index from the layer list above — pick the right layer for the element type
+3. Tooltips that appear on hover should use z:9999+ so they render above persistent panels
+4. Persistent panels (always visible) should use z:100-500
+5. Resource bars and critical controls use z:10000
+6. Test with ALL game modes (Player vs AI has fewer panels than AI vs AI)
+7. Test with capture zone cards visible — they stack vertically and can get tall
+
 ### Detection Ranges (in UnitAI.ts)
 ```
 Archer: 6, Paladin: 5, Trebuchet: 7, Catapult: 5, Scout: 7, Rider: 4, default (Warrior): 4
