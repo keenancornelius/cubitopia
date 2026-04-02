@@ -5,12 +5,12 @@
 
 import {
   GameMap, Tile, HexCoord, TerrainType, BlockType, VoxelBlock,
-  ResourceType, MapType, MapPreset,
+  ResourceType, MapType, MapPreset, ENABLE_UNDERGROUND,
 } from '../types';
 import { MapGenerator } from './MapGenerator';
 
 // --- Map Preset Definitions ---
-export const MAP_PRESETS: MapPreset[] = [
+const ALL_MAP_PRESETS: MapPreset[] = [
   {
     type: MapType.STANDARD,
     label: 'STANDARD',
@@ -54,6 +54,11 @@ export const MAP_PRESETS: MapPreset[] = [
     color: '#d4a056',
   },
 ];
+
+/** Filtered presets — hides Desert Tunnels when underground is disabled */
+export const MAP_PRESETS: MapPreset[] = ENABLE_UNDERGROUND
+  ? ALL_MAP_PRESETS
+  : ALL_MAP_PRESETS.filter(p => p.type !== MapType.DESERT_TUNNELS);
 
 export function getPreset(type: MapType): MapPreset {
   return MAP_PRESETS.find(p => p.type === type) || MAP_PRESETS[0];

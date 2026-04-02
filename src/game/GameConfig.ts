@@ -1,0 +1,482 @@
+import { UnitType } from '../types';
+
+export const GAME_CONFIG = {
+  population: {
+    foodPerCombatUnit: 3,
+    startingFood: 30,
+  },
+
+  defenses: {
+    wall: {
+      cost: { stone: 1 },
+      maxHealth: 20,
+    },
+    gate: {
+      cost: { stone: 2 },
+      maxHealth: 20,
+    },
+    barracks: {
+      maxHealth: 250,
+    },
+  },
+
+  units: {
+    [UnitType.WARRIOR]: {
+      costs: {
+        menu: { gold: 5 },
+        tooltipQueue: { gold: 5 },
+        ai: { gold: 5 },
+      },
+      aiWeight: 20,
+    },
+    [UnitType.ARCHER]: {
+      costs: {
+        menu: { gold: 8 },
+        tooltipQueue: { gold: 8 },
+        ai: { gold: 8 },
+      },
+      aiWeight: 15,
+    },
+    [UnitType.RIDER]: {
+      costs: {
+        menu: { gold: 10 },
+        tooltipQueue: { gold: 10 },
+        ai: { gold: 10 },
+      },
+      aiWeight: 8,
+    },
+    [UnitType.PALADIN]: {
+      costs: {
+        menu: { gold: 12 },
+        tooltipQueue: { gold: 6 },
+        ai: { gold: 12, steel: 1 },
+      },
+      aiWeight: 8,
+    },
+    [UnitType.TREBUCHET]: {
+      costs: {
+        playerQueue: { wood: 5, stone: 5, rope: 3 },
+        tooltipQueue: { wood: 4, stone: 4, rope: 6 },
+        ai: { gold: 15 },
+      },
+      aiWeight: 4,
+    },
+    [UnitType.SCOUT]: {
+      costs: {
+        menu: { gold: 6 },
+        tooltipQueue: { wood: 4 },
+        ai: { gold: 6 },
+      },
+      aiWeight: 10,
+    },
+    [UnitType.MAGE]: {
+      costs: {
+        menu: { gold: 8, crystal: 2 },
+        ai: { gold: 9, crystal: 1 },
+      },
+      aiWeight: 7,
+    },
+    [UnitType.BUILDER]: {
+      costs: {
+        menu: { wood: 3 },
+        tooltipQueue: { wood: 4 },
+      },
+    },
+    [UnitType.LUMBERJACK]: {
+      costs: {
+        menu: { wood: 3 },
+        tooltipQueue: { wood: 3 },
+      },
+    },
+    [UnitType.VILLAGER]: {
+      costs: {
+        menu: { wood: 3 },
+        tooltipQueue: { wood: 3 },
+      },
+    },
+    [UnitType.HEALER]: {
+      costs: {
+        menu: { gold: 6, crystal: 1 },
+        ai: { gold: 10, crystal: 1 },
+      },
+      aiWeight: 8,
+    },
+    [UnitType.ASSASSIN]: {
+      costs: {
+        menu: { gold: 7, steel: 1 },
+        ai: { gold: 13, steel: 1 },
+      },
+      aiWeight: 5,
+    },
+    [UnitType.SHIELDBEARER]: {
+      costs: {
+        menu: { gold: 8, steel: 3 },
+        ai: { gold: 11, steel: 1 },
+      },
+      aiWeight: 7,
+    },
+    [UnitType.BERSERKER]: {
+      costs: {
+        menu: { gold: 7, steel: 2 },
+        ai: { gold: 14, steel: 1 },
+      },
+      aiWeight: 6,
+    },
+    [UnitType.BATTLEMAGE]: {
+      costs: {
+        menu: { gold: 12, crystal: 3 },
+        ai: { gold: 15, crystal: 1 },
+      },
+      aiWeight: 5,
+    },
+    [UnitType.GREATSWORD]: {
+      costs: {
+        menu: { gold: 8, steel: 2 },
+        ai: { gold: 12, steel: 1 },
+      },
+      aiWeight: 7,
+    },
+    [UnitType.OGRE]: {
+      costs: {},
+    },
+  },
+
+  buildings: {
+    barracks: {
+      cost: {
+        player: { wood: 10, stone: 0, steel: 0, crystal: 0 },
+        ai: { wood: 10, stone: 0, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 5 },
+      spawnTime: 5,
+    },
+    forestry: {
+      cost: {
+        player: { wood: 8, stone: 0, steel: 0, crystal: 0 },
+        ai: { wood: 8, stone: 0, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 4 },
+      spawnTime: 5,
+    },
+    masonry: {
+      cost: {
+        player: { wood: 8, stone: 0, steel: 0, crystal: 0 },
+        ai: { wood: 10, stone: 0, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 5 },
+      spawnTime: 5,
+    },
+    farmhouse: {
+      cost: {
+        player: { wood: 6, stone: 0, steel: 0, crystal: 0 },
+        ai: { wood: 8, stone: 0, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 4 },
+      spawnTime: 5,
+    },
+    workshop: {
+      cost: {
+        player: { wood: 12, stone: 4, steel: 0, crystal: 0 },
+        ai: { wood: 15, stone: 5, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 8 },
+      spawnTime: 8,
+    },
+    silo: {
+      cost: {
+        player: { wood: 5, stone: 0, steel: 0, crystal: 0 },
+        ai: { wood: 6, stone: 0, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 3 },
+    },
+    smelter: {
+      cost: {
+        player: { wood: 8, stone: 6, steel: 0, crystal: 0 },
+        ai: { wood: 8, stone: 6, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 4 },
+    },
+    armory: {
+      cost: {
+        player: { wood: 10, stone: 5, steel: 3, crystal: 0 },
+        ai: { wood: 10, stone: 5, steel: 3, crystal: 0 },
+      },
+      refund: { wood: 5 },
+      spawnTime: 6,
+    },
+    wizard_tower: {
+      cost: {
+        player: { wood: 10, stone: 5, steel: 0, crystal: 3 },
+        ai: { wood: 10, stone: 5, steel: 0, crystal: 3 },
+      },
+      refund: { wood: 5 },
+      spawnTime: 7,
+    },
+  },
+
+  combat: {
+    unitAI: {
+      detectionRanges: {
+        [UnitType.ARCHER]: 6,
+        [UnitType.PALADIN]: 5,
+        [UnitType.SCOUT]: 7,
+        [UnitType.RIDER]: 4,
+        [UnitType.TREBUCHET]: 7,
+        [UnitType.HEALER]: 5,
+        [UnitType.ASSASSIN]: 6,
+        [UnitType.SHIELDBEARER]: 3,
+        [UnitType.BERSERKER]: 5,
+        [UnitType.BATTLEMAGE]: 6,
+        [UnitType.GREATSWORD]: 4,
+        default: 4,
+      },
+      kiteTriggerBonus: 1,
+      moveReaggro: {
+        squadAttackMoveBonus: 2,
+        defensiveBonus: 1,
+      },
+      miningPriorities: {
+        crystal: { threshold: 4, criticalThreshold: 1, urgency: 12, criticalUrgency: 20 },
+        iron: { threshold: 4, criticalThreshold: 1, urgency: 10, criticalUrgency: 18 },
+        gold: { threshold: 8, criticalThreshold: 2, urgency: 9, criticalUrgency: 16 },
+        clay: { threshold: 4, criticalThreshold: 1, urgency: 8, criticalUrgency: 15 },
+        stone: { threshold: 10, criticalThreshold: 3, urgency: 5, criticalUrgency: 14, fallbackUrgency: 3 },
+        steelDependencyThreshold: 3,
+        charcoalDependencyThreshold: 3,
+      },
+      miningSearch: {
+        minBaseDistance: 4,
+        maxRangeStone: 12,
+        maxRangeRare: 20,
+        maxReachFactor: 0.7,
+        clusterClaimBonus: -2,
+        clusterCaveBonus: -1,
+        buddyDistance: 4,
+        buddyBonus: -3,
+        idealBaseDistanceStone: 6,
+        idealBaseDistanceRare: 8,
+        baseDistancePenaltyFactor: 0.8,
+        travelPenaltyFactor: 0.6,
+      },
+      builder: {
+        wallBuildCooldown: 1.5,
+      },
+    },
+    highGround: {
+      threshold: 3,
+      attackBonus: 2,
+      defenseBonus: 2,
+    },
+    damage: {
+      attackerMultiplier: 4.5,
+      counterMultiplier: 3.5,
+    },
+    block: {
+      baseChance: 0.1,
+      defenseScaling: 0.05,
+      baseCap: 0.55,
+      shieldBonus: 0.15,
+      finalCap: 0.65,
+      damageMultiplier: 0.35,
+    },
+    deflect: {
+      damageMultiplier: 0.2,
+    },
+    experience: {
+      kill: 3,
+      hit: 1,
+      levelThresholdMultiplier: 5,
+      levelUpHealRatio: 0.3,
+    },
+    healer: {
+      projectileCooldown: 2.0,
+      healAmount: 3,
+    },
+    berserker: {
+      axeThrowDamageMultiplier: 0.4,
+      rageAttackBonusMax: 4,
+    },
+    assassin: {
+      fullHealthAttackBonus: 3,
+    },
+    paladin: {
+      auraRange: 2,
+      auraDefenseBonus: 2,
+    },
+    battlemage: {
+      splashRadius: 1,
+      splashDamageMultiplier: 0.75,
+    },
+    greatsword: {
+      cleaveRadius: 1,
+      cleaveDamageMultiplier: 0.6,
+      knockbackDistance: 1,
+    },
+    ogre: {
+      swipeRadius: 2,
+      swipeDamageMultiplier: 0.7,
+      knockbackDistance: 1,
+    },
+    shieldbearer: {
+      bashKnockbackDistance: 1,
+    },
+  },
+
+  timers: {
+    ai: {
+      economyTick: 3,
+      combatSpawn: 5,
+      workerSpawn: 4,
+      autoMarchStart: 3,
+      commanderTick: 1.5,
+    },
+    nature: {
+      maxHarvests: 3,
+      treeRegrowTime: 12,
+      treeGrowthTime: 10,
+      treeSproutInterval: 5,
+      treeSproutChance: 0.2,
+      regrowHarvestScale: 0.5,
+      grassGrowthTime: 8,
+      grassSpreadInterval: 6,
+      grassSpreadChance: 0.15,
+      grassSpreadMaxPerTick: 3,
+      initialGrassMatureChance: 0.5,
+      grassSpreadElevationCap: 3.0,
+    },
+  },
+
+  formation: {
+    boxMaxRadius: 5,
+    wedgeMaxRows: 6,
+    circleMaxRadius: 5,
+    aiRangedLineThreshold: 0.5,
+    aiWedgeMinUnits: 5,
+    aiMarchSpeedCatchupFactor: 0.3,
+    priorities: {
+      [UnitType.PALADIN]: 0,
+      [UnitType.WARRIOR]: 1,
+      [UnitType.RIDER]: 2,
+      [UnitType.LUMBERJACK]: 3,
+      [UnitType.BUILDER]: 3,
+      [UnitType.VILLAGER]: 3,
+      [UnitType.ARCHER]: 4,
+      [UnitType.MAGE]: 4,
+      [UnitType.TREBUCHET]: 5,
+      [UnitType.SCOUT]: 5,
+      default: 3,
+    },
+    aiPriorities: {
+      [UnitType.PALADIN]: 0,
+      [UnitType.GREATSWORD]: 0,
+      [UnitType.SHIELDBEARER]: 0,
+      [UnitType.WARRIOR]: 1,
+      [UnitType.BERSERKER]: 1,
+      [UnitType.RIDER]: 2,
+      [UnitType.LUMBERJACK]: 3,
+      [UnitType.BUILDER]: 3,
+      [UnitType.VILLAGER]: 3,
+      [UnitType.ARCHER]: 4,
+      [UnitType.MAGE]: 4,
+      [UnitType.BATTLEMAGE]: 4,
+      [UnitType.ASSASSIN]: 5,
+      [UnitType.SCOUT]: 5,
+      [UnitType.HEALER]: 6,
+      [UnitType.TREBUCHET]: 7,
+      default: 3,
+    },
+  },
+
+  economy: {
+    trade: {
+      sellWoodThreshold: 15,
+      sellWood: {
+        input: { wood: 4 },
+        output: { gold: 5 },
+      },
+      combatRewards: {
+        unitKillGold: 3,
+        siegeKillGold: 5,
+      },
+    },
+    recipes: {
+      rope: {
+        input: { grass_fiber: 3, clay: 2 },
+        output: { rope: 1 },
+      },
+      charcoal: {
+        input: { wood: 3, clay: 2 },
+        output: { charcoal: 2 },
+      },
+      steel: {
+        input: { iron: 2, charcoal: 1 },
+        output: { steel: 1 },
+      },
+    },
+    harvest: {
+      crops: {
+        foodYield: 3,
+      },
+      tree: {
+        plantCost: { wood: 1 },
+        woodYieldByAge: {
+          sapling: 2,
+          young: 4,
+          mature: 6,
+        },
+      },
+      grass: {
+        hayBase: 2,
+        hayVariance: 2,
+        fiberBase: 1,
+        fiberVariance: 2,
+      },
+    },
+    mining: {
+      defaultBlockYield: 1,
+      crystalYield: 3,
+    },
+    ai: {
+      charcoalTarget: 5,
+      steelTarget: 5,
+      workerCaps: {
+        lumberjack: 4,
+        builder: 4,
+        villager: 3,
+      },
+      spawnQueue: {
+        baseSize: 3,
+        maxSize: 8,
+      },
+    },
+  },
+
+  captureZone: {
+    captureDuration: 20,       // seconds for full capture
+    zoneRadius: 5,             // hex radius of capture zone
+    minAdvantage: 1,           // minimum unit advantage to make progress
+  },
+
+  tacticalGroup: {
+    minMusterSize: 2,          // minimum army size to start marching
+    maxMusterWait: 8,          // seconds before marching with partial army
+    reformDelay: 4,            // seconds without enemy contact before reforming
+    retreatThreshold: 0.35,    // health-weighted strength ratio to retreat
+  },
+
+  gather: {
+    lumberjackCooldown: 0.5,   // seconds between tree chops
+    builderMineCooldown: 0.8,  // seconds between builder mine swings
+    villagerGrassCooldown: 2.5,// seconds for grass gathering
+    villagerFarmCooldown: 4.0, // seconds for farm crop gathering
+    lumberjackChopCooldown: 3.0, // seconds between tree chops
+    initialConstructionDelay: 0.5, // seconds before first construction tick
+    constructionRate: 0.125,   // progress per tick (1/8 = 8 seconds to build)
+    constructionCooldown: 1.0, // seconds between construction ticks
+    wallBuildCooldown: 1.5,    // seconds between wall placements
+    healerCastDelay: 1200,     // ms for healer cast animation
+    workerFleeRange: 4,        // hex range for enemy detection flee
+    workerGroupFleeRange: 5,   // hex range for group flee
+    workerFleeDistance: 3,     // hex distance to flee from base
+  },
+} as const;

@@ -4,6 +4,10 @@
 
 import * as THREE from 'three';
 
+// --- Feature Flags ---
+/** Set to true to re-enable underground tunnels, lava tubes, and the Desert Tunnels map. */
+export const ENABLE_UNDERGROUND = false;
+
 // --- Grid & World Types ---
 
 export interface GridPosition {
@@ -94,6 +98,7 @@ export enum BlockType {
   WALL = 'wall',
   JUNGLE = 'jungle',
   CLAY = 'clay',
+  CRYSTAL = 'crystal',
   // Gem-infused stone — found only in lava tube tunnel walls
   GEM_RUBY = 'gem_ruby',
   GEM_EMERALD = 'gem_emerald',
@@ -203,7 +208,11 @@ export interface Unit {
   _garrisonKey?: string;            // Hex key "q,r" of the structure they're garrisoned in
   _squadId?: number | null;         // Squad assignment — units in same squad march together
   _squadSpeed?: number;             // Effective march speed (slowest unit in squad)
+  _squadObjective?: string;         // Squad objective label for HUD display (e.g. "CAPTURE", "ASSAULT")
+  _squadJoining?: boolean;          // True while unit is catching up to squad — uses own speed, excluded from centroid
+  _tacticalGroupId?: string;        // TacticalGroup assignment — coordinated combat
   _isKiting?: boolean;              // Ranged unit is fleeing from melee threat — don't re-aggro
+  _lastRepathTime?: number;         // Timestamp of last wall-repath to throttle pathfinding
   _pendingRangedDeath?: boolean;    // Unit killed by ranged attack — defer DEAD state until projectile lands
   _pendingDeathTimestamp?: number;  // Timestamp when _pendingRangedDeath was first detected (for safety cleanup)
   kills: number;                    // Total kills this unit has scored
@@ -225,7 +234,6 @@ export enum UnitType {
   ARCHER = 'archer',
   RIDER = 'rider',
   PALADIN = 'paladin',
-  CATAPULT = 'catapult',
   TREBUCHET = 'trebuchet',
   SCOUT = 'scout',
   MAGE = 'mage',
@@ -468,7 +476,20 @@ export interface AIBuildState {
   buildPhase: number;
   tacticsTimer: number;
   guardAssignments: Map<string, HexCoord>;
+  /** Persistent squad slots (1-4). Each squad persists across objectives. */
+  squads: PersistentSquad[];
 }
+
+/** A persistent squad slot — stays alive across objectives, absorbs stragglers */
+export interface PersistentSquad {
+  id: number;               // Squad display number (1–4)
+  objective: string;        // CAPTURE, ASSAULT, CHOKE, RALLY, DEFEND
+  target: HexCoord | null;  // Current objective position
+  stance: UnitStance;
+}
+
+/** Max squads per team */
+export const MAX_SQUADS_PER_TEAM = 4;
 
 export function createAIBuildState(): AIBuildState {
   return {
@@ -477,6 +498,7 @@ export function createAIBuildState(): AIBuildState {
     econTimer: -10, cmdTimer: 0, autoMarchTimer: 0, battleStarted: false,
     armySize: 0, waveNumber: 0, mustering: true, rallyTimer: 0, buildPhase: 0,
     tacticsTimer: 0, guardAssignments: new Map(),
+    squads: [],
   };
 }
 

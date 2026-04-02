@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType } from '../../types';
+import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType, UnitType } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import {
@@ -7,6 +7,7 @@ import {
   buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh,
   buildSmelterMesh, buildArmoryMesh, buildWizardTowerMesh
 } from './BuildingMeshFactory';
+import { GAME_CONFIG } from '../GameConfig';
 
 let nextBuildingId = 0;
 
@@ -55,15 +56,20 @@ class BuildingSystem {
   }
 
   getBuildingsOfKind(kind: BuildingKind, owner = 0): PlacedBuilding[] {
-    return this.placedBuildings.filter(pb => pb.kind === kind && pb.owner === owner);
+    return this.placedBuildings.filter(pb => pb.kind === kind && pb.owner === owner && !pb.isBlueprint);
   }
 
+  /** Peek at the next spawn building without advancing the round-robin index */
   getNextSpawnBuilding(kind: BuildingKind, owner = 0): PlacedBuilding | null {
     const buildings = this.getBuildingsOfKind(kind, owner);
     if (buildings.length === 0) return null;
     const idx = this.buildingSpawnIndex[kind] % buildings.length;
-    this.buildingSpawnIndex[kind] = idx + 1;
     return buildings[idx];
+  }
+
+  /** Advance the round-robin spawn index for a building kind. Call after actually spawning. */
+  advanceSpawnIndex(kind: BuildingKind): void {
+    this.buildingSpawnIndex[kind] = (this.buildingSpawnIndex[kind] ?? 0) + 1;
   }
 
   getBuildingAt(pos: HexCoord, owner?: number): PlacedBuilding | null {
@@ -75,12 +81,15 @@ class BuildingSystem {
 
   // --- Registry Methods ---
 
-  registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth = 200): PlacedBuilding {
+  registerBuilding(kind: BuildingKind, owner: number, pos: HexCoord, mesh: THREE.Group, maxHealth = 200, startAsBlueprint = true): PlacedBuilding {
     const pb: PlacedBuilding = {
       id: `bld_${nextBuildingId++}`,
       kind, owner, position: pos,
       worldPosition: this.ctx.hexToWorld(pos),
       mesh, health: maxHealth, maxHealth,
+      constructionProgress: startAsBlueprint ? 0 : 1,
+      isBlueprint: startAsBlueprint,
+      assignedBuilderId: null,
     };
     this.placedBuildings.push(pb);
     const key = `${pos.q},${pos.r}`;
@@ -88,7 +97,79 @@ class BuildingSystem {
     // Track in UnitAI so all units can auto-attack enemy buildings
     UnitAI.buildingPositions.add(key);
     UnitAI.buildingOwners.set(key, owner);
+
+    // Blueprint visual: make mesh semi-transparent + add wireframe overlay
+    if (startAsBlueprint) {
+      this.applyBlueprintVisual(mesh, 0);
+    }
     return pb;
+  }
+
+  /** Make building mesh semi-transparent and add blue wireframe to indicate blueprint state */
+  applyBlueprintVisual(mesh: THREE.Group, progress: number): void {
+    const baseOpacity = 0.2 + progress * 0.8; // 0.2 at start, 1.0 when done
+    mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mat = child.material as THREE.MeshLambertMaterial;
+        if (!mat.userData) mat.userData = {};
+        // Store original opacity on first call
+        if (mat.userData._origOpacity === undefined) {
+          mat.userData._origOpacity = mat.opacity;
+          mat.userData._origTransparent = mat.transparent;
+        }
+        mat.transparent = true;
+        mat.opacity = baseOpacity;
+        mat.needsUpdate = true;
+      }
+    });
+  }
+
+  /** Restore building mesh to full opacity when construction completes */
+  clearBlueprintVisual(mesh: THREE.Group): void {
+    mesh.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material) {
+        const mat = child.material as THREE.MeshLambertMaterial;
+        if (mat.userData?._origOpacity !== undefined) {
+          mat.opacity = mat.userData._origOpacity;
+          mat.transparent = mat.userData._origTransparent;
+          delete mat.userData._origOpacity;
+          delete mat.userData._origTransparent;
+          mat.needsUpdate = true;
+        }
+      }
+    });
+  }
+
+  /** Update construction progress — returns true when building completes */
+  advanceConstruction(pb: PlacedBuilding, amount: number): boolean {
+    if (!pb.isBlueprint) return false;
+    pb.constructionProgress = Math.min(1, pb.constructionProgress + amount);
+    this.applyBlueprintVisual(pb.mesh, pb.constructionProgress);
+    if (pb.constructionProgress >= 1) {
+      pb.isBlueprint = false;
+      pb.assignedBuilderId = null;
+      this.clearBlueprintVisual(pb.mesh);
+      return true; // construction complete
+    }
+    return false;
+  }
+
+  /** Find the nearest blueprint building for a given owner */
+  findNearestBlueprint(pos: HexCoord, owner: number): PlacedBuilding | null {
+    let best: PlacedBuilding | null = null;
+    let bestDist = Infinity;
+    for (let i = 0; i < this.placedBuildings.length; i++) {
+      const pb = this.placedBuildings[i];
+      if (pb.owner !== owner || !pb.isBlueprint) continue;
+      // Skip if already assigned to another builder
+      if (pb.assignedBuilderId) continue;
+      const dist = Math.abs(pb.position.q - pos.q) + Math.abs(pb.position.r - pos.r);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = pb;
+      }
+    }
+    return best;
   }
 
   unregisterBuilding(pb: PlacedBuilding): void {
@@ -210,24 +291,27 @@ class BuildingSystem {
   getBuildingQueueOptions(kind: BuildingKind): { type: string; label: string; costLabel: string }[] {
     switch (kind) {
       case 'barracks': return [
-        { type: 'warrior', label: 'Warrior', costLabel: '5g' },
-        { type: 'archer', label: 'Archer', costLabel: '8g' },
-        { type: 'rider', label: 'Rider', costLabel: '10g' },
-        { type: 'paladin', label: 'Paladin', costLabel: '6g' },
+        { type: 'warrior', label: 'Warrior', costLabel: `${GAME_CONFIG.units[UnitType.WARRIOR].costs.tooltipQueue.gold}g` },
+        { type: 'archer', label: 'Archer', costLabel: `${GAME_CONFIG.units[UnitType.ARCHER].costs.tooltipQueue.gold}g` },
+        { type: 'rider', label: 'Rider', costLabel: `${GAME_CONFIG.units[UnitType.RIDER].costs.tooltipQueue.gold}g` },
+        { type: 'paladin', label: 'Paladin', costLabel: `${GAME_CONFIG.units[UnitType.PALADIN].costs.tooltipQueue.gold}g` },
       ];
       case 'forestry': return [
-        { type: 'lumberjack', label: 'Lumberjack', costLabel: '3w' },
-        { type: 'scout', label: 'Scout', costLabel: '4w' },
+        { type: 'lumberjack', label: 'Lumberjack', costLabel: `${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.tooltipQueue.wood}w` },
+        { type: 'scout', label: 'Scout', costLabel: `${GAME_CONFIG.units[UnitType.SCOUT].costs.tooltipQueue.wood}w` },
       ];
       case 'masonry': return [
-        { type: 'builder', label: 'Builder', costLabel: '4w' },
+        { type: 'builder', label: 'Builder', costLabel: `${GAME_CONFIG.units[UnitType.BUILDER].costs.tooltipQueue.wood}w` },
       ];
       case 'farmhouse': return [
-        { type: 'villager', label: 'Villager', costLabel: '3w' },
+        { type: 'villager', label: 'Villager', costLabel: `${GAME_CONFIG.units[UnitType.VILLAGER].costs.tooltipQueue.wood}w` },
       ];
       case 'workshop': return [
-        { type: 'trebuchet', label: 'Trebuchet', costLabel: '6r+4s+4w' },
-        { type: 'catapult', label: 'Catapult', costLabel: '3r+3s+3w' },
+        {
+          type: 'trebuchet',
+          label: 'Trebuchet',
+          costLabel: `${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.rope}r+${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.stone}s+${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.wood}w`,
+        },
       ];
       case 'silo': return [];
       default: return [];
@@ -242,6 +326,17 @@ class BuildingSystem {
         pb.mesh.parent.remove(pb.mesh);
       }
       this.ctx.scene.remove(pb.mesh);
+      // Dispose GPU resources to prevent WebGL memory leaks on restart
+      pb.mesh.traverse((child: THREE.Object3D) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m: THREE.Material) => m.dispose());
+          } else {
+            (child.material as THREE.Material).dispose();
+          }
+        }
+      });
     }
     this.placedBuildings = [];
     this.wallConnectable.clear();
@@ -249,6 +344,9 @@ class BuildingSystem {
       barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0
     };
     nextBuildingId = 0;
+    // Clear UnitAI static collections to prevent phantom buildings in new matches
+    UnitAI.buildingPositions.clear();
+    UnitAI.buildingOwners.clear();
   }
 }
 

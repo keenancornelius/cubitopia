@@ -6,6 +6,7 @@
 import { HexCoord, TerrainType, GameMap } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
+import { GAME_CONFIG } from '../GameConfig';
 
 /** Slim interface — only what NatureSystem needs from the outside */
 export interface NatureOps {
@@ -50,21 +51,21 @@ export default class NatureSystem {
   /** How many times each tile has been harvested — regrowth chance decreases */
   harvestCount: Map<string, number> = new Map();
   /** Max harvests before a tile stops regrowing entirely */
-  private readonly MAX_HARVESTS = 3;
+  private readonly MAX_HARVESTS = GAME_CONFIG.timers.nature.maxHarvests;
 
-  readonly TREE_REGROW_TIME = 12;
-  readonly TREE_GROWTH_TIME = 10;
-  private readonly TREE_SPROUT_INTERVAL = 5;
-  private readonly TREE_SPROUT_CHANCE = 0.2;
+  readonly TREE_REGROW_TIME = GAME_CONFIG.timers.nature.treeRegrowTime;
+  readonly TREE_GROWTH_TIME = GAME_CONFIG.timers.nature.treeGrowthTime;
+  private readonly TREE_SPROUT_INTERVAL = GAME_CONFIG.timers.nature.treeSproutInterval;
+  private readonly TREE_SPROUT_CHANCE = GAME_CONFIG.timers.nature.treeSproutChance;
 
   // ── Grass state ──────────────────────────────────────────────
   grassAge: Map<string, number> = new Map();
   grassGrowthTimers: Map<string, number> = new Map();
   private grassSpreadTimer = 0;
 
-  readonly GRASS_GROWTH_TIME = 8;
-  private readonly GRASS_SPREAD_INTERVAL = 6;
-  private readonly GRASS_SPREAD_CHANCE = 0.15;
+  readonly GRASS_GROWTH_TIME = GAME_CONFIG.timers.nature.grassGrowthTime;
+  private readonly GRASS_SPREAD_INTERVAL = GAME_CONFIG.timers.nature.grassSpreadInterval;
+  private readonly GRASS_SPREAD_CHANCE = GAME_CONFIG.timers.nature.grassSpreadChance;
 
   /** Tiles where grass was harvested — eligible for crops */
   clearedPlains: Set<string> = new Set();
@@ -104,7 +105,7 @@ export default class NatureSystem {
     if (harvests >= this.MAX_HARVESTS) return; // exhausted — no more regrowth
 
     // Longer regrowth time with each harvest
-    const regrowTime = this.TREE_REGROW_TIME * (1 + harvests * 0.5);
+    const regrowTime = this.TREE_REGROW_TIME * (1 + harvests * GAME_CONFIG.timers.nature.regrowHarvestScale);
     this.treeRegrowthTimers.set(key, regrowTime);
   }
 
@@ -132,7 +133,7 @@ export default class NatureSystem {
     if (!map) return;
     for (const [key, tile] of map.tiles) {
       if (tile.terrain === TerrainType.PLAINS && this.ops.hasGrass(key)) {
-        const stage = Math.random() > 0.5 ? 2 : 1;
+        const stage = Math.random() > GAME_CONFIG.timers.nature.initialGrassMatureChance ? 2 : 1;
         this.grassAge.set(key, stage);
         if (stage < 2) {
           this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
@@ -270,12 +271,12 @@ export default class NatureSystem {
 
     let spreadCount = 0;
     for (const key of spreadCandidates) {
-      if (spreadCount >= 3) break;
+      if (spreadCount >= GAME_CONFIG.timers.nature.grassSpreadMaxPerTick) break;
       const [q, r] = key.split(',').map(Number);
       const neighbors = getHexNeighbors(q, r);
 
       for (const [nq, nr] of neighbors) {
-        if (spreadCount >= 3) break;
+        if (spreadCount >= GAME_CONFIG.timers.nature.grassSpreadMaxPerTick) break;
         const nKey = `${nq},${nr}`;
         const nTile = map.tiles.get(nKey);
         if (!nTile) continue;
@@ -283,7 +284,7 @@ export default class NatureSystem {
         if (this.grassAge.has(nKey)) continue;
         if (Pathfinder.blockedTiles.has(nKey)) continue;
         if (UnitAI.farmPatches.has(nKey)) continue;
-        if (nTile.elevation * 0.5 >= 3.0) continue;
+        if (nTile.elevation * 0.5 >= GAME_CONFIG.timers.nature.grassSpreadElevationCap) continue;
 
         if (Math.random() < this.GRASS_SPREAD_CHANCE) {
           this.ops.addGrassAtStage({ q: nq, r: nr }, nTile.elevation * 0.5, 0);

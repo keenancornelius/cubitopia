@@ -37,11 +37,6 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 0.8, attackSpeed: 0.6, color: 0x7f8c8d,
     carryCapacity: 4, isSiege: false,
   },
-  [UnitType.CATAPULT]: {
-    stats: { maxHealth: 6, attack: 6, defense: 0, movement: 1, range: 4 },
-    moveSpeed: 0.6, attackSpeed: 0.3, color: 0x8e44ad,
-    carryCapacity: 4, isSiege: true,
-  },
   [UnitType.TREBUCHET]: {
     stats: { maxHealth: 8, attack: 9, defense: 0, movement: 1, range: 6 },
     moveSpeed: 0.4, attackSpeed: 0.2, color: 0x5d4037,
@@ -53,7 +48,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 5, isSiege: false,
   },
   [UnitType.MAGE]: {
-    stats: { maxHealth: 8, attack: 5, defense: 1, movement: 2, range: 2 },
+    stats: { maxHealth: 8, attack: 5, defense: 1, movement: 2, range: 4 },
     moveSpeed: 1.2, attackSpeed: 0.8, color: 0x2980b9,
     carryCapacity: 4, isSiege: false,
   },
@@ -103,6 +98,12 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 0.9, attackSpeed: 0.7, color: 0x546e7a,
     carryCapacity: 0, isSiege: false,
   },
+  // --- Reward unit (spawns on base tier-up, cannot be queued) ---
+  [UnitType.OGRE]: {
+    stats: { maxHealth: 50, attack: 8, defense: 4, movement: 1, range: 1 },
+    moveSpeed: 0.6, attackSpeed: 0.4, color: 0x4e342e,
+    carryCapacity: 0, isSiege: true,  // Can smash walls/buildings
+  },
 };
 
 // Backward-compat export — UnitRenderer imports this
@@ -141,9 +142,10 @@ export class UnitFactory {
       stance: UnitStance.DEFENSIVE,
       isSiege: cfg.isSiege,
       kills: 0,
-      // Mages get a random elemental affinity
+      // Mages get a random starting element and cycle through all 5
       ...(type === UnitType.MAGE || type === UnitType.BATTLEMAGE ? {
         element: UnitFactory._randomElement(),
+        _elementCycleIndex: Math.floor(Math.random() * 5),
       } : {}),
       // Berserkers start with axe throw ready (one ranged attack per unique target)
       ...(type === UnitType.BERSERKER ? {

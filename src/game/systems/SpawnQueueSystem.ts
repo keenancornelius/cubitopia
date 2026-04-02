@@ -8,6 +8,9 @@ import { Unit, UnitType, UnitStance, HexCoord, BuildingKind, PlacedBuilding, Pla
 import { UnitFactory } from '../entities/UnitFactory';
 import { UnitAI } from './UnitAI';
 import { HUD } from '../../ui/HUD';
+import { FOOD_PER_COMBAT_UNIT } from './PopulationSystem';
+import { Pathfinder } from './Pathfinder';
+import { GAME_CONFIG } from '../GameConfig';
 
 // ── Queue item types ──
 
@@ -39,6 +42,7 @@ export interface SpawnQueueOps {
 
   // Building queries
   getNextSpawnBuilding(kind: BuildingKind, owner: number): PlacedBuilding | null;
+  advanceSpawnIndex(kind: BuildingKind): void;
   getFirstBuilding(kind: BuildingKind, owner: number): { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
 
   // Spawning helpers
@@ -59,6 +63,14 @@ export interface SpawnQueueOps {
 
   // Mode toggles (for "place building first" flow)
   toggleBuildingPlaceMode(kind: BuildingKind): void;
+
+  // Population cap (food-based)
+  canSpawnCombatUnit(owner: number): boolean;
+  getCombatPopInfo(owner: number): { current: number; cap: number };
+
+  // Food access — deducted when combat units spawn
+  getFoodStockpile(owner: number): number;
+  setFoodStockpile(owner: number, v: number): void;
 }
 
 const isCombatType = (t: UnitType) =>
@@ -111,6 +123,13 @@ export default class SpawnQueueSystem {
       return;
     }
     const debugFlags = ops.getDebugFlags();
+    // Pop cap check for combat units
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
+      const info = ops.getCombatPopInfo(0);
+      ops.playSound('queue_error', 0.4);
+      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      return;
+    }
     if (!debugFlags.freeBuild && cfg.getResource() < cost) {
       ops.playSound('queue_error', 0.4);
       ops.showNotification(`Need ${cost} ${cfg.resourceType} for ${name}! (have ${cfg.getResource()})`, '#e67e22');
@@ -129,8 +148,15 @@ export default class SpawnQueueSystem {
       ops.toggleBuildingPlaceMode('workshop');
       return;
     }
-    const cost = { wood: 5, stone: 5, rope: 3 };
+    const cost = { ...GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue };
     const debugFlags = ops.getDebugFlags();
+    // Pop cap check for combat units
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
+      const info = ops.getCombatPopInfo(0);
+      ops.playSound('queue_error', 0.4);
+      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      return;
+    }
     if (!debugFlags.freeBuild) {
       if (ops.getRope() < cost.rope) {
         ops.playSound('queue_error', 0.4);
@@ -163,6 +189,13 @@ export default class SpawnQueueSystem {
       return;
     }
     const debugFlags = ops.getDebugFlags();
+    // Pop cap check for combat units
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
+      const info = ops.getCombatPopInfo(0);
+      ops.playSound('queue_error', 0.4);
+      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      return;
+    }
     if (!debugFlags.freeBuild) {
       if (ops.getGold() < goldCost) {
         ops.playSound('queue_error', 0.4);
@@ -190,6 +223,13 @@ export default class SpawnQueueSystem {
       return;
     }
     const debugFlags = ops.getDebugFlags();
+    // Pop cap check for combat units
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
+      const info = ops.getCombatPopInfo(0);
+      ops.playSound('queue_error', 0.4);
+      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      return;
+    }
     if (!debugFlags.freeBuild) {
       if (ops.getGold() < goldCost) {
         ops.playSound('queue_error', 0.4);
@@ -223,35 +263,35 @@ export default class SpawnQueueSystem {
       canAfford: (item: any) => boolean; deductCost: (item: any) => void;
     }[] = [
       {
-        kind: 'barracks', color: '#e67e22', spawnTime: 5,
+        kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime,
         queue: this.spawnQueue,
         getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
         canAfford: (item: SimpleQueueItem) => ops.getGold() >= item.cost,
         deductCost: (item: SimpleQueueItem) => { ops.setGold(ops.getGold() - item.cost); },
       },
       {
-        kind: 'forestry', color: '#6b8e23', spawnTime: 5,
+        kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime,
         queue: this.forestrySpawnQueue,
         getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
         canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
         deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
       },
       {
-        kind: 'masonry', color: '#808080', spawnTime: 5,
+        kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime,
         queue: this.masonrySpawnQueue,
         getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
         canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
         deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
       },
       {
-        kind: 'farmhouse', color: '#d4a030', spawnTime: 5,
+        kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime,
         queue: this.farmhouseSpawnQueue,
         getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
         canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
         deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
       },
       {
-        kind: 'workshop', color: '#c9a96e', spawnTime: 8,
+        kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime,
         queue: this.workshopSpawnQueue,
         getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
         canAfford: (item: WorkshopQueueItem) =>
@@ -265,7 +305,7 @@ export default class SpawnQueueSystem {
         },
       },
       {
-        kind: 'armory', color: '#e67e22', spawnTime: 6,
+        kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime,
         queue: this.armorySpawnQueue,
         getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
         canAfford: (item: ArmoryQueueItem) =>
@@ -277,7 +317,7 @@ export default class SpawnQueueSystem {
         },
       },
       {
-        kind: 'wizard_tower', color: '#7c3aed', spawnTime: 7,
+        kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime,
         queue: this.wizardTowerSpawnQueue,
         getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
         canAfford: (item: WizardTowerQueueItem) =>
@@ -304,14 +344,22 @@ export default class SpawnQueueSystem {
         if (cfg.canAfford(next)) {
           cfg.deductCost(next);
           cfg.queue.shift();
-          const spawnBuilding = ops.getNextSpawnBuilding(cfg.kind as any, 0)!;
-          const pos = ops.findSpawnTile(map, spawnBuilding.position.q, spawnBuilding.position.r, true);
+          // Use the already-peeked building (no double-advance)
+          const pos = ops.findSpawnTile(map, building.position.q, building.position.r, true);
+          ops.advanceSpawnIndex(cfg.kind as any);
+          // Mark tile occupied immediately to prevent same-frame stacking
+          Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
           const unit = UnitFactory.create(next.type, 0, pos);
           const wp = ops.hexToWorld(pos);
           unit.worldPosition = { ...wp };
           ops.addUnitToGame(unit);
           ops.addUnitToRenderer(unit, ops.getElevation(pos));
           ops.playSound('unit_spawn', 0.45);
+          // Deduct food for combat units (3 food per combat unit)
+          if (isCombatType(unit.type)) {
+            const currentFood = ops.getFoodStockpile(0);
+            ops.setFoodStockpile(0, Math.max(0, currentFood - FOOD_PER_COMBAT_UNIT));
+          }
           ops.updateResources();
           // Rally point
           const rallySlot = ops.getRallyFormationSlot(cfg.kind as any, unit);
@@ -336,13 +384,13 @@ export default class SpawnQueueSystem {
   /** Get current queue entries for HUD (called by main.ts to combine with AI queues) */
   getQueueHUDEntries(debugFlags: { instantSpawn: boolean }): { kind: string; color: string; items: { type: UnitType }[]; timerProgress: number }[] {
     const configs = [
-      { kind: 'barracks', color: '#e67e22', spawnTime: 5, queue: this.spawnQueue, timer: this.spawnTimer },
-      { kind: 'forestry', color: '#6b8e23', spawnTime: 5, queue: this.forestrySpawnQueue, timer: this.forestrySpawnTimer },
-      { kind: 'masonry', color: '#808080', spawnTime: 5, queue: this.masonrySpawnQueue, timer: this.masonrySpawnTimer },
-      { kind: 'farmhouse', color: '#d4a030', spawnTime: 5, queue: this.farmhouseSpawnQueue, timer: this.farmhouseSpawnTimer },
-      { kind: 'workshop', color: '#c9a96e', spawnTime: 8, queue: this.workshopSpawnQueue, timer: this.workshopSpawnTimer },
-      { kind: 'armory', color: '#e67e22', spawnTime: 6, queue: this.armorySpawnQueue, timer: this.armorySpawnTimer },
-      { kind: 'wizard_tower', color: '#7c3aed', spawnTime: 7, queue: this.wizardTowerSpawnQueue, timer: this.wizardTowerSpawnTimer },
+      { kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime, queue: this.spawnQueue, timer: this.spawnTimer },
+      { kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime, queue: this.forestrySpawnQueue, timer: this.forestrySpawnTimer },
+      { kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime, queue: this.masonrySpawnQueue, timer: this.masonrySpawnTimer },
+      { kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime, queue: this.farmhouseSpawnQueue, timer: this.farmhouseSpawnTimer },
+      { kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime, queue: this.workshopSpawnQueue, timer: this.workshopSpawnTimer },
+      { kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime, queue: this.armorySpawnQueue, timer: this.armorySpawnTimer },
+      { kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime, queue: this.wizardTowerSpawnQueue, timer: this.wizardTowerSpawnTimer },
     ];
 
     return configs.map(cfg => ({
@@ -377,33 +425,31 @@ export default class SpawnQueueSystem {
   queueUnitFromTooltip(unitType: string, buildingKind: BuildingKind): void {
     switch (buildingKind) {
       case 'barracks': {
-        const costs: Record<string, number> = { warrior: 5, archer: 8, rider: 10, paladin: 6 };
-        const cost = costs[unitType] ?? 5;
         const type = unitType === 'archer' ? UnitType.ARCHER :
                      unitType === 'rider' ? UnitType.RIDER :
                      unitType === 'paladin' ? UnitType.PALADIN : UnitType.WARRIOR;
+        const cost = GAME_CONFIG.units[type].costs.tooltipQueue.gold;
         this.doSpawnQueueGeneric('barracks', type, cost, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase());
         break;
       }
       case 'forestry': {
-        const costs: Record<string, number> = { lumberjack: 3, scout: 4 };
-        const cost = costs[unitType] ?? 3;
         const type = unitType === 'scout' ? UnitType.SCOUT : UnitType.LUMBERJACK;
+        const cost = GAME_CONFIG.units[type].costs.tooltipQueue.wood;
         this.doSpawnQueueGeneric('forestry', type, cost, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase());
         break;
       }
       case 'masonry': {
         const type = UnitType.BUILDER;
-        this.doSpawnQueueGeneric('masonry', type, 4, 'Builder');
+        this.doSpawnQueueGeneric('masonry', type, GAME_CONFIG.units[type].costs.tooltipQueue.wood, 'Builder');
         break;
       }
       case 'farmhouse': {
         const type = UnitType.VILLAGER;
-        this.doSpawnQueueGeneric('farmhouse', type, 3, 'Villager');
+        this.doSpawnQueueGeneric('farmhouse', type, GAME_CONFIG.units[type].costs.tooltipQueue.wood, 'Villager');
         break;
       }
       case 'workshop': {
-        const type = unitType === 'catapult' ? UnitType.CATAPULT : UnitType.TREBUCHET;
+        const type = UnitType.TREBUCHET;
         this.doSpawnQueueWorkshop(type, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase());
         break;
       }

@@ -5,6 +5,7 @@
 
 import { HexCoord, TerrainType, Tile, UnitType, Unit, FormationType } from '../../types';
 import { Pathfinder } from './Pathfinder';
+import { GAME_CONFIG } from '../GameConfig';
 
 /** Minimal map interface for tile validation */
 interface TileMap {
@@ -47,7 +48,7 @@ export function generateBoxFormation(center: HexCoord, count: number, tiles: Til
   const slots: HexCoord[] = [center];
   if (count <= 1) return slots;
 
-  for (let radius = 1; slots.length < count && radius <= 5; radius++) {
+  for (let radius = 1; slots.length < count && radius <= GAME_CONFIG.formation.boxMaxRadius; radius++) {
     const ring = getHexRing(center, radius);
     ring.sort((a, b) => {
       // Offset (odd-q) to cube distance
@@ -103,7 +104,7 @@ export function generateWedgeFormation(center: HexCoord, count: number, tiles: T
       }
     }
     row++;
-    if (row > 6) break;
+    if (row > GAME_CONFIG.formation.wedgeMaxRows) break;
   }
   return slots;
 }
@@ -111,7 +112,7 @@ export function generateWedgeFormation(center: HexCoord, count: number, tiles: T
 /** Circle formation: concentric rings (no center unit) */
 export function generateCircleFormation(center: HexCoord, count: number, tiles: TileMap): HexCoord[] {
   const slots: HexCoord[] = [];
-  for (let radius = 1; slots.length < count && radius <= 5; radius++) {
+  for (let radius = 1; slots.length < count && radius <= GAME_CONFIG.formation.circleMaxRadius; radius++) {
     const ring = getHexRing(center, radius);
     const step = Math.max(1, Math.floor(ring.length / Math.min(count - slots.length, ring.length)));
     for (let i = 0; i < ring.length && slots.length < count; i += step) {
@@ -146,17 +147,16 @@ export function generateFormation(
  */
 export function getUnitFormationPriority(unit: Unit): number {
   switch (unit.type) {
-    case UnitType.PALADIN:       return 0;
-    case UnitType.WARRIOR:        return 1;
-    case UnitType.RIDER:          return 2;
-    case UnitType.LUMBERJACK:
-    case UnitType.BUILDER:
-    case UnitType.VILLAGER:       return 3;
-    case UnitType.ARCHER:
-    case UnitType.MAGE:           return 4;
-    case UnitType.CATAPULT:
-    case UnitType.TREBUCHET:
-    case UnitType.SCOUT:          return 5;
-    default:                      return 3;
+    case UnitType.PALADIN:       return GAME_CONFIG.formation.priorities[UnitType.PALADIN];
+    case UnitType.WARRIOR:       return GAME_CONFIG.formation.priorities[UnitType.WARRIOR];
+    case UnitType.RIDER:         return GAME_CONFIG.formation.priorities[UnitType.RIDER];
+    case UnitType.LUMBERJACK:    return GAME_CONFIG.formation.priorities[UnitType.LUMBERJACK];
+    case UnitType.BUILDER:       return GAME_CONFIG.formation.priorities[UnitType.BUILDER];
+    case UnitType.VILLAGER:      return GAME_CONFIG.formation.priorities[UnitType.VILLAGER];
+    case UnitType.ARCHER:        return GAME_CONFIG.formation.priorities[UnitType.ARCHER];
+    case UnitType.MAGE:          return GAME_CONFIG.formation.priorities[UnitType.MAGE];
+    case UnitType.TREBUCHET:     return GAME_CONFIG.formation.priorities[UnitType.TREBUCHET];
+    case UnitType.SCOUT:         return GAME_CONFIG.formation.priorities[UnitType.SCOUT];
+    default:                     return GAME_CONFIG.formation.priorities.default;
   }
 }

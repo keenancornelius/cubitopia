@@ -7,6 +7,50 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 **Dev server:** `npx vite dev` → localhost:5173
 **Type check:** `npx tsc --noEmit`
 **Build:** `npx vite build`
+**Codebase size:** ~42,068 lines across ~42 TypeScript files (as of 2026-04-01)
+
+---
+
+## Project Goals & Priorities
+
+### Revenue Target
+Ship on **Steam** (desktop) and/or **App Store** (mobile via web wrapper or native port). The game must reach a quality bar where players would pay for it. Every decision should be evaluated against: "does this make the game more fun, more polished, or more shippable?"
+
+### Architecture Goals (Priority 1 — Unblocks Everything Else)
+These must be addressed BEFORE adding major new features. Technical debt is actively slowing iteration.
+
+1. ~~**Shrink main.ts to <3000 lines**~~ **DONE (2026-04-01).** Currently **2938 lines** (down from 5043, 42% cut). Extracted modules: InputManager (1205), MapInitializer (560), RallyPointSystem (229), InteractionStateMachine (241), SquadIndicatorSystem (87), LifecycleUpdater (137), DebugOverlayRenderer (93). Moved: _updateMusic → ProceduralMusic.updateFromGameState(), spawnClickIndicator → Renderer, spawnTestArmies + spawnFormationArmy → DebugController, killSelected → DebugController. Removed: 37 dead legacy ISM getters.
+2. ~~**Split UnitRenderer.ts (8981 lines)**~~ **DONE (2026-04-01).** UnitRenderer.ts is now a 938-line facade. Heavy logic split into: UnitModels.ts (3526 lines — mesh factories), UnitAnimations.ts (2158 — idle/attack/move/hit), ProjectileSystem.ts (1505 — all projectile/spell methods), UnitVFX.ts (1053 — health bars, selection rings, particles, effects). Public API preserved — no external import changes needed.
+3. ~~**Consolidate placement mode flags**~~ **DONE (2026-04-01).** Replaced 26 boolean flags + 10 rotation fields with `InteractionStateMachine.ts` — typed discriminated union FSM with proper enter/exit transitions. See `src/game/InteractionStateMachine.ts`.
+4. ~~**Centralize magic numbers**~~ **DONE (2026-04-01).** `src/game/GameConfig.ts` (500+ lines) centralizes all balance constants: unit costs, building costs, AI weights, combat values (damage/block/deflect/XP), timers, formation params, economy recipes, mining priorities, boids perception radii, capture zone params, tactical group thresholds, and gather cooldowns. Used by 10+ consumer files via `GAME_CONFIG.*` references.
+
+### Performance Goals (Priority 2 — Required for Shipping)
+These directly affect whether the game feels good to play.
+
+1. ~~**Chunked voxel meshing.**~~ **DONE (2026-04-01).** VoxelBuilder refactored to 8×8 hex chunks with per-chunk InstancedMesh + dirty flagging. Mining now rebuilds only the affected chunk (~64 tiles) instead of the entire map. `markTileDirty()` auto-marks edge-adjacent neighbor chunks for seamless pit walls. `flushDirtyChunks()` called once per frame from game loop. Full rebuild preserved as fallback for map init and debug.
+2. **InstancedMesh for repeated objects.** Trees, grass tufts, decorations, and potentially units of the same type. Cuts draw calls from thousands to dozens.
+3. ~~**Reduce raycasting.**~~ **DONE (2026-04-01).** Eliminated 3 expensive `intersectObjects(scene.children, true)` calls: main.ts `raycastToHex` (per-frame hover), SelectionManager `screenToWorld` (right-click), InputManager attack-move click. Replaced with O(1) ground-plane intersection + `worldToHex` math. Building/base click detection kept as targeted raycasts against small mesh arrays.
+4. ~~**Profile and optimize the game loop.**~~ **DONE (2026-04-01).** Added `Renderer.getPerfInfo()` exposing WebGL draw calls, triangles, textures, geometries. Performance overlay (F3 key) shows live FPS, draw calls, triangle count, unit count, game speed. Updates at 2Hz to avoid overhead.
+
+### Gameplay Goals (Priority 3 — Makes the Game Fun)
+Build on the strong foundation of hex combat, capture zones, and economy.
+
+1. **Make AI feel alive.** Squads should march visibly, capture bases in sequence, and put real pressure on the player. Currently squads stall and lack urgency.
+2. **Polish combat readability.** Players should instantly understand what's happening in a battle — who's winning, which units to focus, when to retreat.
+3. **Economy depth.** The resource chain (iron → steel, wood → charcoal) is good. Add trade-offs and strategic choices (which buildings to prioritize, tech paths).
+4. **Map variety.** Different map types should create genuinely different games. Island maps, chokepoint maps, resource-scarce maps.
+5. **Win condition clarity.** Capture the enemy capital is clear, but the path to get there should feel like a strategic journey with decision points.
+
+### Future Goals (Not Yet — Requires Architecture First)
+- **Tribe/faction system** — different unit rosters, tech trees, visual themes per faction
+- **Multiplayer** — deterministic simulation, command serialization, netcode. Requires eliminating Math.random() in game logic and separating view from simulation.
+- **Mobile support** — touch controls, performance scaling, responsive UI
+- **Mod support** — data-driven configs for units, buildings, maps
+
+### Non-Goals (Avoid Scope Creep)
+- Realistic graphics (we're voxel — lean into it)
+- Complex diplomacy/trade (keep it combat + economy focused)
+- Procedural story/campaign (focus on skirmish replayability first)
 
 ---
 
@@ -69,6 +113,7 @@ After each commit, pause and run through these checks before moving on. This is 
 - Delete dead code paths, unused imports, orphaned type declarations
 - Update line counts in CLAUDE.md if they've drifted by more than 50 lines
 - Check if any Mistakes Log entries are now irrelevant (problem fully resolved, code deleted)
+- For each change, examine the existing system and redesign it into the most elegant solution that would have emerged if the change had been a foundational assumption from the start.
 
 If any check fails, fix it before starting the next task. The 5 minutes spent here saves hours of drift.
 
@@ -165,8 +210,8 @@ Leg swing + arm counter-swing + body bob. Usually simpler than idle/attack. Same
 ## Project Architecture
 
 ### Key Files
-- `src/main.ts` — **Central orchestrator (~4084 lines, down from ~6275)**. Contains the `Cubitopia` class with game loop, data-driven building placement, and input handling. Delegates subsystems via adapter interfaces. **NOTE:** Grew from ~3880 with underground/surface base creation on standard maps, arena spawn jitter, selection type-toggle wiring, unit stats panel. Next extraction target: InputManager (~700 lines of event handlers) once placement mode state is consolidated. Underground/surface base setup (~60 lines) could move to a MapSetup module.
-- `src/game/systems/AIController.ts` — **AI brain (~1187 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), unified weighted roster spawning from all available buildings, squad dispatch system (formation + shared march speed), territory-first 3-phase commander (Phase 1.7 early capture → territory capture → capital assault), guard tactics, structure garrison (auto-garrisons archers/mages in gates). Uses `AIBuildingOps` + `AIGarrisonOps` slim interfaces.
+- `src/main.ts` — **Central orchestrator (~3484 lines, TARGET: <3000)**. Down from 5043 after extracting InputManager, MapInitializer, RallyPointSystem, and dead code cleanup. Still a god-class but manageable. **RULE: Must shrink, not grow. Every new feature MUST extract code to offset additions.** Next extraction targets: split initSystems() into helper methods, extract debug spawn methods to DebugController, split updateRTS() into phase methods.
+- `src/game/systems/AIController.ts` — **AI brain (~1238 lines)**. Economy build phases 0-8 (includes Smelter, Armory, Wizard Tower), auto-crafting (charcoal, steel), unified weighted roster spawning from all available buildings, squad dispatch system (formation + shared march speed), territory-first 3-phase commander (Phase 1.7 early capture → territory capture → capital assault), guard tactics, structure garrison (auto-garrisons archers/mages in gates). Uses `AIBuildingOps` + `AIGarrisonOps` slim interfaces.
 - `src/game/systems/BuildingSystem.ts` — **Building registry (~255 lines)**. Owns `placedBuildings[]`, `wallConnectable`, spawn index. Delegates mesh creation to BuildingMeshFactory. Syncs UnitAI.buildingPositions/buildingOwners on register/unregister.
 - `src/game/systems/WallSystem.ts` — **Wall & gate system (~447 lines)**. Owns all wall/gate state, construction, damage, mesh management. Uses `WallSystemOps` callback interface for main.ts operations.
 - `src/game/systems/ResourceManager.ts` — **Resource deposits & crafting (~346 lines)**. Deposit handlers (wood, stone, food, iron, clay, grass fiber) with collection notifications, crafting (rope, charcoal, steel smelting), stockpile visuals for all 10 resource types.
@@ -179,19 +224,21 @@ Leg swing + arm counter-swing + body bob. Usually simpler than idle/attack. Same
 - `src/game/systems/NatureSystem.ts` — **Vegetation simulation (~321 lines)**. Tree regrowth/sprouting, grass growth/spreading, grass tracking. Owns all vegetation lifecycle state. Uses `NatureOps` slim interface.
 - `src/ui/MenuController.ts` — **Main menu with map selector (~256 lines)**. Game mode + map type selection, game-over screen. Uses `MenuCallbacks` interface (onStartGame(mode, mapType), onPlayAgain).
 - `src/game/systems/DebugController.ts` — **Debug/playtester commands (~267 lines)**. All debug commands (spawn, resources, kill, heal, buff, teleport, instant win/lose, clear terrain). Uses `DebugOps` slim interface.
-- `src/game/systems/UnitAI.ts` — **Unit behavior (~2727 lines)**. Stances, combat targeting, movement, worker AI, pathfinding commands. Static helpers: isUndergroundBase(), findAdjacentEnemyBuilding(). Tracks buildingPositions/buildingOwners for auto-attack.
+- `src/game/systems/UnitAI.ts` — **Unit behavior (~3241 lines)**. Stances, combat targeting, movement, worker AI, pathfinding commands. Static helpers: isUndergroundBase(), findAdjacentEnemyBuilding(). Tracks buildingPositions/buildingOwners for auto-attack.
 - `src/game/systems/CombatEventHandler.ts` — **Combat event processing (~419 lines)**. Processes all UnitAI events: damage visuals, projectiles, unit deaths, AoE splash, cleave knockback, XP/level-up, worker tasks (build/chop/mine/harvest), building damage. Uses `CombatEventOps` slim interface.
 - `src/game/systems/SpawnQueueSystem.ts` — **Spawn queue management (~430 lines)**. All 7 player spawn queues (barracks, forestry, masonry, farmhouse, workshop, armory, wizard_tower). Queue processing, cost deduction, unit creation, HUD updates. Uses `SpawnQueueOps` slim interface.
-- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~320 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, shield deflect (80% ranged damage reduction for shieldbearers/paladins), battlemage AoE, greatsword cleave + knockback, healer tick.
+- `src/game/systems/CombatSystem.ts` — **Combat resolution + abilities (~370 lines)**. Polytopia-like damage formula + berserker rage, assassin burst, shieldbearer aura, shield deflect (80% ranged damage reduction for shieldbearers/paladins), battlemage AoE, greatsword cleave + knockback, ogre club swipe (2-hex AOE + knockback), healer tick.
+- `src/game/systems/BaseUpgradeSystem.ts` — **Base tier progression (~175 lines)**. Checks tier requirements (population + unique buildings in 5-hex zone). Emits BaseUpgradeEvent. Uses `BaseUpgradeOps` slim interface.
+- `src/game/systems/PopulationSystem.ts` — **Food population cap (~110 lines)**. Tracks combat units vs food-based cap (2 food per unit). Workers free. Uses `PopulationOps` slim interface.
 - `src/game/systems/CaptureZoneSystem.ts` — **Zone control capture (~400 lines)**. 5-hex radius capture zones around all bases. Unit majority = capture progress. Visual ring, light column, progress bar. Y-distance layer check for underground bases. Emits CaptureEvent on flip.
 - **Underground elevation safety**: `main.ts hexToWorld(coord, underground?)` now accepts underground parameter. Per-frame Y correction in game loop snaps underground units to tunnel floor if their Y drifts (e.g., from knockback). CombatEventHandler knockback uses underground-aware hexToWorld.
-- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (17 types). Adding a unit = adding one config entry.
+- `src/game/entities/UnitFactory.ts` — **Data-driven unit config (~153 lines)**. Single `UNIT_CONFIG` table per UnitType (18 types including Ogre). Adding a unit = adding one config entry.
 - `src/game/MapPresets.ts` — **Map type configs + arena generators (~660 lines)**. MAP_PRESETS data, generateArenaMap(), generateDesertTunnelsMap(), MapGenParams for generator overrides. Desert Tunnels: central cavern + 2 side caverns with neutral outposts, 3-4 surface entrances, deep tunnel network.
 - `src/engine/SoundManager.ts` — **Procedural audio (~905 lines)**. Web Audio API synthesized SFX (26 sounds). Zero asset files. Melee/ranged/siege/pierce/cleave/blunt hits, shield_deflect (metallic ping + clatter), death, heal, level_up (triumphant brass fanfare), AoE splash, UI sounds, queue_confirm/queue_error/craft_confirm feedback, unit_spawn pop.
-- `src/ui/HUD.ts` — **All UI (~3061 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel, capture zone HUD cards, unit stats panel (I key toggle), elevation slicer with Web Audio thwip sounds, selection type-toggle badges for squad filtering. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection. `onSelectionFiltered()` callback for type-toggle → SelectionManager integration.
+- `src/ui/HUD.ts` — **All UI (~3106 lines)**. Resource panel with dropdown groups, build buttons (10 building types), unit spawn buttons (Armory/Wizard Tower sections), crafting buttons, help overlay, spawn queues, stance panel, capture zone HUD cards, unit stats panel (I key toggle), elevation slicer with Web Audio thwip sounds, selection type-toggle badges for squad filtering. Debug flags/gameSpeed/spawnCount properties remain here (read by main.ts). `HUD.isCombatType()` static method for combat unit detection. `onSelectionFiltered()` callback for type-toggle → SelectionManager integration.
 - `src/ui/DebugPanel.ts` — **Unified tabbed debug panel (~777 lines)**. Three tabs: TOOLS (debug toggles, game speed, spawn buttons), ARMY (composition editor with presets + per-unit counters + mirror mode), COMBAT (live combat log with filters). Toggle with backtick, F9 opens directly to COMBAT tab. Uses `DebugPanelCallbacks` interface to decouple from main.ts.
 - `src/ui/ArenaDebugConsole.ts` — **Combat log engine (~191 lines)**. Static `CombatLog` class provides global event logging from UnitAI/CombatSystem with dedup maps for TARGET/PEEL/KITE events. `reset()` for clean game starts. Old UI class removed.
-- `src/engine/UnitRenderer.ts` — **3D unit rendering (~7153 lines)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs, deflected arrows with comical tumble+sparks), AoE explosions, combat strafing, trail particles, health bars, labels.
+- `src/engine/UnitRenderer.ts` — **3D unit rendering (~8981 lines, LARGEST FILE)**. Unit mesh generation (17 elaborate models with oversized weapons), attack animations (weapon-specific), swing streak VFX, projectile systems (arrows, magic orbs, deflected arrows with comical tumble+sparks), AoE explosions, combat strafing, trail particles, health bars, labels.
 - `src/types/index.ts` — All TypeScript interfaces and enums (Unit, UnitType, UnitStance, MapType, MapPreset, etc.)
 - `src/game/systems/Pathfinder.ts` — Hex grid A* pathfinding with blocked tiles, wall awareness
 - `src/engine/Renderer.ts` — Three.js scene setup, lighting
@@ -246,7 +293,7 @@ Called from main.ts only for AI players. Makes strategic decisions:
 - **Re-aggro:** Combat units check for threats while moving (attack-move or aggressive stance units redirect to new targets entering detection range)
 - **Squad March:** Units assigned to a squad (`_squadId`, `_squadSpeed` on Unit interface) use shared march speed instead of individual moveSpeed. Squad dissolves when units arrive or break off to fight.
 
-### Unit Types (17 total)
+### Unit Types (18 total)
 | Type | Enum | Role | Special |
 |------|------|------|---------|
 | Warrior | WARRIOR | Melee DPS | Oversized broadsword + buckler shield |
@@ -266,6 +313,43 @@ Called from main.ts only for AI players. Makes strategic decisions:
 | Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP, ranged axe throw (range 7) once per unique target (slows + chase boost), deflected by shields |
 | Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
 | Greatsword | GREATSWORD | Cleave melee | Massive claymore, 360° spin hits all adjacent, knockback |
+| Ogre | OGRE | Reward tank | FREE on base tier-up. 50 HP, 8 ATK, 2-hex AOE club smash + knockback. Cannot be trained. 1.4x scale, isSiege |
+
+### Base Tier System
+Bases upgrade through 3 tiers based on population count + unique building diversity in the capture zone (5-hex radius):
+
+| Tier | Name | Pop Required | Unique Buildings | Reward |
+|------|------|-------------|-----------------|--------|
+| 0 | Camp | 0 | 0 | Starting tier |
+| 1 | Fort | 30 | 3 | Free Ogre |
+| 2 | Castle | 60 | 6 | Free Ogre |
+
+All bases (player + neutral + captured) start as Camp. Neutral bases captured at Camp tier.
+
+### Food Population Cap
+Food controls max combat unit count. Workers (Builder, Lumberjack, Villager) are FREE.
+
+- FOOD_PER_COMBAT_UNIT = 2 (every 2 food supports 1 combat unit)
+- STARTING_FOOD = 30 (15 combat unit starting cap)
+- Pop cap enforced at queue time (SpawnQueueSystem + AIController)
+- HUD shows current/cap in resource bar, color-coded (green/orange/red)
+
+Key files: `PopulationSystem.ts`, `BaseUpgradeSystem.ts`, `SpawnQueueSystem.ts` (pop cap checks), `AIController.ts` (AI pop cap)
+
+### Builder Construction System
+Player buildings are placed as **blueprints** (transparent, non-functional). A builder unit must walk to the blueprint and construct it (~8 seconds). AI buildings are placed instantly.
+
+- `PlacedBuilding.isBlueprint` / `.constructionProgress` (0..1) / `.assignedBuilderId` — tracks construction state
+- `BuildingSystem.advanceConstruction()` — ticks progress, applies visual opacity, fires completion
+- `BuildingSystem.applyBlueprintVisual()` / `clearBlueprintVisual()` — transparency transitions
+- `UnitAI.handleConstructing()` — builder ticks construction, emits `builder:construct_tick` events
+- `UnitAI.findNearestBlueprint()` — idle builders auto-seek unassigned blueprints
+- `UnitState.CONSTRUCTING` / `CommandType.CONSTRUCT` — new state/command for builders
+- `UnitRenderer.animateConstructing()` — overhead hammer swing animation
+- Post-placement hooks (UnitAI positions) fire on completion, not placement
+- `getBuildingsOfKind()` filters out blueprints — spawn queues only work from completed buildings
+
+Key files: `BuildingSystem.ts`, `UnitAI.ts` (handleConstructing, findNearestBlueprint), `CombatEventHandler.ts` (construct_tick), `UnitRenderer.ts` (animateConstructing)
 
 ---
 
@@ -404,7 +488,17 @@ Resolved items are struck through. Remaining items should be addressed during th
 
 7. **`regenerateMap()` and `restartGame()` share ~90% code**: The cleanup logic is duplicated between these two methods. Should extract a shared `cleanupGameState()` method and have both call it.
 
-8. **HUD.ts now ~2519 lines**: Grew with capture zone HUD cards, selection panel capture action, and help menu updates. The help overlay (~300 lines), stance panel, spawn queue display, capture zone HUD, and selection panel could be extracted into separate files.
+8. **HUD.ts now ~3106 lines**: Continues to grow. The help overlay (~300 lines), stance panel, spawn queue display, capture zone HUD, and selection panel could be extracted into separate files.
+
+9. **main.ts at ~5043 lines**: The "shrink main.ts" mission has regressed badly. Was 2998, now 5043. Placement mode boolean flags (9 booleans + 9 rotation angles) should become a PlacementState state machine. InputManager extraction is overdue.
+
+10. **UnitRenderer.ts at ~8981 lines**: The single largest file. Unit model definitions, animations (idle/attack/move/hit), VFX, projectiles, health bars, labels, and squad indicators all in one file. Should be split into: UnitModels.ts (mesh factories), UnitAnimations.ts (animation logic), ProjectileSystem.ts, and UnitVFX.ts.
+
+11. **No chunked voxel meshing**: Every mine/harvest triggers a full map voxel rebuild. This is the single biggest performance bottleneck and will become critical with larger maps.
+
+12. **No InstancedMesh usage**: Every tree, grass tuft, and unit is an individual mesh. Draw calls scale linearly with entity count. InstancedMesh for repeated objects would dramatically reduce draw calls.
+
+13. **Magic numbers everywhere**: Costs, timers, distances, thresholds scattered through code as literals. Need a centralized GameConfig/Constants module.
 
 ---
 
@@ -425,12 +519,26 @@ Converting from single-building references to `placedBuildings[]` array caused ~
 ### 2024-03-29: Workshop Duplicate Fields
 `workshop` and `workshopMesh` were declared as both explicit fields AND getter properties, causing TypeScript duplicate declaration errors. Fixed by removing the old explicit fields.
 
+### 2026-04-01: Spawn Building Rotation Bug
+`BuildingSystem.getNextSpawnBuilding()` advanced the round-robin index every call. `SpawnQueueSystem` called it once to check existence (line 333) and again to get the spawn position (line 345), causing every spawn to skip a building. Fix: `getNextSpawnBuilding()` now peeks without advancing; new `advanceSpawnIndex()` method called only after a successful spawn.
+
+### 2026-04-01: Debug Kill Button Wiring
+The debug panel "Kill" button callback was wired through `main.respawnSelectedUnits()` — a confusingly-named method that actually killed units. Moved the kill logic to `DebugController.killSelected()` where it belongs, and removed the dead method from main.ts (-22 lines).
+
 ---
 
-## Current Mission: Reduce main.ts Complexity
+## Current Mission: Architecture Cleanup & Performance
 
-### Goal
-Shrink `src/main.ts` (currently **~2998 lines**, down from ~6275) to a manageable size by extracting self-contained subsystems into dedicated modules. ~3277 lines extracted/consolidated so far across 14 modules + data-driven refactors.
+### Status (2026-04-01)
+main.ts reduced from **5043 → 2938 lines** (42% cut). UnitRenderer.ts split from 8981 → 938 lines (facade) + 4 subsystem modules. **All 4 architecture goals DONE.** GameConfig.ts (500+ lines) centralizes all balance constants; used by 10+ consumer files. **Performance Goal #1 DONE**: chunked voxel meshing (8×8 hex chunks, dirty flagging, per-chunk InstancedMesh). InstancedMesh for decorations (Goal #2) delegated to Codex.
+
+### Bug Fixes (2026-04-01)
+- **Spawn building rotation**: `getNextSpawnBuilding()` was advancing the round-robin index on every call. `SpawnQueueSystem` called it twice per spawn (once to check, once to use), causing frame-rate-dependent building skipping. Fix: `getNextSpawnBuilding()` now peeks without advancing; separate `advanceSpawnIndex()` called after actual spawn.
+- **Debug Kill button**: The debug panel "Kill" button was wired to `main.respawnSelectedUnits()` (misnamed). Moved kill logic to `DebugController.killSelected()` and removed the dead method from main.ts.
+- **Legacy getter cleanup**: Removed 37 dead ISM backward-compat getters from main.ts (26 mode booleans + 10 rotation getters + 1 comment). InputManager already uses ISM directly.
+
+### Active Goal
+Push `src/main.ts` below **3000 lines** (~329 remaining) and split `UnitRenderer.ts` into sub-modules. No new features should be added to main.ts without extracting equivalent or greater code out of it.
 
 ### Extraction Strategy
 We use two patterns depending on the code being extracted:
@@ -469,20 +577,29 @@ We use two patterns depending on the code being extracted:
 | `CombatEventHandler.ts` | ~225 | Stateful subsystem (CombatEventOps interface) |
 | `SpawnQueueSystem.ts` | ~240 | Stateful subsystem (SpawnQueueOps interface) |
 
-### All Pre-Extracted Modules Now Wired
-No remaining files to wire. Future extractions will target new code regions.
+### 2026-04-01 Extractions
+| Module | Lines Saved | Pattern |
+|--------|-------------|---------|
+| `InputManager.ts` | ~1335 | Stateful subsystem (full game ref) |
+| `MapInitializer.ts` | ~560 | Stateful subsystem (MapInitOps interface) |
+| `RallyPointSystem.ts` | ~229 | Stateful subsystem (RallyPointOps interface) |
+| Dead code cleanup | ~200+ | Removed unused getters, wrappers, duplicate constants, stale imports |
 
 ### Next Extraction Targets (priority order)
-1. **InputManager** — keyboard/mouse handler breakout from `setupEventHandlers` (~700 lines). Blocked on: placement mode state consolidation (9 boolean flags + 9 rotation angles should become a single `PlacementState` object first). The ops interface would need 40+ methods — worth waiting until coupling is reduced.
+1. **initSystems() helpers** — split into smaller setup methods (~200 lines potential)
+2. **DebugController expansion** — move spawnFormationArmy, spawnTestArmies, respawnSelectedUnits (~150 lines)
+3. **CameraController** — camera state + updateCamera logic (~200 lines)
+4. **Squad indicator rendering** — extract from updateRTS (~200 lines)
 
-### Shrink-Wrap Discipline (ENFORCED)
+### Shrink-Wrap Discipline (RE-ENFORCED 2026-04-01)
 **Every feature addition or refactor MUST leave main.ts the same size or smaller.**
 - Before adding new code to main.ts, identify what can be extracted to offset it
 - New features should be built as standalone modules from the start — never inline first
 - If a function in main.ts exceeds ~40 lines, it's a candidate for extraction
 - If a group of related fields + methods exceeds ~100 lines, extract as a subsystem
 - Review and eliminate dead code, unused imports, and stale backward-compat shims on every pass
-- **Phase 0 line-count gate achieved: 2998 lines** (target was <3000). Currently ~4084 after underground/surface base creation, arena jitter, selection type-toggle wiring, unit stats panel, and berserker/AI ops bridge additions. Next extraction candidates: underground/surface base setup (~60 lines → MapSetup module), arena spawning (~40 lines → ArenaSetup module).
+- **STATUS: main.ts is 3484 lines (target <3000).** Reduced from 5043 on 2026-04-01 via InputManager (1335), MapInitializer (560), RallyPointSystem (229) extractions + dead code cleanup. ~484 lines remain to reach target.
+- **Total codebase: ~41,280 lines across all .ts files.** The 4 largest files (UnitRenderer 8981, main 3484, UnitAI 3241, HUD 3106) account for ~46% of all code.
 
 ### WallSystem Integration Notes
 - Owns all wall/gate state (wallsBuilt, wallOwners, wallHealth, gatesBuilt, etc.)

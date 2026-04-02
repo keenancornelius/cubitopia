@@ -13,6 +13,21 @@ interface PathNode {
   parent: PathNode | null;
 }
 
+/** Cached tile key strings to avoid per-frame template literal allocations.
+ *  Key: (q * 10007 + r) — a simple hash for the interning map. */
+const _tileKeyCache: Map<number, string> = new Map();
+
+/** Get a cached "q,r" tile key string. Avoids new string allocation on repeated calls. */
+export function tileKey(q: number, r: number): string {
+  const hash = q * 10007 + r;
+  let k = _tileKeyCache.get(hash);
+  if (k === undefined) {
+    k = `${q},${r}`;
+    _tileKeyCache.set(hash, k);
+  }
+  return k;
+}
+
 export class Pathfinder {
   /**
    * Find path from start to goal on hex grid using A*
@@ -26,7 +41,7 @@ export class Pathfinder {
   /** Set of tile keys occupied by units. Updated each tick from main game loop. */
   static occupiedTiles: Set<string> = new Set();
 
-  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number, canTraverseRidge = false, tunnelMode = false): HexCoord[] {
+  static findPath(start: HexCoord, goal: HexCoord, map: GameMap, canTraverseForest = false, unitOwner?: number, canTraverseRidge = false, tunnelMode = false, ignoreOccupied = false): HexCoord[] {
     const startKey = `${start.q},${start.r}`;
     const goalKey = `${goal.q},${goal.r}`;
 
@@ -66,6 +81,43 @@ export class Pathfinder {
         }
       }
       if (bestDist === Infinity) return []; // No reachable neighbor
+    }
+
+    // If goal is blocked (e.g. base/building tile), path to nearest unblocked neighbor instead
+    // Search up to 2 rings out — bases can be surrounded by walls/buildings
+    if (Pathfinder.blockedTiles.has(effectiveGoalKey)) {
+      let bestDist = Infinity;
+      let bestNeighbor: HexCoord | null = null;
+      const ring1 = Pathfinder.getHexNeighbors(effectiveGoal);
+      const candidates: HexCoord[] = [...ring1];
+      // Add ring 2 — neighbors of ring 1
+      for (const r1 of ring1) {
+        for (const r2 of Pathfinder.getHexNeighbors(r1)) {
+          const r2Key = `${r2.q},${r2.r}`;
+          // Avoid duplicates from ring 1
+          if (!candidates.some(c => c.q === r2.q && c.r === r2.r)) {
+            candidates.push(r2);
+          }
+        }
+      }
+      for (const n of candidates) {
+        const nKey = `${n.q},${n.r}`;
+        const nTile = map.tiles.get(nKey);
+        if (nTile && nTile.terrain !== TerrainType.WATER
+            && !Pathfinder.blockedTiles.has(nKey)) {
+          const dist = Pathfinder.heuristic(start, n);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestNeighbor = n;
+          }
+        }
+      }
+      if (bestNeighbor) {
+        effectiveGoal = bestNeighbor;
+        effectiveGoalKey = `${bestNeighbor.q},${bestNeighbor.r}`;
+      } else {
+        return []; // Completely walled off — no path possible
+      }
     }
 
     const open: PathNode[] = [];
@@ -135,9 +187,11 @@ export class Pathfinder {
         // Tunnel shortcut: reduce cost to encourage pathfinder to use tunnels (ONLY in tunnel mode)
         // In surface mode, tunnel tiles use normal terrain cost — no bonus for cutting through ground
         if (tunnelMode && tile.hasTunnel) moveCost = Math.max(0.1, moveCost - 0.5);
-        // Add heavy penalty for tiles occupied by other units (strong anti-collision)
-        if (Pathfinder.occupiedTiles.has(nKey) && nKey !== effectiveGoalKey) {
-          moveCost += 8;
+        // Add penalty for tiles occupied by other units (anti-collision)
+        // Squad units skip this — the penalty creates impassable chokepoints
+        // near congested bases.
+        if (!ignoreOccupied && Pathfinder.occupiedTiles.has(nKey) && nKey !== effectiveGoalKey) {
+          moveCost += 3; // Reduced from 8 — still discourages but doesn't block
         }
         const g = current.g + moveCost;
         const h = Pathfinder.heuristic(neighbor, goal);

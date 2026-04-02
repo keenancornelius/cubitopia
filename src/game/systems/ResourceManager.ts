@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { HexCoord, GameContext, Unit, ResourceType } from '../../types';
+import { GAME_CONFIG } from '../GameConfig';
 
 class ResourceManager {
   ctx: GameContext;
@@ -128,14 +129,14 @@ class ResourceManager {
   }
 
   handleCropHarvest(unit: Unit, _farmPos: HexCoord): void {
-    const foodYield = 3;
+    const foodYield = GAME_CONFIG.economy.harvest.crops.foodYield;
     unit.carryAmount = Math.min(foodYield, unit.carryCapacity);
     unit.carryType = ResourceType.FOOD;
   }
 
   craftRope(): void {
-    const fiberNeeded = 3;
-    const clayNeeded = 2;
+    const fiberNeeded = GAME_CONFIG.economy.recipes.rope.input.grass_fiber;
+    const clayNeeded = GAME_CONFIG.economy.recipes.rope.input.clay;
     if (this.ctx.grassFiberStockpile[0] < fiberNeeded || this.ctx.clayStockpile[0] < clayNeeded) {
       this.ctx.hud.showNotification(
         `⚠️ Need ${fiberNeeded} grass fiber + ${clayNeeded} clay to craft rope! (have ${this.ctx.grassFiberStockpile[0]} fiber, ${this.ctx.clayStockpile[0]} clay)`,
@@ -147,15 +148,15 @@ class ResourceManager {
     this.ctx.players[0].resources.grass_fiber -= fiberNeeded;
     this.ctx.clayStockpile[0] -= clayNeeded;
     this.ctx.players[0].resources.clay -= clayNeeded;
-    this.ctx.ropeStockpile[0] += 1;
-    this.ctx.players[0].resources.rope += 1;
+    this.ctx.ropeStockpile[0] += GAME_CONFIG.economy.recipes.rope.output.rope;
+    this.ctx.players[0].resources.rope += GAME_CONFIG.economy.recipes.rope.output.rope;
     this.updateHUD();
-    this.ctx.hud.showNotification(`🪢 Crafted 1 rope (${this.ctx.ropeStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`🪢 Crafted ${GAME_CONFIG.economy.recipes.rope.output.rope} rope (${this.ctx.ropeStockpile[0]} total)`, '#2ecc71');
   }
 
   craftCharcoal(): void {
-    const woodNeeded = 3;
-    const clayNeeded = 2;
+    const woodNeeded = GAME_CONFIG.economy.recipes.charcoal.input.wood;
+    const clayNeeded = GAME_CONFIG.economy.recipes.charcoal.input.clay;
     if (this.ctx.woodStockpile[0] < woodNeeded || this.ctx.clayStockpile[0] < clayNeeded) {
       this.ctx.hud.showNotification(
         `⚠️ Need ${woodNeeded} wood + ${clayNeeded} clay to craft charcoal! (have ${this.ctx.woodStockpile[0]} wood, ${this.ctx.clayStockpile[0]} clay)`,
@@ -167,15 +168,15 @@ class ResourceManager {
     this.ctx.players[0].resources.wood -= woodNeeded;
     this.ctx.clayStockpile[0] -= clayNeeded;
     this.ctx.players[0].resources.clay -= clayNeeded;
-    this.ctx.charcoalStockpile[0] += 2;
-    this.ctx.players[0].resources.charcoal += 2;
+    this.ctx.charcoalStockpile[0] += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
+    this.ctx.players[0].resources.charcoal += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
     this.updateHUD();
-    this.ctx.hud.showNotification(`⚫ Crafted 2 charcoal (${this.ctx.charcoalStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`⚫ Crafted ${GAME_CONFIG.economy.recipes.charcoal.output.charcoal} charcoal (${this.ctx.charcoalStockpile[0]} total)`, '#2ecc71');
   }
 
   smeltSteel(): void {
-    const ironNeeded = 2;
-    const charcoalNeeded = 1;
+    const ironNeeded = GAME_CONFIG.economy.recipes.steel.input.iron;
+    const charcoalNeeded = GAME_CONFIG.economy.recipes.steel.input.charcoal;
 
     // Check if smelter building exists
     const hasSmelter = this.ctx.hasBuilding('smelter', 0);
@@ -198,22 +199,25 @@ class ResourceManager {
     this.ctx.players[0].resources.iron -= ironNeeded;
     this.ctx.charcoalStockpile[0] -= charcoalNeeded;
     this.ctx.players[0].resources.charcoal -= charcoalNeeded;
-    this.ctx.steelStockpile[0] += 1;
-    this.ctx.players[0].resources.steel += 1;
+    this.ctx.steelStockpile[0] += GAME_CONFIG.economy.recipes.steel.output.steel;
+    this.ctx.players[0].resources.steel += GAME_CONFIG.economy.recipes.steel.output.steel;
     this.updateHUD();
-    this.ctx.hud.showNotification(`🔨 Smelted 1 steel (${this.ctx.steelStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`🔨 Smelted ${GAME_CONFIG.economy.recipes.steel.output.steel} steel (${this.ctx.steelStockpile[0]} total)`, '#2ecc71');
   }
 
   doSellWood(): void {
-    if (this.ctx.woodStockpile[0] >= 4) {
-      this.ctx.woodStockpile[0] -= 4;
-      this.ctx.players[0].resources.wood -= 4;
-      this.ctx.players[0].resources.gold += 5;
+    const woodCost = GAME_CONFIG.economy.trade.sellWood.input.wood;
+    const goldGain = GAME_CONFIG.economy.trade.sellWood.output.gold;
+    if (this.ctx.woodStockpile[0] >= woodCost) {
+      this.ctx.woodStockpile[0] -= woodCost;
+      this.ctx.players[0].resources.wood -= woodCost;
+      this.ctx.goldStockpile[0] += goldGain;
+      this.ctx.players[0].resources.gold += goldGain;
       this.updateHUD();
       this.updateStockpileVisual(0);
-      this.ctx.hud.showNotification('💰 Sold 4 wood → 5 gold', '#2ecc71');
+      this.ctx.hud.showNotification(`💰 Sold ${woodCost} wood → ${goldGain} gold`, '#2ecc71');
     } else {
-      this.ctx.hud.showNotification(`⚠️ Need 4 wood to sell! (have ${this.ctx.woodStockpile[0]})`, '#e67e22');
+      this.ctx.hud.showNotification(`⚠️ Need ${woodCost} wood to sell! (have ${this.ctx.woodStockpile[0]})`, '#e67e22');
     }
   }
 

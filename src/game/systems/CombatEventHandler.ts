@@ -7,6 +7,7 @@
 
 import { Unit, UnitType, UnitState, HexCoord, ResourceType, Player, PlacedBuilding, BuildingKind, ElementType } from '../../types';
 import { UnitEvent } from './UnitAI';
+import { GAME_CONFIG } from '../GameConfig';
 
 /** Slim interface — only what CombatEventHandler needs from the outside */
 export interface CombatEventOps {
@@ -19,6 +20,7 @@ export interface CombatEventOps {
   getWoodStockpile(): number[];
   getFoodStockpile(): number[];
   getStoneStockpile(): number[];
+  getGoldStockpile(): number[];
 
   // Unit lifecycle
   removeUnitFromGame(unit: Unit, killer?: Unit): void;
@@ -31,6 +33,13 @@ export interface CombatEventOps {
   fireArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireDeflectedArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireMagicOrb(from: any, to: any, color: number, targetId: string, isSplash: boolean, onImpact: () => void): void;
+  fireLightningBolt(from: any, to: any, targetId: string, onImpact: () => void): void;
+  fireLightningChain(from: any, to: any, targetId: string): void;
+  spawnElectrocuteEffect(unitId: string): void;
+  fireFlamethrower(from: any, to: any, targetId: string, onImpact: () => void): void;
+  fireStoneColumn(from: any, to: any, targetId: string, onImpact: () => void): void;
+  fireWaterWave(from: any, to: any, targetId: string, onImpact: () => void): void;
+  fireWindTornado(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireBoulder(from: any, to: any, onImpact: () => void): void;
   fireProjectile(from: any, to: any, color: number, targetId: string, onImpact: () => void): void;
   knockbackUnit(unitId: string, targetWorldPos: { x: number; y: number; z: number }): void;
@@ -79,6 +88,9 @@ export interface CombatEventOps {
   handleHarvestGrass(unit: Unit, position: HexCoord): void;
   handleFoodDeposit(unit: Unit): void;
   isPlayerGateBlueprint(key: string): boolean;
+
+  // Building construction
+  handleConstructTick(unit: Unit, buildingId: string, amount: number): void;
 }
 
 export default class CombatEventHandler {
@@ -99,6 +111,7 @@ export default class CombatEventHandler {
     [UnitType.BERSERKER]:    420,  // speed=1.1, strike mid ~0.45 → 409ms
     [UnitType.SHIELDBEARER]: 460,  // speed=1.0, strike mid ~0.45 → 450ms (heavy tank)
     [UnitType.GREATSWORD]:   510,  // speed=0.85, strike mid ~0.42 → 494ms (massive wind-up)
+    [UnitType.OGRE]:         580,  // speed=0.6, strike mid ~0.42 → 700ms (heaviest unit in game)
     [UnitType.LUMBERJACK]:   350,  // speed=1.4, generic melee
   };
 
@@ -130,7 +143,10 @@ export default class CombatEventHandler {
       if (event.type === 'unit:killed' && event.unit) {
         if (event.killer && event.unit) {
           const killerOwner = event.killer.owner;
-          const goldReward = event.unit.type === UnitType.TREBUCHET || event.unit.type === UnitType.CATAPULT ? 5 : 3;
+          const goldReward = event.unit.type === UnitType.TREBUCHET
+            ? GAME_CONFIG.economy.trade.combatRewards.siegeKillGold
+            : GAME_CONFIG.economy.trade.combatRewards.unitKillGold;
+          ops.getGoldStockpile()[killerOwner] += goldReward;
           ops.getPlayers()[killerOwner].resources.gold += goldReward;
           if (killerOwner === 0) {
             ops.showNotification(`💰 +${goldReward} gold`, '#FFD700');
@@ -161,7 +177,7 @@ export default class CombatEventHandler {
         let hitSound: string = 'hit_melee';
         if (isDeflected) {
           hitSound = 'shield_deflect';
-        } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
+        } else if (event.attacker.type === UnitType.TREBUCHET) {
           hitSound = 'hit_siege';
         } else if (event.attacker.stats.range > 1) {
           hitSound = 'hit_ranged';
@@ -169,6 +185,8 @@ export default class CombatEventHandler {
           hitSound = 'assassin_strike';
         } else if (event.attacker.type === UnitType.RIDER || event.attacker.type === UnitType.SCOUT) {
           hitSound = 'hit_pierce';
+        } else if (event.attacker.type === UnitType.OGRE) {
+          hitSound = 'hit_blunt'; // heavy club impact
         } else if (event.attacker.type === UnitType.BERSERKER || event.attacker.type === UnitType.LUMBERJACK
                 || event.attacker.type === UnitType.GREATSWORD) {
           hitSound = 'hit_cleave';
@@ -227,14 +245,65 @@ export default class CombatEventHandler {
               ops.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
             }
           } else if (event.attacker.type === UnitType.MAGE) {
-            // Elemental orb color — falls back to default blue if no element assigned
-            const orbColor = attackerElement ? ops.getElementOrbColor(attackerElement) : 0x2980b9;
-            ops.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, orbColor, defId, false, applyDamageVisuals);
+            // Element-specific projectiles — each element has a unique visual
+            const elem = attackerElement ?? ElementType.FIRE;
+            const attackerRef = event.attacker;
+            const defenderRef = event.defender;
+            switch (elem) {
+              case ElementType.LIGHTNING:
+                // Lightning bolt that chains to 2 nearby enemies
+                ops.fireLightningBolt(attackerRef.worldPosition, defenderRef.worldPosition, defId, () => {
+                  applyDamageVisuals();
+                  // Chain lightning to 2 nearby enemies within range 3
+                  const allUnits = ops.getAllUnits();
+                  const chainTargets = allUnits
+                    .filter(u => u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.state !== 'dead')
+                    .map(u => ({ unit: u, dist: Math.hypot(u.worldPosition.x - defenderRef.worldPosition.x, u.worldPosition.z - defenderRef.worldPosition.z) }))
+                    .filter(e => e.dist < 3.0)
+                    .sort((a, b) => a.dist - b.dist)
+                    .slice(0, 2);
+                  for (const ct of chainTargets) {
+                    const chainDmg = Math.max(1, Math.floor((event.result?.damage ?? 0) * 0.5));
+                    ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - chainDmg);
+                    ops.queueDeferredEffect(150, () => {
+                      ops.fireLightningChain(defenderRef.worldPosition, ct.unit.worldPosition, ct.unit.id);
+                      ops.spawnElectrocuteEffect(ct.unit.id);
+                      ops.updateHealthBar(ct.unit);
+                      if (ct.unit.currentHealth <= 0) {
+                        ct.unit.state = UnitState.DEAD;
+                        ops.removeUnitFromGame(ct.unit, attackerRef);
+                        ops.playSound('death');
+                      }
+                    });
+                  }
+                  // Electrocute effect on primary target
+                  ops.spawnElectrocuteEffect(defId);
+                });
+                break;
+              case ElementType.FIRE:
+                ops.fireFlamethrower(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyDamageVisuals);
+                break;
+              case ElementType.EARTH:
+                ops.fireStoneColumn(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyDamageVisuals);
+                break;
+              case ElementType.WATER:
+                ops.fireWaterWave(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyDamageVisuals);
+                break;
+              case ElementType.WIND:
+                ops.fireWindTornado(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyDamageVisuals);
+                break;
+            }
+            // Cycle element to next in sequence
+            const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+            const cycleIdx = attackerRef._elementCycleIndex ?? 0;
+            const nextIdx = (cycleIdx + 1) % ELEMENT_CYCLE.length;
+            attackerRef._elementCycleIndex = nextIdx;
+            attackerRef.element = ELEMENT_CYCLE[nextIdx];
           } else if (event.attacker.type === UnitType.BATTLEMAGE) {
             const orbColor = attackerElement ? ops.getElementOrbColor(attackerElement) : 0x7c4dff;
             ops.fireMagicOrb(event.attacker.worldPosition, event.defender.worldPosition, orbColor, defId, true, applyDamageVisuals);
             ops.playSound('splash_aoe');
-          } else if (event.attacker.type === UnitType.TREBUCHET || event.attacker.type === UnitType.CATAPULT) {
+          } else if (event.attacker.type === UnitType.TREBUCHET) {
             ops.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition, applyDamageVisuals);
           } else if (event.attacker.type === UnitType.BERSERKER && event.attacker._axeThrowReady) {
             // Berserker axe throw — fire spinning axe, apply slow debuff on impact, then reset to melee
@@ -355,6 +424,11 @@ export default class CombatEventHandler {
       }
       if (event.type === 'builder:place_gate' && event.result && !debugFlags.disableBuild) {
         ops.handleBuildGate(event.unit!, event.result.position);
+      }
+
+      // ─── Builder: construction tick ───
+      if (event.type === 'builder:construct_tick' && event.result && event.unit) {
+        ops.handleConstructTick(event.unit!, event.result.buildingId, event.result.amount);
       }
 
       // ─── Lumberjack ───

@@ -31,6 +31,7 @@ const COMBAT_UNIT_DEFS: { type: UnitType; label: string; color: string; emoji: s
   { type: UnitType.BERSERKER, label: 'Berserker', color: '#e74c3c', emoji: '🪓' },
   { type: UnitType.BATTLEMAGE, label: 'B.Mage', color: '#8e44ad', emoji: '⚡' },
   { type: UnitType.GREATSWORD, label: 'G.Sword', color: '#546e7a', emoji: '🗡️' },
+  { type: UnitType.OGRE, label: 'Ogre', color: '#4e342e', emoji: '👹' },
 ];
 
 // Default composition: one of each
@@ -94,6 +95,12 @@ export class DebugPanel {
   private previewAnimFrame: number = 0;
   private previewAnimMode: 'idle' | 'moving' | 'attacking' | 'hit' | 'block' = 'idle';
   private previewElement: ElementType = ElementType.FIRE;
+
+  // Weapon/arm debug state (persists across rebuilds within session)
+  private weaponDebugEnabled = false;
+  private weaponDebugFrozen = false; // freeze animation so sliders are visible
+  private weaponDebugValues: Record<string, number> = {};
+  private weaponDebugTargets: Set<string> = new Set(); // multi-select targets
 
   // Army composition state
   private armyComp: ArmyComposition = {
@@ -416,6 +423,34 @@ export class DebugPanel {
       enemyRow.appendChild(mkBtn(ud.label, ud.color, () => cb.spawnEnemy(ud.type, cb.getSpawnCount())));
     }
     container.appendChild(enemyRow);
+
+    // Spawn Test Armies — large balanced armies for testing tactical AI
+    mkSection('Test Armies', '#00e676');
+    const testNote = document.createElement('div');
+    testNote.style.cssText = 'color:#888;font-size:9px;margin-bottom:4px;';
+    testNote.textContent = 'Spawn balanced armies near each base (uses Army tab composition)';
+    container.appendChild(testNote);
+    const testRow = document.createElement('div');
+    testRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px;margin-bottom:4px;';
+    const testArmyPresets: { label: string; scale: number }[] = [
+      { label: 'Small (x2)', scale: 2 },
+      { label: 'Medium (x5)', scale: 5 },
+      { label: 'Large (x10)', scale: 10 },
+      { label: 'Massive (x20)', scale: 20 },
+    ];
+    for (const preset of testArmyPresets) {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'background:#1b5e20;color:#fff;border:1px solid #00e67644;padding:4px 10px;font-size:10px;font-family:"Courier New",monospace;border-radius:3px;cursor:pointer;';
+      btn.textContent = preset.label;
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cb.spawnTestArmies(preset.scale);
+      });
+      btn.addEventListener('mouseenter', () => { btn.style.background = '#2e7d32'; });
+      btn.addEventListener('mouseleave', () => { btn.style.background = '#1b5e20'; });
+      testRow.appendChild(btn);
+    }
+    container.appendChild(testRow);
   }
 
   // ==== ARMY TAB ====
@@ -894,6 +929,9 @@ export class DebugPanel {
       container.appendChild(elemRow);
     }
 
+    // ── Weapon / Arm Debug Tool ──
+    this.buildWeaponDebugSection(container);
+
     // ── Stat Sliders ──
     const cfg = UNIT_CONFIG[this.selectedUnitType];
     const slidersDiv = document.createElement('div');
@@ -951,6 +989,368 @@ export class DebugPanel {
     resetBtn.addEventListener('mouseenter', () => { resetBtn.style.background = 'rgba(255,50,50,0.2)'; });
     resetBtn.addEventListener('mouseleave', () => { resetBtn.style.background = 'rgba(255,50,50,0.08)'; });
     container.appendChild(resetBtn);
+  }
+
+  // ── Weapon / Arm Debug Tool ──
+  private buildWeaponDebugSection(container: HTMLElement): void {
+    // Toggle button
+    const toggleRow = document.createElement('div');
+    toggleRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+    const toggleBtn = document.createElement('div');
+    const isOn = this.weaponDebugEnabled;
+    toggleBtn.style.cssText = `
+      flex:1; padding:4px 0; text-align:center; cursor:pointer; font-size:10px;
+      border-radius:4px; transition:all 0.15s;
+      background:${isOn ? 'rgba(255,152,0,0.18)' : 'rgba(255,255,255,0.04)'};
+      color:${isOn ? '#ff9800' : '#666'};
+      border:1px solid ${isOn ? 'rgba(255,152,0,0.5)' : 'rgba(255,255,255,0.08)'};
+    `;
+    toggleBtn.textContent = `🔧 ${isOn ? 'HIDE' : 'SHOW'} WEAPON DEBUG`;
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.weaponDebugEnabled = !this.weaponDebugEnabled;
+      this.rebuildContent();
+    });
+    toggleRow.appendChild(toggleBtn);
+    container.appendChild(toggleRow);
+
+    if (!isOn || !this.previewGroup) return;
+
+    const debugDiv = document.createElement('div');
+    debugDiv.style.cssText = `
+      border:1px solid rgba(255,152,0,0.3); border-radius:6px; padding:8px;
+      background:rgba(255,152,0,0.05); margin-bottom:10px;
+    `;
+
+    // Freeze animation toggle
+    const freezeRow = document.createElement('div');
+    freezeRow.style.cssText = 'display:flex;gap:4px;margin-bottom:8px;';
+    const freezeBtn = document.createElement('div');
+    freezeBtn.style.cssText = `
+      flex:1; padding:3px 0; text-align:center; cursor:pointer; font-size:10px;
+      border-radius:4px;
+      background:${this.weaponDebugFrozen ? 'rgba(33,150,243,0.2)' : 'rgba(255,255,255,0.04)'};
+      color:${this.weaponDebugFrozen ? '#2196f3' : '#888'};
+      border:1px solid ${this.weaponDebugFrozen ? 'rgba(33,150,243,0.5)' : 'rgba(255,255,255,0.08)'};
+    `;
+    freezeBtn.textContent = this.weaponDebugFrozen ? '❄ FROZEN (click to unfreeze)' : '▶ ANIMATING (click to freeze)';
+    freezeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.weaponDebugFrozen = !this.weaponDebugFrozen;
+      this.rebuildContent();
+    });
+    freezeRow.appendChild(freezeBtn);
+    debugDiv.appendChild(freezeRow);
+
+    // Discover named meshes in the model for target selector
+    const namedMeshes: { name: string; depth: number }[] = [];
+    const scanGroup = (obj: THREE.Object3D, depth: number) => {
+      if (obj.name && obj.name !== '' && depth > 0) {
+        namedMeshes.push({ name: obj.name, depth });
+      }
+      for (const child of obj.children) scanGroup(child, depth + 1);
+    };
+    scanGroup(this.previewGroup, 0);
+
+    // Target selector — multi-select pill row of available parts
+    const targetHeader = document.createElement('div');
+    targetHeader.style.cssText = 'font-size:9px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;';
+    targetHeader.textContent = '🎯 TARGET MESHES (multi-select)';
+    debugDiv.appendChild(targetHeader);
+
+    const targetRow = document.createElement('div');
+    targetRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:2px;margin-bottom:8px;max-height:60px;overflow-y:auto;';
+
+    // Categorize meshes
+    const weaponNames = namedMeshes.filter(m =>
+      /bow|weapon|shield|sword|staff|orb|axe|lance|club|mace|hammer|throw-arm|trebuchet/i.test(m.name)
+    );
+    const armNames = namedMeshes.filter(m => /^arm-/i.test(m.name));
+    const legNames = namedMeshes.filter(m => /^leg-/i.test(m.name));
+    const otherNames = namedMeshes.filter(m =>
+      !weaponNames.some(w => w.name === m.name) &&
+      !armNames.some(a => a.name === m.name) &&
+      !legNames.some(l => l.name === m.name) &&
+      !/selection|attack-target/i.test(m.name)
+    );
+
+    // For weapon grouping: identify group parents and their children
+    const groupParents = new Set<string>(); // e.g., 'sword-group'
+    const groupChildren = new Map<string, Set<string>>(); // 'sword-group' -> { 'sword-blade', 'sword-crossguard' }
+    for (const m of weaponNames) {
+      const groupMatch = m.name.match(/^(.+-group)$/);
+      if (groupMatch) {
+        groupParents.add(m.name);
+        groupChildren.set(m.name, new Set());
+      }
+    }
+    // Find children of groups (any mesh whose prefix matches a group)
+    for (const m of weaponNames) {
+      if (!groupParents.has(m.name)) {
+        for (const groupName of groupParents) {
+          const prefix = groupName.slice(0, -'-group'.length); // 'sword-group' -> 'sword'
+          if (m.name.startsWith(prefix + '-') && m.name !== prefix) {
+            if (!groupChildren.has(groupName)) groupChildren.set(groupName, new Set());
+            groupChildren.get(groupName)!.add(m.name);
+          }
+        }
+      }
+    }
+
+    // Filter weapon pills: show groups and standalone weapons (hide grouped children)
+    const groupedChildren = new Set<string>();
+    for (const children of groupChildren.values()) {
+      for (const child of children) groupedChildren.add(child);
+    }
+    const weaponPillNames = weaponNames.filter(m => !groupedChildren.has(m.name));
+
+    // Auto-select: if empty, add first weapon pill
+    if (this.weaponDebugTargets.size === 0 && weaponPillNames.length > 0) {
+      this.weaponDebugTargets.add(weaponPillNames[0].name);
+    }
+
+    const addTargetPill = (name: string, color: string) => {
+      const pill = document.createElement('div');
+      const active = this.weaponDebugTargets.has(name);
+      pill.style.cssText = `
+        padding:2px 5px; border-radius:3px; cursor:pointer; font-size:8px;
+        background:${active ? color + '33' : 'rgba(255,255,255,0.04)'};
+        color:${active ? color : '#777'}; border:1px solid ${active ? color + '88' : '#333'};
+        white-space:nowrap;
+      `;
+      pill.textContent = name;
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (this.weaponDebugTargets.has(name)) {
+          this.weaponDebugTargets.delete(name);
+        } else {
+          this.weaponDebugTargets.add(name);
+        }
+        this.rebuildContent();
+      });
+      targetRow.appendChild(pill);
+    };
+
+    // Weapons first (groups and standalone), then arms, then legs, then other
+    for (const m of weaponPillNames) addTargetPill(m.name, '#ff9800');
+    for (const m of armNames) addTargetPill(m.name, '#4caf50');
+    for (const m of legNames) addTargetPill(m.name, '#2196f3');
+    for (const m of otherNames) addTargetPill(m.name, '#9e9e9e');
+
+    debugDiv.appendChild(targetRow);
+
+    // Find the first selected mesh (or any valid mesh to show properties)
+    let targetMesh: THREE.Object3D | undefined;
+    for (const name of this.weaponDebugTargets) {
+      const mesh = this.previewGroup.getObjectByName(name);
+      if (mesh) {
+        targetMesh = mesh;
+        break;
+      }
+    }
+    if (!targetMesh && this.weaponDebugTargets.size === 0) {
+      const noTarget = document.createElement('div');
+      noTarget.style.cssText = 'font-size:10px;color:#666;text-align:center;padding:8px 0;';
+      noTarget.textContent = 'No target meshes selected';
+      debugDiv.appendChild(noTarget);
+      container.appendChild(debugDiv);
+      return;
+    }
+
+    // Current values readout (show first selected mesh and which targets are selected)
+    const selectedLabel = Array.from(this.weaponDebugTargets).join(', ');
+    const readout = document.createElement('div');
+    readout.style.cssText = 'font-size:8px;color:#aaa;font-family:monospace;margin-bottom:6px;background:rgba(0,0,0,0.3);padding:4px;border-radius:3px;line-height:1.4;';
+    if (targetMesh) {
+      readout.textContent = `[${selectedLabel}]\npos(${targetMesh.position.x.toFixed(3)}, ${targetMesh.position.y.toFixed(3)}, ${targetMesh.position.z.toFixed(3)}) rot(${targetMesh.rotation.x.toFixed(3)}, ${targetMesh.rotation.y.toFixed(3)}, ${targetMesh.rotation.z.toFixed(3)})`;
+    }
+    debugDiv.appendChild(readout);
+
+    // Position sliders
+    const posHeader = document.createElement('div');
+    posHeader.style.cssText = 'font-size:9px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-bottom:2px;';
+    posHeader.textContent = '📐 POSITION';
+    debugDiv.appendChild(posHeader);
+
+    const posAxes: { label: string; axis: 'x' | 'y' | 'z'; color: string }[] = [
+      { label: 'X', axis: 'x', color: '#f44336' },
+      { label: 'Y', axis: 'y', color: '#4caf50' },
+      { label: 'Z', axis: 'z', color: '#2196f3' },
+    ];
+
+    for (const ax of posAxes) {
+      const key = `pos_${ax.axis}`;
+      const baseVal = this.weaponDebugValues[key] ?? targetMesh?.position[ax.axis] ?? 0;
+      debugDiv.appendChild(this.buildDebugSlider(
+        ax.label, key, baseVal, -1.5, 1.5, 0.005, ax.color,
+        (val) => {
+          for (const targetName of this.weaponDebugTargets) {
+            const mesh = this.previewGroup?.getObjectByName(targetName);
+            if (mesh) mesh.position[ax.axis] = val;
+          }
+          const firstMesh = targetMesh || Array.from(this.weaponDebugTargets).map(n => this.previewGroup?.getObjectByName(n)).find(m => m);
+          if (firstMesh) {
+            const selectedLabel = Array.from(this.weaponDebugTargets).join(', ');
+            readout.textContent = `[${selectedLabel}]\npos(${firstMesh.position.x.toFixed(3)}, ${firstMesh.position.y.toFixed(3)}, ${firstMesh.position.z.toFixed(3)}) rot(${firstMesh.rotation.x.toFixed(3)}, ${firstMesh.rotation.y.toFixed(3)}, ${firstMesh.rotation.z.toFixed(3)})`;
+          }
+        }
+      ));
+    }
+
+    // Rotation sliders
+    const rotHeader = document.createElement('div');
+    rotHeader.style.cssText = 'font-size:9px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-top:4px;margin-bottom:2px;';
+    rotHeader.textContent = '🔄 ROTATION';
+    debugDiv.appendChild(rotHeader);
+
+    const rotAxes: { label: string; axis: 'x' | 'y' | 'z'; color: string }[] = [
+      { label: 'RX', axis: 'x', color: '#e91e63' },
+      { label: 'RY', axis: 'y', color: '#8bc34a' },
+      { label: 'RZ', axis: 'z', color: '#03a9f4' },
+    ];
+
+    for (const ax of rotAxes) {
+      const key = `rot_${ax.axis}`;
+      const baseVal = this.weaponDebugValues[key] ?? targetMesh?.rotation[ax.axis] ?? 0;
+      debugDiv.appendChild(this.buildDebugSlider(
+        ax.label, key, baseVal, -Math.PI, Math.PI, 0.01, ax.color,
+        (val) => {
+          for (const targetName of this.weaponDebugTargets) {
+            const mesh = this.previewGroup?.getObjectByName(targetName);
+            if (mesh) mesh.rotation[ax.axis] = val;
+          }
+          const firstMesh = targetMesh || Array.from(this.weaponDebugTargets).map(n => this.previewGroup?.getObjectByName(n)).find(m => m);
+          if (firstMesh) {
+            const selectedLabel = Array.from(this.weaponDebugTargets).join(', ');
+            readout.textContent = `[${selectedLabel}]\npos(${firstMesh.position.x.toFixed(3)}, ${firstMesh.position.y.toFixed(3)}, ${firstMesh.position.z.toFixed(3)}) rot(${firstMesh.rotation.x.toFixed(3)}, ${firstMesh.rotation.y.toFixed(3)}, ${firstMesh.rotation.z.toFixed(3)})`;
+          }
+        }
+      ));
+    }
+
+    // Scale slider (uniform)
+    const scaleHeader = document.createElement('div');
+    scaleHeader.style.cssText = 'font-size:9px;color:#ff9800;text-transform:uppercase;letter-spacing:1px;margin-top:4px;margin-bottom:2px;';
+    scaleHeader.textContent = '📏 SCALE';
+    debugDiv.appendChild(scaleHeader);
+
+    const scaleKey = 'scale';
+    const scaleBase = this.weaponDebugValues[scaleKey] ?? targetMesh?.scale.x ?? 1;
+    debugDiv.appendChild(this.buildDebugSlider(
+      'S', scaleKey, scaleBase, 0.1, 3.0, 0.01, '#ff9800',
+      (val) => {
+        for (const targetName of this.weaponDebugTargets) {
+          const mesh = this.previewGroup?.getObjectByName(targetName);
+          if (mesh) mesh.scale.set(val, val, val);
+        }
+      }
+    ));
+
+    // Copy code button — outputs the current values as code to console
+    const copyRow = document.createElement('div');
+    copyRow.style.cssText = 'display:flex;gap:4px;margin-top:8px;';
+    const copyBtn = document.createElement('div');
+    copyBtn.style.cssText = `
+      flex:1; padding:4px 0; text-align:center; cursor:pointer; font-size:10px;
+      border-radius:4px; background:rgba(76,175,80,0.15); color:#4caf50;
+      border:1px solid rgba(76,175,80,0.4); transition:all 0.15s;
+    `;
+    copyBtn.textContent = '📋 COPY VALUES TO CONSOLE';
+    copyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.weaponDebugTargets.size === 0) return;
+      let output = '';
+      for (const targetName of this.weaponDebugTargets) {
+        const mesh = this.previewGroup?.getObjectByName(targetName);
+        if (!mesh) continue;
+        const code = `// ${targetName} — debug values\n` +
+          `.position.set(${mesh.position.x.toFixed(4)}, ${mesh.position.y.toFixed(4)}, ${mesh.position.z.toFixed(4)});\n` +
+          `.rotation.set(${mesh.rotation.x.toFixed(4)}, ${mesh.rotation.y.toFixed(4)}, ${mesh.rotation.z.toFixed(4)});\n` +
+          `.scale.set(${mesh.scale.x.toFixed(4)}, ${mesh.scale.y.toFixed(4)}, ${mesh.scale.z.toFixed(4)});\n`;
+        output += code;
+      }
+      console.log('%c[WeaponDebug] Selected targets: ' + Array.from(this.weaponDebugTargets).join(', '), 'color:#ff9800;font-weight:bold;');
+      console.log(output);
+      copyBtn.textContent = '✅ COPIED TO CONSOLE';
+      setTimeout(() => { copyBtn.textContent = '📋 COPY VALUES TO CONSOLE'; }, 1500);
+    });
+    copyRow.appendChild(copyBtn);
+
+    // Reset button
+    const resetDebugBtn = document.createElement('div');
+    resetDebugBtn.style.cssText = `
+      flex:1; padding:4px 0; text-align:center; cursor:pointer; font-size:10px;
+      border-radius:4px; background:rgba(255,50,50,0.1); color:#ff4444;
+      border:1px solid rgba(255,50,50,0.3); transition:all 0.15s;
+    `;
+    resetDebugBtn.textContent = '↺ RESET';
+    resetDebugBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.weaponDebugValues = {};
+      this.rebuildContent();
+    });
+    copyRow.appendChild(resetDebugBtn);
+    debugDiv.appendChild(copyRow);
+
+    container.appendChild(debugDiv);
+  }
+
+  private buildDebugSlider(
+    label: string, key: string, value: number,
+    min: number, max: number, step: number, color: string,
+    onChange: (val: number) => void
+  ): HTMLElement {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:4px;height:20px;';
+
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `width:22px;font-size:9px;color:${color};font-weight:bold;text-align:right;flex-shrink:0;`;
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = String(min);
+    slider.max = String(max);
+    slider.step = String(step);
+    slider.value = String(value);
+    const sliderId = `dbg-${key}-${Date.now()}`;
+    slider.id = sliderId;
+    slider.style.cssText = `
+      flex:1; height:4px; -webkit-appearance:none; appearance:none;
+      background:linear-gradient(to right, ${color}44, ${color});
+      border-radius:2px; outline:none; cursor:pointer;
+    `;
+    const thumbStyle = document.createElement('style');
+    thumbStyle.textContent = `
+      #${sliderId}::-webkit-slider-thumb {
+        -webkit-appearance:none; appearance:none; width:10px; height:10px;
+        border-radius:50%; background:${color}; cursor:pointer;
+        box-shadow:0 0 3px ${color}88;
+      }
+    `;
+    document.head.appendChild(thumbStyle);
+    row.appendChild(slider);
+
+    const valDisplay = document.createElement('div');
+    valDisplay.style.cssText = 'width:42px;font-size:9px;color:#ccc;text-align:center;font-family:monospace;flex-shrink:0;';
+    valDisplay.textContent = value.toFixed(3);
+    row.appendChild(valDisplay);
+
+    slider.addEventListener('input', (e) => {
+      e.stopPropagation();
+      const newVal = parseFloat(slider.value);
+      valDisplay.textContent = newVal.toFixed(3);
+      this.weaponDebugValues[key] = newVal;
+      onChange(newVal);
+    });
+
+    // Store initial value
+    if (!(key in this.weaponDebugValues)) {
+      this.weaponDebugValues[key] = value;
+    }
+
+    return row;
   }
 
   private buildSliderRow(label: string, field: string, value: number, min: number, max: number, step: number, color: string, isStat: boolean): HTMLElement {
@@ -1074,12 +1474,28 @@ export class DebugPanel {
       if (!this.previewRenderer || !this.previewScene || !this.previewCamera || !this.previewGroup) return;
       const time = performance.now() / 1000;
       // Slow turntable only in idle mode; pause rotation during walk/attack/hit so the anim is readable
-      if (this.previewAnimMode === 'idle') {
+      if (this.previewAnimMode === 'idle' && !this.weaponDebugFrozen) {
         this.previewGroup.rotation.y += 0.008;
       }
-      // Run unit animation via callback
-      if (this._callbacks) {
+      // Run unit animation via callback (skip if frozen for debug)
+      if (this._callbacks && !this.weaponDebugFrozen) {
         this._callbacks.animatePreview(this.previewGroup, this.selectedUnitType, this.previewAnimMode, time);
+      }
+      // Apply debug overrides (re-apply each frame so animation doesn't clobber them)
+      if (this.weaponDebugEnabled && this.weaponDebugTargets.size > 0) {
+        const v = this.weaponDebugValues;
+        for (const targetName of this.weaponDebugTargets) {
+          const dbgMesh = this.previewGroup.getObjectByName(targetName);
+          if (dbgMesh) {
+            if ('pos_x' in v) dbgMesh.position.x = v['pos_x'];
+            if ('pos_y' in v) dbgMesh.position.y = v['pos_y'];
+            if ('pos_z' in v) dbgMesh.position.z = v['pos_z'];
+            if ('rot_x' in v) dbgMesh.rotation.x = v['rot_x'];
+            if ('rot_y' in v) dbgMesh.rotation.y = v['rot_y'];
+            if ('rot_z' in v) dbgMesh.rotation.z = v['rot_z'];
+            if ('scale' in v) dbgMesh.scale.set(v['scale'], v['scale'], v['scale']);
+          }
+        }
       }
       this.previewRenderer.render(this.previewScene, this.previewCamera);
       this.previewAnimFrame = requestAnimationFrame(animate);
@@ -1142,6 +1558,7 @@ export interface DebugPanelCallbacks {
   instantLose(): void;
   spawnUnit(type: UnitType, count: number): void;
   spawnEnemy(type: UnitType, count: number): void;
+  spawnTestArmies(scale: number): void;
   restartArena(): void;
   getMapType(): string;
   applyUnitStatChange(type: UnitType, field: string, value: number): void;

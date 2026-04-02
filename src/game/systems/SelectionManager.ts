@@ -20,6 +20,14 @@ export class SelectionManager {
   static suppressRightClick = false;
   /** When true, skip clearing selection on the next single-click (building/wall click) */
   static suppressNextClear = false;
+  /** Suppress one left-click selection (used by attack-move) */
+  static suppressNextClick = false;
+
+  // ── Control group / squad system ──
+  // 5 squad slots mapped to A/S/D/F/G keys (indices 0-4)
+  private controlGroups: Map<number, string[]> = new Map(); // slot → array of unit IDs
+  /** Whether shift was held during the current box-select drag */
+  private shiftHeldDuringDrag = false;
 
   // Box selection state
   private isBoxSelecting = false;
@@ -30,6 +38,7 @@ export class SelectionManager {
   // Callbacks
   private onSelectionChange: ((units: Unit[]) => void) | null = null;
   private onRightClick: ((worldPos: THREE.Vector3, screenX: number, screenY: number) => void) | null = null;
+  private onRightClickPing: ((worldPos: THREE.Vector3) => void) | null = null;
 
   constructor(canvas: HTMLCanvasElement, camera: THREE.PerspectiveCamera) {
     this.canvas = canvas;
@@ -63,6 +72,10 @@ export class SelectionManager {
     this.onRightClick = callback;
   }
 
+  onPing(callback: (worldPos: THREE.Vector3) => void): void {
+    this.onRightClickPing = callback;
+  }
+
   getSelectedUnits(): Unit[] {
     return this.selectedUnits;
   }
@@ -78,6 +91,49 @@ export class SelectionManager {
     this.onSelectionChange?.(this.selectedUnits);
   }
 
+  // ── Control Group (Squad) API ──
+
+  /** Assign units to a control group slot (0-4 → A/S/D/F/G).
+   *  If filterCombat is true, only combat units are stored (workers are deselected). */
+  assignControlGroup(slot: number, units: Unit[], filterCombat: boolean): Unit[] {
+    const WORKER_TYPES = new Set(['builder', 'lumberjack', 'villager']);
+    const combatUnits = filterCombat
+      ? units.filter(u => !WORKER_TYPES.has(u.type))
+      : units;
+    this.controlGroups.set(slot, combatUnits.map(u => u.id));
+    // Update selection to only the combat units
+    this.selectedUnits = combatUnits;
+    this.onSelectionChange?.(this.selectedUnits);
+    return combatUnits;
+  }
+
+  /** Select (recall) a previously assigned control group.
+   *  Returns the units that were selected, or empty if the group doesn't exist. */
+  selectControlGroup(slot: number): Unit[] {
+    const ids = this.controlGroups.get(slot);
+    if (!ids || ids.length === 0) return [];
+    const idSet = new Set(ids);
+    // Find living units that are still in the game
+    const units = this.allUnits.filter(u =>
+      u.owner === this.playerId && idSet.has(u.id) && u.currentHealth > 0
+    );
+    if (units.length === 0) {
+      this.controlGroups.delete(slot); // Clean up dead groups
+      return [];
+    }
+    // Update stored IDs to remove dead units
+    this.controlGroups.set(slot, units.map(u => u.id));
+    this.selectedUnits = units;
+    this.onSelectionChange?.(this.selectedUnits);
+    return units;
+  }
+
+  /** Check if a control group slot has units assigned */
+  hasControlGroup(slot: number): boolean {
+    const ids = this.controlGroups.get(slot);
+    return !!ids && ids.length > 0;
+  }
+
   private setupListeners(): void {
     let mouseDownTime = 0;
     let mouseDownPos = { x: 0, y: 0 };
@@ -91,6 +147,7 @@ export class SelectionManager {
         mouseDownPos = { x: e.clientX, y: e.clientY };
         this.boxStart = { x: e.clientX, y: e.clientY };
         this.boxEnd = { x: e.clientX, y: e.clientY };
+        this.shiftHeldDuringDrag = e.shiftKey; // Track shift for append-select
       }
     });
 
@@ -118,7 +175,10 @@ export class SelectionManager {
         mouseIsDown = false;
         if (boxTimeout) { clearTimeout(boxTimeout); boxTimeout = null; }
 
-        if (this.isBoxSelecting) {
+        if (SelectionManager.suppressNextClick) {
+          SelectionManager.suppressNextClick = false;
+          // Skip selection — attack-move consumed this click
+        } else if (this.isBoxSelecting) {
           this.finishBoxSelect();
         } else {
           // Single click selection
@@ -146,11 +206,13 @@ export class SelectionManager {
     this.canvas.addEventListener('contextmenu', (e: MouseEvent) => {
       e.preventDefault();
       if (SelectionManager.suppressRightClick) return;
-      if (this.selectedUnits.length > 0) {
-        const worldPos = this.screenToWorld(e.clientX, e.clientY);
-        if (worldPos) {
+      const worldPos = this.screenToWorld(e.clientX, e.clientY);
+      if (worldPos) {
+        if (this.selectedUnits.length > 0) {
           this.onRightClick?.(worldPos, e.clientX, e.clientY);
         }
+        // Always fire ping callback (even without selection)
+        this.onRightClickPing?.(worldPos);
       }
     });
   }
@@ -223,7 +285,7 @@ export class SelectionManager {
     if (maxX - minX < 5 && maxY - minY < 5) return;
 
     const rect = this.canvas.getBoundingClientRect();
-    const selected: Unit[] = [];
+    const newlySelected: Unit[] = [];
 
     for (const unit of this.allUnits) {
       if (unit.owner !== this.playerId) continue;
@@ -236,11 +298,22 @@ export class SelectionManager {
         screenPos.y >= minY - rect.top &&
         screenPos.y <= maxY - rect.top
       ) {
-        selected.push(unit);
+        newlySelected.push(unit);
       }
     }
 
-    this.selectedUnits = selected;
+    if (this.shiftHeldDuringDrag) {
+      // Shift+drag: APPEND to existing selection (no duplicates)
+      const existingIds = new Set(this.selectedUnits.map(u => u.id));
+      for (const unit of newlySelected) {
+        if (!existingIds.has(unit.id)) {
+          this.selectedUnits.push(unit);
+        }
+      }
+    } else {
+      // Normal drag: replace selection
+      this.selectedUnits = newlySelected;
+    }
     this.onSelectionChange?.(this.selectedUnits);
   }
 
@@ -272,48 +345,16 @@ export class SelectionManager {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, this.camera);
 
-    // Try scene intersection first (handles elevated terrain)
-    if (this.scene) {
-      const intersects = raycaster.intersectObjects(this.scene.children, true);
-      for (const hit of intersects) {
-        if (!(hit.object instanceof THREE.Mesh)) continue;
-        const name = hit.object.name || hit.object.parent?.name || '';
-        if (name.startsWith('harvest_') || name.startsWith('ghost_')) continue;
-
-        // Check hit face normal to distinguish top vs side faces
-        if (hit.face && hit.face.normal) {
-          let worldNormal = hit.face.normal.clone();
-
-          // If the mesh has a world matrix, transform the normal
-          // For instanced meshes or meshes with no rotation, local normal ≈ world normal
-          const mesh = hit.object as THREE.Mesh;
-          if (mesh.matrixWorld) {
-            // Use the normal matrix for proper normal transformation
-            const normalMatrix = new THREE.Matrix3().setFromMatrix4(mesh.matrixWorld);
-            worldNormal.applyMatrix3(normalMatrix).normalize();
-          }
-
-          // If it's a top face (normal.y > 0.5), use hit point as-is
-          if (worldNormal.y > 0.5) {
-            return hit.point;
-          } else {
-            // Side face: nudge outward along the normal by ~0.5 units
-            // This resolves to the adjacent lower tile instead of the tall column
-            const adjusted = hit.point.clone().add(worldNormal.clone().multiplyScalar(0.8));
-            return adjusted;
-          }
-        }
-
-        // Fallback if no face normal available
-        return hit.point;
-      }
-    }
+    // Ground-plane intersection: try mid-elevation, then refine with tile's actual elevation
+    const intersection = new THREE.Vector3();
+    const midPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
+    raycaster.ray.intersectPlane(midPlane, intersection);
+    if (intersection) return intersection;
 
     // Fallback: multiple elevation planes
-    const elevations = [0, 0.5, 1.0, 1.5, 2.0];
+    const elevations = [0, 0.5, 1.5, 2.0, 3.0];
     for (const elev of elevations) {
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -elev);
-      const intersection = new THREE.Vector3();
       const result = raycaster.ray.intersectPlane(plane, intersection);
       if (result) return intersection;
     }

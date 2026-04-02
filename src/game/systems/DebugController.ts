@@ -3,9 +3,10 @@
  * Uses DebugOps slim interface to access game state.
  */
 
-import { HexCoord, TerrainType, UnitType, UnitState, Unit } from '../../types';
+import { HexCoord, TerrainType, UnitType, UnitState, Unit, UnitStance, GameMap } from '../../types';
 import { UnitFactory } from '../entities/UnitFactory';
 import { Pathfinder } from './Pathfinder';
+import { FOOD_PER_COMBAT_UNIT } from './PopulationSystem';
 
 export interface DebugOps {
   // State access
@@ -49,6 +50,8 @@ export interface DebugOps {
   setCharcoalStockpile(val: number): void;
   getSteelStockpile(): number;
   setSteelStockpile(val: number): void;
+  getGoldStockpile(): number;
+  setGoldStockpile(val: number): void;
   getCrystalStockpile(): number;
   setCrystalStockpile(val: number): void;
 
@@ -68,6 +71,15 @@ export interface DebugOps {
 
   // Win condition
   checkWinCondition(): void;
+
+  // Test army spawning
+  getCurrentMap(): GameMap | null;
+  addUnitToRenderer(unit: Unit, elevation: number): void;
+  getFoodForPlayer(pid: number): number;
+  setFoodForPlayer(pid: number, value: number): void;
+  setPlayerFoodResource(pid: number, value: number): void;
+  rebuildAllUnits(): void;
+  getArmyComposition(): { blue: { type: UnitType; count: number }[]; red: { type: UnitType; count: number }[] };
 }
 
 export default class DebugController {
@@ -83,6 +95,8 @@ export default class DebugController {
     if (!base) return;
     for (let i = 0; i < count; i++) {
       const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
+      // Mark tile occupied immediately so next spawn in this batch picks a different tile
+      Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
       const unit = UnitFactory.create(type, 0, pos);
       const wp = this.ops.hexToWorld(pos);
       unit.worldPosition = { ...wp };
@@ -98,6 +112,8 @@ export default class DebugController {
     if (!base) return;
     for (let i = 0; i < count; i++) {
       const pos = this.ops.findSpawnTile(base.position.q, base.position.r, true);
+      // Mark tile occupied immediately so next spawn in this batch picks a different tile
+      Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
       const unit = UnitFactory.create(type, 1, pos);
       const wp = this.ops.hexToWorld(pos);
       unit.worldPosition = { ...wp };
@@ -115,6 +131,7 @@ export default class DebugController {
     players[0].resources.stone += 999;
     this.ops.setFoodStockpile(this.ops.getFoodStockpile() + 999);
     players[0].resources.food += 999;
+    this.ops.setGoldStockpile(this.ops.getGoldStockpile() + 999);
     players[0].resources.gold += 999;
     this.ops.setGrassFiberStockpile(this.ops.getGrassFiberStockpile() + 999);
     players[0].resources.grass_fiber += 999;
@@ -169,6 +186,26 @@ export default class DebugController {
       }
     }
     this.ops.showNotification(`💚 Healed ${healed} unit(s) to full`, '#27ae60');
+  }
+
+  killSelected(): void {
+    const selected = this.ops.getSelectedUnits();
+    if (selected.length === 0) {
+      this.ops.showNotification('No units selected', '#999');
+      return;
+    }
+    // Copy array since removeUnitFromGame modifies allUnits
+    const toKill = [...selected];
+    let killCount = 0;
+    for (const unit of toKill) {
+      unit.state = UnitState.DEAD;
+      unit.currentHealth = 0;
+      this.ops.removeUnitFromGame(unit);
+      killCount++;
+    }
+    if (killCount > 0) {
+      this.ops.showNotification(`💀 ${killCount} unit(s) killed`, '#e74c3c');
+    }
   }
 
   buffSelected(stat: string): void {
@@ -263,5 +300,98 @@ export default class DebugController {
     }
     if (count > 0) this.ops.rebuildVoxels();
     this.ops.showNotification(`🪨 Cleared ${count} stone tiles`, '#78909c');
+  }
+
+  // ===================== SPAWN TEST ARMIES =====================
+
+  /** Role-based spawn depth — tanks front, melee mid, ranged back, siege far back */
+  static readonly ROLE_DEPTH: Record<string, number> = {
+    [UnitType.PALADIN]: 0, [UnitType.SHIELDBEARER]: 0, [UnitType.OGRE]: 0,
+    [UnitType.WARRIOR]: 1, [UnitType.GREATSWORD]: 1,
+    [UnitType.BERSERKER]: 1, [UnitType.ASSASSIN]: 1, [UnitType.RIDER]: 1, [UnitType.SCOUT]: 1,
+    [UnitType.ARCHER]: 2, [UnitType.MAGE]: 2, [UnitType.BATTLEMAGE]: 2,
+    [UnitType.HEALER]: 2,
+    [UnitType.TREBUCHET]: 3,
+  };
+
+  /** Spawn a formation-arranged army for one player. */
+  private spawnFormationArmy(
+    owner: number, baseQ: number, baseR: number,
+    defs: { type: UnitType; count: number }[], map: GameMap,
+  ): number {
+    const dir = owner === 0 ? 1 : -1;
+    const units: { type: UnitType; depth: number }[] = [];
+    for (const def of defs) {
+      const depth = DebugController.ROLE_DEPTH[def.type] ?? 1;
+      for (let i = 0; i < def.count; i++) units.push({ type: def.type, depth });
+    }
+    units.sort((a, b) => a.depth - b.depth);
+
+    const depthCounts: Record<number, number> = {};
+    for (const u of units) depthCounts[u.depth] = (depthCounts[u.depth] ?? 0) + 1;
+
+    const lineCounters: Record<number, number> = {};
+    let spawned = 0;
+
+    for (const u of units) {
+      const lineIdx = lineCounters[u.depth] ?? 0;
+      lineCounters[u.depth] = lineIdx + 1;
+      const qOffset = (2 - u.depth * 2) * dir;
+      const lineWidth = 5;
+      const subRow = Math.floor(lineIdx / lineWidth);
+      const posInRow = lineIdx % lineWidth;
+      const totalInDepth = depthCounts[u.depth] ?? 1;
+      const rowSize = Math.min(lineWidth, totalInDepth);
+      const rOffset = posInRow - Math.floor(rowSize / 2);
+      const qExtra = subRow * dir;
+
+      const pos = this.ops.findSpawnTile(baseQ + qOffset + qExtra, baseR + rOffset);
+      const unit = UnitFactory.create(u.type, owner, pos);
+      unit.worldPosition = this.ops.hexToWorld(pos);
+      unit.stance = UnitStance.AGGRESSIVE;
+      this.ops.getPlayers()[owner].units.push(unit);
+      this.ops.addUnitToRenderer(unit, this.ops.getElevation(pos));
+      Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
+      spawned++;
+    }
+    return spawned;
+  }
+
+  spawnTestArmies(scale: number): void {
+    const map = this.ops.getCurrentMap();
+    if (!map || this.ops.getPlayers().length < 2) return;
+
+    const armyComp = this.ops.getArmyComposition();
+    const defaultDefs = [
+      { type: UnitType.WARRIOR, count: 1 }, { type: UnitType.ARCHER, count: 1 },
+      { type: UnitType.PALADIN, count: 1 }, { type: UnitType.MAGE, count: 1 },
+      { type: UnitType.HEALER, count: 1 }, { type: UnitType.BERSERKER, count: 1 },
+      { type: UnitType.ASSASSIN, count: 1 }, { type: UnitType.SHIELDBEARER, count: 1 },
+      { type: UnitType.GREATSWORD, count: 1 },
+    ];
+    const blueDefs = armyComp.blue.length > 0 ? armyComp.blue : defaultDefs;
+    const redDefs = armyComp.red.length > 0 ? armyComp.red : blueDefs;
+
+    const scaledBlue = blueDefs.map(d => ({ type: d.type, count: d.count * scale }));
+    const scaledRed = redDefs.map(d => ({ type: d.type, count: d.count * scale }));
+
+    const bases = this.ops.getBases();
+    let totalSpawned = 0;
+    for (let owner = 0; owner < 2; owner++) {
+      const base = bases.find(b => b.owner === owner && !b.destroyed);
+      if (!base) continue;
+      const defs = owner === 0 ? scaledBlue : scaledRed;
+      totalSpawned += this.spawnFormationArmy(owner, base.position.q, base.position.r, defs, map);
+    }
+
+    this.ops.rebuildAllUnits();
+    const foodNeeded = totalSpawned * FOOD_PER_COMBAT_UNIT + 50;
+    for (let pid = 0; pid < 2; pid++) {
+      const current = this.ops.getFoodForPlayer(pid);
+      this.ops.setFoodForPlayer(pid, Math.max(current, foodNeeded));
+      this.ops.setPlayerFoodResource(pid, Math.max(current, foodNeeded));
+    }
+    this.ops.updateResourceDisplay();
+    this.ops.showNotification(`⚔️ Spawned ${totalSpawned} test units (${scale}x)`, '#00e676');
   }
 }

@@ -5,34 +5,370 @@
 
 import * as THREE from 'three';
 import { TerrainType, ResourceType, HexCoord } from '../types';
+import { InstancedObjectManager } from './InstancedObjectManager';
+
+const TREE_FOLIAGE_COLORS = [0x2e7d32, 0x388e3c, 0x43a047, 0x4caf50] as const;
+const STAGE_TREE_COLORS = [
+  [0x66bb6a, 0x81c784],
+  [0x43a047, 0x4caf50],
+  [0x2e7d32, 0x388e3c],
+] as const;
+const SNOW_PINE_COLORS = [0x1b5e20, 0x2e7d32, 0x33691e] as const;
+const FLOWER_COLORS = [0xff6b6b, 0xffd93d, 0x6bcb77, 0xc084fc, 0xff8fab] as const;
+const DESERT_ROCK_COLORS = [0xc4a46c, 0xb8956a, 0xd4a96a, 0xc9935e] as const;
+const JUNGLE_TREE_COLORS = [0x1b7a1e, 0x237b28, 0x2e7d32] as const;
+const GRASS_VARIANT_COUNT = 4;
 
 // Seeded random for consistent decoration placement
 class SeededRand {
   private s: number;
-  constructor(seed: number) { this.s = seed; }
+
+  constructor(seed: number) {
+    this.s = seed;
+  }
+
   next(): number {
     this.s = (this.s * 16807 + 0) % 2147483647;
     return this.s / 2147483647;
   }
 }
 
+type Vec3Like = { x: number; y: number; z: number };
+
+interface GeometryPart {
+  geometry: THREE.BufferGeometry;
+  color: THREE.ColorRepresentation;
+  position?: Vec3Like;
+  rotation?: Vec3Like;
+  scale?: Vec3Like;
+}
+
+interface InstanceDecorationRef {
+  kind: 'instance';
+  type: string;
+  instanceId: number;
+}
+
+interface ObjectDecorationRef {
+  kind: 'object';
+  object: THREE.Object3D;
+}
+
+type TileDecorationRef = InstanceDecorationRef | ObjectDecorationRef;
+
+interface GrassInstanceData {
+  type: string;
+  instanceId: number;
+  position: THREE.Vector3;
+  rotationY: number;
+  swayPhase: number;
+  swaySpeed: number;
+  swayAmount: number;
+}
+
+function coordKey(coord: HexCoord): string {
+  return `${coord.q},${coord.r}`;
+}
+
+function worldFromCoord(coord: HexCoord): { x: number; z: number } {
+  return {
+    x: coord.q * 1.5,
+    z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
+  };
+}
+
+function createTransformMatrix(
+  position: Vec3Like = { x: 0, y: 0, z: 0 },
+  rotation: Vec3Like = { x: 0, y: 0, z: 0 },
+  scale: Vec3Like = { x: 1, y: 1, z: 1 }
+): THREE.Matrix4 {
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
+  matrix.compose(
+    new THREE.Vector3(position.x, position.y, position.z),
+    quaternion,
+    new THREE.Vector3(scale.x, scale.y, scale.z)
+  );
+  return matrix;
+}
+
+function createMergedGeometry(parts: GeometryPart[]): THREE.BufferGeometry {
+  const prepared: THREE.BufferGeometry[] = [];
+  let totalVertices = 0;
+
+  for (const part of parts) {
+    const clone = part.geometry.clone();
+    const geometry = clone.index ? clone.toNonIndexed() ?? clone : clone;
+    if (geometry !== clone) clone.dispose();
+    geometry.applyMatrix4(createTransformMatrix(part.position, part.rotation, part.scale));
+
+    if (!geometry.getAttribute('normal')) {
+      geometry.computeVertexNormals();
+    }
+
+    const positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const color = new THREE.Color(part.color);
+    const colors = new Float32Array(positionAttr.count * 3);
+    for (let i = 0; i < positionAttr.count; i++) {
+      const offset = i * 3;
+      colors[offset] = color.r;
+      colors[offset + 1] = color.g;
+      colors[offset + 2] = color.b;
+    }
+
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    prepared.push(geometry);
+    totalVertices += positionAttr.count;
+  }
+
+  const positions = new Float32Array(totalVertices * 3);
+  const normals = new Float32Array(totalVertices * 3);
+  const colors = new Float32Array(totalVertices * 3);
+
+  let vertexOffset = 0;
+  for (const geometry of prepared) {
+    const positionAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const normalAttr = geometry.getAttribute('normal') as THREE.BufferAttribute;
+    const colorAttr = geometry.getAttribute('color') as THREE.BufferAttribute;
+    const arrayOffset = vertexOffset * 3;
+
+    positions.set(positionAttr.array as ArrayLike<number>, arrayOffset);
+    normals.set(normalAttr.array as ArrayLike<number>, arrayOffset);
+    colors.set(colorAttr.array as ArrayLike<number>, arrayOffset);
+
+    vertexOffset += positionAttr.count;
+    geometry.dispose();
+  }
+
+  const merged = new THREE.BufferGeometry();
+  merged.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  merged.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  merged.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  merged.computeBoundingSphere();
+  merged.computeBoundingBox();
+  return merged;
+}
+
+function createTreeGeometry(foliageColor: THREE.ColorRepresentation, stage?: 0 | 1 | 2): THREE.BufferGeometry {
+  const stageScales = [0.35, 0.65, 1.0] as const;
+  const baseScale = stage === undefined ? 1 : stageScales[stage];
+  const trunkRadius = stage === 0 ? 0.03 : stage === 1 ? 0.06 : 0.09;
+  const trunkHeight = (stage === undefined ? 1.0 : 0.95) * baseScale;
+  const foliageLayers = stage === undefined ? 3 : stage === 0 ? 1 : stage === 1 ? 2 : 3;
+  const parts: GeometryPart[] = [
+    {
+      geometry: new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 5),
+      color: stage === 0 ? 0x795548 : 0x5d4037,
+      position: { x: 0, y: trunkHeight / 2, z: 0 },
+    },
+  ];
+
+  for (let i = 0; i < foliageLayers; i++) {
+    parts.push({
+      geometry: new THREE.ConeGeometry((0.35 - i * 0.08) * baseScale, 0.4 * baseScale, 6),
+      color: foliageColor,
+      position: {
+        x: 0,
+        y: trunkHeight + i * 0.25 * baseScale + 0.1 * baseScale,
+        z: 0,
+      },
+    });
+  }
+
+  return createMergedGeometry(parts);
+}
+
+function createSnowPineGeometry(foliageColor: THREE.ColorRepresentation): THREE.BufferGeometry {
+  const trunkHeight = 1.0;
+  const parts: GeometryPart[] = [
+    {
+      geometry: new THREE.CylinderGeometry(0.06, 0.09, trunkHeight, 5),
+      color: 0x5d4037,
+      position: { x: 0, y: trunkHeight / 2, z: 0 },
+    },
+  ];
+
+  for (let i = 0; i < 3; i++) {
+    const radius = 0.35 - i * 0.08;
+    parts.push({
+      geometry: new THREE.ConeGeometry(radius, 0.4, 6),
+      color: foliageColor,
+      position: { x: 0, y: trunkHeight + i * 0.25 + 0.1, z: 0 },
+    });
+    parts.push({
+      geometry: new THREE.ConeGeometry(radius * 0.75, 0.12, 6),
+      color: 0xf5f5f5,
+      position: { x: 0, y: trunkHeight + i * 0.25 + 0.28, z: 0 },
+    });
+  }
+
+  parts.push({
+    geometry: new THREE.ConeGeometry(0.1, 0.12, 6),
+    color: 0xfafafa,
+    position: { x: 0, y: trunkHeight + 0.85, z: 0 },
+  });
+
+  return createMergedGeometry(parts);
+}
+
+function createFlowerStemGeometry(): THREE.BufferGeometry {
+  return createMergedGeometry([
+    {
+      geometry: new THREE.CylinderGeometry(0.01, 0.01, 0.15, 3),
+      color: 0x2e7d32,
+    },
+  ]);
+}
+
+function createFlowerBloomGeometry(color: THREE.ColorRepresentation): THREE.BufferGeometry {
+  return createMergedGeometry([
+    {
+      geometry: new THREE.SphereGeometry(0.04, 4, 4),
+      color,
+      position: { x: 0, y: 0.08, z: 0 },
+    },
+  ]);
+}
+
+function createCactusGeometry(withArm: boolean): THREE.BufferGeometry {
+  const parts: GeometryPart[] = [
+    {
+      geometry: new THREE.CylinderGeometry(0.08, 0.1, 0.5, 6),
+      color: 0x558b2f,
+      position: { x: 0, y: 0.25, z: 0 },
+    },
+  ];
+
+  if (withArm) {
+    parts.push({
+      geometry: new THREE.CylinderGeometry(0.05, 0.06, 0.25, 5),
+      color: 0x558b2f,
+      position: { x: 0.12, y: 0.35, z: 0 },
+      rotation: { x: 0, y: 0, z: -0.5 },
+    });
+  }
+
+  return createMergedGeometry(parts);
+}
+
+function createJungleTreeGeometry(canopyColor: THREE.ColorRepresentation, includeLowerCanopy: boolean): THREE.BufferGeometry {
+  const height = 0.9;
+  const canopySize = 0.35;
+  const parts: GeometryPart[] = [
+    {
+      geometry: new THREE.CylinderGeometry(0.03, 0.08, height, 5),
+      color: 0x4e3b2a,
+      position: { x: 0, y: height / 2, z: 0 },
+      rotation: { x: 0, y: 0, z: 0.08 },
+    },
+    {
+      geometry: new THREE.SphereGeometry(canopySize, 6, 5),
+      color: canopyColor,
+      position: { x: 0, y: height + canopySize * 0.5, z: 0 },
+      scale: { x: 1.2, y: 0.8, z: 1.2 },
+    },
+  ];
+
+  if (includeLowerCanopy) {
+    parts.push({
+      geometry: new THREE.SphereGeometry(canopySize * 0.7, 5, 4),
+      color: 0x2e7d32,
+      position: { x: 0.05, y: height * 0.6, z: -0.05 },
+    });
+  }
+
+  return createMergedGeometry(parts);
+}
+
+function createGrassClumpGeometry(stage: number, variantSeed: number): THREE.BufferGeometry {
+  const rng = new SeededRand(variantSeed);
+  const stageScale = [0.45, 0.75, 1.0][Math.min(stage, 2)];
+  const bladeCount = [30, 50, 80][Math.min(stage, 2)];
+  const colors = [
+    new THREE.Color(0.35, 0.65, 0.12),
+    new THREE.Color(0.30, 0.58, 0.10),
+    new THREE.Color(0.45, 0.55, 0.12),
+  ];
+  const baseColor = colors[Math.min(stage, 2)];
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const vertColors: number[] = [];
+  const spread = 0.85;
+
+  for (let i = 0; i < bladeCount; i++) {
+    const h = (0.2 + rng.next() * 0.2) * stageScale;
+    const w = (0.04 + rng.next() * 0.03) * stageScale;
+    const bx = (rng.next() - 0.5) * spread * 2;
+    const bz = (rng.next() - 0.5) * spread * 2;
+    const angle = rng.next() * Math.PI;
+    const lean = (rng.next() - 0.5) * 0.3;
+    const cosA = Math.cos(angle);
+    const sinA = Math.sin(angle);
+    const shade = 0.85 + rng.next() * 0.3;
+    const cr = baseColor.r * shade;
+    const cg = baseColor.g * shade;
+    const cb = baseColor.b * shade;
+    const hw = w / 2;
+    const pts = [
+      [-hw, 0, 0],
+      [hw, 0, 0],
+      [-hw, h, lean * h],
+      [hw, h, lean * h],
+    ] as const;
+    const transformed = pts.map(([px, py, pz]) => {
+      const rx = px * cosA - pz * sinA + bx;
+      const ry = py;
+      const rz = px * sinA + pz * cosA + bz;
+      return [rx, ry, rz] as const;
+    });
+    const nx = -sinA;
+    const nz = cosA;
+
+    positions.push(
+      transformed[0][0], transformed[0][1], transformed[0][2],
+      transformed[1][0], transformed[1][1], transformed[1][2],
+      transformed[2][0], transformed[2][1], transformed[2][2],
+      transformed[1][0], transformed[1][1], transformed[1][2],
+      transformed[3][0], transformed[3][1], transformed[3][2],
+      transformed[2][0], transformed[2][1], transformed[2][2]
+    );
+
+    for (let n = 0; n < 6; n++) {
+      normals.push(nx, 0.3, nz);
+      vertColors.push(cr, cg, cb);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(vertColors, 3));
+  geometry.computeBoundingSphere();
+  geometry.computeBoundingBox();
+  return geometry;
+}
+
 export class TerrainDecorator {
   private scene: THREE.Scene;
+  private instancedObjects: InstancedObjectManager;
   private decorations: THREE.Object3D[] = [];
-  private decorationsByTile: Map<string, THREE.Object3D[]> = new Map();
+  private decorationsByTile: Map<string, TileDecorationRef[]> = new Map();
   private waterMeshes: THREE.Mesh[] = [];
-  private mistClouds: THREE.Mesh[] = []; // separate list for spinning mist
-  private waterTime: number = 0;
-  /** All grass clump meshes — animated with sway each frame (1 merged mesh per tile) */
-  private grassBlades: THREE.Mesh[] = [];
-  /** Grass clump meshes keyed by tile "q,r" for removal/regrowth */
-  grassClumpsByTile: Map<string, THREE.Object3D> = new Map();
-  private grassTime: number = 0;
+  private mistClouds: THREE.Mesh[] = [];
+  private waterTime = 0;
+  grassClumpsByTile: Map<string, GrassInstanceData> = new Map();
+  private grassTime = 0;
   /** When true, MOUNTAIN tiles get desert decorations (cacti/rocks) instead of trees */
   desertMode = false;
+  /** Camera position reference for grass distance culling. Set externally each frame. */
+  cameraWorldPos: { x: number; z: number } = { x: 0, z: 0 };
+  private _grassFrameSkip = 0;
+  private readonly tempEuler = new THREE.Euler();
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
+    this.instancedObjects = new InstancedObjectManager(scene);
+    this.registerInstancedTypes();
   }
 
   /** Apply Y-level clipping to all water decoration meshes (curtains, surfaces).
@@ -50,13 +386,14 @@ export class TerrainDecorator {
    *  Hides decorations above the slice level. Pass null to remove clipping. */
   setDecorationClipPlane(clipPlane: THREE.Plane | null): void {
     const planes = clipPlane ? [clipPlane] : null;
-    // Apply to water meshes
+    this.instancedObjects.setClippingPlanes(planes);
+
     for (const mesh of this.waterMeshes) {
       if (mesh.material instanceof THREE.Material) {
         (mesh.material as THREE.MeshPhongMaterial).clippingPlanes = planes as THREE.Plane[] | null;
       }
     }
-    // Apply to all other decorations (trees, rocks, flowers, etc.)
+
     for (const obj of this.decorations) {
       obj.traverse((child) => {
         if (child instanceof THREE.Mesh && child.material instanceof THREE.Material) {
@@ -64,13 +401,7 @@ export class TerrainDecorator {
         }
       });
     }
-    // Apply to grass clumps
-    for (const mesh of this.grassBlades) {
-      if (mesh.material instanceof THREE.Material) {
-        mesh.material.clippingPlanes = planes as THREE.Plane[] | null;
-      }
-    }
-    // Apply to mist clouds
+
     for (const mesh of this.mistClouds) {
       if (mesh.material instanceof THREE.Material) {
         mesh.material.clippingPlanes = planes as THREE.Plane[] | null;
@@ -80,72 +411,60 @@ export class TerrainDecorator {
 
   /** Remove all decorations on a specific tile (e.g. when a tree is chopped) */
   removeDecoration(coord: HexCoord): void {
-    const key = `${coord.q},${coord.r}`;
-    const objs = this.decorationsByTile.get(key);
-    if (objs) {
-      for (const obj of objs) {
-        this.scene.remove(obj);
-        obj.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            if (child.material instanceof THREE.Material) child.material.dispose();
-          }
-        });
-        const idx = this.decorations.indexOf(obj);
-        if (idx !== -1) this.decorations.splice(idx, 1);
-      }
-      this.decorationsByTile.delete(key);
-    }
-  }
+    const key = coordKey(coord);
+    const refs = this.decorationsByTile.get(key);
+    if (!refs) return;
 
-  /**
-   * Decorate a tile based on terrain type
-   */
-  /** Helper: track a decoration object for a tile */
-  private trackDecoration(obj: THREE.Object3D, tileKey: string): void {
-    if (!this.decorationsByTile.has(tileKey)) {
-      this.decorationsByTile.set(tileKey, []);
+    const grass = this.grassClumpsByTile.get(key);
+
+    for (const ref of refs) {
+      if (ref.kind === 'instance') {
+        this.instancedObjects.removeInstance(ref.type, ref.instanceId);
+        if (grass && grass.type === ref.type && grass.instanceId === ref.instanceId) {
+          this.grassClumpsByTile.delete(key);
+        }
+      } else {
+        this.removeLooseDecorationObject(ref.object);
+      }
     }
-    this.decorationsByTile.get(tileKey)!.push(obj);
+
+    this.decorationsByTile.delete(key);
   }
 
   /**
    * Decorate a tile. maxNeighborElevation prevents trees on tiles where
    * a much taller neighbor would cause visual clipping.
    */
-  decorateTile(coord: HexCoord, terrain: TerrainType, elevation: number, maxNeighborElevation: number = elevation, resource: ResourceType | null = null): void {
-    const tileKey = `${coord.q},${coord.r}`;
-    const decorsBefore = this.decorations.length;
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
+  decorateTile(
+    coord: HexCoord,
+    terrain: TerrainType,
+    elevation: number,
+    maxNeighborElevation: number = elevation,
+    resource: ResourceType | null = null
+  ): void {
+    const tileKey = coordKey(coord);
+    const { x: worldX, z: worldZ } = worldFromCoord(coord);
     const rng = new SeededRand(coord.q * 1000 + coord.r);
 
-    // Ridges are now real terrain — tile elevation already includes ridge height.
-    // Trees sit at the tile's elevation directly (no manual spire offset needed).
     const treeElevation = elevation;
-
-    // Only block trees if a neighbor is dramatically taller (would visually engulf the tree)
     const neighborTooTall = (maxNeighborElevation - treeElevation) > 2.5;
 
     switch (terrain) {
       case TerrainType.FOREST:
         if (!neighborTooTall) {
-          // Above snow line (scaled elev >= 6.5) use snowy trees
           if (elevation >= 6.5) {
-            this.addSnowPine(worldX, treeElevation, worldZ, rng);
-            if (rng.next() > 0.6) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng);
+            this.addSnowPine(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.6) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
           } else {
-            this.addTree(worldX, treeElevation, worldZ, rng);
-            if (rng.next() > 0.6) this.addTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng);
+            this.addTree(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.6) this.addTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
           }
         }
         break;
       case TerrainType.PLAINS:
         if (!neighborTooTall) {
-          // Skip grass/flowers on high-elevation plains where the surface is stone (elev >= 3.0 = height 6+)
           const hasGrassSurface = elevation < 3.0;
-          if (hasGrassSurface && rng.next() > 0.7) this.addFlowers(worldX, treeElevation, worldZ, rng);
-          // Most plains tiles get grass (70% chance) — spawns at medium stage
+          if (hasGrassSurface && rng.next() > 0.7) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
           if (hasGrassSurface && rng.next() > 0.3) {
             this.addGrassAtStage(coord, treeElevation, 1 + (rng.next() > 0.5 ? 1 : 0));
           }
@@ -153,62 +472,66 @@ export class TerrainDecorator {
         break;
       case TerrainType.MOUNTAIN:
         if (this.desertMode) {
-          // Desert plateaus/mesas: cacti, desert rocks, no trees
-          if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng);
-          if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng);
-          if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+          if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
         } else {
-          // Mountains get sparse rocks + sparse trees at the correct height
-          if (rng.next() > 0.55) this.addRock(worldX, treeElevation, worldZ, rng);
-          if (rng.next() > 0.8) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng);
+          if (rng.next() > 0.55) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.8) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
           if (!neighborTooTall && rng.next() > 0.65) {
             if (elevation >= 6.5) {
-              this.addSnowPine(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+              this.addSnowPine(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
             } else {
-              this.addTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng);
+              this.addTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
             }
           }
         }
-        // Iron ore vein indicator — rusty-orange rocks on iron-rich mountains
         if (resource === ResourceType.IRON) {
-          this.addIronOreVein(worldX, treeElevation, worldZ, rng);
+          this.addIronOreVein(worldX, treeElevation, worldZ, rng, tileKey);
         }
         break;
       case TerrainType.WATER:
-        // Ocean plane handles water visuals — no decoration needed
         break;
       case TerrainType.DESERT:
-        if (rng.next() > 0.75) this.addCactus(worldX, elevation, worldZ, rng);
-        if (rng.next() > 0.85) this.addTumbleweed(worldX + (rng.next() - 0.5) * 0.5, elevation, worldZ + (rng.next() - 0.5) * 0.5, rng);
-        if (rng.next() > 0.92) this.addDesertRock(worldX + (rng.next() - 0.5) * 0.4, elevation, worldZ + (rng.next() - 0.5) * 0.4, rng);
+        if (rng.next() > 0.75) this.addCactus(worldX, elevation, worldZ, rng, tileKey);
+        if (rng.next() > 0.85) {
+          this.addTumbleweed(
+            worldX + (rng.next() - 0.5) * 0.5,
+            elevation,
+            worldZ + (rng.next() - 0.5) * 0.5,
+            rng,
+            tileKey
+          );
+        }
+        if (rng.next() > 0.92) {
+          this.addDesertRock(
+            worldX + (rng.next() - 0.5) * 0.4,
+            elevation,
+            worldZ + (rng.next() - 0.5) * 0.4,
+            rng,
+            tileKey
+          );
+        }
         break;
       case TerrainType.SNOW:
-        // No trees in snow zones — too high/cold. Just rocks occasionally.
-        if (rng.next() > 0.75) this.addRock(worldX, elevation, worldZ, rng);
+        if (rng.next() > 0.75) this.addRock(worldX, elevation, worldZ, rng, tileKey);
         break;
       case TerrainType.JUNGLE:
-        // Dense jungle: multiple trees + undergrowth
         if (!neighborTooTall) {
-          this.addJungleTree(worldX, treeElevation, worldZ, rng);
-          if (rng.next() > 0.3) this.addJungleTree(worldX + 0.35, treeElevation, worldZ + 0.2, rng);
-          if (rng.next() > 0.5) this.addJungleTree(worldX - 0.2, treeElevation, worldZ - 0.3, rng);
+          this.addJungleTree(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.3) this.addJungleTree(worldX + 0.35, treeElevation, worldZ + 0.2, rng, tileKey);
+          if (rng.next() > 0.5) this.addJungleTree(worldX - 0.2, treeElevation, worldZ - 0.3, rng, tileKey);
         }
         break;
       case TerrainType.RIVER:
-        this.addWater(worldX, elevation, worldZ);
+        this.addWater(worldX, elevation, worldZ, tileKey);
         break;
       case TerrainType.LAKE:
-        this.addWater(worldX, elevation, worldZ);
+        this.addWater(worldX, elevation, worldZ, tileKey);
         break;
       case TerrainType.WATERFALL:
-        this.addWaterfall(worldX, elevation, worldZ, maxNeighborElevation);
+        this.addWaterfall(worldX, elevation, worldZ, maxNeighborElevation, tileKey);
         break;
-    }
-
-    // Track all decorations added for this tile
-    const newDecors = this.decorations.slice(decorsBefore);
-    if (newDecors.length > 0) {
-      this.decorationsByTile.set(tileKey, newDecors);
     }
   }
 
@@ -217,388 +540,43 @@ export class TerrainDecorator {
    * Scale and color vary by stage.
    */
   addTreeAtStage(coord: HexCoord, elevation: number, stage: number): void {
-    const tileKey = `${coord.q},${coord.r}`;
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const rng = new SeededRand(coord.q * 1000 + coord.r + stage * 7);
-
-    const group = new THREE.Group();
-    const y = elevation;
-
-    // Stage-based scaling: sapling=0.35, young=0.65, mature=1.0+
-    const stageScales = [0.35, 0.65, 1.0];
-    const baseScale = stageScales[Math.min(stage, 2)];
-
-    // Sapling: lighter green, thinner trunk
-    const trunkH = (0.8 + rng.next() * 0.4) * baseScale;
-    const trunkRadius = stage === 0 ? 0.03 : stage === 1 ? 0.06 : 0.09;
-    const trunkGeo = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkH, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: stage === 0 ? 0x795548 : 0x5d4037 });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.set(0, trunkH / 2, 0);
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Foliage — saplings are brighter/lighter green
-    const foliageColors = stage === 0
-      ? [0x66bb6a, 0x81c784]  // light green saplings
-      : stage === 1
-        ? [0x43a047, 0x4caf50] // medium green young
-        : [0x2e7d32, 0x388e3c]; // dark green mature
-    const color = foliageColors[Math.floor(rng.next() * foliageColors.length)];
-
-    const layers = stage === 0 ? 1 : stage === 1 ? 2 : 3;
-    for (let i = 0; i < layers; i++) {
-      const radius = (0.35 - i * 0.08) * baseScale;
-      const height = 0.4 * baseScale;
-      const coneGeo = new THREE.ConeGeometry(radius, height, 6);
-      const coneMat = new THREE.MeshLambertMaterial({ color });
-      const cone = new THREE.Mesh(coneGeo, coneMat);
-      cone.position.set(0, trunkH + i * 0.25 * baseScale + 0.1 * baseScale, 0);
-      cone.castShadow = true;
-      group.add(cone);
-    }
-
+    const tileKey = coordKey(coord);
+    const { x: worldX, z: worldZ } = worldFromCoord(coord);
+    const clampedStage = Math.min(stage, 2) as 0 | 1 | 2;
+    const rng = new SeededRand(coord.q * 1000 + coord.r + clampedStage * 7);
+    const variant = Math.floor(rng.next() * STAGE_TREE_COLORS[clampedStage].length);
     const offsetX = (rng.next() - 0.5) * 0.3;
     const offsetZ = (rng.next() - 0.5) * 0.3;
-    group.position.set(worldX + offsetX, y, worldZ + offsetZ);
-    group.rotation.y = rng.next() * Math.PI * 2;
-
-    this.scene.add(group);
-    this.decorations.push(group);
-
-    // Track for tile
-    if (!this.decorationsByTile.has(tileKey)) {
-      this.decorationsByTile.set(tileKey, []);
-    }
-    this.decorationsByTile.get(tileKey)!.push(group);
-  }
-
-  private addTree(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
-    const y = elevation;
-
-    // Trunk
-    const trunkH = 0.8 + rng.next() * 0.4;
-    const trunkGeo = new THREE.CylinderGeometry(0.06, 0.09, trunkH, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.set(0, trunkH / 2, 0);
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Foliage layers (stacked cones for a low-poly tree)
-    const foliageColors = [0x2e7d32, 0x388e3c, 0x43a047, 0x4caf50];
-    const color = foliageColors[Math.floor(rng.next() * foliageColors.length)];
-
-    for (let i = 0; i < 3; i++) {
-      const radius = 0.35 - i * 0.08;
-      const height = 0.4;
-      const coneGeo = new THREE.ConeGeometry(radius, height, 6);
-      const coneMat = new THREE.MeshLambertMaterial({ color });
-      const cone = new THREE.Mesh(coneGeo, coneMat);
-      cone.position.set(0, trunkH + i * 0.25 + 0.1, 0);
-      cone.castShadow = true;
-      group.add(cone);
-    }
-
-    const offsetX = (rng.next() - 0.5) * 0.3;
-    const offsetZ = (rng.next() - 0.5) * 0.3;
-    group.position.set(x + offsetX, y, z + offsetZ);
-
-    // Slight random rotation
-    group.rotation.y = rng.next() * Math.PI * 2;
-    const scale = 0.8 + rng.next() * 0.5;
-    group.scale.setScalar(scale);
-
-    this.scene.add(group);
-    this.decorations.push(group);
-  }
-
-  private addSnowPine(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
-    const y = elevation;
-
-    // Brown trunk (same as normal tree)
-    const trunkH = 0.8 + rng.next() * 0.4;
-    const trunkGeo = new THREE.CylinderGeometry(0.06, 0.09, trunkH, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.set(0, trunkH / 2, 0);
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Green foliage layers with snow dusting — darker green than normal trees
-    const foliageColors = [0x1b5e20, 0x2e7d32, 0x33691e];
-    const color = foliageColors[Math.floor(rng.next() * foliageColors.length)];
-
-    for (let i = 0; i < 3; i++) {
-      const radius = 0.35 - i * 0.08;
-      const coneGeo = new THREE.ConeGeometry(radius, 0.4, 6);
-      const coneMat = new THREE.MeshLambertMaterial({ color });
-      const cone = new THREE.Mesh(coneGeo, coneMat);
-      cone.position.set(0, trunkH + i * 0.25 + 0.1, 0);
-      cone.castShadow = true;
-      group.add(cone);
-
-      // Snow dusting on top of each foliage layer
-      const snowRadius = radius * 0.75;
-      const snowGeo = new THREE.ConeGeometry(snowRadius, 0.12, 6);
-      const snowMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f5 });
-      const snowDust = new THREE.Mesh(snowGeo, snowMat);
-      snowDust.position.set(0, trunkH + i * 0.25 + 0.28, 0);
-      group.add(snowDust);
-    }
-
-    // Snow cap on the very top
-    const capGeo = new THREE.ConeGeometry(0.1, 0.12, 6);
-    const capMat = new THREE.MeshLambertMaterial({ color: 0xfafafa });
-    const cap = new THREE.Mesh(capGeo, capMat);
-    cap.position.set(0, trunkH + 0.85, 0);
-    group.add(cap);
-
-    const offsetX = (rng.next() - 0.5) * 0.3;
-    const offsetZ = (rng.next() - 0.5) * 0.3;
-    group.position.set(x + offsetX, y, z + offsetZ);
-    group.rotation.y = rng.next() * Math.PI * 2;
-    group.scale.setScalar(0.8 + rng.next() * 0.5);
-    this.scene.add(group);
-    this.decorations.push(group);
-  }
-
-  private addRock(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const rockGeo = new THREE.DodecahedronGeometry(0.15 + rng.next() * 0.15, 0);
-    const rockMat = new THREE.MeshLambertMaterial({
-      color: new THREE.Color(0.45 + rng.next() * 0.1, 0.43 + rng.next() * 0.1, 0.4 + rng.next() * 0.1),
-    });
-    const rock = new THREE.Mesh(rockGeo, rockMat);
-    rock.position.set(
-      x + (rng.next() - 0.5) * 0.4,
-      elevation - 0.05,
-      z + (rng.next() - 0.5) * 0.4
+    const rotationY = rng.next() * Math.PI * 2;
+    const scale = 0.95 + rng.next() * 0.1;
+    const type = `tree_stage_${clampedStage}_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x: worldX + offsetX, y: elevation, z: worldZ + offsetZ },
+      new THREE.Euler(0, rotationY, 0),
+      { x: scale, y: scale, z: scale }
     );
-    rock.rotation.set(rng.next(), rng.next(), rng.next());
-    rock.scale.y = 0.6 + rng.next() * 0.3;
-    rock.castShadow = true;
-    this.scene.add(rock);
-    this.decorations.push(rock);
-  }
-
-  /** Iron ore vein — cluster of rusty-orange rocks with metallic sheen */
-  private addIronOreVein(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const count = 2 + Math.floor(rng.next() * 2); // 2-3 ore chunks
-    for (let i = 0; i < count; i++) {
-      const size = 0.1 + rng.next() * 0.12;
-      const oreGeo = new THREE.DodecahedronGeometry(size, 0);
-      // Rusty orange-brown color with slight variation
-      const r = 0.55 + rng.next() * 0.15;
-      const g = 0.25 + rng.next() * 0.1;
-      const b = 0.1 + rng.next() * 0.05;
-      const oreMat = new THREE.MeshLambertMaterial({
-        color: new THREE.Color(r, g, b),
-        emissive: new THREE.Color(0.15, 0.06, 0.02), // subtle warm glow
-      });
-      const ore = new THREE.Mesh(oreGeo, oreMat);
-      ore.position.set(
-        x + (rng.next() - 0.5) * 0.5,
-        elevation - 0.06 + rng.next() * 0.04,
-        z + (rng.next() - 0.5) * 0.5
-      );
-      ore.rotation.set(rng.next() * Math.PI, rng.next() * Math.PI, rng.next() * Math.PI);
-      ore.scale.set(1, 0.6 + rng.next() * 0.4, 1);
-      ore.castShadow = true;
-      this.scene.add(ore);
-      this.decorations.push(ore);
-    }
-  }
-
-  private addFlowers(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const flowerColors = [0xff6b6b, 0xffd93d, 0x6bcb77, 0xc084fc, 0xff8fab];
-    const count = 2 + Math.floor(rng.next() * 3);
-
-    for (let i = 0; i < count; i++) {
-      const color = flowerColors[Math.floor(rng.next() * flowerColors.length)];
-
-      // Stem
-      const stemGeo = new THREE.CylinderGeometry(0.01, 0.01, 0.15, 3);
-      const stemMat = new THREE.MeshLambertMaterial({ color: 0x2e7d32 });
-      const stem = new THREE.Mesh(stemGeo, stemMat);
-
-      // Bloom
-      const bloomGeo = new THREE.SphereGeometry(0.04, 4, 4);
-      const bloomMat = new THREE.MeshLambertMaterial({ color });
-      const bloom = new THREE.Mesh(bloomGeo, bloomMat);
-      bloom.position.y = 0.08;
-
-      const group = new THREE.Group();
-      group.add(stem);
-      group.add(bloom);
-      group.position.set(
-        x + (rng.next() - 0.5) * 0.6,
-        elevation + 0.07,
-        z + (rng.next() - 0.5) * 0.6
-      );
-
-      this.scene.add(group);
-      this.decorations.push(group);
-    }
-  }
-
-  /**
-   * Add a grass clump at a growth stage (0=short, 1=medium, 2=tall/harvestable).
-   * All blades merged into a single mesh per tile for performance.
-   * Spread radius extends slightly beyond tile edge so adjacent grass tiles blend seamlessly.
-   */
-  addGrassAtStage(coord: HexCoord, elevation: number, stage: number): void {
-    const tileKey = `${coord.q},${coord.r}`;
-    const worldX = coord.q * 1.5;
-    const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
-    const rng = new SeededRand(coord.q * 997 + coord.r * 131 + stage * 17);
-
-    // Remove existing grass clump on this tile
-    this.removeGrassClump(tileKey);
-
-    const stageScale = [0.45, 0.75, 1.0][Math.min(stage, 2)];
-    const bladeCount = [30, 50, 80][Math.min(stage, 2)];
-
-    // Color per stage — lighter = short, golden = ready to harvest
-    const colors = [
-      new THREE.Color(0.35, 0.65, 0.12),  // stage 0: bright lime
-      new THREE.Color(0.30, 0.58, 0.10),  // stage 1: warm green
-      new THREE.Color(0.45, 0.55, 0.12),  // stage 2: golden-green (ready to harvest)
-    ];
-    const baseColor = colors[Math.min(stage, 2)];
-
-    // Build a merged BufferGeometry from all blades (1 draw call per tile!)
-    const positions: number[] = [];
-    const normals: number[] = [];
-    const vertColors: number[] = [];
-    // Spread radius slightly beyond tile boundary (0.85 vs tile spacing 1.5/2 = 0.75)
-    const SPREAD = 0.85;
-
-    for (let i = 0; i < bladeCount; i++) {
-      const h = (0.2 + rng.next() * 0.2) * stageScale;
-      const w = (0.04 + rng.next() * 0.03) * stageScale;
-
-      // Position within tile (extended radius for seamless blending)
-      const bx = (rng.next() - 0.5) * SPREAD * 2;
-      const bz = (rng.next() - 0.5) * SPREAD * 2;
-
-      // Random rotation around Y
-      const angle = rng.next() * Math.PI;
-      const lean = (rng.next() - 0.5) * 0.3;
-      const cosA = Math.cos(angle);
-      const sinA = Math.sin(angle);
-
-      // Per-blade color variation
-      const shade = 0.85 + rng.next() * 0.3;
-      const cr = baseColor.r * shade;
-      const cg = baseColor.g * shade;
-      const cb = baseColor.b * shade;
-
-      // Build two triangles (quad) for each blade
-      // Bottom-left, bottom-right, top-left, top-right in local space
-      const hw = w / 2;
-      const pts = [
-        [-hw, 0, 0], [hw, 0, 0], [-hw, h, lean * h], [hw, h, lean * h]
-      ];
-
-      // Rotate and translate each vertex
-      const transformed = pts.map(([px, py, pz]) => {
-        const rx = px * cosA - pz * sinA + bx;
-        const ry = py;
-        const rz = px * sinA + pz * cosA + bz;
-        return [rx, ry, rz];
-      });
-
-      // Normal (face normal of the quad, roughly)
-      const nx = -sinA;
-      const nz = cosA;
-
-      // Triangle 1: 0, 1, 2
-      positions.push(
-        transformed[0][0], transformed[0][1], transformed[0][2],
-        transformed[1][0], transformed[1][1], transformed[1][2],
-        transformed[2][0], transformed[2][1], transformed[2][2]
-      );
-      // Triangle 2: 1, 3, 2
-      positions.push(
-        transformed[1][0], transformed[1][1], transformed[1][2],
-        transformed[3][0], transformed[3][1], transformed[3][2],
-        transformed[2][0], transformed[2][1], transformed[2][2]
-      );
-
-      // Normals (6 vertices)
-      for (let n = 0; n < 6; n++) {
-        normals.push(nx, 0.3, nz);
-      }
-      // Colors (6 vertices)
-      for (let n = 0; n < 6; n++) {
-        vertColors.push(cr, cg, cb);
-      }
-    }
-
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(vertColors, 3));
-    geo.computeBoundingSphere();
-
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(worldX, elevation, worldZ);
-    mesh.frustumCulled = false;
-
-    // Store sway data on the mesh
-    mesh.userData.swayPhase = rng.next() * Math.PI * 2;
-    mesh.userData.swaySpeed = 1.8 + rng.next() * 0.6;
-    mesh.userData.swayAmount = 0.04 + stage * 0.02;
-
-    this.scene.add(mesh);
-    this.decorations.push(mesh);
-    this.grassBlades.push(mesh); // For sway animation (now 1 mesh per tile)
-    this.grassClumpsByTile.set(tileKey, mesh);
-
-    // Track for tile-based removal
-    if (!this.decorationsByTile.has(tileKey)) {
-      this.decorationsByTile.set(tileKey, []);
-    }
-    this.decorationsByTile.get(tileKey)!.push(mesh);
+    this.trackInstanceDecoration(tileKey, type, instanceId);
   }
 
   /** Remove grass clump from a tile */
   removeGrassClump(tileKey: string): void {
     const existing = this.grassClumpsByTile.get(tileKey);
-    if (existing) {
-      // Remove from animation list
-      const idx2 = this.grassBlades.indexOf(existing as THREE.Mesh);
-      if (idx2 !== -1) this.grassBlades.splice(idx2, 1);
+    if (!existing) return;
 
-      this.scene.remove(existing);
-      if (existing instanceof THREE.Mesh) {
-        existing.geometry.dispose();
-        if (existing.material instanceof THREE.Material) existing.material.dispose();
-      } else {
-        existing.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            if (child.material instanceof THREE.Material) child.material.dispose();
-          }
-        });
-      }
-      const idx = this.decorations.indexOf(existing);
-      if (idx !== -1) this.decorations.splice(idx, 1);
-      this.grassClumpsByTile.delete(tileKey);
+    this.instancedObjects.removeInstance(existing.type, existing.instanceId);
+    this.grassClumpsByTile.delete(tileKey);
 
-      // Also remove from decorationsByTile
-      const tileDecors = this.decorationsByTile.get(tileKey);
-      if (tileDecors) {
-        const gi = tileDecors.indexOf(existing);
-        if (gi !== -1) tileDecors.splice(gi, 1);
-      }
+    const tileDecors = this.decorationsByTile.get(tileKey);
+    if (!tileDecors) return;
+
+    const filtered = tileDecors.filter(
+      (ref) => ref.kind !== 'instance' || ref.type !== existing.type || ref.instanceId !== existing.instanceId
+    );
+    if (filtered.length > 0) {
+      this.decorationsByTile.set(tileKey, filtered);
+    } else {
+      this.decorationsByTile.delete(tileKey);
     }
   }
 
@@ -610,124 +588,201 @@ export class TerrainDecorator {
   /** Legacy addGrass — now delegates to addGrassAtStage for map-generation */
   private addGrass(x: number, elevation: number, z: number, rng: SeededRand, coord?: HexCoord): void {
     if (!coord) return;
+    void x;
+    void z;
+    void rng;
     this.addGrassAtStage(coord, elevation, 1);
   }
 
-  private addCactus(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
-
-    // Main body
-    const bodyGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.5, 6);
-    const cactusMat = new THREE.MeshLambertMaterial({ color: 0x558b2f });
-    const body = new THREE.Mesh(bodyGeo, cactusMat);
-    body.position.y = 0.25;
-    body.castShadow = true;
-    group.add(body);
-
-    // Arm
-    if (rng.next() > 0.4) {
-      const armGeo = new THREE.CylinderGeometry(0.05, 0.06, 0.25, 5);
-      const arm = new THREE.Mesh(armGeo, cactusMat);
-      arm.position.set(0.12, 0.35, 0);
-      arm.rotation.z = -0.5;
-      group.add(arm);
-    }
-
-    group.position.set(x, elevation, z);
-    this.scene.add(group);
-    this.decorations.push(group);
+  private addTree(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const variant = Math.floor(rng.next() * TREE_FOLIAGE_COLORS.length);
+    const offsetX = (rng.next() - 0.5) * 0.3;
+    const offsetZ = (rng.next() - 0.5) * 0.3;
+    const rotationY = rng.next() * Math.PI * 2;
+    const scale = 0.8 + rng.next() * 0.5;
+    const type = `tree_mature_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x: x + offsetX, y: elevation, z: z + offsetZ },
+      new THREE.Euler(0, rotationY, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
   }
 
-  private addTumbleweed(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
+  private addSnowPine(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const variant = Math.floor(rng.next() * SNOW_PINE_COLORS.length);
+    const offsetX = (rng.next() - 0.5) * 0.3;
+    const offsetZ = (rng.next() - 0.5) * 0.3;
+    const rotationY = rng.next() * Math.PI * 2;
+    const scale = 0.8 + rng.next() * 0.5;
+    const type = `snow_pine_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x: x + offsetX, y: elevation, z: z + offsetZ },
+      new THREE.Euler(0, rotationY, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  private addRock(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const size = 0.15 + rng.next() * 0.15;
+    const yScale = 0.6 + rng.next() * 0.3;
+    const color = new THREE.Color(0.45 + rng.next() * 0.1, 0.43 + rng.next() * 0.1, 0.4 + rng.next() * 0.1);
+    const instanceId = this.instancedObjects.addInstance(
+      'rock',
+      {
+        x: x + (rng.next() - 0.5) * 0.4,
+        y: elevation - 0.05,
+        z: z + (rng.next() - 0.5) * 0.4,
+      },
+      new THREE.Euler(rng.next(), rng.next(), rng.next()),
+      { x: size, y: size * yScale, z: size },
+      color
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, 'rock', instanceId);
+  }
+
+  /** Iron ore vein — cluster of rusty-orange rocks with metallic sheen */
+  private addIronOreVein(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const count = 2 + Math.floor(rng.next() * 2);
+    for (let i = 0; i < count; i++) {
+      const size = 0.1 + rng.next() * 0.12;
+      const rotation = new THREE.Euler(rng.next() * Math.PI, rng.next() * Math.PI, rng.next() * Math.PI);
+      const color = new THREE.Color(0.55 + rng.next() * 0.15, 0.25 + rng.next() * 0.1, 0.1 + rng.next() * 0.05);
+      const instanceId = this.instancedObjects.addInstance(
+        'iron_ore',
+        {
+          x: x + (rng.next() - 0.5) * 0.5,
+          y: elevation - 0.06 + rng.next() * 0.04,
+          z: z + (rng.next() - 0.5) * 0.5,
+        },
+        rotation,
+        { x: size, y: size * (0.6 + rng.next() * 0.4), z: size },
+        color
+      );
+      if (tileKey) this.trackInstanceDecoration(tileKey, 'iron_ore', instanceId);
+    }
+  }
+
+  private addFlowers(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const count = 2 + Math.floor(rng.next() * 3);
+
+    for (let i = 0; i < count; i++) {
+      const variant = Math.floor(rng.next() * FLOWER_COLORS.length);
+      const baseX = x + (rng.next() - 0.5) * 0.6;
+      const baseY = elevation + 0.07;
+      const baseZ = z + (rng.next() - 0.5) * 0.6;
+      const scale = 0.9 + rng.next() * 0.2;
+      const rotationY = rng.next() * Math.PI * 2;
+      const rotation = new THREE.Euler(0, rotationY, 0);
+      const scaleVec = { x: scale, y: scale, z: scale };
+      const stemId = this.instancedObjects.addInstance('flower_stem', { x: baseX, y: baseY, z: baseZ }, rotation, scaleVec);
+      const bloomType = `flower_bloom_${variant}`;
+      const bloomId = this.instancedObjects.addInstance(bloomType, { x: baseX, y: baseY, z: baseZ }, rotation, scaleVec);
+
+      if (tileKey) {
+        this.trackInstanceDecoration(tileKey, 'flower_stem', stemId);
+        this.trackInstanceDecoration(tileKey, bloomType, bloomId);
+      }
+    }
+  }
+
+  /**
+   * Add a grass clump at a growth stage (0=short, 1=medium, 2=tall/harvestable).
+   * Each stage uses a shared clump archetype and animates via per-instance transforms.
+   */
+  addGrassAtStage(coord: HexCoord, elevation: number, stage: number): void {
+    const tileKey = coordKey(coord);
+    const { x: worldX, z: worldZ } = worldFromCoord(coord);
+    const clampedStage = Math.min(stage, 2);
+    const rng = new SeededRand(coord.q * 997 + coord.r * 131 + clampedStage * 17);
+
+    this.removeGrassClump(tileKey);
+
+    const variant = Math.floor(rng.next() * GRASS_VARIANT_COUNT);
+    const type = `grass_stage_${clampedStage}_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(type, { x: worldX, y: elevation, z: worldZ });
+    const grassData: GrassInstanceData = {
+      type,
+      instanceId,
+      position: new THREE.Vector3(worldX, elevation, worldZ),
+      rotationY: 0,
+      swayPhase: rng.next() * Math.PI * 2,
+      swaySpeed: 1.8 + rng.next() * 0.6,
+      swayAmount: 0.04 + clampedStage * 0.02,
+    };
+
+    this.grassClumpsByTile.set(tileKey, grassData);
+    this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  private addCactus(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const type = rng.next() > 0.4 ? 'cactus_arm' : 'cactus_plain';
+    const scale = 0.9 + rng.next() * 0.2;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x, y: elevation, z },
+      new THREE.Euler(0, rng.next() * Math.PI * 2, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  private addTumbleweed(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
     const size = 0.12 + rng.next() * 0.1;
-    // Dry tangled ball of sticks
-    const ballGeo = new THREE.IcosahedronGeometry(size, 1);
-    const mat = new THREE.MeshLambertMaterial({
-      color: 0xb8860b, // dark goldenrod — dried plant
-      wireframe: true,
-    });
-    const ball = new THREE.Mesh(ballGeo, mat);
-    ball.position.y = size;
-    ball.rotation.set(rng.next() * Math.PI, rng.next() * Math.PI, 0);
-    group.add(ball);
+    const ballId = this.instancedObjects.addInstance(
+      'tumbleweed_ball',
+      { x, y: elevation, z },
+      new THREE.Euler(rng.next() * Math.PI, rng.next() * Math.PI, 0),
+      { x: size, y: size, z: size }
+    );
+    const coreId = this.instancedObjects.addInstance(
+      'tumbleweed_core',
+      { x, y: elevation, z },
+      undefined,
+      { x: size, y: size, z: size }
+    );
 
-    // Inner core (slightly darker, solid)
-    const coreGeo = new THREE.IcosahedronGeometry(size * 0.5, 0);
-    const coreMat = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
-    const core = new THREE.Mesh(coreGeo, coreMat);
-    core.position.y = size;
-    group.add(core);
-
-    group.position.set(x, elevation, z);
-    this.scene.add(group);
-    this.decorations.push(group);
-  }
-
-  private addDesertRock(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
-    // Weathered sandstone rock
-    const w = 0.15 + rng.next() * 0.2;
-    const h = 0.1 + rng.next() * 0.15;
-    const d = 0.15 + rng.next() * 0.15;
-    const geo = new THREE.BoxGeometry(w, h, d);
-    // Warm sandstone colors
-    const colors = [0xc4a46c, 0xb8956a, 0xd4a96a, 0xc9935e];
-    const mat = new THREE.MeshLambertMaterial({
-      color: colors[Math.floor(rng.next() * colors.length)],
-    });
-    const rock = new THREE.Mesh(geo, mat);
-    rock.position.y = h / 2;
-    rock.rotation.y = rng.next() * Math.PI;
-    rock.rotation.x = (rng.next() - 0.5) * 0.3;
-    rock.castShadow = true;
-    group.add(rock);
-
-    group.position.set(x, elevation, z);
-    this.scene.add(group);
-    this.decorations.push(group);
-  }
-
-  private addJungleTree(x: number, elevation: number, z: number, rng: SeededRand): void {
-    const group = new THREE.Group();
-
-    // Tall tropical trunk
-    const height = 0.6 + rng.next() * 0.5;
-    const trunkGeo = new THREE.CylinderGeometry(0.03, 0.08, height, 5);
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x4e3b2a });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.y = height / 2;
-    trunk.rotation.z = (rng.next() - 0.5) * 0.15;
-    trunk.castShadow = true;
-    group.add(trunk);
-
-    // Dense canopy — large lush foliage
-    const canopySize = 0.25 + rng.next() * 0.2;
-    const foliageGeo = new THREE.SphereGeometry(canopySize, 6, 5);
-    const greenShade = 0x1b7a1e + Math.floor(rng.next() * 0x002200);
-    const foliageMat = new THREE.MeshLambertMaterial({ color: greenShade });
-    const foliage = new THREE.Mesh(foliageGeo, foliageMat);
-    foliage.position.y = height + canopySize * 0.5;
-    foliage.scale.set(1.2, 0.8, 1.2);
-    foliage.castShadow = true;
-    group.add(foliage);
-
-    // Secondary lower canopy layer for lushness
-    if (rng.next() > 0.4) {
-      const lowerGeo = new THREE.SphereGeometry(canopySize * 0.7, 5, 4);
-      const lowerMat = new THREE.MeshLambertMaterial({ color: 0x2e7d32 });
-      const lower = new THREE.Mesh(lowerGeo, lowerMat);
-      lower.position.set((rng.next() - 0.5) * 0.15, height * 0.6, (rng.next() - 0.5) * 0.15);
-      lower.castShadow = true;
-      group.add(lower);
+    if (tileKey) {
+      this.trackInstanceDecoration(tileKey, 'tumbleweed_ball', ballId);
+      this.trackInstanceDecoration(tileKey, 'tumbleweed_core', coreId);
     }
-
-    group.position.set(x, elevation, z);
-    this.scene.add(group);
-    this.decorations.push(group);
   }
 
-  private addWater(x: number, elevation: number, z: number): void {
+  private addDesertRock(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const scale = {
+      x: 0.15 + rng.next() * 0.2,
+      y: 0.1 + rng.next() * 0.15,
+      z: 0.15 + rng.next() * 0.15,
+    };
+    const color = DESERT_ROCK_COLORS[Math.floor(rng.next() * DESERT_ROCK_COLORS.length)];
+    const instanceId = this.instancedObjects.addInstance(
+      'desert_rock',
+      { x, y: elevation, z },
+      new THREE.Euler((rng.next() - 0.5) * 0.3, rng.next() * Math.PI, 0),
+      scale,
+      color
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, 'desert_rock', instanceId);
+  }
+
+  private addJungleTree(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const colorIndex = Math.floor(rng.next() * JUNGLE_TREE_COLORS.length);
+    const withLowerCanopy = rng.next() > 0.4 ? 1 : 0;
+    const type = `jungle_tree_${colorIndex}_${withLowerCanopy}`;
+    const scale = 0.9 + rng.next() * 0.5;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x, y: elevation, z },
+      new THREE.Euler(0, rng.next() * Math.PI * 2, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  private addWater(x: number, elevation: number, z: number, tileKey?: string): void {
     const waterGeo = new THREE.PlaneGeometry(1.5, 1.5);
     const waterMat = new THREE.MeshPhongMaterial({
       color: 0x1e88e5,
@@ -739,11 +794,10 @@ export class TerrainDecorator {
     });
     const water = new THREE.Mesh(waterGeo, waterMat);
     water.rotation.x = -Math.PI / 2;
-    // Place just above the voxel surface
     water.position.set(x, elevation + 0.05, z);
     this.scene.add(water);
     this.waterMeshes.push(water);
-    this.decorations.push(water);
+    this.trackLooseDecoration(water, tileKey);
   }
 
   /**
@@ -754,18 +808,17 @@ export class TerrainDecorator {
   addWaterEdgeCurtain(x: number, elevation: number, z: number, dx: number, dz: number, dropHeight: number): void {
     const tileWidth = 1.5;
     const halfW = tileWidth / 2;
-    const outset = halfW + 0.20; // push in front of blocks
-    const curtainH = Math.min(dropHeight + 0.3, 5); // cap depth to prevent underground bleed
+    const outset = halfW + 0.20;
+    const curtainH = Math.min(dropHeight + 0.3, 5);
 
-    // Determine face position and rotation based on direction
-    let px: number, pz: number, ry: number;
+    let px: number;
+    let pz: number;
+    let ry: number;
     if (dz !== 0) {
-      // North or south face
       px = 0;
       pz = dz < 0 ? -outset : outset;
       ry = 0;
     } else {
-      // East or west face
       px = dx < 0 ? -outset : outset;
       pz = 0;
       ry = Math.PI / 2;
@@ -773,7 +826,6 @@ export class TerrainDecorator {
 
     const group = new THREE.Group();
 
-    // Blue water curtain
     const wallGeo = new THREE.PlaneGeometry(tileWidth * 1.05, curtainH);
     const wallMat = new THREE.MeshPhongMaterial({
       color: 0x2196f3,
@@ -791,7 +843,6 @@ export class TerrainDecorator {
     group.add(wall);
     this.waterMeshes.push(wall);
 
-    // White streaks
     const streakCount = 3 + Math.floor(Math.random() * 2);
     for (let s = 0; s < streakCount; s++) {
       const sw = 0.06 + Math.random() * 0.12;
@@ -820,7 +871,7 @@ export class TerrainDecorator {
 
     group.position.set(x, elevation + 0.05, z);
     this.scene.add(group);
-    this.decorations.push(group);
+    this.trackLooseDecoration(group);
   }
 
   private addSwampWater(x: number, elevation: number, z: number): void {
@@ -837,21 +888,17 @@ export class TerrainDecorator {
     water.position.set(x, elevation + 0.03, z);
     this.scene.add(water);
     this.waterMeshes.push(water);
-    this.decorations.push(water);
+    this.trackLooseDecoration(water);
   }
 
-  private addWaterfall(x: number, elevation: number, z: number, maxNeighborElevation: number): void {
+  private addWaterfall(x: number, elevation: number, z: number, maxNeighborElevation: number, tileKey?: string): void {
+    void maxNeighborElevation;
     const group = new THREE.Group();
     const tileWidth = 1.5;
     const halfW = tileWidth / 2;
-    const fallHeight = Math.min(Math.max(1.5, elevation - 0.5), 5); // cap to prevent deep underground bleed
-
-    // Outward offset so curtains render IN FRONT of the block faces
-    // Blocks extend to ~0.76 from center (offset 0.5 + voxelSize/2=0.26)
-    // so we push curtains to 0.95 from center to be clearly visible
+    const fallHeight = Math.min(Math.max(1.5, elevation - 0.5), 5);
     const faceOutset = halfW + 0.20;
 
-    // --- Water surface on top (blue river feeding into falls) ---
     const topGeo = new THREE.PlaneGeometry(tileWidth * 1.1, tileWidth * 1.1);
     const topMat = new THREE.MeshPhongMaterial({
       color: 0x1e88e5,
@@ -867,17 +914,15 @@ export class TerrainDecorator {
     group.add(topWater);
     this.waterMeshes.push(topWater);
 
-    // --- Glass water curtains on ALL 4 side faces, pushed OUTWARD past block geometry ---
     const faces = [
-      { px: 0,         pz: -faceOutset, ry: 0 },
-      { px: 0,         pz: faceOutset,  ry: 0 },
-      { px: -faceOutset, pz: 0,         ry: Math.PI / 2 },
-      { px: faceOutset,  pz: 0,         ry: Math.PI / 2 },
+      { px: 0, pz: -faceOutset, ry: 0 },
+      { px: 0, pz: faceOutset, ry: 0 },
+      { px: -faceOutset, pz: 0, ry: Math.PI / 2 },
+      { px: faceOutset, pz: 0, ry: Math.PI / 2 },
     ];
 
     for (const face of faces) {
-      // Glass water curtain — visible in front of dark rock
-      const curtainH = fallHeight + 0.5; // extend slightly past the block column
+      const curtainH = fallHeight + 0.5;
       const wallGeo = new THREE.PlaneGeometry(tileWidth * 1.1, curtainH);
       const wallMat = new THREE.MeshPhongMaterial({
         color: 0x2196f3,
@@ -895,7 +940,6 @@ export class TerrainDecorator {
       group.add(wall);
       this.waterMeshes.push(wall);
 
-      // White water streaks flowing down each face
       const streakCount = 4 + Math.floor(Math.random() * 3);
       for (let s = 0; s < streakCount; s++) {
         const sw = 0.08 + Math.random() * 0.16;
@@ -913,7 +957,6 @@ export class TerrainDecorator {
         const streak = new THREE.Mesh(streakGeo, streakMat);
         const lateral = (Math.random() - 0.5) * tileWidth * 0.8;
         const vertOff = (Math.random() - 0.5) * curtainH * 0.3;
-        // Push streaks slightly further out than the curtain so they're on top
         const extraOut = 0.04;
         const outset = face.ry === 0
           ? { x: lateral, z: (face.pz > 0 ? -extraOut : extraOut) }
@@ -924,8 +967,6 @@ export class TerrainDecorator {
       }
     }
 
-    // --- Big billowing mist clouds that SPIN ---
-    // These are large, overlapping, flattened spheres that create swirling fog
     const cloudSpread = tileWidth * 1.8;
     for (let i = 0; i < 12; i++) {
       const radius = 0.3 + Math.random() * 0.6;
@@ -938,22 +979,18 @@ export class TerrainDecorator {
         side: THREE.DoubleSide,
       });
       const mist = new THREE.Mesh(mistGeo, mistMat);
-
-      // Position clouds in a wide volume around the base and up the falls
       const angle = Math.random() * Math.PI * 2;
       const dist = Math.random() * cloudSpread * 0.6;
       mist.position.set(
         Math.cos(angle) * dist,
         -fallHeight + 0.2 + Math.random() * (fallHeight * 0.8),
-        Math.sin(angle) * dist,
+        Math.sin(angle) * dist
       );
-      // Flatten into cloud/disc shapes
       mist.scale.set(
         1.0 + Math.random() * 0.8,
         0.3 + Math.random() * 0.4,
-        1.0 + Math.random() * 0.8,
+        1.0 + Math.random() * 0.8
       );
-      // Store spin data for animation
       mist.userData.spinSpeed = (Math.random() - 0.5) * 1.5;
       mist.userData.bobSpeed = 0.5 + Math.random() * 1.0;
       mist.userData.bobPhase = Math.random() * Math.PI * 2;
@@ -964,7 +1001,6 @@ export class TerrainDecorator {
       this.waterMeshes.push(mist);
     }
 
-    // --- Sparkle particles scattered through the mist ---
     for (let i = 0; i < 15; i++) {
       const sparkleGeo = new THREE.SphereGeometry(0.015 + Math.random() * 0.025, 4, 4);
       const sparkleMat = new THREE.MeshPhongMaterial({
@@ -982,15 +1018,13 @@ export class TerrainDecorator {
       sparkle.position.set(
         Math.cos(sAngle) * sDist,
         -fallHeight * 0.2 + Math.random() * fallHeight * 0.7,
-        Math.sin(sAngle) * sDist,
+        Math.sin(sAngle) * sDist
       );
       sparkle.userData.sparklePhase = Math.random() * Math.PI * 2;
       group.add(sparkle);
       this.waterMeshes.push(sparkle);
     }
 
-    // --- White spray / smoke at the TOP where water crashes over the edge ---
-    // Brownian-motion style puffs clustered around the spill point
     const sprayCount = 18;
     for (let i = 0; i < sprayCount; i++) {
       const r = 0.12 + Math.random() * 0.28;
@@ -1005,24 +1039,21 @@ export class TerrainDecorator {
         side: THREE.DoubleSide,
       });
       const spray = new THREE.Mesh(sprayGeo, sprayMat);
-      // Cluster around the top edge (y ~ 0) with some spreading outward
       const angle = Math.random() * Math.PI * 2;
       const dist = Math.random() * tileWidth * 0.8;
       spray.position.set(
         Math.cos(angle) * dist,
-        -0.3 + Math.random() * 0.8, // concentrated near the top spill edge
-        Math.sin(angle) * dist,
+        -0.3 + Math.random() * 0.8,
+        Math.sin(angle) * dist
       );
-      // Flatten slightly into wispy puff shapes
       spray.scale.set(
         0.8 + Math.random() * 0.6,
         0.4 + Math.random() * 0.3,
-        0.8 + Math.random() * 0.6,
+        0.8 + Math.random() * 0.6
       );
-      // Brownian drift animation data
       spray.userData.isMistCloud = true;
-      spray.userData.spinSpeed = (Math.random() - 0.5) * 2.0; // faster spin for turbulence
-      spray.userData.bobSpeed = 1.0 + Math.random() * 1.5; // quick bobbing
+      spray.userData.spinSpeed = (Math.random() - 0.5) * 2.0;
+      spray.userData.bobSpeed = 1.0 + Math.random() * 1.5;
       spray.userData.bobPhase = Math.random() * Math.PI * 2;
 
       group.add(spray);
@@ -1030,7 +1061,6 @@ export class TerrainDecorator {
       this.waterMeshes.push(spray);
     }
 
-    // --- Rainbow arc in the mist ---
     const rainbowColors = [0xff0000, 0xff8800, 0xffff00, 0x00cc00, 0x0066ff, 0x4400aa, 0x8800ff];
     for (let i = 0; i < rainbowColors.length; i++) {
       const angle = (i / (rainbowColors.length - 1)) * Math.PI * 0.6 + Math.PI * 0.2;
@@ -1048,7 +1078,7 @@ export class TerrainDecorator {
       band.position.set(
         Math.cos(angle) * arcR * 0.4,
         -fallHeight * 0.45 + Math.sin(angle) * arcR,
-        0.4,
+        0.4
       );
       band.rotation.z = angle - Math.PI / 2;
       group.add(band);
@@ -1056,32 +1086,34 @@ export class TerrainDecorator {
 
     group.position.set(x, elevation, z);
     this.scene.add(group);
-    this.decorations.push(group);
+    this.trackLooseDecoration(group, tileKey);
   }
 
   /**
    * Animate water tiles (call each frame)
    */
+  /** Frame counter for water animation throttle */
+  private _waterFrameSkip = 0;
+
   updateWater(delta: number): void {
     this.waterTime += delta;
+    // Animate every 3rd frame — water bob is subtle
+    if (++this._waterFrameSkip % 3 !== 0) return;
     for (const water of this.waterMeshes) {
-      // Standard water bob
       water.position.y += Math.sin(this.waterTime * 2 + water.position.x) * 0.0008;
 
-      // Sparkle twinkle
       if (water.userData.sparklePhase !== undefined) {
         const phase = water.userData.sparklePhase as number;
         const twinkle = 0.3 + Math.abs(Math.sin(this.waterTime * 3 + phase)) * 0.7;
         (water.material as THREE.MeshPhongMaterial).opacity = twinkle;
         (water.material as THREE.MeshPhongMaterial).emissiveIntensity = twinkle * 0.6;
-        continue; // skip default opacity animation for sparkles
+        continue;
       }
 
       (water.material as THREE.MeshPhongMaterial).opacity =
         0.6 + Math.sin(this.waterTime * 1.5 + water.position.z) * 0.1;
     }
 
-    // Spin and bob the mist clouds
     for (const cloud of this.mistClouds) {
       const spin = cloud.userData.spinSpeed as number;
       const bobSpd = cloud.userData.bobSpeed as number;
@@ -1090,7 +1122,6 @@ export class TerrainDecorator {
       cloud.rotation.y += spin * delta;
       cloud.position.y += Math.sin(this.waterTime * bobSpd + bobPhase) * 0.002;
 
-      // Gentle opacity pulse for breathing effect
       const baseOpacity = 0.08 + Math.abs(Math.sin(this.waterTime * 0.5 + bobPhase)) * 0.08;
       (cloud.material as THREE.MeshPhongMaterial).opacity = baseOpacity;
     }
@@ -1098,60 +1129,231 @@ export class TerrainDecorator {
 
   /**
    * Animate grass meshes swaying in the wind (call each frame).
-   * Each mesh is a merged clump — rotate the whole mesh gently.
+   * Each grass tile is a single instanced clump updated in-place.
    */
   updateGrass(delta: number): void {
     this.grassTime += delta;
-    for (const mesh of this.grassBlades) {
-      const { swayPhase, swaySpeed, swayAmount } = mesh.userData;
-      // Gentle lean on Z axis (wind direction)
-      mesh.rotation.z = Math.sin(this.grassTime * swaySpeed + swayPhase) * swayAmount;
-      // Slight X wobble for natural feel
-      mesh.rotation.x = Math.sin(this.grassTime * swaySpeed * 0.7 + swayPhase + 1.5) * swayAmount * 0.4;
+    // Animate every 3rd frame — sway is subtle enough that 20Hz looks fine
+    if (++this._grassFrameSkip % 3 !== 0) return;
+
+    const cx = this.cameraWorldPos.x;
+    const cz = this.cameraWorldPos.z;
+    const cullSq = 45 * 45;
+
+    for (const grass of this.grassClumpsByTile.values()) {
+      const dx = grass.position.x - cx;
+      const dz = grass.position.z - cz;
+      if (dx * dx + dz * dz > cullSq) continue;
+
+      this.tempEuler.set(
+        Math.sin(this.grassTime * grass.swaySpeed * 0.7 + grass.swayPhase + 1.5) * grass.swayAmount * 0.4,
+        grass.rotationY,
+        Math.sin(this.grassTime * grass.swaySpeed + grass.swayPhase) * grass.swayAmount
+      );
+      this.instancedObjects.updateInstance(grass.type, grass.instanceId, grass.position, this.tempEuler);
     }
   }
 
   /** Remove all water meshes near a world position (for damming) */
   removeWater(tileKey: string): void {
-    // Parse hex key to get world coordinates
     const [q, r] = tileKey.split(',').map(Number);
     const worldX = q * 1.5;
     const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
-    const MATCH_DIST = 1.0; // Radius to match water meshes near this tile
+    const matchDist = 1.0;
 
-    // Remove water meshes near this position
     const toRemove: THREE.Mesh[] = [];
     for (const water of this.waterMeshes) {
       const dx = water.position.x - worldX;
       const dz = water.position.z - worldZ;
-      if (Math.sqrt(dx * dx + dz * dz) < MATCH_DIST) {
+      if (Math.sqrt(dx * dx + dz * dz) < matchDist) {
         toRemove.push(water);
         this.scene.remove(water);
         water.geometry.dispose();
         if (water.material instanceof THREE.Material) water.material.dispose();
-        // Also remove from decorations array
         const idx = this.decorations.indexOf(water);
         if (idx !== -1) this.decorations.splice(idx, 1);
       }
     }
-    // Remove from waterMeshes array
-    this.waterMeshes = this.waterMeshes.filter(w => !toRemove.includes(w));
-    // Also remove from mistClouds if any matched
-    this.mistClouds = this.mistClouds.filter(c => !toRemove.includes(c as any));
+
+    this.waterMeshes = this.waterMeshes.filter((w) => !toRemove.includes(w));
+    this.mistClouds = this.mistClouds.filter((c) => !toRemove.includes(c));
+  }
+
+  /** Flush deferred bounding-sphere recomputation. Call once per frame. */
+  flushBounds(): void {
+    this.instancedObjects.flushBounds();
   }
 
   dispose(): void {
-    for (const obj of this.decorations) {
-      this.scene.remove(obj);
-      obj.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
+    this.instancedObjects.dispose();
+
+    for (const obj of [...this.decorations]) {
+      this.removeLooseDecorationObject(obj);
     }
+
     this.decorations = [];
+    this.decorationsByTile.clear();
     this.waterMeshes = [];
     this.mistClouds = [];
+    this.grassClumpsByTile.clear();
+  }
+
+  private registerInstancedTypes(): void {
+    const treeMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const grassMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+
+    for (let i = 0; i < TREE_FOLIAGE_COLORS.length; i++) {
+      this.instancedObjects.registerType(
+        `tree_mature_${i}`,
+        createTreeGeometry(TREE_FOLIAGE_COLORS[i]),
+        treeMaterial.clone(),
+        { castShadow: true, initialCapacity: 128 }
+      );
+    }
+
+    for (let stage = 0; stage < STAGE_TREE_COLORS.length; stage++) {
+      for (let variant = 0; variant < STAGE_TREE_COLORS[stage].length; variant++) {
+        this.instancedObjects.registerType(
+          `tree_stage_${stage}_${variant}`,
+          createTreeGeometry(STAGE_TREE_COLORS[stage][variant], stage as 0 | 1 | 2),
+          treeMaterial.clone(),
+          { castShadow: true, initialCapacity: 96 }
+        );
+      }
+    }
+
+    for (let i = 0; i < SNOW_PINE_COLORS.length; i++) {
+      this.instancedObjects.registerType(
+        `snow_pine_${i}`,
+        createSnowPineGeometry(SNOW_PINE_COLORS[i]),
+        treeMaterial.clone(),
+        { castShadow: true, initialCapacity: 128 }
+      );
+    }
+
+    this.instancedObjects.registerType(
+      'rock',
+      new THREE.DodecahedronGeometry(1, 0),
+      new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      { castShadow: true, initialCapacity: 256 }
+    );
+
+    this.instancedObjects.registerType(
+      'iron_ore',
+      new THREE.DodecahedronGeometry(1, 0),
+      new THREE.MeshLambertMaterial({
+        color: 0xffffff,
+        emissive: new THREE.Color(0.15, 0.06, 0.02),
+      }),
+      { castShadow: true, initialCapacity: 192 }
+    );
+
+    this.instancedObjects.registerType(
+      'flower_stem',
+      createFlowerStemGeometry(),
+      treeMaterial.clone(),
+      { castShadow: false, initialCapacity: 256 }
+    );
+    for (let i = 0; i < FLOWER_COLORS.length; i++) {
+      this.instancedObjects.registerType(
+        `flower_bloom_${i}`,
+        createFlowerBloomGeometry(FLOWER_COLORS[i]),
+        treeMaterial.clone(),
+        { castShadow: false, initialCapacity: 256 }
+      );
+    }
+
+    for (let stage = 0; stage <= 2; stage++) {
+      for (let variant = 0; variant < GRASS_VARIANT_COUNT; variant++) {
+        this.instancedObjects.registerType(
+          `grass_stage_${stage}_${variant}`,
+          createGrassClumpGeometry(stage, 1000 + stage * 97 + variant * 211),
+          grassMaterial.clone(),
+          { initialCapacity: 512, castShadow: false, receiveShadow: false }
+        );
+      }
+    }
+
+    this.instancedObjects.registerType(
+      'cactus_plain',
+      createCactusGeometry(false),
+      treeMaterial.clone(),
+      { castShadow: true, initialCapacity: 96 }
+    );
+    this.instancedObjects.registerType(
+      'cactus_arm',
+      createCactusGeometry(true),
+      treeMaterial.clone(),
+      { castShadow: true, initialCapacity: 96 }
+    );
+
+    const tumbleweedBall = new THREE.IcosahedronGeometry(1, 1);
+    tumbleweedBall.translate(0, 1, 0);
+    const tumbleweedCore = new THREE.IcosahedronGeometry(0.5, 0);
+    tumbleweedCore.translate(0, 1, 0);
+    this.instancedObjects.registerType(
+      'tumbleweed_ball',
+      tumbleweedBall,
+      new THREE.MeshLambertMaterial({ color: 0xb8860b, wireframe: true }),
+      { castShadow: false, initialCapacity: 96 }
+    );
+    this.instancedObjects.registerType(
+      'tumbleweed_core',
+      tumbleweedCore,
+      new THREE.MeshLambertMaterial({ color: 0x8b7355 }),
+      { castShadow: false, initialCapacity: 96 }
+    );
+
+    const desertRockGeometry = new THREE.BoxGeometry(1, 1, 1);
+    desertRockGeometry.translate(0, 0.5, 0);
+    this.instancedObjects.registerType(
+      'desert_rock',
+      desertRockGeometry,
+      new THREE.MeshLambertMaterial({ color: 0xffffff }),
+      { castShadow: true, initialCapacity: 192 }
+    );
+
+    for (let colorIndex = 0; colorIndex < JUNGLE_TREE_COLORS.length; colorIndex++) {
+      for (const lower of [0, 1] as const) {
+        this.instancedObjects.registerType(
+          `jungle_tree_${colorIndex}_${lower}`,
+          createJungleTreeGeometry(JUNGLE_TREE_COLORS[colorIndex], lower === 1),
+          treeMaterial.clone(),
+          { castShadow: true, initialCapacity: 128 }
+        );
+      }
+    }
+  }
+
+  private trackInstanceDecoration(tileKey: string, type: string, instanceId: number): void {
+    if (!this.decorationsByTile.has(tileKey)) {
+      this.decorationsByTile.set(tileKey, []);
+    }
+    this.decorationsByTile.get(tileKey)!.push({ kind: 'instance', type, instanceId });
+  }
+
+  private trackLooseDecoration(object: THREE.Object3D, tileKey?: string): void {
+    this.decorations.push(object);
+    if (!tileKey) return;
+    if (!this.decorationsByTile.has(tileKey)) {
+      this.decorationsByTile.set(tileKey, []);
+    }
+    this.decorationsByTile.get(tileKey)!.push({ kind: 'object', object });
+  }
+
+  private removeLooseDecorationObject(object: THREE.Object3D): void {
+    const removedMeshes = new Set<THREE.Mesh>();
+    this.scene.remove(object);
+    object.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        removedMeshes.add(child);
+        child.geometry.dispose();
+        if (child.material instanceof THREE.Material) child.material.dispose();
+      }
+    });
+    this.waterMeshes = this.waterMeshes.filter((mesh) => !removedMeshes.has(mesh));
+    this.mistClouds = this.mistClouds.filter((mesh) => !removedMeshes.has(mesh));
+    const idx = this.decorations.indexOf(object);
+    if (idx !== -1) this.decorations.splice(idx, 1);
   }
 }

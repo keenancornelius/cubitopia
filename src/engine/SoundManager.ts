@@ -28,7 +28,7 @@ export default class SoundManager {
   private config: SoundConfig = {
     masterVolume: 0.3,
     sfxVolume: 0.7,
-    musicVolume: 0.3,
+    musicVolume: 0.5,
     muted: false,
   };
   private lastPlayTime: Map<SoundName, number> = new Map();
@@ -42,13 +42,27 @@ export default class SoundManager {
         this.ctx = new AudioContext();
         this.noiseBuffer = this.createNoiseBuffer(2);
         this.distortionCurve = this.createDistortionCurve(400);
+        console.log('[SoundManager] AudioContext created, state:', this.ctx.state);
+      }
+      // Browsers require explicit resume after user gesture — without this,
+      // AudioContext stays "suspended" and all audio output is silenced
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume()
+          .then(() => console.log('[SoundManager] AudioContext resumed, state:', this.ctx!.state))
+          .catch(e => console.warn('[SoundManager] Failed to resume AudioContext:', e));
       }
       document.removeEventListener('click', initAudio);
       document.removeEventListener('keydown', initAudio);
+      document.removeEventListener('pointerdown', initAudio);
     };
     document.addEventListener('click', initAudio);
     document.addEventListener('keydown', initAudio);
+    document.addEventListener('pointerdown', initAudio);
   }
+
+  /** Expose AudioContext for shared use (e.g. ProceduralMusic). Null until first user interaction. */
+  get audioContext(): AudioContext | null { return this.ctx; }
+  get musicVolume(): number { return this.config.musicVolume; }
 
   setMuted(muted: boolean): void { this.config.muted = muted; }
   setVolume(volume: number): void { this.config.masterVolume = Math.max(0, Math.min(1, volume)); }
@@ -254,7 +268,7 @@ export default class SoundManager {
     this.filteredNoise('bandpass', 1200, 2, vol * 0.12, 0.001, 0.04);
   }
 
-  /** Catapult/trebuchet launch rumble → heavy ground-shaking impact */
+  /** Trebuchet launch rumble → heavy ground-shaking impact */
   private synthHitSiege(vol: number): void {
     const ctx = this.ctx!;
     const t = ctx.currentTime;

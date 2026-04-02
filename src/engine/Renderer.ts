@@ -202,6 +202,8 @@ export class Renderer {
     this.scene.add(this.particles);
   }
 
+  private _particleFrameSkip = 0;
+
   updateParticles(delta: number): void {
     if (!this.particles) return;
     this.particleTime += delta;
@@ -213,6 +215,9 @@ export class Renderer {
       this.sunGlow.scale.setScalar(pulse);
       (this.sunGlow.material as THREE.MeshBasicMaterial).opacity = 0.10 + Math.sin(this.sunTime * 1.2) * 0.02;
     }
+
+    // Throttle particle GPU upload to every 3rd frame — drift is barely visible
+    if (++this._particleFrameSkip % 3 !== 0) return;
 
     const positions = this.particles.geometry.attributes.position.array as Float32Array;
     for (let i = 0; i < positions.length / 3; i++) {
@@ -228,6 +233,18 @@ export class Renderer {
     this.renderer.render(this.scene, camera);
   }
 
+  /** Get WebGL renderer performance info (draw calls, triangles, textures, geometries) */
+  getPerfInfo(): { drawCalls: number; triangles: number; textures: number; geometries: number; programs: number } {
+    const info = this.renderer.info;
+    return {
+      drawCalls: info.render.calls,
+      triangles: info.render.triangles,
+      textures: info.memory.textures,
+      geometries: info.memory.geometries,
+      programs: info.programs?.length ?? 0,
+    };
+  }
+
   resize(width: number, height: number): void {
     this.config.width = width;
     this.config.height = height;
@@ -236,5 +253,86 @@ export class Renderer {
 
   dispose(): void {
     this.renderer.dispose();
+  }
+
+  /** Re-create the WebGLRenderer on the same canvas (used after title scene releases it). */
+  reinitWebGL(): void {
+    // Don't dispose the old renderer if the context was already lost/replaced
+    try { this.renderer.dispose(); } catch {}
+
+    const canvas = document.getElementById(this.config.canvasId) as HTMLCanvasElement;
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: this.config.antialias,
+      alpha: false,
+    });
+    this.renderer.setSize(this.config.width, this.config.height);
+    this.renderer.setPixelRatio(this.config.pixelRatio);
+    if (this.config.shadows) {
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    }
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.2;
+    this.renderer.localClippingEnabled = true;
+  }
+
+  /**
+   * Spawn a 3D click indicator at a world position — a colored ring/dot/pole that fades out.
+   * Moved from main.ts to keep Cubitopia class lean.
+   */
+  spawnClickIndicator(worldPos: THREE.Vector3, color: number, size = 0.8): void {
+    // Outer ring
+    const ringGeo = new THREE.RingGeometry(size * 0.6, size, 16);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(worldPos);
+    ring.position.y += 0.1;
+    this.scene.add(ring);
+
+    // Inner dot
+    const dotGeo = new THREE.CircleGeometry(size * 0.15, 8);
+    const dotMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const dot = new THREE.Mesh(dotGeo, dotMat);
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.copy(worldPos);
+    dot.position.y += 0.12;
+    this.scene.add(dot);
+
+    // Vertical line (flag pole)
+    const poleGeo = new THREE.BoxGeometry(0.03, 0.6, 0.03);
+    const poleMat = new THREE.MeshBasicMaterial({
+      color, transparent: true, opacity: 0.8,
+    });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.copy(worldPos);
+    pole.position.y += 0.4;
+    this.scene.add(pole);
+
+    // Animate: expand ring slightly, then fade out
+    const scene = this.scene;
+    let life = 1.0;
+    const animate = () => {
+      life -= 0.025;
+      if (life <= 0) {
+        scene.remove(ring); scene.remove(dot); scene.remove(pole);
+        ringGeo.dispose(); ringMat.dispose();
+        dotGeo.dispose(); dotMat.dispose();
+        poleGeo.dispose(); poleMat.dispose();
+        return;
+      }
+      ringMat.opacity = life * 0.7;
+      dotMat.opacity = life * 0.9;
+      poleMat.opacity = life * 0.8;
+      const scale = 1 + (1 - life) * 0.3;
+      ring.scale.set(scale, scale, scale);
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
   }
 }

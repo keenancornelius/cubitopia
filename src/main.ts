@@ -11,10 +11,11 @@ import { UnitRenderer } from './engine/UnitRenderer';
 import { TileHighlighter } from './engine/TileHighlighter';
 import { TerrainDecorator } from './engine/TerrainDecorator';
 import { MapGenerator } from './game/MapGenerator';
+import MapInitializer, { MapInitOps } from './game/MapInitializer';
 import { UnitFactory } from './game/entities/UnitFactory';
 import { SelectionManager } from './game/systems/SelectionManager';
 import { UnitAI } from './game/systems/UnitAI';
-import { Pathfinder } from './game/systems/Pathfinder';
+import { Pathfinder, tileKey } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
 import { BaseRenderer } from './engine/BaseRenderer';
 import { CaptureZoneSystem } from './game/systems/CaptureZoneSystem';
@@ -29,7 +30,7 @@ import BuildingTooltipController from './game/systems/BuildingTooltipController'
 import type { TooltipOps } from './game/systems/BuildingTooltipController';
 import BlueprintSystem from './game/systems/BlueprintSystem';
 import type { BlueprintOps } from './game/systems/BlueprintSystem';
-import { generateFormation, generateBoxFormation, getUnitFormationPriority, getHexRing } from './game/systems/FormationSystem';
+import { generateFormation, getUnitFormationPriority } from './game/systems/FormationSystem';
 import NatureSystem from './game/systems/NatureSystem';
 import type { NatureOps } from './game/systems/NatureSystem';
 import CombatEventHandler, { CombatEventOps } from './game/systems/CombatEventHandler';
@@ -38,10 +39,20 @@ import SpawnQueueSystem, { SpawnQueueOps } from './game/systems/SpawnQueueSystem
 import { BaseUpgradeSystem } from './game/systems/BaseUpgradeSystem';
 import { PopulationSystem, FOOD_PER_COMBAT_UNIT, STARTING_FOOD } from './game/systems/PopulationSystem';
 import GarrisonSystem, { GarrisonOps } from './game/systems/GarrisonSystem';
+import RallyPointSystem, { RallyPointOps } from './game/systems/RallyPointSystem';
 import MenuController from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
 import SoundManager from './engine/SoundManager';
+import { ProceduralMusic, MusicMood } from './engine/ProceduralMusic';
+import { TitleScene } from './engine/TitleScene';
+import DebugOverlayRenderer from './ui/DebugOverlayRenderer';
+import SquadIndicatorSystem from './game/systems/SquadIndicatorSystem';
+import LifecycleUpdater from './game/systems/LifecycleUpdater';
 import type { DebugOps } from './game/systems/DebugController';
+import { TacticalGroupManager } from './game/systems/TacticalGroup';
+import { InputManager } from './game/InputManager';
+import { InteractionStateMachine, InteractionState, InteractionCallbacks } from './game/InteractionStateMachine';
+import { GAME_CONFIG } from './game/GameConfig';
 import {
   EngineConfig,
   CameraConfig,
@@ -65,8 +76,8 @@ import {
   MapType,
   ElementType,
   BaseTier,
+  ENABLE_UNDERGROUND,
 } from './types';
-import { getPreset, generateArenaMap, generateDesertTunnelsMap, ArenaMap, DesertTunnelsMap } from './game/MapPresets';
 import { CombatLog } from './ui/ArenaDebugConsole';
 import { DebugPanel } from './ui/DebugPanel';
 
@@ -98,8 +109,8 @@ const CAMERA_CONFIG: CameraConfig = {
 // --- Game Class ---
 
 class Cubitopia {
-  private static readonly MAX_MINE_DEPTH = -39; // One above bedrock floor at -40
-  private static readonly UNDERGROUND_DEPTH = -40;
+  private static readonly UNDERGROUND_DEPTH = ENABLE_UNDERGROUND ? -40 : -10;
+  private static readonly MAX_MINE_DEPTH = Cubitopia.UNDERGROUND_DEPTH + 1;
 
   private renderer: Renderer;
   private camera: StrategyCamera;
@@ -123,8 +134,7 @@ class Cubitopia {
   private gameSpeed = 1;
   private gameMode: 'pvai' | 'aivai' = 'pvai';
   private mapType: MapType = MapType.STANDARD;
-  private debugOverlayContainer: HTMLElement | null = null;
-  private debugOverlayLabels: Map<string, HTMLElement> = new Map();
+  // debugOverlayContainer + debugOverlayLabels moved to DebugOverlayRenderer
   private resourceManager!: ResourceManager;
   private buildingSystem!: BuildingSystem;
   private wallSystem!: WallSystem;
@@ -136,20 +146,39 @@ class Cubitopia {
   private spawnQueueSystem!: SpawnQueueSystem;
   private baseUpgradeSystem!: BaseUpgradeSystem;
   private populationSystem!: PopulationSystem;
-  private _tierCheckTimer = 0;
+  private tacticalGroupManager = new TacticalGroupManager();
+  // _tierCheckTimer moved to LifecycleUpdater
   private _popInfoCache: { current: number; cap: number } | undefined;
   private _popInfoTimer = 0;
   private _unitById: Map<string, Unit> | null = null;
+  private _enemyResCache: any = null;
   private _aggroList: Array<{ attackerId: string; targetId: string }> | null = null;
   private _unitStatsPanelTimer = 0;
   private _selInfoTimer = 0;
   private _spawnQueueHudTimer = 0;
-  private _deadCleanupTimer = 0;
+  // Performance stats overlay
+  private _perfOverlay: HTMLElement | null = null;
+  private _perfVisible = false;
+  private _fpsFrames = 0;
+  private _fpsTime = 0;
+  private _fpsDisplay = 0;
+  // _deadCleanupTimer moved to LifecycleUpdater
   private garrisonSystem!: GarrisonSystem;
+  private rallyPointSystem!: RallyPointSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
+  interaction!: InteractionStateMachine;
   private sound: SoundManager;
+  private music: ProceduralMusic;
+  private titleScene: TitleScene | null = null;
+  // _musicInitialized + _musicIntensityTimer moved into ProceduralMusic.updateFromGameState()
+  private _buildingMeshScratch: THREE.Object3D[] | null = null;
+  private _baseMeshScratch: THREE.Object3D[] | null = null;
   private debugPanel: DebugPanel;
+  private debugOverlay!: DebugOverlayRenderer;
+  private squadIndicatorSystem!: SquadIndicatorSystem;
+  private lifecycleUpdater!: LifecycleUpdater;
+  private mapInitializer!: MapInitializer;
 
   constructor() {
     this.renderer = new Renderer(ENGINE_CONFIG);
@@ -170,15 +199,79 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
     this.sound = new SoundManager();
+    this.music = new ProceduralMusic();
     this.debugPanel = new DebugPanel();
-    this.menuController = new MenuController({
-      onStartGame: (mode, mapType) => { this.gameMode = mode; this.mapType = mapType; this.startNewGame(); },
-      onPlayAgain: () => this.regenerateMap(),
+    this.debugOverlay = new DebugOverlayRenderer({
+      showUnitOverlay: () => this.hud.debugFlags.showUnitOverlay,
+      getAllUnits: () => this.allUnits,
+      getCamera: () => this.camera.camera,
+      getCanvasId: () => ENGINE_CONFIG.canvasId,
     });
+    this.squadIndicatorSystem = new SquadIndicatorSystem({
+      getAllUnits: () => this.allUnits,
+      renderSquadIndicators: (squads, gameTime) => this.unitRenderer.updateSquadIndicators(squads, gameTime),
+    });
+    this.menuController = new MenuController({
+      onStartGame: (mode, mapType) => {
+        this.music.stopTitleMusic();
+        this.music.resumeGameplay();
+        this._stopTitleScene();
+        this.hud.setVisible(true);
+        this.gameMode = mode;
+        this.mapType = mapType;
+        this.startNewGame();
+      },
+      onPlayAgain: () => this.regenerateMap(),
+      onGenreChanged: (genreId) => this.music.setGenre(genreId),
+      onMenuShown: () => { this.hud.setVisible(false); this.music.playTitleMusic(); this._startTitleScene(); },
+    });
+
+    // Tutorial music — plays Tutorial.mp3 while help overlay is open
+    this.hud.onHelpOpen(() => this.music.playTutorial());
+    this.hud.onHelpClose(() => this.music.stopTutorial());
 
     this.initSystems();
     this.initDebugController();
-    this.setupEventHandlers();
+    this.lifecycleUpdater = new LifecycleUpdater({
+      getPlayers: () => this.players,
+      getBases: () => this.bases,
+      checkAllUpgrades: (pid) => this.baseUpgradeSystem.checkAllUpgrades(pid),
+      rebuildBaseForTier: (base, elev) => this.baseRenderer.rebuildForTier(base, elev),
+      getElevation: (pos) => this.getElevation(pos),
+      findSpawnTile: (q, r) => this.findSpawnTile(this.currentMap!, q, r),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      addUnitToWorld: (unit, elev) => this.unitRenderer.addUnit(unit, elev),
+      setPlayerUnits: (units, pid) => this.selectionManager.setPlayerUnits(units, pid),
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+      showNotification: (msg, color) => this.hud.showNotification(msg, color),
+      findExcessUnits: (pid) => this.populationSystem ? this.populationSystem.findExcessUnits(pid) : [],
+      getUnitById: (id) => this._unitById?.get(id),
+      removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
+      getAllUnits: () => this.allUnits,
+    });
+
+    // Interaction state machine — replaces 26+ boolean mode flags
+    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
+    this.interaction = new InteractionStateMachine({
+      setHUDMode: (state: InteractionState) => this.syncHUDMode(state),
+      resetSlicer: () => {
+        this.hud.onSliceChange = (y) => {
+          this.voxelBuilder.setSliceY(y);
+          this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
+        };
+        this.commandYLevel = null;
+        this.voxelBuilder.setSliceY(null);
+        this.terrainDecorator.setDecorationClipPlane(null);
+      },
+      clearHoverGhost: () => this.blueprintSystem.clearHoverGhost(),
+      hideTooltip: () => this.tooltipController.hideTooltip(),
+      getCanvas: () => canvasEl,
+    });
+
+    // Set up input handling via InputManager
+    const inputManager = new InputManager(this, this.hud, this.debugPanel, canvasEl, ENGINE_CONFIG);
+    inputManager.setupHandlers();
+
     this.setupResizeHandler();
   }
 
@@ -218,6 +311,8 @@ class Cubitopia {
       setIronStockpile: (v) => { this.ironStockpile[0] = v; },
       getCharcoalStockpile: () => this.charcoalStockpile[0],
       setCharcoalStockpile: (v) => { this.charcoalStockpile[0] = v; },
+      getGoldStockpile: () => this.goldStockpile[0],
+      setGoldStockpile: (v) => { this.goldStockpile[0] = v; },
       getSteelStockpile: () => this.steelStockpile[0],
       setSteelStockpile: (v) => { this.steelStockpile[0] = v; },
       getCrystalStockpile: () => this.crystalStockpile[0],
@@ -231,919 +326,20 @@ class Cubitopia {
       deleteTreeAge: (key) => this.natureSystem.treeAge.delete(key),
       deleteTreeRegrowthTimer: (key) => this.natureSystem.treeRegrowthTimers.delete(key),
       checkWinCondition: () => this.debugCheckWinCondition(),
+      getCurrentMap: () => this.currentMap,
+      addUnitToRenderer: (unit, elev) => this.unitRenderer.addUnit(unit, elev),
+      getFoodForPlayer: (pid) => this.foodStockpile[pid],
+      setFoodForPlayer: (pid, v) => { this.foodStockpile[pid] = v; },
+      setPlayerFoodResource: (pid, v) => { this.players[pid].resources.food = v; },
+      rebuildAllUnits: () => {
+        this.allUnits = [...this.players[0].units, ...this.players[1].units];
+        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+      },
+      getArmyComposition: () => this.debugPanel.getArmyComposition(),
     };
     this.debugController = new DebugController(debugOps);
   }
 
-  private setupEventHandlers(): void {
-    this.hud.onNewMap(() => this.regenerateMap());
-
-    // Wire up control panel buttons — global actions + nested menu system
-    this.hud.onBuildWalls(() => this.toggleBuildMode());
-    this.hud.onHarvest(() => this.toggleHarvestMode());
-    this.hud.onMine(() => this.toggleMineMode());
-    this.hud.onSellWood(() => this.resourceManager.doSellWood());
-    this.hud.onFarmPatch(() => this.toggleFarmPatchMode());
-    this.hud.onHelp(() => this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp());
-
-    // Nested menu callbacks
-    this.hud.onMenuCategory((catOrEncoded: number) => {
-      if (catOrEncoded >= 10) {
-        // Encoded category + index from tab click: cat=floor(n/10), idx=n%10
-        const cat = Math.floor(catOrEncoded / 10) as 1 | 2 | 3;
-        const idx = catOrEncoded % 10;
-        this.menuCategory = cat;
-        this.menuBuildingIndex = idx;
-        const building = Cubitopia.MENU_CATEGORIES[cat - 1].buildings[idx];
-        this.toggleBuildingPlaceMode(building.kind);
-        this.hud.updateNestedMenu(this.menuCategory, this.menuBuildingIndex, Cubitopia.MENU_CATEGORIES);
-      } else {
-        this.openMenuCategory(catOrEncoded as 1 | 2 | 3);
-      }
-    });
-    this.hud.onMenuAction((action: string) => this.executeMenuAction(action));
-    this.hud.onSetStance((stance: UnitStance) => this.setSelectedUnitsStance(stance));
-    this.hud.onSetFormation((formation: FormationType) => this.setSelectedUnitsFormation(formation));
-    this.hud.onRespawnUnits(() => this.respawnSelectedUnits());
-    this.hud.onCaptureNearestZone(() => this.captureNearestZoneWithSelected());
-
-    // Wire unified debug panel callbacks
-    this.debugPanel.setCallbacks({
-      getFlag: (key) => (this.hud.debugFlags as any)[key] ?? false,
-      toggleFlag: (key) => { (this.hud.debugFlags as any)[key] = !(this.hud.debugFlags as any)[key]; },
-      getGameSpeed: () => this.hud.gameSpeed,
-      setGameSpeed: (s) => { this.hud.gameSpeed = s; this.gameSpeed = s; this.hud.showNotification(`Speed: ${s}x`, '#00bcd4'); },
-      getSpawnCount: () => this.hud.debugSpawnCount,
-      setSpawnCount: (n) => { this.hud.debugSpawnCount = n; },
-      giveResources: () => this.debugController.giveResources(),
-      killAllEnemy: () => this.debugController.killAllEnemy(),
-      damageBase: (owner, amount) => this.debugController.damageBase(owner, amount),
-      healSelected: () => this.debugController.healSelected(),
-      killSelected: () => this.respawnSelectedUnits(),
-      buffSelected: (stat) => this.debugController.buffSelected(stat),
-      clearTrees: () => this.debugController.clearTrees(),
-      clearStones: () => this.debugController.clearStones(),
-      instantWin: () => this.debugController.instantWin(),
-      instantLose: () => this.debugController.instantLose(),
-      spawnUnit: (type, count) => this.debugController.spawnUnit(type, count),
-      spawnEnemy: (type, count) => this.debugController.spawnEnemyUnit(type, count),
-      restartArena: () => { this.gameMode = 'aivai'; this.mapType = MapType.ARENA; this.restartGame(); },
-      getMapType: () => this.mapType,
-      animatePreview: (group, unitType, state, time) => {
-        this.unitRenderer.animatePreviewGroup(group, unitType, state, time);
-      },
-      applyUnitStatChange: (type: UnitType, field: string, value: number) => {
-        // Apply to all live units of this type
-        for (const unit of this.allUnits) {
-          if (unit.type !== type) continue;
-          if (field.startsWith('stats.')) {
-            const statKey = field.slice(6);
-            (unit.stats as any)[statKey] = value;
-            // If maxHealth changed, scale currentHealth proportionally
-            if (statKey === 'maxHealth') {
-              unit.currentHealth = Math.min(unit.currentHealth, value);
-              this.unitRenderer.updateHealthBar(unit);
-            }
-          } else if (field === 'moveSpeed') {
-            unit.moveSpeed = value;
-          } else if (field === 'attackSpeed') {
-            unit.attackSpeed = value;
-          }
-        }
-      },
-    });
-
-    // Squad type toggle: when user clicks a unit type badge in the tooltip, filter the selection
-    this.hud.onSelectionFiltered((filtered) => {
-      this.selectionManager.setSelection(filtered);
-    });
-
-    // Selection changed
-    this.selectionManager.onSelect((units) => {
-      // In wall build mode, left-click places blueprints instead of selecting
-      if (this.wallBuildMode) return;
-
-      this.hud.updateSelection(units);
-      this.tileHighlighter.clearAll();
-
-      for (const u of this.allUnits) {
-        this.unitRenderer.setSelected(u.id, units.includes(u), u.stats.range);
-      }
-
-      for (const u of units) {
-        const elev = this.getElevation(u.position);
-        this.tileHighlighter.showSelection(u.position, elev);
-      }
-
-      // When units are selected, right-click should issue commands, not rotate camera
-      StrategyCamera.suppressRightClick = units.length > 0;
-
-      // When units are selected, slicer also sets commandYLevel for underground troop commands
-      if (units.length > 0 && !this.mineMode) {
-        this.hud.onSliceChange = (y) => {
-          this.commandYLevel = y;
-          this.voxelBuilder.setSliceY(y);
-          this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
-        };
-      } else if (units.length === 0 && !this.mineMode) {
-        // No units selected — slicer still visible but only controls visual slicing
-        this.hud.onSliceChange = (y) => {
-          this.voxelBuilder.setSliceY(y);
-          this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
-        };
-        this.commandYLevel = null;
-      }
-    });
-
-    // Right-click command
-    this.selectionManager.onCommand((worldPos) => {
-      this.issueCommand(worldPos);
-    });
-
-    // Right-click ping (even without selection)
-    this.selectionManager.onPing((worldPos) => {
-      this.spawnClickIndicator(worldPos, 0xaaaaaa, 0.5); // Grey for ping
-    });
-
-    // Attack-move left-click handler
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    canvasEl.addEventListener('click', (e: MouseEvent) => {
-      if (!this._attackMoveMode) return;
-      this._attackMoveMode = false;
-      (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = '';
-
-      const selected = this.selectionManager.getSelectedUnits();
-      if (selected.length === 0 || !this.currentMap) return;
-
-      // Raycast to world position
-      const rect = canvasEl.getBoundingClientRect();
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
-      );
-      raycaster.setFromCamera(mouse, this.camera.camera);
-      const intersects = raycaster.intersectObjects(this.renderer.scene.children, true);
-      if (intersects.length === 0) return;
-      const worldPos = intersects[0].point;
-      const hexCoord = this.worldToHex(worldPos);
-      if (!hexCoord) return;
-
-      const preferUnderground = this.commandYLevel !== null && this.commandYLevel < 0;
-
-      // Issue attack-move command: units move to position but re-aggro on enemies in range
-      for (const unit of selected) {
-        unit._playerCommanded = true;
-        unit._forceMove = true; // Still force-move to override stance until arrival
-        unit._focusTarget = undefined;
-        UnitAI.commandAttack(unit, hexCoord, null, this.currentMap!, preferUnderground);
-      }
-
-      // Show attack-move indicator (orange flag)
-      this.hud.showNotification('Attack-moving!', '#ff9800');
-      const elev = this.getElevation(hexCoord);
-      this.tileHighlighter.showAttackIndicator(hexCoord, elev);
-
-      // Visual click indicator
-      this.spawnClickIndicator(worldPos, 0xff9900, 1.0); // Orange for attack-move
-
-      // Prevent this click from being handled as selection
-      e.stopPropagation();
-    }, true); // Use capture phase to intercept before selection
-
-    // Mousedown handler to set suppressNextClick flag for attack-move
-    canvasEl.addEventListener('mousedown', (e: MouseEvent) => {
-      if (e.button === 0 && this._attackMoveMode) {
-        SelectionManager.suppressNextClick = true;
-      }
-    }, true);
-
-    // Keyboard shortcuts — nested menu system + global actions
-    window.addEventListener('keydown', (e) => {
-      if (this.hud.isHelpVisible()) return;
-
-      // --- Nested Menu System ---
-      // 1/2/3 open menu categories
-      if (e.key === '1' && !e.shiftKey) { this.openMenuCategory(1); return; }
-      if (e.key === '2' && !e.shiftKey) { this.openMenuCategory(2); return; }
-      if (e.key === '3' && !e.shiftKey) { this.openMenuCategory(3); return; }
-
-      // Tab exits menu and/or any active action mode (mine, harvest, wall, placement)
-      if (e.key === 'Tab') {
-        const hadMode = this.mineMode || this.harvestMode || this.farmPatchMode
-          || this.plantTreeMode || this.wallBuildMode || this.menuCategory !== 0;
-        if (hadMode) {
-          e.preventDefault();
-          this.closeMenu();   // Clears menu + calls clearAllModes
-          return;
-        }
-      }
-
-      // A-key: one-shot attack-move mode entry (auto-exits on click)
-      if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.altKey && this.menuCategory === 0) {
-        const selected = this.selectionManager.getSelectedUnits();
-        if (selected.length > 0) {
-          this._attackMoveMode = true;
-          this.hud.showNotification('ATTACK MOVE — Left-click target', '#ff9800');
-          (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = 'crosshair';
-          return;
-        }
-      }
-
-      // Shift cycles buildings within active menu
-      if ((e.key === 'Shift') && this.menuCategory !== 0) {
-        this.cycleBuildingInMenu(1);
-        return;
-      }
-
-      // QWERTY actions when menu is open
-      if (this.menuCategory !== 0) {
-        const keyUpper = e.key.toUpperCase();
-        const qwertyKeys = ['Q', 'W', 'E', 'R', 'T', 'Y'];
-        const qIdx = qwertyKeys.indexOf(keyUpper);
-        if (qIdx >= 0) {
-          const cat = Cubitopia.MENU_CATEGORIES[this.menuCategory - 1];
-          const building = cat.buildings[this.menuBuildingIndex];
-          if (qIdx < building.actions.length) {
-            this.executeMenuAction(building.actions[qIdx].action);
-          }
-          return;
-        }
-        // R rotates building in placement mode (doesn't consume if not in QWERTY range)
-        // Fall through to rotation handler below
-      }
-
-      // R rotates in any placement mode
-      if (e.key === 'r' || e.key === 'R') {
-        // Find which placement mode is active and toggle its rotation
-        const placeModes: { flag: string; rotation: string }[] = [
-          { flag: 'barracksPlaceMode', rotation: 'barracksRotation' },
-          { flag: 'forestryPlaceMode', rotation: 'forestryRotation' },
-          { flag: 'masonryPlaceMode', rotation: 'masonryRotation' },
-          { flag: 'farmhousePlaceMode', rotation: 'farmhouseRotation' },
-          { flag: 'siloPlaceMode', rotation: 'siloRotation' },
-          { flag: 'workshopPlaceMode', rotation: 'workshopRotation' },
-          { flag: 'smelterPlaceMode', rotation: 'smelterRotation' },
-          { flag: 'armoryPlaceMode', rotation: 'armoryRotation' },
-          { flag: 'wizardTowerPlaceMode', rotation: 'wizardTowerRotation' },
-        ];
-        for (const pm of placeModes) {
-          if ((this as any)[pm.flag]) {
-            (this as any)[pm.rotation] = (this as any)[pm.rotation] === 0 ? Math.PI / 2 : 0;
-            if (this.blueprintSystem.hoverGhost) this.blueprintSystem.hoverGhost.rotation.y = (this as any)[pm.rotation];
-            break;
-          }
-        }
-        // If we're in menu and R is also a QWERTY action, it was already handled above
-        if (this.menuCategory !== 0) return;
-      }
-
-      // --- Global actions (always available, close menu if open) ---
-      const globalAction = (action: () => void) => {
-        if (this.menuCategory !== 0) { this.menuCategory = 0; this.menuBuildingIndex = 0; this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES); }
-        action();
-      };
-      if (e.key === 'b' || e.key === 'B') globalAction(() => this.toggleBuildMode());
-      if (e.key === 'h' || e.key === 'H') globalAction(() => this.toggleHarvestMode());
-      if (e.key === 'n' || e.key === 'N') globalAction(() => this.toggleMineMode());
-      if (e.key === 'j' || e.key === 'J') globalAction(() => this.toggleFarmPatchMode());
-      if (e.key === 'g' || e.key === 'G') globalAction(() => this.resourceManager.doSellWood());
-
-      if (e.key === '`') { this.debugPanel.setUnits(this.allUnits); this.debugPanel.toggle(); }
-      if (e.key === 'F9') { this.debugPanel.setUnits(this.allUnits); if (!this.debugPanel.isVisible()) this.debugPanel.toggle(); this.debugPanel.switchTab('combat'); }
-      if (e.key === 'i' || e.key === 'I') { this.hud.toggleUnitStatsPanel(); this.hud.updateUnitStatsPanel(this.allUnits); }
-
-      // Escape cancels attack-move mode
-      if (e.key === 'Escape' && this._attackMoveMode) {
-        this._attackMoveMode = false;
-        (document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement).style.cursor = '';
-        return;
-      }
-    });
-
-    // Scroll wheel in mine mode adjusts depth (handled elsewhere);
-    // building menu cycling is Shift-only — no scroll hijacking.
-
-    // Ghost preview on mousemove (for all placement modes)
-    canvasEl.addEventListener('mousemove', (e) => {
-      const inPlacementMode = this.wallBuildMode || this.barracksPlaceMode ||
-                             this.forestryPlaceMode || this.masonryPlaceMode ||
-                             this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
-                             this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode;
-      if (!inPlacementMode || !this.currentMap) {
-        this.blueprintSystem.clearHoverGhost();
-        return;
-      }
-
-      const rect = canvasEl.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, this.camera.camera);
-
-      // Try multiple elevation planes to handle elevated terrain (forests, mountains)
-      const hexCoord = this.raycastToHex(raycaster);
-      if (!hexCoord) {
-        this.blueprintSystem.clearHoverGhost();
-        return;
-      }
-
-      const key = `${hexCoord.q},${hexCoord.r}`;
-      const tile = this.currentMap.tiles.get(key);
-
-      // Only show ghost on valid buildable terrain
-      const isWallMode = this.wallBuildMode;
-      const terrainOk = isWallMode
-        ? (tile && !this.isWaterTerrain(tile.terrain) && tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.MOUNTAIN)
-        : (tile && (tile.terrain === TerrainType.PLAINS || tile.terrain === TerrainType.DESERT));
-      if (!tile || !terrainOk || Pathfinder.blockedTiles.has(key)) {
-        this.blueprintSystem.clearHoverGhost();
-        return;
-      }
-
-      // Skip redundant updates
-      if (this.blueprintSystem.lastHoverKey === key) return;
-      this.blueprintSystem.lastHoverKey = key;
-
-      // Create or move the hover ghost
-      const worldX = hexCoord.q * 1.5;
-      const worldZ = hexCoord.r * 1.5 + (hexCoord.q % 2 === 1 ? 0.75 : 0);
-      const baseY = this.getElevation(hexCoord);
-
-      // Remove old ghost and rebuild (geometry may differ per mode)
-      if (this.blueprintSystem.hoverGhost) {
-        this.blueprintSystem.clearHoverGhost();
-      }
-
-      this.blueprintSystem.hoverGhost = new THREE.Group();
-      const ghostMat = new THREE.MeshBasicMaterial({
-        color: 0x3498db, transparent: true, opacity: 0.25, depthWrite: false,
-      });
-
-      if (isWallMode) {
-        // Pillar ghost + connector previews toward existing walls/blueprints
-        const pillarGeo = new THREE.BoxGeometry(0.55, 2.0, 0.55);
-        const pillar = new THREE.Mesh(pillarGeo, ghostMat);
-        pillar.position.y = 1.0;
-        this.blueprintSystem.hoverGhost.add(pillar);
-
-        // Show connector previews to adjacent walls/blueprints
-        const neighbors = Pathfinder.getHexNeighbors(hexCoord);
-        for (const n of neighbors) {
-          const nKey = `${n.q},${n.r}`;
-          if (!this.wallSystem.wallsBuilt.has(nKey) && !this.blueprintSystem.blueprintGhosts.has(nKey)) continue;
-          const nWorldX = n.q * 1.5;
-          const nWorldZ = n.r * 1.5 + (n.q % 2 === 1 ? 0.75 : 0);
-          const dx = nWorldX - worldX;
-          const dz = nWorldZ - worldZ;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          const angle = Math.atan2(dx, dz);
-          const segGeo = new THREE.BoxGeometry(0.4, 1.4, dist / 2);
-          const seg = new THREE.Mesh(segGeo, ghostMat);
-          seg.position.set(dx / 4, 0.7, dz / 4);
-          seg.rotation.y = -angle;
-          this.blueprintSystem.hoverGhost.add(seg);
-        }
-      } else {
-        // Standard box ghost for other placement modes
-        const ghostGeo = new THREE.BoxGeometry(1.45, 1.6, 0.5);
-        const ghostMesh = new THREE.Mesh(ghostGeo, ghostMat);
-        ghostMesh.position.y = 0.8;
-        this.blueprintSystem.hoverGhost.add(ghostMesh);
-      }
-
-      this.renderer.scene.add(this.blueprintSystem.hoverGhost);
-      this.blueprintSystem.hoverGhost.position.set(worldX, baseY, worldZ);
-
-      // Get the current rotation based on placement mode (walls don't rotate)
-      let rotation = 0;
-      if (this.barracksPlaceMode) rotation = this.barracksRotation;
-      else if (this.forestryPlaceMode) rotation = this.forestryRotation;
-      else if (this.masonryPlaceMode) rotation = this.masonryRotation;
-      else if (this.farmhousePlaceMode) rotation = this.farmhouseRotation;
-      else if (this.siloPlaceMode) rotation = this.siloRotation;
-      else if (this.workshopPlaceMode) rotation = this.workshopRotation;
-      else if (this.smelterPlaceMode) rotation = this.smelterRotation;
-      else if (this.armoryPlaceMode) rotation = this.armoryRotation;
-      else if (this.wizardTowerPlaceMode) rotation = this.wizardTowerRotation;
-
-      this.blueprintSystem.hoverGhost.rotation.y = rotation;
-    });
-
-    // --- Hover detection: attack targets + building inspection ---
-    // When player has units selected and hovers over an enemy, show attack cursor + red ring
-    // When hovering over ANY building/base (even with no selection), show pointer cursor for inspection
-    let hoveredEnemyId: string | null = null;
-    canvasEl.addEventListener('mousemove', (e) => {
-      if (!this.currentMap) return;
-
-      const rect = canvasEl.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, this.camera.camera);
-
-      const selected = this.selectionManager.getSelectedUnits();
-
-      // Check if hovering over any building mesh — show pointer for inspection
-      const allBuildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
-      if (allBuildingMeshes.length > 0) {
-        const buildHits = raycaster.intersectObjects(allBuildingMeshes, true);
-        if (buildHits.length > 0) {
-          let foundPB: PlacedBuilding | null = null;
-          let obj: THREE.Object3D | null = buildHits[0].object;
-          while (obj) {
-            const pb = this.buildingSystem.placedBuildings.find(p => p.mesh === obj);
-            if (pb) { foundPB = pb; break; }
-            obj = obj.parent;
-          }
-          if (foundPB) {
-            // Enemy building with units selected = crosshair, otherwise pointer for info
-            canvasEl.style.cursor = (selected.length > 0 && foundPB.owner !== 0) ? 'crosshair' : 'pointer';
-            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
-            return;
-          }
-        }
-      }
-
-      // Check if hovering over base mesh — pointer for info, crosshair if selected + enemy
-      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
-      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
-      if (baseMeshObjects.length > 0) {
-        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
-        if (baseHits.length > 0) {
-          let foundBase: Base | null = null;
-          let hitObj: THREE.Object3D | null = baseHits[0].object;
-          while (hitObj) {
-            const found = baseMeshGroups.find(bg => bg.group === hitObj);
-            if (found) { foundBase = this.bases.find(b => b.id === found.baseId) ?? null; break; }
-            hitObj = hitObj.parent;
-          }
-          if (foundBase && !foundBase.destroyed) {
-            canvasEl.style.cursor = (selected.length > 0 && foundBase.owner !== 0) ? 'crosshair' : 'pointer';
-            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
-            return;
-          }
-        }
-      }
-
-      // Combat hover detection (enemy units) — requires units to be selected
-      if (selected.length > 0) {
-        const hexCoord = this.raycastToHex(raycaster);
-        if (hexCoord) {
-          const enemy = this.findEnemyAt(hexCoord, selected[0].owner);
-          if (enemy) {
-            if (hoveredEnemyId !== enemy.id) {
-              hoveredEnemyId = enemy.id;
-              this.unitRenderer.highlightAttackTarget(enemy.id);
-              canvasEl.style.cursor = 'crosshair';
-            }
-            return;
-          }
-
-          // Check for enemy/neutral base hover via hex proximity
-          const base = this.findBaseAt(hexCoord, selected[0].owner);
-          if (base) {
-            canvasEl.style.cursor = 'crosshair';
-            if (hoveredEnemyId) { this.unitRenderer.highlightAttackTarget(null); hoveredEnemyId = null; }
-            return;
-          }
-        }
-      }
-
-      // No target under cursor — clear highlight
-      if (hoveredEnemyId) {
-        this.unitRenderer.highlightAttackTarget(null);
-        canvasEl.style.cursor = '';
-        hoveredEnemyId = null;
-      } else {
-        canvasEl.style.cursor = '';
-      }
-    });
-
-    // Build/Harvest/Barracks/Forestry/Masonry/Farm mode: click on tiles to place
-    canvasEl.addEventListener('click', (e) => {
-      // --- Debug teleport mode ---
-      if (this.hud.debugFlags.teleportMode && this.currentMap) {
-        const rect2 = canvasEl.getBoundingClientRect();
-        const mouse2 = new THREE.Vector2(
-          ((e.clientX - rect2.left) / rect2.width) * 2 - 1,
-          -((e.clientY - rect2.top) / rect2.height) * 2 + 1,
-        );
-        const rc2 = new THREE.Raycaster();
-        rc2.setFromCamera(mouse2, this.camera.camera);
-        const hexTarget = this.raycastToHex(rc2);
-        if (hexTarget) {
-          this.debugController.teleportSelected(hexTarget);
-          return;
-        }
-      }
-
-      const inMode = this.wallBuildMode || this.barracksPlaceMode ||
-                     this.forestryPlaceMode || this.masonryPlaceMode ||
-                     this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
-                     this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
-                     this.rallyPointSetMode || this.plantCropsMode || this.exitPickMode;
-      if (!inMode || !this.currentMap) return;
-
-      const rect = canvasEl.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, this.camera.camera);
-
-      const hexCoord = this.raycastToHex(raycaster);
-      if (hexCoord) {
-        if (this.wallBuildMode) {
-          this.blueprintSystem.toggleWallBlueprint(hexCoord);
-        } else if (this.barracksPlaceMode) {
-          this.placeGenericBuilding('barracks', hexCoord);
-        } else if (this.forestryPlaceMode) {
-          this.placeGenericBuilding('forestry', hexCoord);
-        } else if (this.masonryPlaceMode) {
-          this.placeGenericBuilding('masonry', hexCoord);
-        } else if (this.farmhousePlaceMode) {
-          this.placeGenericBuilding('farmhouse', hexCoord);
-        } else if (this.siloPlaceMode) {
-          this.placeGenericBuilding('silo', hexCoord);
-        } else if (this.workshopPlaceMode) {
-          this.placeGenericBuilding('workshop', hexCoord);
-        } else if (this.smelterPlaceMode) {
-          this.placeGenericBuilding('smelter', hexCoord);
-        } else if (this.armoryPlaceMode) {
-          this.placeGenericBuilding('armory', hexCoord);
-        } else if (this.wizardTowerPlaceMode) {
-          this.placeGenericBuilding('wizard_tower', hexCoord);
-        } else if (this.rallyPointSetMode && this.rallyPointBuilding) {
-          this.setRallyPoint(this.rallyPointBuilding, hexCoord);
-          this.hud.showNotification(`🚩 Rally point set for ${this.rallyPointBuilding}`, '#2ecc71');
-          this.rallyPointSetMode = false;
-          this.rallyPointBuilding = null;
-          this.hud.setRallyPointMode(false);
-          const canvasEl2 = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-          canvasEl2.style.cursor = 'default';
-        } else if (this.plantCropsMode) {
-          this.paintPlantCrop(hexCoord);
-        } else if (this.exitPickMode && this.exitPickSourceKey) {
-          // Exit-pick mode: click a building/gate to ungarrison there
-          const exitKey = `${hexCoord.q},${hexCoord.r}`;
-          const released = this.garrisonSystem.ungarrison(this.exitPickSourceKey, exitKey);
-          if (released.length > 0) {
-            this.hud.showNotification(`🏰 ${released.length} unit(s) exited at (${hexCoord.q},${hexCoord.r})`, '#e67e22');
-          } else {
-            this.hud.showNotification('No units to ungarrison or location not connected', '#e74c3c');
-          }
-          this.exitPickMode = false;
-          this.exitPickSourceKey = null;
-          const canvasEl3 = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-          canvasEl3.style.cursor = 'default';
-        }
-      }
-    });
-
-    // --- Pre-detect building/wall/gate clicks on mousedown to suppress selection clearing ---
-    // This fires BEFORE SelectionManager.mouseup, preserving unit selection for garrison
-    canvasEl.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return; // Left click only
-      const inAnyMode = this.wallBuildMode || this.barracksPlaceMode ||
-                        this.forestryPlaceMode || this.masonryPlaceMode ||
-                        this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
-                        this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
-                        this.harvestMode || this.farmPatchMode ||
-                        this.plantTreeMode || this.mineMode ||
-                        this.plantCropsMode || this.rallyPointSetMode || this.exitPickMode;
-      if (inAnyMode || !this.currentMap) return;
-
-      const rect = canvasEl.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, this.camera.camera);
-
-      // Check building meshes
-      const buildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
-      if (buildingMeshes.length > 0) {
-        const hits = raycaster.intersectObjects(buildingMeshes, true);
-        if (hits.length > 0) {
-          SelectionManager.suppressNextClear = true;
-          return;
-        }
-      }
-      // Check base meshes
-      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
-      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
-      if (baseMeshObjects.length > 0) {
-        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
-        if (baseHits.length > 0) {
-          SelectionManager.suppressNextClear = true;
-          return;
-        }
-      }
-      // Check wall/gate meshes
-      const allWgMeshes: THREE.Object3D[] = [
-        ...this.wallSystem.wallMeshes,
-        ...this.wallSystem.gateMeshes,
-      ];
-      if (allWgMeshes.length > 0) {
-        const wgHits = raycaster.intersectObjects(allWgMeshes, true);
-        if (wgHits.length > 0) {
-          SelectionManager.suppressNextClear = true;
-          return;
-        }
-      }
-    });
-
-    // --- Terrain info: click on any tile when not in a special mode to see info ---
-    canvasEl.addEventListener('click', (e) => {
-      const inAnyMode = this.wallBuildMode || this.barracksPlaceMode ||
-                        this.forestryPlaceMode || this.masonryPlaceMode ||
-                        this.farmhousePlaceMode || this.siloPlaceMode || this.workshopPlaceMode ||
-                        this.smelterPlaceMode || this.armoryPlaceMode || this.wizardTowerPlaceMode ||
-                        this.harvestMode || this.farmPatchMode ||
-                        this.plantTreeMode || this.mineMode ||
-                        this.plantCropsMode || this.rallyPointSetMode || this.exitPickMode;
-      if (inAnyMode || !this.currentMap) return;
-
-      // Raycast against building meshes to detect building clicks
-      const rect = canvasEl.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera(mouse, this.camera.camera);
-
-      // Check all placed building meshes (friendly AND enemy)
-      const buildingMeshes: THREE.Object3D[] = this.buildingSystem.placedBuildings.map(pb => pb.mesh);
-
-      if (buildingMeshes.length > 0) {
-        const hits = raycaster.intersectObjects(buildingMeshes, true);
-        if (hits.length > 0) {
-          let clickedPB: PlacedBuilding | null = null;
-          let obj: THREE.Object3D | null = hits[0].object;
-          while (obj) {
-            const found = this.buildingSystem.placedBuildings.find(pb => pb.mesh === obj);
-            if (found) { clickedPB = found; break; }
-            obj = obj.parent;
-          }
-          if (clickedPB) {
-            if (clickedPB.owner === 0) {
-              // Friendly building — show full tooltip with queue/demolish
-              this.tooltipController.showTooltip(clickedPB, e.clientX, e.clientY);
-            } else {
-              // Enemy/neutral building — show enemy tooltip with attack/rally
-              this.tooltipController.showEnemyBuildingTooltip(clickedPB, e.clientX, e.clientY);
-            }
-            return;
-          }
-        }
-      }
-
-      // Check base meshes (friendly, enemy, neutral)
-      const baseMeshGroups = this.baseRenderer.getAllBaseMeshGroups();
-      const baseMeshObjects: THREE.Object3D[] = baseMeshGroups.map(bg => bg.group);
-      if (baseMeshObjects.length > 0) {
-        const baseHits = raycaster.intersectObjects(baseMeshObjects, true);
-        if (baseHits.length > 0) {
-          let clickedBase: Base | null = null;
-          let hitObj: THREE.Object3D | null = baseHits[0].object;
-          while (hitObj) {
-            const found = baseMeshGroups.find(bg => bg.group === hitObj);
-            if (found) {
-              clickedBase = this.bases.find(b => b.id === found.baseId) ?? null;
-              break;
-            }
-            hitObj = hitObj.parent;
-          }
-          if (clickedBase && !clickedBase.destroyed) {
-            const isOwn = clickedBase.owner === 0;
-            this.tooltipController.showBaseTooltip(clickedBase, isOwn, e.clientX, e.clientY);
-            return;
-          }
-        }
-      }
-
-      // Check wall/gate meshes for garrison tooltip
-      const allWallGateMeshes: THREE.Object3D[] = [
-        ...this.wallSystem.wallMeshes,
-        ...this.wallSystem.gateMeshes,
-      ];
-      if (allWallGateMeshes.length > 0) {
-        const wgHits = raycaster.intersectObjects(allWallGateMeshes, true);
-        if (wgHits.length > 0) {
-          // Find which wall/gate was clicked
-          let hitMesh: THREE.Object3D | null = wgHits[0].object;
-          let foundKey: string | null = null;
-          let foundType: 'wall' | 'gate' | null = null;
-
-          while (hitMesh) {
-            // Check wall meshes
-            for (const [wKey, wMesh] of this.wallSystem.wallMeshMap) {
-              if (wMesh === hitMesh) { foundKey = wKey; foundType = 'wall'; break; }
-            }
-            if (foundKey) break;
-            // Check gate meshes
-            for (const [gKey, gMesh] of this.wallSystem.gateMeshMap) {
-              if (gMesh === hitMesh) { foundKey = gKey; foundType = 'gate'; break; }
-            }
-            if (foundKey) break;
-            hitMesh = hitMesh.parent;
-          }
-
-          if (foundKey && foundType) {
-            const owner = foundType === 'wall'
-              ? (this.wallSystem.wallOwners.get(foundKey) ?? -1)
-              : (this.wallSystem.gateOwners.get(foundKey) ?? -1);
-            const health = foundType === 'wall'
-              ? (this.wallSystem.wallHealth.get(foundKey) ?? WallSystem.WALL_MAX_HP)
-              : (this.wallSystem.gateHealth.get(foundKey) ?? WallSystem.GATE_MAX_HP);
-            const maxHealth = foundType === 'wall' ? WallSystem.WALL_MAX_HP : WallSystem.GATE_MAX_HP;
-
-            if (owner === 0) {
-              this.tooltipController.showWallGateTooltip(foundKey, foundType, owner, health, maxHealth, e.clientX, e.clientY);
-              return;
-            }
-          }
-        }
-      }
-
-      const hex = this.mouseToHex(e, canvasEl);
-      if (!hex) return;
-      const key = `${hex.q},${hex.r}`;
-      const tile = this.currentMap.tiles.get(key);
-      if (tile) {
-        this.hud.showTerrainInfo(tile);
-      }
-    });
-
-    // --- Paint drag-select: mousedown starts painting, mousemove continues, mouseup stops ---
-    let paintDragging = false;
-    let mineEraseMode = false; // true = dragging to REMOVE mine markers
-    let lastDragHex: HexCoord | null = null; // Track last hex for path-based drag (gates/walls)
-
-    // Trace a hex-neighbor path from 'from' to the hex nearest 'to', returning all steps.
-    // This ensures every placed tile is adjacent to the previous one — critical for hex grids.
-    const traceHexPath = (from: HexCoord, to: HexCoord): HexCoord[] => {
-      const path: HexCoord[] = [];
-      let cur = { q: from.q, r: from.r };
-      const toKey = `${to.q},${to.r}`;
-      for (let steps = 0; steps < 30; steps++) {
-        const curKey = `${cur.q},${cur.r}`;
-        if (curKey === toKey) break;
-        // Find the hex neighbor of 'cur' that's closest to 'to' in world space
-        const neighbors = Pathfinder.getHexNeighbors(cur);
-        const toWX = to.q * 1.5;
-        const toWZ = to.r * 1.5 + (to.q % 2 === 1 ? 0.75 : 0);
-        let bestN = neighbors[0];
-        let bestDist = Infinity;
-        for (const n of neighbors) {
-          const nWX = n.q * 1.5;
-          const nWZ = n.r * 1.5 + (n.q % 2 === 1 ? 0.75 : 0);
-          const d = (nWX - toWX) ** 2 + (nWZ - toWZ) ** 2;
-          if (d < bestDist) { bestDist = d; bestN = n; }
-        }
-        path.push(bestN);
-        cur = bestN;
-      }
-      return path;
-    };
-
-    canvasEl.addEventListener('mousedown', (e) => {
-      if (!this.harvestMode && !this.farmPatchMode && !this.plantTreeMode && !this.mineMode && !this.wallBuildMode) return;
-      if (e.button !== 0) return; // Left click only
-      paintDragging = true;
-      lastDragHex = null;
-
-      // Use mine-specific raycast for side-face detection in mine mode
-      const hex = this.mineMode ? this.mouseToMineHex(e, canvasEl) : this.mouseToHex(e, canvasEl);
-      if (hex) {
-        if (this.harvestMode) this.blueprintSystem.paintHarvestTile(hex);
-        else if (this.farmPatchMode) this.blueprintSystem.paintFarmPatch(hex);
-        else if (this.plantTreeMode) this.paintPlantTree(hex);
-        else if (this.wallBuildMode) {
-          // First click determines drag mode: if tile already has blueprint, drag = erase
-          const key = `${hex.q},${hex.r}`;
-          mineEraseMode = UnitAI.playerWallBlueprint.has(key) || this.wallSystem.wallsBuilt.has(key);
-          if (e.shiftKey) {
-            // Shift+click: place gate instead
-            if (mineEraseMode) {
-              this.blueprintSystem.removeWallBlueprint(hex);
-            } else {
-              this.blueprintSystem.paintGateBlueprint(hex);
-              lastDragHex = hex;
-            }
-          } else {
-            // Normal click: place wall
-            if (mineEraseMode) {
-              this.blueprintSystem.removeWallBlueprint(hex);
-            } else {
-              this.blueprintSystem.paintWallBlueprint(hex);
-              lastDragHex = hex;
-            }
-          }
-        }
-        else if (this.mineMode) {
-          const key = `${hex.q},${hex.r}`;
-          mineEraseMode = UnitAI.playerMineBlueprint.has(key);
-          if (mineEraseMode) {
-            this.blueprintSystem.unpaintMine(hex);
-          } else {
-            // startY = sliceY if slicer active, null = surface
-            const sliceY = this.voxelBuilder.getSliceY();
-            this.blueprintSystem.paintMine(hex, sliceY);
-          }
-        }
-      }
-    });
-    canvasEl.addEventListener('mousemove', (e) => {
-      if (!paintDragging) return;
-      const hex = this.mineMode ? this.mouseToMineHex(e, canvasEl) : this.mouseToHex(e, canvasEl);
-      if (hex) {
-        if (this.harvestMode) this.blueprintSystem.paintHarvestTile(hex);
-        else if (this.farmPatchMode) this.blueprintSystem.paintFarmPatch(hex);
-        else if (this.plantTreeMode) this.paintPlantTree(hex);
-        else if (this.wallBuildMode) {
-          if (mineEraseMode) {
-            this.blueprintSystem.removeWallBlueprint(hex);
-          } else if (e.shiftKey) {
-            // Gate drag: trace hex-neighbor path from last gate to target
-            if (lastDragHex) {
-              const path = traceHexPath(lastDragHex, hex);
-              for (const step of path) {
-                this.blueprintSystem.paintGateBlueprint(step);
-              }
-              if (path.length > 0) lastDragHex = path[path.length - 1];
-            } else {
-              this.blueprintSystem.paintGateBlueprint(hex);
-              lastDragHex = hex;
-            }
-          } else {
-            // Wall drag: trace hex-neighbor path from last wall to target
-            if (lastDragHex) {
-              const path = traceHexPath(lastDragHex, hex);
-              for (const step of path) {
-                this.blueprintSystem.paintWallBlueprint(step);
-              }
-              if (path.length > 0) lastDragHex = path[path.length - 1];
-            } else {
-              this.blueprintSystem.paintWallBlueprint(hex);
-              lastDragHex = hex;
-            }
-          }
-        }
-        else if (this.mineMode) {
-          if (mineEraseMode) {
-            this.blueprintSystem.unpaintMine(hex);
-          } else {
-            const sliceY = this.voxelBuilder.getSliceY();
-            this.blueprintSystem.paintMine(hex, sliceY);
-          }
-        }
-      }
-    });
-    canvasEl.addEventListener('mouseup', () => {
-      paintDragging = false;
-      mineEraseMode = false;
-      lastDragHex = null;
-    });
-
-    // Scroll wheel adjusts mine depth (or horizontal Y level with Shift) in mine mode
-    canvasEl.addEventListener('wheel', (e) => {
-      if (this.mineMode) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.shiftKey) {
-          // Shift+scroll = adjust elevation slicer Y level
-          // macOS converts Shift+scroll into horizontal scroll (deltaX), so check both axes
-          const rawDelta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
-          const sign = Math.sign(rawDelta);
-          if (sign === 0) return;
-          const delta = -sign;
-          const currentSlice = this.voxelBuilder.getSliceY();
-          const newY = currentSlice !== null
-            ? Math.max(-40, Math.min(25, currentSlice + delta))
-            : 25; // first Shift+scroll activates slicer at max
-          this.voxelBuilder.setSliceY(newY);
-          this.terrainDecorator.setDecorationClipPlane(this.voxelBuilder.getClipPlane());
-          this.hud.setSlicerValue(newY);
-          this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, newY);
-        } else {
-          const delta = e.deltaY > 0 ? -1 : 1; // scroll down = shallower, scroll up = deeper
-          this.adjustMineDepth(delta);
-        }
-      }
-    }, { capture: true }); // capture phase so it fires before camera zoom
-  }
 
   /** Convert mouse event to hex coordinate */
   private mouseToHex(e: MouseEvent, canvasEl: HTMLCanvasElement): HexCoord | null {
@@ -1195,38 +391,16 @@ class Cubitopia {
   // Old horizontal Y indicator removed — replaced by clipping plane slicer
 
   private toggleMineMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.mineMode;
-    this.clearAllModes();
-    this.mineMode = !wasActive;
-    this.hud.setMineMode(this.mineMode, this.blueprintSystem.mineDepthLayers);
-    canvasEl.style.cursor = this.mineMode ? 'crosshair' : 'default';
-    StrategyCamera.suppressLeftDrag = this.mineMode;
-    SelectionManager.suppressBoxSelect = this.mineMode;
-    SelectionManager.suppressRightClick = this.mineMode;
-    // In mine mode, right-click should always rotate camera (not issue unit commands)
-    if (this.mineMode) {
-      StrategyCamera.suppressRightClick = false;
-    }
-
-    // Swap slicer callback for mine mode (adds mine depth HUD update)
-    if (this.mineMode) {
+    this.interaction.toggle({ kind: 'mine' });
+    // Mine mode has extra slicer callback wiring
+    if (this.interaction.state.kind === 'mine') {
       this.hud.onSliceChange = (y) => {
         this.voxelBuilder.setSliceY(y);
         this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
-        // Update HUD to show current slice Y
         if (y !== null) {
           this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers, y);
         }
       };
-    } else {
-      // Exiting mine mode — restore default slicer callback (visual only)
-      this.hud.onSliceChange = (y) => {
-        this.voxelBuilder.setSliceY(y);
-        this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
-      };
-      this.voxelBuilder.setSliceY(null);
-      this.terrainDecorator.setDecorationClipPlane(null);
     }
   }
 
@@ -1234,21 +408,21 @@ class Cubitopia {
   /** Map block type → resource type for per-block mining */
   private blockToResource(blockType: BlockType): { type: ResourceType; yield: number } {
     switch (blockType) {
-      case BlockType.SNOW:          return { type: ResourceType.STONE,   yield: 1 };
-      case BlockType.STONE:         return { type: ResourceType.STONE,   yield: 1 };
-      case BlockType.IRON:          return { type: ResourceType.IRON,    yield: 1 };
-      case BlockType.GOLD:          return { type: ResourceType.GOLD,    yield: 1 };
-      case BlockType.SAND:          return { type: ResourceType.CLAY,    yield: 1 };
-      case BlockType.DIRT:          return { type: ResourceType.STONE,   yield: 1 };
-      case BlockType.GRASS:         return { type: ResourceType.FOOD,    yield: 1 };
-      case BlockType.WOOD:          return { type: ResourceType.WOOD,    yield: 1 };
-      case BlockType.JUNGLE:        return { type: ResourceType.WOOD,    yield: 1 };
-      case BlockType.CLAY:          return { type: ResourceType.CLAY,    yield: 1 };
-      case BlockType.GEM_RUBY:      return { type: ResourceType.CRYSTAL, yield: 3 };
-      case BlockType.GEM_EMERALD:   return { type: ResourceType.CRYSTAL, yield: 3 };
-      case BlockType.GEM_SAPPHIRE:  return { type: ResourceType.CRYSTAL, yield: 3 };
-      case BlockType.GEM_AMETHYST:  return { type: ResourceType.CRYSTAL, yield: 3 };
-      default:                      return { type: ResourceType.STONE,   yield: 1 };
+      case BlockType.SNOW:          return { type: ResourceType.STONE,   yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.STONE:         return { type: ResourceType.STONE,   yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.IRON:          return { type: ResourceType.IRON,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.GOLD:          return { type: ResourceType.GOLD,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.SAND:          return { type: ResourceType.CLAY,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.DIRT:          return { type: ResourceType.STONE,   yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.GRASS:         return { type: ResourceType.FOOD,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.WOOD:          return { type: ResourceType.WOOD,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.JUNGLE:        return { type: ResourceType.WOOD,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.CLAY:          return { type: ResourceType.CLAY,    yield: GAME_CONFIG.economy.mining.defaultBlockYield };
+      case BlockType.GEM_RUBY:      return { type: ResourceType.CRYSTAL, yield: GAME_CONFIG.economy.mining.crystalYield };
+      case BlockType.GEM_EMERALD:   return { type: ResourceType.CRYSTAL, yield: GAME_CONFIG.economy.mining.crystalYield };
+      case BlockType.GEM_SAPPHIRE:  return { type: ResourceType.CRYSTAL, yield: GAME_CONFIG.economy.mining.crystalYield };
+      case BlockType.GEM_AMETHYST:  return { type: ResourceType.CRYSTAL, yield: GAME_CONFIG.economy.mining.crystalYield };
+      default:                      return { type: ResourceType.STONE,   yield: GAME_CONFIG.economy.mining.defaultBlockYield };
     }
   }
 
@@ -1313,7 +487,9 @@ class Cubitopia {
     let resource = this.blockToResource(primaryBlock.type);
     if (resource.type === ResourceType.STONE && tile.resource && tile.resource !== ResourceType.STONE) {
       // Tile metadata says this is an iron/gold/crystal/clay deposit — honor it
-      const tileYield = tile.resource === ResourceType.CRYSTAL ? 3 : 1;
+      const tileYield = tile.resource === ResourceType.CRYSTAL
+        ? GAME_CONFIG.economy.mining.crystalYield
+        : GAME_CONFIG.economy.mining.defaultBlockYield;
       resource = { type: tile.resource, yield: tileYield };
     }
 
@@ -1364,8 +540,8 @@ class Cubitopia {
       UnitAI.claimedMines.delete(key);
     }
 
-    // Rebuild the voxel mesh
-    this.voxelBuilder.rebuildFromMap(this.currentMap);
+    // Mark affected chunk dirty (rebuilt lazily in game loop)
+    this.voxelBuilder.markTileDirty(key);
 
     // Load resource onto the worker
     const totalYield = toRemove.length * resource.yield;
@@ -1474,6 +650,7 @@ class Cubitopia {
       };
 
       // Append only the missing wall blocks
+      let added = false;
       for (const lx of offsets) {
         for (const lz of offsets) {
           for (let y = wallBottom; y < wallTop; y++) {
@@ -1485,10 +662,13 @@ class Cubitopia {
                 health: 100,
                 maxHealth: 100,
               });
+              added = true;
             }
           }
         }
       }
+      // Mark neighbor chunk dirty if we added pit wall blocks
+      if (added) this.voxelBuilder.markTileDirty(nKey);
     }
   }
 
@@ -1585,11 +765,22 @@ class Cubitopia {
       if (builders.length > 0) {
         const hexKey = `${hexCoord.q},${hexCoord.r}`;
 
-        // 1) Building blueprint at target hex
-        const blueprint = this.buildingSystem.placedBuildings.find(
+        // 1) Building blueprint at target hex (or adjacent hex — click may land on neighbor due to camera angle)
+        let blueprint = this.buildingSystem.placedBuildings.find(
           pb => pb.isBlueprint && pb.owner === builders[0].owner
             && pb.position.q === hexCoord.q && pb.position.r === hexCoord.r
         );
+        if (!blueprint) {
+          // Check adjacent hexes for blueprint (camera perspective can offset click target)
+          const neighbors = Pathfinder.getHexNeighbors(hexCoord);
+          for (const n of neighbors) {
+            blueprint = this.buildingSystem.placedBuildings.find(
+              pb => pb.isBlueprint && pb.owner === builders[0].owner
+                && pb.position.q === n.q && pb.position.r === n.r
+            );
+            if (blueprint) break;
+          }
+        }
         if (blueprint) {
           for (const builder of builders) {
             // Clear any previous assignment on other blueprints
@@ -1779,52 +970,53 @@ class Cubitopia {
     return null;
   }
 
-  /** Raycast against multiple elevation planes and return the best matching hex tile */
+  /**
+   * Convert a raycaster into a hex coordinate using ground-plane intersection.
+   * Uses a two-pass approach: first try a mid-elevation plane for quick lookup,
+   * then refine using the tile's actual elevation. No scene raycast needed —
+   * this is O(1) instead of O(n) scene children.
+   */
   private raycastToHex(raycaster: THREE.Raycaster): HexCoord | null {
     if (!this.currentMap) return null;
 
-    // Try scene object intersection first (most accurate)
-    const intersects = raycaster.intersectObjects(this.renderer.scene.children, true);
-    for (const hit of intersects) {
-      // Skip sprites, lines, particles, etc — only care about mesh hits
-      if (!(hit.object instanceof THREE.Mesh)) continue;
-      // Skip ocean plane, UI elements, harvest markers, blueprint ghosts
-      const name = hit.object.name || hit.object.parent?.name || '';
-      if (name.startsWith('harvest_') || name.startsWith('ghost_') || name.startsWith('mine_')) continue;
+    const intersection = new THREE.Vector3();
 
-      const coord = this.worldToHex(hit.point);
-      if (coord) return coord;
+    // Pass 1: intersect a mid-elevation plane to get approximate hex
+    const midPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
+    raycaster.ray.intersectPlane(midPlane, intersection);
+    if (!intersection) return null;
+
+    const approxCoord = this.worldToHex(intersection);
+    if (approxCoord) {
+      // Pass 2: refine with the tile's actual elevation
+      const tileElev = this.getElevation(approxCoord);
+      const refinedPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -tileElev);
+      raycaster.ray.intersectPlane(refinedPlane, intersection);
+      if (intersection) {
+        const refinedCoord = this.worldToHex(intersection);
+        if (refinedCoord) return refinedCoord;
+      }
+      // Approximate coord is still valid
+      return approxCoord;
     }
 
-    // Fallback: try multiple elevation planes (0, 0.5, 1.0, 1.5, 2.0)
-    let bestCoord: HexCoord | null = null;
-    const elevations = [0, 0.5, 1.0, 1.5, 2.0];
+    // Fallback: try a range of elevation planes for edge cases (steep terrain, camera angles)
+    const elevations = [0, 0.5, 1.5, 2.0, 3.0];
     for (const elev of elevations) {
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -elev);
-      const intersection = new THREE.Vector3();
       raycaster.ray.intersectPlane(plane, intersection);
       if (intersection) {
         const coord = this.worldToHex(intersection);
-        if (coord) {
-          const tileElev = this.getElevation(coord);
-          // Pick the coord whose tile elevation best matches this plane
-          if (Math.abs(tileElev - elev) < 0.5) {
-            bestCoord = coord;
-            break;
-          }
-          // Keep the first valid coord as fallback
-          if (!bestCoord) bestCoord = coord;
-        }
+        if (coord) return coord;
       }
     }
-    return bestCoord;
+    return null;
   }
 
   private getElevation(coord: HexCoord, underground = false): number {
     if (!this.currentMap) return 1;
     const tile = this.currentMap.tiles.get(`${coord.q},${coord.r}`);
     if (!tile) return 0.5;
-    // Surface units use tile.elevation; underground units use walkableFloor/tunnelFloorY
     if (underground && tile.hasTunnel) {
       return (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5;
     }
@@ -1950,7 +1142,7 @@ class Cubitopia {
     const tooltipOps: TooltipOps = {
       enterRallyPointMode: (key) => this.enterRallyPointModeForBuilding(key),
       demolishBuilding: (pb) => this.demolishBuilding(pb),
-      queueUnit: (unitType, buildingKind) => this.queueUnitFromTooltip(unitType, buildingKind),
+      queueUnit: (unitType, buildingKind) => this.spawnQueueSystem.queueUnitFromTooltip(unitType, buildingKind),
       getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
       captureZone: (position) => this.captureZoneFromTooltip(position),
       attackTarget: (position) => this.attackTargetFromTooltip(position),
@@ -1987,11 +1179,8 @@ class Cubitopia {
         }
       },
       enterExitPickMode: (structureKey) => {
-        this.exitPickMode = true;
-        this.exitPickSourceKey = structureKey;
+        this.interaction.enter({ kind: 'exit_pick', sourceKey: structureKey });
         this.hud.showNotification('Click a connected building or gate to choose exit point', '#8e44ad');
-        const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-        canvasEl.style.cursor = 'crosshair';
       },
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
@@ -2043,6 +1232,19 @@ class Cubitopia {
     };
     this.garrisonSystem = new GarrisonSystem(garrisonOps);
 
+    // Rally point system
+    const rallyPointOps: RallyPointOps = {
+      addToScene: (mesh) => this.renderer.scene.add(mesh),
+      removeFromScene: (mesh) => this.renderer.scene.remove(mesh),
+      getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
+      getPlacedBuildings: () => this.buildingSystem.placedBuildings,
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getElevation: (pos) => this.getElevation(pos),
+      getCurrentMap: () => this.currentMap,
+      getPlayerUnits: (owner) => this.players[owner].units,
+    };
+    this.rallyPointSystem = new RallyPointSystem(rallyPointOps);
+
     // Wire AI garrison ops (after both systems exist)
     this.aiController.setGarrisonOps({
       garrison: (units, key) => this.garrisonSystem.garrison(units, key),
@@ -2052,6 +1254,9 @@ class Cubitopia {
       getGateOwner: (key) => this.wallSystem.gateOwners.get(key) ?? -1,
     });
 
+    // Wire tactical group manager to AI controller
+    this.aiController.setTacticalGroupManager(this.tacticalGroupManager);
+
     // Combat event handler
     this.combatEventHandler = new CombatEventHandler({
       getPlayers: () => this.players,
@@ -2060,6 +1265,7 @@ class Cubitopia {
       getWoodStockpile: () => this.woodStockpile,
       getFoodStockpile: () => this.foodStockpile,
       getStoneStockpile: () => this.stoneStockpile,
+      getGoldStockpile: () => this.goldStockpile,
       removeUnitFromGame: (unit, killer) => this.removeUnitFromGame(unit, killer),
       updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
       showDamageEffect: (wp) => this.unitRenderer.showDamageEffect(wp),
@@ -2128,7 +1334,7 @@ class Cubitopia {
       getAllUnits: () => this.allUnits,
       getCurrentMap: () => this.currentMap,
       getGold: () => this.players[0].resources.gold,
-      setGold: (v) => { this.players[0].resources.gold = v; },
+      setGold: (v) => { this.goldStockpile[0] = v; this.players[0].resources.gold = v; },
       getWood: () => this.woodStockpile[0],
       setWood: (v) => { this.woodStockpile[0] = v; this.players[0].resources.wood = v; },
       getStone: () => this.stoneStockpile[0],
@@ -2140,6 +1346,7 @@ class Cubitopia {
       getCrystal: () => this.players[0].resources.crystal,
       setCrystal: (v) => { this.players[0].resources.crystal = v; },
       getNextSpawnBuilding: (kind, owner) => this.buildingSystem.getNextSpawnBuilding(kind, owner),
+      advanceSpawnIndex: (kind) => this.buildingSystem.advanceSpawnIndex(kind),
       getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
       findSpawnTile: (map, q, r, allow) => this.findSpawnTile(map, q, r, allow),
       hexToWorld: (pos) => this.hexToWorld(pos),
@@ -2150,7 +1357,7 @@ class Cubitopia {
         this.allUnits.push(unit);
         this.selectionManager.setPlayerUnits(this.allUnits, 0);
       },
-      getRallyFormationSlot: (kind, unit) => this.getRallyFormationSlot(kind, unit),
+      getRallyFormationSlot: (kind, unit) => this.rallyPointSystem.getRallyFormationSlot(kind, unit),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
       updateResources: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
       playSound: (name, vol) => this.sound.play(name as any, vol),
@@ -2168,6 +1375,11 @@ class Cubitopia {
           };
         }
         return { current: 0, cap: 999 };
+      },
+      getFoodStockpile: (owner) => this.foodStockpile[owner] ?? 0,
+      setFoodStockpile: (owner, v) => {
+        this.foodStockpile[owner] = v;
+        this.players[owner].resources.food = v;
       },
     });
 
@@ -2196,178 +1408,54 @@ class Cubitopia {
       getFoodStockpile: (owner) => this.foodStockpile[owner] ?? 0,
       getAllUnits: () => this.allUnits,
     });
-  }
 
-  /** Flatten terrain around a base position — modifies tile data BEFORE voxel rendering */
-  private flattenBaseArea(map: GameMap, baseQ: number, midR: number, radius: number): void {
-    // Use a consistent flat elevation (3) for the entire base area
-    const FLAT_ELEV = 3;
-
-    for (let dq = -radius; dq <= radius; dq++) {
-      for (let dr = -radius; dr <= radius; dr++) {
-        const q = baseQ + dq;
-        const r = midR + dr;
-        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
-        if (hexDist > radius) continue;
-
-        const key = `${q},${r}`;
-        const tile = map.tiles.get(key);
-        if (!tile) continue;
-
-        // Convert ALL non-walkable terrain to PLAINS (including water at edges)
-        let changed = false;
-        if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.FOREST) {
-          tile.terrain = TerrainType.PLAINS;
-          changed = true;
-        }
-
-        // Force flat elevation across the whole base area
-        if (tile.elevation !== FLAT_ELEV) {
-          tile.elevation = FLAT_ELEV;
-          tile.walkableFloor = FLAT_ELEV;
-          changed = true;
-        }
-
-        // Rebuild voxel data if anything changed
-        if (changed) {
-          this.rebuildTileShell({ q, r });
-        }
-      }
-    }
-
-    // Smooth transition: clamp neighbors at the border so there's no sheer cliff
-    const rebuilt = new Set<string>();
-    for (let dq = -radius; dq <= radius; dq++) {
-      for (let dr = -radius; dr <= radius; dr++) {
-        const q = baseQ + dq;
-        const r = midR + dr;
-        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
-        if (hexDist > radius) continue;
-        for (const n of Pathfinder.getHexNeighbors({ q, r })) {
-          const nk = `${n.q},${n.r}`;
-          if (rebuilt.has(nk)) continue;
-          rebuilt.add(nk);
-
-          const nTile = map.tiles.get(nk);
-          if (nTile) {
-            // Clamp border neighbors to at most 2 above flat level so no cliff walls
-            if (nTile.elevation > FLAT_ELEV + 2) {
-              nTile.elevation = FLAT_ELEV + 2;
-            }
-            // Convert impassable border terrain
-            if (nTile.terrain === TerrainType.MOUNTAIN || nTile.terrain === TerrainType.SNOW) {
-              nTile.terrain = TerrainType.PLAINS;
-            }
-          }
-          this.rebuildTileShell(n);
-        }
-      }
-    }
-  }
-
-  /**
-   * Guarantee forest tiles in a ring around a base (radius 3-6).
-   * Converts PLAINS tiles to FOREST and adds WOOD resources.
-   * Ensures at least 6 forest tiles exist near each base.
-   */
-  private seedBaseForest(map: GameMap, baseQ: number, baseR: number): void {
-    const MIN_FOREST = 6;
-    const INNER_RADIUS = 3;
-    const OUTER_RADIUS = 7;
-
-    // Count existing forest tiles in the zone
-    const candidates: { q: number; r: number; dist: number }[] = [];
-    let existingForest = 0;
-
-    for (let dq = -OUTER_RADIUS; dq <= OUTER_RADIUS; dq++) {
-      for (let dr = -OUTER_RADIUS; dr <= OUTER_RADIUS; dr++) {
-        const q = baseQ + dq;
-        const r = baseR + dr;
-        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
-        if (hexDist < INNER_RADIUS || hexDist > OUTER_RADIUS) continue;
-
-        const key = `${q},${r}`;
-        const tile = map.tiles.get(key);
-        if (!tile) continue;
-
-        if (tile.terrain === TerrainType.FOREST) {
-          existingForest++;
-        } else if (tile.terrain === TerrainType.PLAINS || tile.terrain === TerrainType.DESERT) {
-          candidates.push({ q, r, dist: hexDist });
-        }
-      }
-    }
-
-    if (existingForest >= MIN_FOREST) return; // Already enough trees
-
-    // Sort candidates: prefer closer tiles, add some variety
-    candidates.sort((a, b) => a.dist - b.dist);
-
-    const needed = MIN_FOREST - existingForest;
-    for (let i = 0; i < Math.min(needed, candidates.length); i++) {
-      const c = candidates[i];
-      const key = `${c.q},${c.r}`;
-      const tile = map.tiles.get(key);
-      if (!tile) continue;
-      tile.terrain = TerrainType.FOREST;
-      if (!tile.resource) {
-        tile.resource = ResourceType.WOOD;
-      }
-      this.rebuildTileShell({ q: c.q, r: c.r });
-    }
-  }
-
-  // Ocean plane removed — terrain is a solid voxel mass floating in space
-  private addOceanPlane(_mapSize: number): void {
-    // No-op: ocean removed for cube planet preparation
+    // Map Initializer — handles map generation and setup
+    const mapInitOps: MapInitOps = {
+      addToScene: (mesh) => this.renderer.scene.add(mesh),
+      removeFromScene: (mesh) => this.renderer.scene.remove(mesh),
+      addBlock: (pos, blockType) => this.voxelBuilder.addBlock(pos, blockType),
+      setSliceY: (y) => this.voxelBuilder.setSliceY(y),
+      decorateTile: (pos, terrain, scaledElev, maxNeighborElev, resource) =>
+        this.terrainDecorator.decorateTile(pos, terrain, scaledElev, maxNeighborElev, resource),
+      setDecorationClipPlane: (plane) => this.terrainDecorator.setDecorationClipPlane(plane),
+      removeDecoration: (pos) => this.terrainDecorator.removeDecoration(pos),
+      addWaterEdgeCurtain: (wx, elev, wz, dx, dz, h) =>
+        this.terrainDecorator.addWaterEdgeCurtain(wx, elev, wz, dx, dz, h),
+      addBase: (base, elevation) => this.baseRenderer.addBase(base, elevation),
+      placeWallDirect: (pos, owner) => this.wallSystem.placeWallDirect(pos, owner),
+      placeGateDirect: (pos, owner) => this.wallSystem.placeGateDirect(pos, owner),
+      rebuildAllConnections: () => this.wallSystem.rebuildAllConnections(),
+      disposeCaptureSystems: () => this.captureZoneSystem.dispose(),
+      addCaptureZone: (base, isMain, isUndg) => this.captureZoneSystem.addZone(base, isMain, isUndg),
+      findSpawnTile: (map, pq, pr, skip) => this.findSpawnTile(map, pq, pr, skip),
+      hexToWorld: (pos) => this.hexToWorld(pos),
+      getElevation: (pos) => this.getElevation(pos),
+      rebuildTileShell: (pos) => this.rebuildTileShell(pos),
+      isWaterTerrain: (terrain) => this.isWaterTerrain(terrain as TerrainType),
+      initializeGrassTracking: () => this.natureSystem.initializeGrassTracking(),
+      initializeForestTracking: () => this.natureSystem.initializeForestTracking(),
+      setMapBounds: (x0, y0, x1, y1) => this.camera.setMapBounds(x0, y0, x1, y1),
+      focusCameraOnCenter: (cq, cz) => this.camera.focusOn(new THREE.Vector3(cq, 2, cz)),
+      getBaseTiles: () => this.getBaseTiles(),
+      updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
+      getDebugPanel: () => this.debugPanel,
+    };
+    this.mapInitializer = new MapInitializer(mapInitOps);
   }
 
   // --- Shared action methods (called by both keys and control panel buttons) ---
 
   private toggleBuildMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.wallBuildMode;
-    this.clearAllModes();
-    this.wallBuildMode = !wasActive;
-    this.hud.setBuildMode(this.wallBuildMode);
-    if (!this.wallBuildMode) this.blueprintSystem.clearHoverGhost();
-    canvasEl.style.cursor = this.wallBuildMode ? 'crosshair' : 'default';
-    // Suppress camera pan and box-select during wall paint mode
-    StrategyCamera.suppressLeftDrag = this.wallBuildMode;
-    SelectionManager.suppressBoxSelect = this.wallBuildMode;
+    this.interaction.toggle({ kind: 'wall_build', rotation: 0 });
   }
 
   private toggleHarvestMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.harvestMode;
-    this.clearAllModes();
-    this.harvestMode = !wasActive;
-    this.hud.setHarvestMode(this.harvestMode);
-    canvasEl.style.cursor = this.harvestMode ? 'crosshair' : 'default';
-    // Suppress camera pan and box-select during harvest paint mode
-    StrategyCamera.suppressLeftDrag = this.harvestMode;
-    SelectionManager.suppressBoxSelect = this.harvestMode;
+    this.interaction.toggle({ kind: 'harvest' });
   }
 
-  /** Generic building placement mode toggle — replaces per-building toggleX methods */
-  // Map BuildingKind to member variable prefix (handles underscored names like wizard_tower → wizardTower)
-  private static readonly BUILDING_MODE_PREFIX: Record<string, string> = {
-    wizard_tower: 'wizardTower',
-  };
-
+  /** Generic building placement mode toggle */
   private toggleBuildingPlaceMode(kind: BuildingKind): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const prefix = Cubitopia.BUILDING_MODE_PREFIX[kind] ?? kind;
-    const modeKey = `${prefix}PlaceMode` as keyof this;
-    const wasActive = this[modeKey] as boolean;
-    this.clearAllModes();
-    (this as any)[modeKey] = !wasActive;
-    // HUD setter uses the raw kind name (e.g. setWizard_towerMode) for consistency
-    const hudSetter = `set${kind.charAt(0).toUpperCase() + kind.slice(1)}Mode` as keyof HUD;
-    if (typeof this.hud[hudSetter] === 'function') {
-      (this.hud[hudSetter] as (v: boolean) => void)(!wasActive);
-    }
-    canvasEl.style.cursor = !wasActive ? 'crosshair' : 'default';
+    this.interaction.toggleBuilding(kind);
   }
 
   /** Spawn queue config for simple (single-resource) buildings */
@@ -2406,27 +1494,10 @@ class Cubitopia {
     this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
-    // Clear rally point flags
-    for (const [, flagGroup] of this.rallyFlagMeshes) {
-      this.renderer.scene.remove(flagGroup);
-      flagGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-    }
-    this.rallyFlagMeshes.clear();
-    // Clear rally point lines
-    for (const [, line] of this.rallyLineMeshes) {
-      this.renderer.scene.remove(line);
-      line.geometry.dispose();
-      if (line.material instanceof THREE.Material) line.material.dispose();
-    }
-    this.rallyLineMeshes.clear();
-    this.rallyPoints.clear();
-    this.rallyPointSetMode = false;
-    this.rallyPointBuilding = null;
+    // Clear rally point system
+    this.rallyPointSystem.clearAllRallyPoints();
+    // Clear all interaction modes via state machine
+    this.interaction.clear();
 
     this.blueprintSystem.clearAllBlueprintGhosts();
     this.blueprintSystem.clearHoverGhost();
@@ -2435,29 +1506,11 @@ class Cubitopia {
     UnitAI.barracksPositions.clear();
     this.blueprintSystem.clearAllHarvestMarkers();
     this.blueprintSystem.clearAllMineMarkers();
-    this.wallBuildMode = false;
-    this.harvestMode = false;
-    this.barracksPlaceMode = false;
-    this.forestryPlaceMode = false;
-    this.masonryPlaceMode = false;
-    this.hud.setBuildMode(false);
-    this.hud.setHarvestMode(false);
-    this.hud.setBarracksMode(false);
-    this.hud.setForestryMode(false);
-    this.hud.setMasonryMode(false);
-    this.wallRotation = 0;
-    this.barracksRotation = 0;
-    this.forestryRotation = 0;
-    this.masonryRotation = 0;
     // Remove all placed building meshes from scene
     this.buildingSystem.cleanup();
     this.tooltipController.cleanup();
     this.spawnQueueSystem.cleanup();
     this.garrisonSystem.cleanup();
-    this.farmhousePlaceMode = false;
-    this.siloPlaceMode = false;
-    this.farmPatchMode = false;
-    this.plantTreeMode = false;
     this.foodStockpile = [10, 10];
     this.stoneStockpile = [0, 0];
     this.grassFiberStockpile = [0, 0];
@@ -2466,9 +1519,6 @@ class Cubitopia {
     this.ironStockpile = [0, 0];
     this.charcoalStockpile = [0, 0];
     this.steelStockpile = [0, 0];
-    this.workshopPlaceMode = false;
-    this.armoryPlaceMode = false;
-    this.smelterPlaceMode = false;
     // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
     UnitAI.playerGrassBlueprint.clear();
@@ -2501,7 +1551,8 @@ class Cubitopia {
     this.initSystems();
     this.menuController.removeGameOverOverlay();
     this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
-    this.showMainMenu();
+    this.music.pauseGameplay();
+    this.menuController.showMainMenu();
   }
 
   /** Clean up old game state and start a new game without showing the main menu. */
@@ -2528,23 +1579,7 @@ class Cubitopia {
     this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
-    for (const [, flagGroup] of this.rallyFlagMeshes) {
-      this.renderer.scene.remove(flagGroup);
-      flagGroup.traverse((child) => {
-        if (child instanceof THREE.Mesh) {
-          child.geometry.dispose();
-          if (child.material instanceof THREE.Material) child.material.dispose();
-        }
-      });
-    }
-    this.rallyFlagMeshes.clear();
-    for (const [, line] of this.rallyLineMeshes) {
-      this.renderer.scene.remove(line);
-      line.geometry.dispose();
-      if (line.material instanceof THREE.Material) line.material.dispose();
-    }
-    this.rallyLineMeshes.clear();
-    this.rallyPoints.clear();
+    this.rallyPointSystem.clearAllRallyPoints();
     this.blueprintSystem.clearAllBlueprintGhosts();
     this.blueprintSystem.clearHoverGhost();
     UnitAI.clearBlueprints();
@@ -2631,158 +1666,35 @@ class Cubitopia {
     return { q: preferQ, r: preferR };
   }
 
-  private showMainMenu(): void {
-    this.menuController.showMainMenu();
-  }
-
   startNewGame(): void {
-    const preset = getPreset(this.mapType);
-    const MAP_SIZE = preset.size;
-    let map: GameMap;
-    if (this.mapType === MapType.ARENA) {
-      map = generateArenaMap(MAP_SIZE);
-    } else if (this.mapType === MapType.DESERT_TUNNELS) {
-      map = generateDesertTunnelsMap(MAP_SIZE);
-    } else {
-      const mapGen = new MapGenerator();
-      map = mapGen.generate(MAP_SIZE, MAP_SIZE);
-    }
-    this.currentMap = map;
+    const isArena = this.mapType === MapType.ARENA;
 
-    // Base positions (used for spawning + base placement)
+    // Step 1: Initialize map (terrain, bases, decorations)
+    const mapSetupResult = this.mapInitializer.setupMap(this.mapType, this.gameMode, isArena);
+    const map = mapSetupResult.map;
+    const MAP_SIZE = mapSetupResult.mapSize;
+    const bases = mapSetupResult.bases;
+    const p1BaseCoord = mapSetupResult.p1BaseCoord;
+    const p2BaseCoord = mapSetupResult.p2BaseCoord;
     const midR = Math.floor(MAP_SIZE / 2);
-    const BASE_INSET = this.mapType === MapType.ARENA ? 3 : 5;
+    const BASE_INSET = mapSetupResult.baseInset;
     const P1_Q = BASE_INSET;
     const P1_R = MAP_SIZE - 1 - BASE_INSET;
     const P2_Q = MAP_SIZE - 1 - BASE_INSET;
     const P2_R = BASE_INSET;
+    const arenaCenter = Math.floor(MAP_SIZE / 2);
 
-    // Flatten terrain around base spawn areas BEFORE building voxels (skip for arena)
-    if (this.mapType !== MapType.ARENA) {
-      const FLATTEN_RADIUS = 4;
-      this.flattenBaseArea(map, P1_Q, P1_R, FLATTEN_RADIUS);
-      this.flattenBaseArea(map, P2_Q, P2_R, FLATTEN_RADIUS);
+    this.currentMap = map;
+    this.bases = bases;
 
-      // Guarantee forest tiles near both bases so players always have wood access.
-      // Seeds a ring of forest at radius 3-6 from each base (outside the flat core).
-      this.seedBaseForest(map, P1_Q, P1_R);
-      this.seedBaseForest(map, P2_Q, P2_R);
+    // Apply arena decoration mode if needed
+    if (isArena) {
+      this.terrainDecorator.desertMode = false;
+    } else if (this.mapType === MapType.DESERT_TUNNELS) {
+      this.terrainDecorator.desertMode = true;
     }
 
-    // Build terrain
-    map.tiles.forEach((tile, key) => {
-      const [q, r] = key.split(',').map(Number);
-      const worldX = q * 1.5;
-      const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
-
-      if (this.isWaterTerrain(tile.terrain)) {
-        // Water tiles: render underground blocks (dirt/stone/iron/gold) but skip
-        // surface water blocks — water surface is handled by decorative planes.
-        // Without this, water tiles leave visible void cavities underground.
-        for (const block of tile.voxelData.blocks) {
-          if (block.type === BlockType.WATER) continue; // surface water handled by decorator
-          this.voxelBuilder.addBlock(
-            {
-              x: worldX + block.localPosition.x,
-              y: block.localPosition.y,
-              z: worldZ + block.localPosition.z,
-            },
-            block.type
-          );
-        }
-      } else {
-        for (const block of tile.voxelData.blocks) {
-          this.voxelBuilder.addBlock(
-            {
-              x: worldX + block.localPosition.x,
-              y: block.localPosition.y,
-              z: worldZ + block.localPosition.z,
-            },
-            block.type
-          );
-        }
-      }
-
-      const scaledElevation = tile.elevation * 0.5;
-
-      // Find max neighbor elevation to prevent tree clipping through taller neighbors
-      let maxNeighborElev = scaledElevation;
-      const neighbors = q % 2 === 0
-        ? [[q-1,r-1],[q,r-1],[q+1,r-1],[q-1,r],[q+1,r],[q,r+1]]
-        : [[q,r-1],[q-1,r],[q+1,r],[q-1,r+1],[q,r+1],[q+1,r+1]];
-      for (const [nq, nr] of neighbors) {
-        const nTile = map.tiles.get(`${nq},${nr}`);
-        if (nTile) {
-          maxNeighborElev = Math.max(maxNeighborElev, nTile.elevation * 0.5);
-        }
-      }
-
-      // Arena: no trees, grass, or decorations — bare colosseum floor
-      if (this.mapType !== MapType.ARENA) {
-        this.terrainDecorator.desertMode = this.mapType === MapType.DESERT_TUNNELS;
-        this.terrainDecorator.decorateTile({ q, r }, tile.terrain, scaledElevation, maxNeighborElev, tile.resource);
-      }
-    });
-
-    // Remove decorations (trees, grass, flowers) from tunnel tiles — they'd float over cave mouths
-    map.tiles.forEach((tile, key) => {
-      if (!tile.hasTunnel) return;
-      const [q, r] = key.split(',').map(Number);
-      this.terrainDecorator.removeDecoration({ q, r });
-    });
-
-    // Add water curtains on river/lake tiles where they drop to a lower water neighbor
-    map.tiles.forEach((tile, key) => {
-      if (tile.terrain !== TerrainType.RIVER && tile.terrain !== TerrainType.LAKE) return;
-      const [q, r] = key.split(',').map(Number);
-      const myElev = tile.elevation;
-      const worldX = q * 1.5;
-      const worldZ = r * 1.5 + (q % 2 === 1 ? 0.75 : 0);
-      const scaledElev = myElev * 0.5;
-
-      // Check each neighbor for elevation drop
-      const nCoords = q % 2 === 0
-        ? [[q-1,r-1],[q,r-1],[q+1,r-1],[q-1,r],[q+1,r],[q,r+1]]
-        : [[q,r-1],[q-1,r],[q+1,r],[q-1,r+1],[q,r+1],[q+1,r+1]];
-      // Map neighbor index to approximate face direction
-      const nDirs = q % 2 === 0
-        ? [{ dx:-1, dz:-1 }, { dx:0, dz:-1 }, { dx:1, dz:-1 }, { dx:-1, dz:0 }, { dx:1, dz:0 }, { dx:0, dz:1 }]
-        : [{ dx:0, dz:-1 }, { dx:-1, dz:0 }, { dx:1, dz:0 }, { dx:-1, dz:1 }, { dx:0, dz:1 }, { dx:1, dz:1 }];
-
-      for (let i = 0; i < nCoords.length; i++) {
-        const [nq, nr] = nCoords[i];
-        const nTile = map.tiles.get(`${nq},${nr}`);
-        if (!nTile) continue;
-        const nElev = nTile.elevation;
-        const elevDrop = myElev - nElev;
-        // Only add curtain if there's a meaningful drop (2+ block difference)
-        // Cap drop height to prevent water curtains from extending deep underground
-        if (elevDrop >= 2) {
-          const dropHeight = Math.min(elevDrop * 0.5, 4); // max 4 world units deep
-          // Simplify direction to cardinal (nearest axis)
-          const dir = nDirs[i];
-          const absDx = Math.abs(dir.dx);
-          const absDz = Math.abs(dir.dz);
-          let faceDx = 0, faceDz = 0;
-          if (absDx >= absDz) {
-            faceDx = dir.dx > 0 ? 1 : -1;
-          } else {
-            faceDz = dir.dz > 0 ? 1 : -1;
-          }
-          this.terrainDecorator.addWaterEdgeCurtain(worldX, scaledElev, worldZ, faceDx, faceDz, dropHeight);
-        }
-      }
-    });
-
-    this.addOceanPlane(MAP_SIZE);
-
-    // Initialize grass tracking for map-generated grass
-    this.natureSystem.initializeGrassTracking();
-    // Record original forest tiles — trees only regrow where they started
-    this.natureSystem.initializeForestTracking();
-
     // --- Spawn Units ---
-    const isArena = this.mapType === MapType.ARENA;
 
     // Create players — arena gets abundant resources for testing
     const makeResources = (): PlayerResources => isArena
@@ -2812,26 +1724,47 @@ class Cubitopia {
         { type: UnitType.GREATSWORD, count: 1 },
       ];
       const redArmyDefs = armyComp.red.length > 0 ? armyComp.red : blueArmyDefs;
+
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
         const defs = owner === 0 ? blueArmyDefs : redArmyDefs;
-        let idx = 0;
+        const dir = owner === 0 ? 1 : -1; // toward center
+
+        // Flatten defs into individual units and sort by role depth (front first)
+        const units: { type: UnitType; depth: number }[] = [];
         for (const def of defs) {
+          const depth = DebugController.ROLE_DEPTH[def.type] ?? 1;
           for (let i = 0; i < def.count; i++) {
-            // Spread units INWARD toward center from their base with random jitter
-            // owner 0 (blue, left) spreads +q; owner 1 (red, right) spreads -q
-            const jitterQ = Math.floor(Math.random() * 3) - 1; // -1, 0, or +1
-            const jitterR = Math.floor(Math.random() * 3) - 1;
-            const oq = baseQ + (idx % 5 + 1) * (owner === 0 ? 1 : -1) + jitterQ;
-            const or2 = baseR - 4 + Math.floor(idx / 5) * 2 + jitterR;
-            const pos = this.findSpawnTile(map, oq, or2);
-            const unit = UnitFactory.create(def.type, owner, pos);
-            const wp = this.hexToWorld(pos);
-            unit.worldPosition = { ...wp };
-            unit.stance = UnitStance.AGGRESSIVE;
-            this.players[owner].units.push(unit);
-            this.unitRenderer.addUnit(unit, this.getElevation(pos));
-            idx++;
+            units.push({ type: def.type, depth });
           }
+        }
+        units.sort((a, b) => a.depth - b.depth);
+
+        // Place units in formation lines: each depth gets its own row(s)
+        // Front line is closest to center (baseQ + dir*offset)
+        const lineCounters: Record<number, number> = {};
+        for (const u of units) {
+          const lineIdx = lineCounters[u.depth] ?? 0;
+          lineCounters[u.depth] = lineIdx + 1;
+
+          // Q offset: front line (depth 0) is closest to enemy, back lines further from enemy
+          // Depth 0 = +2 toward center, depth 1 = +0 (at base), depth 2 = -2, depth 3 = -4
+          const qOffset = (2 - u.depth * 2) * dir;
+          // R offset: spread units in a line, centered on baseR
+          const lineWidth = 5; // max units per sub-row
+          const subRow = Math.floor(lineIdx / lineWidth);
+          const posInRow = lineIdx % lineWidth;
+          const rOffset = posInRow - Math.floor(Math.min(lineWidth, units.filter(x => x.depth === u.depth).length) / 2);
+          const qExtra = subRow * dir; // extra rows push slightly forward/back
+
+          const oq = baseQ + qOffset + qExtra;
+          const or2 = baseR + rOffset;
+          const pos = this.findSpawnTile(map, oq, or2);
+          const unit = UnitFactory.create(u.type, owner, pos);
+          const wp = this.hexToWorld(pos);
+          unit.worldPosition = { ...wp };
+          unit.stance = UnitStance.AGGRESSIVE;
+          this.players[owner].units.push(unit);
+          this.unitRenderer.addUnit(unit, this.getElevation(pos));
         }
       };
       // Spawn armies AT their bases — maximum separation across arena
@@ -2876,165 +1809,36 @@ class Cubitopia {
 
     this.allUnits = [...this.players[0].units, ...this.players[1].units];
     this.selectionManager.setPlayerUnits(this.allUnits, 0);
+
+    // Sync internal stockpiles with player resources (critical for arena mode
+    // where resources.food=999 but foodStockpile was reset to [10,10] in cleanup)
+    for (let pid = 0; pid < this.players.length; pid++) {
+      const r = this.players[pid].resources;
+      this.foodStockpile[pid] = r.food;
+      this.woodStockpile[pid] = r.wood;
+      this.stoneStockpile[pid] = r.stone;
+      this.goldStockpile[pid] = r.gold;
+      this.ironStockpile[pid] = r.iron;
+      this.crystalStockpile[pid] = r.crystal;
+      this.grassFiberStockpile[pid] = r.grass_fiber;
+      this.clayStockpile[pid] = r.clay;
+      this.ropeStockpile[pid] = r.rope;
+      this.charcoalStockpile[pid] = r.charcoal ?? 0;
+      this.steelStockpile[pid] = r.steel ?? 0;
+    }
+
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
-    // --- Spawn Home Bases ---
-    const BASE_MAX_HEALTH = 500;
-    const arenaCenter = Math.floor(MAP_SIZE / 2);
+    // Base setup already done by mapInitializer.setupMap()
+    // Here we just finalize the remaining game state
 
-    // Arena: bases at army spawn origin, symmetric from center; Standard: map corners
-    // Base offset 8 = same as army origin, 3 hexes from wall ring (radius 11)
-    // Arena uses direct coords (no findSpawnTile) to avoid search-order bias
-    const b1Q = isArena ? arenaCenter - 8 : P1_Q;
-    const b1R = isArena ? arenaCenter : P1_R;
-    const b2Q = isArena ? arenaCenter + 8 : P2_Q;
-    const b2R = isArena ? arenaCenter : P2_R;
-
-    const p1BaseCoord = isArena ? { q: b1Q, r: b1R } : this.findSpawnTile(map, b1Q, b1R);
-    const p1BaseWP = this.hexToWorld(p1BaseCoord);
-    const p1Base: Base = {
-      id: 'base_0', owner: 0, position: p1BaseCoord,
-      worldPosition: p1BaseWP,
-      health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
-      tier: BaseTier.CAMP, ogresSpawned: 0,
-    };
-
-    const p2BaseCoord = isArena ? { q: b2Q, r: b2R } : this.findSpawnTile(map, b2Q, b2R);
-    const p2BaseWP = this.hexToWorld(p2BaseCoord);
-    const p2Base: Base = {
-      id: 'base_1', owner: 1, position: p2BaseCoord,
-      worldPosition: p2BaseWP,
-      health: BASE_MAX_HEALTH, maxHealth: BASE_MAX_HEALTH, destroyed: false,
-      tier: BaseTier.CAMP, ogresSpawned: 0,
-    };
-
-    this.bases = [p1Base, p2Base];
-    this.baseRenderer.addBase(p1Base, this.getElevation(p1BaseCoord));
-    this.baseRenderer.addBase(p2Base, this.getElevation(p2BaseCoord));
-
-    // --- Neutral underdark city (Desert Tunnels only — central cavern) ---
-    if (this.mapType === MapType.DESERT_TUNNELS) {
-      const dtMap = map as DesertTunnelsMap;
-      if (dtMap.cavernCenter) {
-        const neutralCoord = { q: dtMap.cavernCenter.q, r: dtMap.cavernCenter.r };
-        const neutralY = (dtMap.cavernFloorY ?? -16) * 0.5;
-        const neutralBase: Base = {
-          id: 'base_neutral', owner: 2, position: neutralCoord,
-          worldPosition: {
-            x: neutralCoord.q * 1.5,
-            y: neutralY + 0.25,
-            z: neutralCoord.r * 1.5 + (neutralCoord.q % 2 === 1 ? 0.75 : 0),
-          },
-          health: 300, maxHealth: 300, destroyed: false,
-          tier: BaseTier.CAMP, ogresSpawned: 0,
-        };
-        this.bases.push(neutralBase);
-        this.baseRenderer.addBase(neutralBase, neutralY);
-        console.log(`[DesertTunnels] Neutral underdark city at (${neutralCoord.q},${neutralCoord.r}), Y=${neutralY}`);
-      }
-
-      // Extra underground outposts (side caverns)
-      if (dtMap.extraCaverns) {
-        for (let i = 0; i < dtMap.extraCaverns.length; i++) {
-          const cavern = dtMap.extraCaverns[i];
-          const coord = cavern.center;
-          const yLevel = cavern.floorY * 0.5;
-          const extraBase: Base = {
-            id: `base_neutral_${i + 2}`, owner: 2, position: { ...coord },
-            worldPosition: {
-              x: coord.q * 1.5,
-              y: yLevel + 0.25,
-              z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
-            },
-            health: 300, maxHealth: 300, destroyed: false,
-            tier: BaseTier.CAMP, ogresSpawned: 0,
-          };
-          this.bases.push(extraBase);
-          this.baseRenderer.addBase(extraBase, yLevel);
-          console.log(`[DesertTunnels] Extra underground outpost ${i + 1} at (${coord.q},${coord.r}), Y=${yLevel}`);
-        }
-      }
-    }
-
-    // --- Generic underground bases (any map type with undergroundBases, e.g. Standard lava tubes) ---
-    if (map.undergroundBases && map.undergroundBases.length > 0 && this.mapType !== MapType.DESERT_TUNNELS) {
-      for (let i = 0; i < map.undergroundBases.length; i++) {
-        const cavern = map.undergroundBases[i];
-        const coord = cavern.center;
-        const yLevel = cavern.floorY * 0.5;
-        const ugBase: Base = {
-          id: `base_neutral_ug_${i}`, owner: 2, position: { q: coord.q, r: coord.r },
-          worldPosition: {
-            x: coord.q * 1.5,
-            y: yLevel + 0.25,
-            z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
-          },
-          health: 300, maxHealth: 300, destroyed: false,
-          tier: BaseTier.CAMP, ogresSpawned: 0,
-        };
-        this.bases.push(ugBase);
-        this.baseRenderer.addBase(ugBase, yLevel);
-        console.log(`[Underground] Neutral base ${i} at (${coord.q},${coord.r}), Y=${yLevel}`);
-      }
-    }
-
-    // --- Generic surface neutral bases (desert outposts, mountain forts) ---
-    // Filter out any that overlap with player capitals (need 2*ZONE_RADIUS+1 = 11 hex gap)
-    const MIN_DIST_FROM_CAPITAL = 12;
-    if (map.surfaceBases && map.surfaceBases.length > 0) {
-      for (let i = 0; i < map.surfaceBases.length; i++) {
-        const sb = map.surfaceBases[i];
-        const coord = sb.center;
-        // Skip if too close to either player capital
-        const distP1 = (Math.abs(coord.q - p1BaseCoord.q) + Math.abs(coord.r - p1BaseCoord.r) + Math.abs((-coord.q - coord.r) - (-p1BaseCoord.q - p1BaseCoord.r))) / 2;
-        const distP2 = (Math.abs(coord.q - p2BaseCoord.q) + Math.abs(coord.r - p2BaseCoord.r) + Math.abs((-coord.q - coord.r) - (-p2BaseCoord.q - p2BaseCoord.r))) / 2;
-        if (distP1 < MIN_DIST_FROM_CAPITAL || distP2 < MIN_DIST_FROM_CAPITAL) {
-          console.log(`[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d1=${distP1}, d2=${distP2})`);
-          continue;
-        }
-        // Also skip if too close to any existing neutral base
-        const tooCloseToOther = this.bases.some(b => {
-          if (b.owner !== 2) return false;
-          const d = (Math.abs(coord.q - b.position.q) + Math.abs(coord.r - b.position.r) + Math.abs((-coord.q - coord.r) - (-b.position.q - b.position.r))) / 2;
-          return d < MIN_DIST_FROM_CAPITAL;
-        });
-        if (tooCloseToOther) {
-          console.log(`[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to another neutral base`);
-          continue;
-        }
-        const surfY = this.getElevation({ q: coord.q, r: coord.r });
-        const surfBase: Base = {
-          id: `base_neutral_surf_${i}`, owner: 2, position: { q: coord.q, r: coord.r },
-          worldPosition: {
-            x: coord.q * 1.5,
-            y: surfY + 0.25,
-            z: coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0),
-          },
-          health: 300, maxHealth: 300, destroyed: false,
-          tier: BaseTier.CAMP, ogresSpawned: 0,
-        };
-        this.bases.push(surfBase);
-        this.baseRenderer.addBase(surfBase, surfY);
-        console.log(`[Surface] Neutral ${sb.terrain} base ${i} at (${coord.q},${coord.r}), Y=${surfY}`);
-      }
-    }
-
+    // Add wallConnectable tags for player bases
+    const p1Base = this.bases[0];
+    const p2Base = this.bases[1];
     this.buildingSystem.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
     this.buildingSystem.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
 
-    // Register capture zones for all bases
-    this.captureZoneSystem.dispose(); // Clean up from previous game
-    this.captureZoneSystem.addZone(p1Base, true, false);  // Main base, surface
-    this.captureZoneSystem.addZone(p2Base, true, false);  // Main base, surface
-    for (const b of this.bases) {
-      if (b.id !== 'base_0' && b.id !== 'base_1') {
-        // Neutral/extra bases
-        const bTile = map.tiles.get(`${b.position.q},${b.position.r}`);
-        const bUnderground = !!bTile?.hasTunnel && b.worldPosition.y < (bTile.elevation ?? 0) * 0.5;
-        this.captureZoneSystem.addZone(b, false, bUnderground);
-      }
-    }
-
+    // Setup UnitAI static references
     UnitAI.basePositions.set(0, p1BaseCoord);
     UnitAI.basePositions.set(1, p2BaseCoord);
     UnitAI.bases = this.bases;
@@ -3042,30 +1846,10 @@ class Cubitopia {
     UnitAI.siloPositions.set(0, p1BaseCoord);
     UnitAI.siloPositions.set(1, p2BaseCoord);
 
-    // Auto-enable combat logging in Arena mode so events are captured from frame 1
-    // reset() force-clears old events + dedup maps so new games start clean
+    // Auto-enable combat logging in Arena mode
     if (isArena) {
       CombatLog.reset();
       this.debugPanel.setUnits(this.allUnits);
-    }
-
-    // Block base tiles so pathfinder routes units around them
-    Pathfinder.blockedTiles = this.getBaseTiles();
-    Pathfinder.gateTiles.clear();
-
-    // Arena: place colosseum wall ring + gate entries AFTER pathfinder init
-    // Walls colored by team: blue (owner 0) on left half, red (owner 1) on right
-    if (isArena && (map as ArenaMap).wallPositions) {
-      const arenaMap = map as ArenaMap;
-      for (const pos of arenaMap.wallPositions) {
-        const wallOwner = pos.q < arenaCenter ? 0 : pos.q > arenaCenter ? 1 : 0;
-        this.wallSystem.placeWallDirect(pos, wallOwner);
-      }
-      for (const pos of arenaMap.gatePositions) {
-        const gateOwner = pos.q < arenaCenter ? 0 : pos.q > arenaCenter ? 1 : 0;
-        this.wallSystem.placeGateDirect(pos, gateOwner);
-      }
-      this.wallSystem.rebuildAllConnections();
     }
 
     // Standard mode only: generate builder wall plans
@@ -3089,7 +1873,7 @@ class Cubitopia {
     this.hud.setGameMode(this.gameMode);
 
     // Always show Y-slicer — works globally, no mode prerequisite
-    this.hud.showElevationSlicer(true);
+    this.hud.showElevationSlicer(true, 25, Cubitopia.UNDERGROUND_DEPTH);
     this.hud.onSliceChange = (y) => {
       this.voxelBuilder.setSliceY(y);
       this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
@@ -3172,20 +1956,20 @@ class Cubitopia {
       const unit = this.allUnits[i];
       if (unit.state !== UnitState.DEAD) {
         unitById.set(unit.id, unit);
-        Pathfinder.occupiedTiles.add(`${unit.position.q},${unit.position.r}`);
+        Pathfinder.occupiedTiles.add(tileKey(unit.position.q, unit.position.r));
       }
     }
 
     // Pass debug flags to UnitAI before running update
-    UnitAI.debugFlags = {
-      disableChop: this.hud.debugFlags.disableChop,
-      disableMine: this.hud.debugFlags.disableMine,
-      disableHarvest: this.hud.debugFlags.disableHarvest,
-      disableBuild: this.hud.debugFlags.disableBuild,
-      disableDeposit: this.hud.debugFlags.disableDeposit,
-      disableAutoReturn: this.hud.debugFlags.disableAutoReturn,
-      disableCombat: this.hud.debugFlags.disableCombat,
-    };
+    // Sync debug flags without allocating a new object each frame
+    const df = UnitAI.debugFlags;
+    df.disableChop = this.hud.debugFlags.disableChop;
+    df.disableMine = this.hud.debugFlags.disableMine;
+    df.disableHarvest = this.hud.debugFlags.disableHarvest;
+    df.disableBuild = this.hud.debugFlags.disableBuild;
+    df.disableDeposit = this.hud.debugFlags.disableDeposit;
+    df.disableAutoReturn = this.hud.debugFlags.disableAutoReturn;
+    df.disableCombat = this.hud.debugFlags.disableCombat;
 
     // Sync stockpiles to UnitAI so builders know what resources are available
     UnitAI.stoneStockpile = this.stoneStockpile;
@@ -3196,6 +1980,10 @@ class Cubitopia {
     UnitAI.charcoalStockpile = this.charcoalStockpile;
     UnitAI.steelStockpile = this.steelStockpile;
     UnitAI.placedBuildings = this.buildingSystem.placedBuildings;
+    UnitAI.tacticalGroupManager = this.tacticalGroupManager;
+
+    // Update tactical groups (phase transitions, blackboard, centroids)
+    this.tacticalGroupManager.update(delta, this.allUnits);
 
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
@@ -3218,13 +2006,20 @@ class Cubitopia {
       const unit = this.allUnits[i];
       if (unit.state === UnitState.DEAD) continue;
 
-      // Underground Y correction
-      if (hasMap && unit._underground) {
-        const tile = this.currentMap!.tiles.get(`${unit.position.q},${unit.position.r}`);
-        if (tile?.hasTunnel) {
-          const correctY = (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5 + 0.25;
-          if (Math.abs(unit.worldPosition.y - correctY) > 0.5) {
-            unit.worldPosition.y = correctY;
+      // ── Y-floor enforcement: prevent ANY unit from clipping below terrain ──
+      if (hasMap) {
+        const tile = this.currentMap!.tiles.get(tileKey(unit.position.q, unit.position.r));
+        if (tile) {
+          if (unit._underground && tile.hasTunnel) {
+            const correctY = (tile.walkableFloor ?? tile.tunnelFloorY ?? tile.elevation) * 0.5 + 0.25;
+            if (Math.abs(unit.worldPosition.y - correctY) > 0.5) {
+              unit.worldPosition.y = correctY;
+            }
+          } else if (!unit._underground) {
+            const floorY = tile.elevation * 0.5 + 0.25;
+            if (unit.worldPosition.y < floorY - 0.02) {
+              unit.worldPosition.y = floorY;
+            }
           }
         }
       }
@@ -3257,8 +2052,8 @@ class Cubitopia {
     }
     this.unitRenderer.updateAggroIndicators(aggroList, gameTime);
 
-    // Visual-only separation: push overlapping unit meshes apart AFTER position sync
-    this.unitRenderer.applySeparation();
+    // ── Squad indicators: collect active squads and render labels + rings ──
+    this.squadIndicatorSystem.update(gameTime);
 
     // Update attack target hover ring (pulse + follow)
     this.unitRenderer.updateAttackTargetRing(gameTime);
@@ -3286,6 +2081,7 @@ class Cubitopia {
       this.aiController.updateSmartAIEconomy(1, delta);
       this.aiController.updateSmartAISpawnQueue(1, delta);
       this.aiController.updateSmartAITactics(1, delta);
+      this.aiController.updateSmartAIStrategy(1, delta);
 
       // Player 1 AI (only in AI vs AI mode)
       if (this.gameMode === 'aivai') {
@@ -3293,16 +2089,18 @@ class Cubitopia {
         this.aiController.updateSmartAIEconomy(0, delta);
         this.aiController.updateSmartAISpawnQueue(0, delta);
         this.aiController.updateSmartAITactics(0, delta);
+        this.aiController.updateSmartAIStrategy(0, delta);
       }
     }
 
-    // Update enemy resource bar
-    this.hud.updateEnemyResources(this.players[1], {
-      wood: this.woodStockpile[1], food: this.foodStockpile[1], stone: this.stoneStockpile[1],
-      iron: this.ironStockpile[1], crystal: this.crystalStockpile[1], grassFiber: this.grassFiberStockpile[1],
-      clay: this.clayStockpile[1], charcoal: this.charcoalStockpile[1], rope: this.ropeStockpile[1],
-      steel: this.steelStockpile[1], gold: this.goldStockpile[1],
-    });
+    // Update enemy resource bar (reuse cached object to avoid per-frame allocation)
+    if (!this._enemyResCache) this._enemyResCache = { wood: 0, food: 0, stone: 0, iron: 0, crystal: 0, grassFiber: 0, clay: 0, charcoal: 0, rope: 0, steel: 0, gold: 0 };
+    const erc = this._enemyResCache;
+    erc.wood = this.woodStockpile[1]; erc.food = this.foodStockpile[1]; erc.stone = this.stoneStockpile[1];
+    erc.iron = this.ironStockpile[1]; erc.crystal = this.crystalStockpile[1]; erc.grassFiber = this.grassFiberStockpile[1];
+    erc.clay = this.clayStockpile[1]; erc.charcoal = this.charcoalStockpile[1]; erc.rope = this.ropeStockpile[1];
+    erc.steel = this.steelStockpile[1]; erc.gold = this.goldStockpile[1];
+    this.hud.updateEnemyResources(this.players[1], erc);
 
     // Nature simulation (tree regrowth, grass growth/spread)
     if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
@@ -3326,75 +2124,8 @@ class Cubitopia {
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0], this._popInfoCache);
 
-    // --- Base Upgrade System: check tier upgrades (throttled to every 2s) ---
-    this._tierCheckTimer += delta;
-    if (this._tierCheckTimer >= 2 && this.baseUpgradeSystem) {
-      this._tierCheckTimer = 0;
-      for (let pid = 0; pid < this.players.length; pid++) {
-        const upgrades = this.baseUpgradeSystem.checkAllUpgrades(pid);
-        for (const evt of upgrades) {
-          const base = this.bases.find(b => b.id === evt.baseId);
-          if (base) {
-            base.tier = evt.newTier;
-            const tierNames = ['Camp', 'Fort', 'Castle'];
-            const msg = `🏰 Base upgraded to ${tierNames[evt.newTier]}!`;
-            if (pid === 0) {
-              this.hud.showNotification(msg, '#f1c40f');
-              this.sound.play('queue_confirm' as any, 0.8);
-            }
-            console.log(`[BaseUpgrade] Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
-
-            // Spawn reward Ogre at the upgraded base
-            const ogresForTier = evt.newTier;
-            if (base.ogresSpawned < ogresForTier) {
-              const spawnCoord = this.findSpawnTile(this.currentMap!, base.position.q, base.position.r);
-              const ogre = UnitFactory.create(UnitType.OGRE, pid, spawnCoord);
-              ogre.worldPosition = this.hexToWorld(spawnCoord);
-              ogre.isSiege = true;
-              this.players[pid].units.push(ogre);
-              this.allUnits.push(ogre);
-              const elev = this.getElevation(spawnCoord);
-              this.unitRenderer.addUnit(ogre, elev);
-              base.ogresSpawned = ogresForTier;
-              if (pid === 0) {
-                this.hud.showNotification('👹 An Ogre has joined your army!', '#4e342e');
-                this.selectionManager.setPlayerUnits(this.allUnits, 0);
-              }
-              console.log(`[BaseUpgrade] Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
-            }
-          }
-        }
-      }
-    }
-
-    // ── Safety net: clean up dead unit meshes that linger ──
-    // If a unit is DEAD or has _pendingRangedDeath for too long (projectile lost),
-    // force-remove it to prevent ghost meshes on the battlefield.
-    if (!this._deadCleanupTimer) this._deadCleanupTimer = 0;
-    this._deadCleanupTimer += delta;
-    if (this._deadCleanupTimer >= 1.0) {
-      this._deadCleanupTimer = 0;
-      const now = performance.now();
-      for (let i = this.allUnits.length - 1; i >= 0; i--) {
-        const u = this.allUnits[i];
-        if (u.state === UnitState.DEAD) {
-          // Unit is DEAD but still in allUnits — removeUnitFromGame was never called
-          console.warn(`[DeadCleanup] Force-removing dead unit ${u.type}(${u.id})`);
-          this.removeUnitFromGame(u);
-        } else if (u._pendingRangedDeath) {
-          // Track how long it's been pending — if too long, force-kill
-          if (!u._pendingDeathTimestamp) {
-            u._pendingDeathTimestamp = now;
-          } else if (now - u._pendingDeathTimestamp > 3000) {
-            // 3 seconds is far longer than any projectile flight time
-            console.warn(`[DeadCleanup] Force-removing stale pending-death unit ${u.type}(${u.id})`);
-            u.state = UnitState.DEAD;
-            u._pendingRangedDeath = false;
-            this.removeUnitFromGame(u);
-          }
-        }
-      }
-    }
+    // Base upgrades, population disband, and dead cleanup — delegated to LifecycleUpdater
+    this.lifecycleUpdater.update(delta);
 
     // Update unit stats panel (if visible — throttled to every 0.5s)
     if (!this._unitStatsPanelTimer) this._unitStatsPanelTimer = 0;
@@ -3510,40 +2241,30 @@ class Cubitopia {
   private woodStockpile: number[] = [0, 0]; // [player0, player1]
   // Wall/gate state is managed by WallSystem (this.wallSystem)
 
-  // --- Build/Harvest/Mine Modes (visual markers in BlueprintSystem) ---
-  private wallBuildMode = false;
-  private wallRotation = 0; // 0 or Math.PI/2
-  private harvestMode = false;
-  private mineMode = false;
   /** Y-level from slicer for troop commands — null means surface, number means underground */
-  private commandYLevel: number | null = null;
+  commandYLevel: number | null = null;
+  // Interaction mode state fully managed by InteractionStateMachine (legacy getters removed 2026-04-01)
   private stoneStockpile: number[] = [0, 0]; // [player0, player1]
-
-  // --- Building Registry is managed by BuildingSystem (this.buildingSystem) ---
-  // Backwards-compatible single-building shortcuts delegate to buildingSystem
-  private get barracks() { return this.buildingSystem.getFirstBuilding('barracks'); }
-  private get forestry() { return this.buildingSystem.getFirstBuilding('forestry'); }
-  private get masonry() { return this.buildingSystem.getFirstBuilding('masonry'); }
-  private get farmhouse() { return this.buildingSystem.getFirstBuilding('farmhouse'); }
-  private get silo() { return this.buildingSystem.getFirstBuilding('silo'); }
-  private get workshop() { return this.buildingSystem.getFirstBuilding('workshop'); }
 
   // Query/registry methods are in BuildingSystem — accessed via this.buildingSystem.*
 
   // showBuildingTooltip → moved to BuildingTooltipController
 
   /** Queue a unit from the building tooltip */
-  private queueUnitFromTooltip(unitType: string, buildingKind: BuildingKind): void {
-    this.spawnQueueSystem.queueUnitFromTooltip(unitType, buildingKind);
-  }
-
   /** Demolish a player building, removing it from the world and refunding some resources */
   private demolishBuilding(pb: PlacedBuilding): void {
     if (pb.owner !== 0) return; // Only player can demolish their own
     // Refund half the build cost in wood
     const refunds: Record<BuildingKind, number> = {
-      barracks: 5, forestry: 4, masonry: 5, farmhouse: 4, workshop: 8, silo: 3,
-      smelter: 4, armory: 5, wizard_tower: 5,
+      barracks: GAME_CONFIG.buildings.barracks.refund.wood,
+      forestry: GAME_CONFIG.buildings.forestry.refund.wood,
+      masonry: GAME_CONFIG.buildings.masonry.refund.wood,
+      farmhouse: GAME_CONFIG.buildings.farmhouse.refund.wood,
+      workshop: GAME_CONFIG.buildings.workshop.refund.wood,
+      silo: GAME_CONFIG.buildings.silo.refund.wood,
+      smelter: GAME_CONFIG.buildings.smelter.refund.wood,
+      armory: GAME_CONFIG.buildings.armory.refund.wood,
+      wizard_tower: GAME_CONFIG.buildings.wizard_tower.refund.wood,
     };
     const refund = refunds[pb.kind] ?? 3;
     this.woodStockpile[0] += refund;
@@ -3650,7 +2371,7 @@ class Cubitopia {
     let count = 0;
     for (const pb of this.buildingSystem.placedBuildings) {
       if (pb.owner === 0 && combatKinds.includes(pb.kind)) {
-        this.setRallyPoint(pb.kind, position);
+        this.rallyPointSystem.setRallyPoint(pb.kind, position);
         count++;
       }
     }
@@ -3661,44 +2382,13 @@ class Cubitopia {
     }
   }
 
-  // --- Placement mode flags & rotation ---
-  private barracksPlaceMode = false;
-  private barracksRotation = 0;
-
-  private forestryPlaceMode = false;
-  private forestryRotation = 0;
-
-  private masonryPlaceMode = false;
-  private masonryRotation = 0;
-
-  private farmhousePlaceMode = false;
-  private farmhouseRotation = 0;
-  private siloPlaceMode = false;
-  private siloRotation = 0;
-  private farmPatchMode = false;
+  // Placement mode flags & rotation → replaced by InteractionStateMachine
   private foodStockpile: number[] = [0, 0]; // [player0, player1]
-  private plantTreeMode = false;
-  private plantCropsMode = false;
   // clearedPlains moved to NatureSystem
 
-  // --- Workshop & Trebuchet Spawning ---
-  private workshopPlaceMode = false;
-  private workshopRotation = 0;
-
-  // --- Smelter ---
-  private smelterPlaceMode = false;
-  private smelterRotation = 0;
-
-  // --- Armory & Advanced Melee Spawning ---
-  private armoryPlaceMode = false;
-  private armoryRotation = 0;
-
-  // --- Wizard Tower & Magic Unit Spawning ---
-  private wizardTowerPlaceMode = false;
-  private wizardTowerRotation = 0;
+  // Workshop, Smelter, Armory, Wizard Tower → placement managed by InteractionStateMachine
 
   // --- Attack-Move Mode (League-style) ---
-  private _attackMoveMode = false;
   private _attackMoveIndicator: THREE.Mesh | null = null;
 
   // --- Grass Fiber, Clay, Rope Stockpiles ---
@@ -3732,28 +2422,28 @@ class Cubitopia {
         {
           kind: 'barracks', label: 'Barracks', color: '#e67e22',
           actions: [
-            { key: 'Q', label: 'Warrior (5g)', action: 'spawn:barracks:WARRIOR:5' },
-            { key: 'W', label: 'Archer (8g)', action: 'spawn:barracks:ARCHER:8' },
-            { key: 'E', label: 'Rider (10g)', action: 'spawn:barracks:RIDER:10' },
-            { key: 'R', label: 'Scout (6g)', action: 'spawn:barracks:SCOUT:6' },
-            { key: 'T', label: 'Paladin (12g)', action: 'spawn:barracks:PALADIN:12' },
+            { key: 'Q', label: `Warrior (${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g)`, action: `spawn:barracks:WARRIOR:${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}` },
+            { key: 'W', label: `Archer (${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g)`, action: `spawn:barracks:ARCHER:${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}` },
+            { key: 'E', label: `Rider (${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g)`, action: `spawn:barracks:RIDER:${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}` },
+            { key: 'R', label: `Scout (${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g)`, action: `spawn:barracks:SCOUT:${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}` },
+            { key: 'T', label: `Paladin (${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g)`, action: `spawn:barracks:PALADIN:${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}` },
           ],
         },
         {
           kind: 'armory', label: 'Armory', color: '#708090',
           actions: [
-            { key: 'Q', label: 'Greatsword (8g+2s)', action: 'spawn:armory:GREATSWORD:8:2' },
-            { key: 'W', label: 'Assassin (7g+1s)', action: 'spawn:armory:ASSASSIN:7:1' },
-            { key: 'E', label: 'Berserker (7g+2s)', action: 'spawn:armory:BERSERKER:7:2' },
-            { key: 'R', label: 'Shieldbearer (8g+3s)', action: 'spawn:armory:SHIELDBEARER:8:3' },
+            { key: 'Q', label: `Greatsword (${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s)`, action: `spawn:armory:GREATSWORD:${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}:${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}` },
+            { key: 'W', label: `Assassin (${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s)`, action: `spawn:armory:ASSASSIN:${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}:${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}` },
+            { key: 'E', label: `Berserker (${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s)`, action: `spawn:armory:BERSERKER:${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}:${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}` },
+            { key: 'R', label: `Shieldbearer (${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s)`, action: `spawn:armory:SHIELDBEARER:${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}:${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}` },
           ],
         },
         {
           kind: 'wizard_tower', label: 'Wizard Tower', color: '#6a0dad',
           actions: [
-            { key: 'Q', label: 'Mage (8g+2c)', action: 'spawn:wizard_tower:MAGE:8:2' },
-            { key: 'W', label: 'Battlemage (12g+3c)', action: 'spawn:wizard_tower:BATTLEMAGE:12:3' },
-            { key: 'E', label: 'Healer (6g+1c)', action: 'spawn:wizard_tower:HEALER:6:1' },
+            { key: 'Q', label: `Mage (${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c)`, action: `spawn:wizard_tower:MAGE:${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}:${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}` },
+            { key: 'W', label: `Battlemage (${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c)`, action: `spawn:wizard_tower:BATTLEMAGE:${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}:${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}` },
+            { key: 'E', label: `Healer (${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c)`, action: `spawn:wizard_tower:HEALER:${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}:${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}` },
           ],
         },
       ],
@@ -3764,7 +2454,7 @@ class Cubitopia {
         {
           kind: 'forestry', label: 'Forestry', color: '#6b8e23',
           actions: [
-            { key: 'Q', label: 'Lumberjack (3w)', action: 'spawn:forestry:LUMBERJACK:3' },
+            { key: 'Q', label: `Lumberjack (${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood}w)`, action: `spawn:forestry:LUMBERJACK:${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood}` },
             { key: 'W', label: 'Chop Trees', action: 'action:harvest' },
             { key: 'E', label: 'Plant Trees', action: 'action:plantTree' },
           ],
@@ -3772,7 +2462,7 @@ class Cubitopia {
         {
           kind: 'masonry', label: 'Masonry', color: '#b08050',
           actions: [
-            { key: 'Q', label: 'Builder (3w)', action: 'spawn:masonry:BUILDER:3' },
+            { key: 'Q', label: `Builder (${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood}w)`, action: `spawn:masonry:BUILDER:${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood}` },
             { key: 'W', label: 'Mine Terrain', action: 'action:mine' },
             { key: 'E', label: 'Build Walls', action: 'action:walls' },
           ],
@@ -3780,7 +2470,7 @@ class Cubitopia {
         {
           kind: 'farmhouse', label: 'Farmhouse', color: '#daa520',
           actions: [
-            { key: 'Q', label: 'Villager (3w)', action: 'spawn:farmhouse:VILLAGER:3' },
+            { key: 'Q', label: `Villager (${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood}w)`, action: `spawn:farmhouse:VILLAGER:${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood}` },
             { key: 'W', label: 'Farm/Hay', action: 'action:farmPatch' },
             { key: 'E', label: 'Plant Crops', action: 'action:plantCrops' },
           ],
@@ -3788,10 +2478,9 @@ class Cubitopia {
         {
           kind: 'workshop', label: 'Workshop', color: '#5d4037',
           actions: [
-            { key: 'Q', label: 'Catapult', action: 'spawn:workshop:CATAPULT' },
-            { key: 'W', label: 'Trebuchet', action: 'spawn:workshop:TREBUCHET' },
-            { key: 'E', label: 'Craft Rope', action: 'craft:rope' },
-            { key: 'R', label: 'Sell Wood', action: 'action:sellWood' },
+            { key: 'Q', label: 'Trebuchet', action: 'spawn:workshop:TREBUCHET' },
+            { key: 'W', label: 'Craft Rope', action: 'craft:rope' },
+            { key: 'E', label: 'Sell Wood', action: 'action:sellWood' },
           ],
         },
       ],
@@ -3802,8 +2491,8 @@ class Cubitopia {
         {
           kind: 'smelter', label: 'Smelter', color: '#8b4513',
           actions: [
-            { key: 'Q', label: 'Smelt Steel (2i+1c)', action: 'craft:steel' },
-            { key: 'W', label: 'Craft Charcoal (3w+2c)', action: 'craft:charcoal' },
+            { key: 'Q', label: `Smelt Steel (${GAME_CONFIG.economy.recipes.steel.input.iron}i+${GAME_CONFIG.economy.recipes.steel.input.charcoal}c)`, action: 'craft:steel' },
+            { key: 'W', label: `Craft Charcoal (${GAME_CONFIG.economy.recipes.charcoal.input.wood}w+${GAME_CONFIG.economy.recipes.charcoal.input.clay}c)`, action: 'craft:charcoal' },
           ],
         },
         {
@@ -3814,10 +2503,21 @@ class Cubitopia {
     },
   ];
 
+  /** Close all menus and clear any active placement/interaction mode */
+  closeMenu(): void {
+    this.menuCategory = 0;
+    this.menuBuildingIndex = 0;
+    this.clearAllModes();
+    this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES);
+  }
+
   private openMenuCategory(cat: 1 | 2 | 3): void {
     if (this.menuCategory === cat) {
       // Already in this category — close it
-      this.closeMenu();
+      this.menuCategory = 0;
+      this.menuBuildingIndex = 0;
+      this.clearAllModes();
+      this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES);
       return;
     }
     this.menuCategory = cat;
@@ -3827,13 +2527,6 @@ class Cubitopia {
     this.toggleBuildingPlaceMode(building.kind);
     this.sound.play('ui_click');
     this.hud.updateNestedMenu(this.menuCategory, this.menuBuildingIndex, Cubitopia.MENU_CATEGORIES);
-  }
-
-  private closeMenu(): void {
-    this.menuCategory = 0;
-    this.menuBuildingIndex = 0;
-    this.clearAllModes();
-    this.hud.updateNestedMenu(0, 0, Cubitopia.MENU_CATEGORIES);
   }
 
   private cycleBuildingInMenu(direction: number): void {
@@ -3873,14 +2566,7 @@ class Cubitopia {
     }
   }
 
-  // --- Rally Point System ---
-  private rallyPoints: Map<string, HexCoord> = new Map(); // buildingKey → rally target
-  private rallyFlagMeshes: Map<string, THREE.Group> = new Map(); // buildingKey → flag mesh
-  private rallyLineMeshes: Map<string, THREE.Line> = new Map(); // buildingKey → line mesh
-  private rallyPointSetMode = false;
-  private rallyPointBuilding: string | null = null; // Which building we're setting rally for
-  private exitPickMode = false;
-  private exitPickSourceKey: string | null = null; // Structure key being ungarrisoned from
+  // Rally point + garrison exit mode → managed by InteractionStateMachine
 
   // --- Formation state ---
   private selectedFormation: FormationType = FormationType.BOX;
@@ -3907,7 +2593,11 @@ class Cubitopia {
 
     // Wood yield scales with tree age: sapling=2, young=4, mature=6
     const age = this.natureSystem.getTreeAge(key) ?? 2; // default 2 (mature) for map-generated trees
-    const woodYield = age === 0 ? 2 : age === 1 ? 4 : 6;
+    const woodYield = age === 0
+      ? GAME_CONFIG.economy.harvest.tree.woodYieldByAge.sapling
+      : age === 1
+        ? GAME_CONFIG.economy.harvest.tree.woodYieldByAge.young
+        : GAME_CONFIG.economy.harvest.tree.woodYieldByAge.mature;
 
     // Start regrowth timer, clean up growth tracking
     this.natureSystem.onTreeChopped(key);
@@ -3928,13 +2618,15 @@ class Cubitopia {
     this.blueprintSystem.removeHarvestMarker(pos);
 
     // Hay yield: 2-3 food per tall grass tile
-    const hayYield = 2 + Math.floor(Math.random() * 2);
+    const hayYield = GAME_CONFIG.economy.harvest.grass.hayBase
+      + Math.floor(Math.random() * GAME_CONFIG.economy.harvest.grass.hayVariance);
 
     // Reset grass to short (stage 0) — it will regrow; mark as cleared plains
     this.natureSystem.onGrassHarvested(key, pos, tile.elevation * 0.5);
 
     // Grass fiber bonus — harvesting grass also yields fiber (plant material for rope)
-    const fiberYield = 1 + Math.floor(Math.random() * 2); // 1-2 fiber
+    const fiberYield = GAME_CONFIG.economy.harvest.grass.fiberBase
+      + Math.floor(Math.random() * GAME_CONFIG.economy.harvest.grass.fiberVariance); // 1-2 fiber
     this.grassFiberStockpile[unit.owner] += fiberYield;
     this.players[unit.owner].resources.grass_fiber += fiberYield;
     if (unit.owner === 0) {
@@ -3954,15 +2646,15 @@ class Cubitopia {
     notification?: string;
     unitAIHook?: (coord: HexCoord) => void;
   }> = {
-    barracks:      { woodCost: 10, stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: WallSystem.BARRACKS_MAX_HP, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
-    forestry:      { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
-    masonry:       { woodCost: 8,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
-    farmhouse:     { woodCost: 6,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
-    workshop:      { woodCost: 12, stoneCost: 4, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
-    silo:          { woodCost: 5,  stoneCost: 0, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Silo built! Villagers will carry crops here. Place farm patches [J]', unitAIHook: (c) => UnitAI.siloPositions.set(0, c) },
-    smelter:       { woodCost: 8,  stoneCost: 6, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Smelter built! Smelt steel with [Z] (2 iron + 1 charcoal)' },
-    armory:        { woodCost: 10, stoneCost: 5, steelCost: 3, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Armory built! Train advanced melee units [6-9]' },
-    wizard_tower:  { woodCost: 10, stoneCost: 5, crystalCost: 3, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Wizard Tower built! Train magic units [0, Shift+1-2]' },
+    barracks:      { woodCost: GAME_CONFIG.buildings.barracks.cost.player.wood, stoneCost: GAME_CONFIG.buildings.barracks.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: GAME_CONFIG.defenses.barracks.maxHealth, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
+    forestry:      { woodCost: GAME_CONFIG.buildings.forestry.cost.player.wood, stoneCost: GAME_CONFIG.buildings.forestry.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    masonry:       { woodCost: GAME_CONFIG.buildings.masonry.cost.player.wood, stoneCost: GAME_CONFIG.buildings.masonry.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    farmhouse:     { woodCost: GAME_CONFIG.buildings.farmhouse.cost.player.wood, stoneCost: GAME_CONFIG.buildings.farmhouse.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
+    workshop:      { woodCost: GAME_CONFIG.buildings.workshop.cost.player.wood, stoneCost: GAME_CONFIG.buildings.workshop.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
+    silo:          { woodCost: GAME_CONFIG.buildings.silo.cost.player.wood, stoneCost: GAME_CONFIG.buildings.silo.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Silo built! Villagers will carry crops here. Place farm patches [J]', unitAIHook: (c) => UnitAI.siloPositions.set(0, c) },
+    smelter:       { woodCost: GAME_CONFIG.buildings.smelter.cost.player.wood, stoneCost: GAME_CONFIG.buildings.smelter.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: `Smelter built! Smelt steel with [Z] (${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal)` },
+    armory:        { woodCost: GAME_CONFIG.buildings.armory.cost.player.wood, stoneCost: GAME_CONFIG.buildings.armory.cost.player.stone, steelCost: GAME_CONFIG.buildings.armory.cost.player.steel, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Armory built! Train advanced melee units [6-9]' },
+    wizard_tower:  { woodCost: GAME_CONFIG.buildings.wizard_tower.cost.player.wood, stoneCost: GAME_CONFIG.buildings.wizard_tower.cost.player.stone, crystalCost: GAME_CONFIG.buildings.wizard_tower.cost.player.crystal, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Wizard Tower built! Train magic units [0, Shift+1-2]' },
   };
 
   /** Generic building placement — replaces 6 individual placeX methods */
@@ -4025,19 +2717,9 @@ class Cubitopia {
     this.hud.showNotification(`${kind} blueprint placed — builder needed!`, '#3498db');
   }
 
-  /** Exit placement mode for a specific building kind */
-  private exitPlacementMode(kind: BuildingKind): void {
-    switch (kind) {
-      case 'barracks': this.barracksPlaceMode = false; this.hud.setBarracksMode(false); break;
-      case 'forestry': this.forestryPlaceMode = false; this.hud.setForestryMode(false); break;
-      case 'masonry': this.masonryPlaceMode = false; this.hud.setMasonryMode(false); break;
-      case 'farmhouse': this.farmhousePlaceMode = false; this.hud.setFarmhouseMode(false); break;
-      case 'workshop': this.workshopPlaceMode = false; this.hud.setWorkshopMode(false); break;
-      case 'silo': this.siloPlaceMode = false; this.hud.setSiloMode(false); break;
-      case 'smelter': this.smelterPlaceMode = false; break;
-      case 'armory': this.armoryPlaceMode = false; break;
-      case 'wizard_tower': this.wizardTowerPlaceMode = false; break;
-    }
+  /** Exit placement mode after successful building placement */
+  private exitPlacementMode(_kind: BuildingKind): void {
+    this.interaction.clear();
   }
 
   // --- Workshop ---
@@ -4052,26 +2734,11 @@ class Cubitopia {
   // toggleFarmhouseMode, toggleSiloMode → now handled by toggleBuildingPlaceMode
 
   private toggleFarmPatchMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.farmPatchMode;
-    this.clearAllModes();
-    this.farmPatchMode = !wasActive;
-    this.hud.setFarmPatchMode(this.farmPatchMode);
-    canvasEl.style.cursor = this.farmPatchMode ? 'crosshair' : 'default';
-    // Suppress camera pan and box-select during farm paint mode
-    StrategyCamera.suppressLeftDrag = this.farmPatchMode;
-    SelectionManager.suppressBoxSelect = this.farmPatchMode;
+    this.interaction.toggle({ kind: 'farm_patch' });
   }
 
   private togglePlantTreeMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.plantTreeMode;
-    this.clearAllModes();
-    this.plantTreeMode = !wasActive;
-    this.hud.setPlantTreeMode(this.plantTreeMode);
-    canvasEl.style.cursor = this.plantTreeMode ? 'crosshair' : 'default';
-    StrategyCamera.suppressLeftDrag = this.plantTreeMode;
-    SelectionManager.suppressBoxSelect = this.plantTreeMode;
+    this.interaction.toggle({ kind: 'plant_tree' });
   }
 
   /** Plant a tree sapling on a plains tile (costs 1 wood) */
@@ -4088,9 +2755,9 @@ class Cubitopia {
     if (this.natureSystem.treeAge.has(key)) return; // Already has a tree/sapling
 
     // Cost 1 wood
-    if (this.woodStockpile[0] < 1) return;
-    this.woodStockpile[0] -= 1;
-    this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - 1);
+    if (this.woodStockpile[0] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
+    this.woodStockpile[0] -= GAME_CONFIG.economy.harvest.tree.plantCost.wood;
+    this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - GAME_CONFIG.economy.harvest.tree.plantCost.wood);
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
 
     // Sprout a sapling
@@ -4102,53 +2769,54 @@ class Cubitopia {
 
   /** Clear all build/placement modes */
   private clearAllModes(): void {
-    this.wallBuildMode = false;
+    this.interaction.clear();
+  }
+
+  /** Sync HUD mode indicators to match the current InteractionState */
+  private syncHUDMode(state: InteractionState): void {
+    // Clear all HUD mode indicators first
     this.hud.setBuildMode(false);
-    this.harvestMode = false;
     this.hud.setHarvestMode(false);
-    this.barracksPlaceMode = false;
-    this.hud.setBarracksMode(false);
-    this.forestryPlaceMode = false;
-    this.hud.setForestryMode(false);
-    this.masonryPlaceMode = false;
-    this.hud.setMasonryMode(false);
-    this.farmhousePlaceMode = false;
-    this.hud.setFarmhouseMode(false);
-    this.siloPlaceMode = false;
-    this.hud.setSiloMode(false);
-    this.farmPatchMode = false;
-    this.hud.setFarmPatchMode(false);
-    this.plantTreeMode = false;
-    this.hud.setPlantTreeMode(false);
-    this.mineMode = false;
     this.hud.setMineMode(false);
-    // Reset slicer to default visual-only callback (slicer stays visible)
-    this.hud.onSliceChange = (y) => {
-      this.voxelBuilder.setSliceY(y);
-      this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
-    };
-    this.commandYLevel = null;
-    this.voxelBuilder.setSliceY(null);
-    this.terrainDecorator.setDecorationClipPlane(null);
-    this.plantCropsMode = false;
+    this.hud.setBarracksMode(false);
+    this.hud.setForestryMode(false);
+    this.hud.setMasonryMode(false);
+    this.hud.setFarmhouseMode(false);
+    this.hud.setSiloMode(false);
+    this.hud.setFarmPatchMode(false);
+    this.hud.setPlantTreeMode(false);
     this.hud.setPlantCropsMode(false);
-    this.workshopPlaceMode = false;
     this.hud.setWorkshopMode(false);
-    this.smelterPlaceMode = false;
     this.hud.setSmelterMode(false);
-    this.armoryPlaceMode = false;
     this.hud.setArmoryMode(false);
-    this.wizardTowerPlaceMode = false;
     this.hud.setWizard_towerMode(false);
-    this.rallyPointSetMode = false;
-    this.rallyPointBuilding = null;
     this.hud.setRallyPointMode(false);
-    this.blueprintSystem.clearHoverGhost();
-    this.tooltipController.hideTooltip();
-    // Reset drag suppression flags
-    StrategyCamera.suppressLeftDrag = false;
-    SelectionManager.suppressBoxSelect = false;
-    SelectionManager.suppressRightClick = false;
+
+    // Activate the one that matches
+    switch (state.kind) {
+      case 'wall_build': this.hud.setBuildMode(true); break;
+      case 'harvest': this.hud.setHarvestMode(true); break;
+      case 'mine': this.hud.setMineMode(true, this.blueprintSystem.mineDepthLayers); break;
+      case 'farm_patch': this.hud.setFarmPatchMode(true); break;
+      case 'plant_tree': this.hud.setPlantTreeMode(true); break;
+      case 'plant_crops': this.hud.setPlantCropsMode(true); break;
+      case 'rally_point': this.hud.setRallyPointMode(true, state.buildingKey); break;
+      case 'place_building': {
+        const setters: Record<string, (v: boolean) => void> = {
+          barracks: (v) => this.hud.setBarracksMode(v),
+          forestry: (v) => this.hud.setForestryMode(v),
+          masonry: (v) => this.hud.setMasonryMode(v),
+          farmhouse: (v) => this.hud.setFarmhouseMode(v),
+          silo: (v) => this.hud.setSiloMode(v),
+          workshop: (v) => this.hud.setWorkshopMode(v),
+          smelter: (v) => this.hud.setSmelterMode(v),
+          armory: (v) => this.hud.setArmoryMode(v),
+          wizard_tower: (v) => this.hud.setWizard_towerMode(v),
+        };
+        setters[state.building]?.(true);
+        break;
+      }
+    }
   }
 
   // placeFarmhouse, placeSilo → now handled by placeGenericBuilding
@@ -4231,144 +2899,19 @@ class Cubitopia {
     this.hud.showNotification(`Formation: ${label}`, '#8e44ad');
   }
 
-  // ===================== RESPAWN UNITS =====================
-
-  private respawnSelectedUnits(): void {
-    const selected = this.selectionManager.getSelectedUnits();
-    if (selected.length === 0) return;
-
-    // Copy array since removeUnitFromGame modifies allUnits
-    const toKill = [...selected];
-    this.selectionManager.clearSelection();
-
-    let killCount = 0;
-    for (const unit of toKill) {
-      unit.state = UnitState.DEAD;
-      unit.currentHealth = 0;
-      this.removeUnitFromGame(unit);
-      killCount++;
-    }
-
-    if (killCount > 0) {
-      this.hud.showNotification(`💀 ${killCount} unit(s) killed`, '#e74c3c');
-    }
-  }
+  // Spawn test armies moved to DebugController.spawnTestArmies()
 
   // ===================== RALLY POINT SYSTEM =====================
 
   private enterRallyPointModeForBuilding(buildingKey: string): void {
-    this.clearAllModes();
-    this.rallyPointSetMode = true;
-    this.rallyPointBuilding = buildingKey;
-    this.hud.setRallyPointMode(true, buildingKey);
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    canvasEl.style.cursor = 'crosshair';
+    this.interaction.enter({ kind: 'rally_point', buildingKey });
     this.hud.showNotification(`Set ${buildingKey} rally point — click a tile · [ESC] cancel`, '#f0c040');
-  }
-
-  private setRallyPoint(buildingKey: string, target: HexCoord): void {
-    this.rallyPoints.set(buildingKey, target);
-
-    // Get building position for the flag line
-    const bld = this.buildingSystem.getFirstBuilding(buildingKey as BuildingKind, 0);
-    if (!bld) return;
-    const buildingPos = bld.position;
-
-    // Remove old flag + line
-    const oldFlag = this.rallyFlagMeshes.get(buildingKey);
-    if (oldFlag) { this.renderer.scene.remove(oldFlag); }
-    const oldLine = this.rallyLineMeshes.get(buildingKey);
-    if (oldLine) { this.renderer.scene.remove(oldLine); }
-
-    // Create flag mesh at rally point
-    const flagGroup = new THREE.Group();
-    const wp = this.hexToWorld(target);
-    const elev = this.getElevation(target);
-    flagGroup.position.set(wp.x, elev, wp.z);
-
-    // Pole
-    const poleGeo = new THREE.CylinderGeometry(0.03, 0.03, 1.5, 4);
-    const poleMat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
-    const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.y = 0.75;
-    flagGroup.add(pole);
-
-    // Flag banner
-    const flagGeo = new THREE.PlaneGeometry(0.5, 0.3);
-    const flagColor = buildingKey === 'barracks' ? 0xe74c3c : buildingKey === 'forestry' ? 0x27ae60 : buildingKey === 'masonry' ? 0x808080 : 0xdaa520;
-    const flagMat = new THREE.MeshLambertMaterial({ color: flagColor, side: THREE.DoubleSide });
-    const flag = new THREE.Mesh(flagGeo, flagMat);
-    flag.position.set(0.25, 1.35, 0);
-    flagGroup.add(flag);
-
-    this.renderer.scene.add(flagGroup);
-    this.rallyFlagMeshes.set(buildingKey, flagGroup);
-
-    // Create dotted line from building to rally point
-    const buildWP = this.hexToWorld(buildingPos);
-    const buildElev = this.getElevation(buildingPos);
-    const lineGeo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(buildWP.x, buildElev + 0.5, buildWP.z),
-      new THREE.Vector3(wp.x, elev + 0.5, wp.z),
-    ]);
-    const lineMat = new THREE.LineDashedMaterial({ color: flagColor, dashSize: 0.3, gapSize: 0.2 });
-    const line = new THREE.Line(lineGeo, lineMat);
-    line.computeLineDistances();
-    this.renderer.scene.add(line);
-    this.rallyLineMeshes.set(buildingKey, line);
-  }
-
-  /** Get rally point for a building, or null */
-  private getRallyPoint(buildingKey: string): HexCoord | null {
-    return this.rallyPoints.get(buildingKey) ?? null;
-  }
-
-  /**
-   * Get a formation slot for a newly spawned unit at a rally point.
-   * Gathers all nearby player units, sorts by type priority, generates formation slots,
-   * and returns the slot designated for the new unit (which should be assigned to the last position).
-   */
-  private getRallyFormationSlot(buildingKey: string, newUnit: Unit): HexCoord | null {
-    if (!this.currentMap) return null;
-
-    const rally = this.getRallyPoint(buildingKey);
-    if (!rally) return null;
-
-    // Gather all player 0 units within hex distance 5 of the rally point
-    const nearbyUnits: Unit[] = [];
-    for (const unit of this.players[0].units) {
-      if (unit.state === UnitState.DEAD) continue;
-      const dist = Pathfinder.heuristic(unit.position, rally);
-      if (dist <= 5) {
-        nearbyUnits.push(unit);
-      }
-    }
-
-    // Add the new unit to the list
-    const allUnits = [...nearbyUnits, newUnit];
-
-    // Sort by type priority (paladins outer, archers inner)
-    allUnits.sort((a, b) => getUnitFormationPriority(a) - getUnitFormationPriority(b));
-
-    // Generate formation slots for all units around the rally point
-    const formationSlots = generateFormation(rally, allUnits.length, FormationType.BOX, this.currentMap!.tiles);
-
-    // Return the slot for the new unit (it's at the end of the sorted list)
-    const newUnitIndex = allUnits.length - 1;
-    return formationSlots[newUnitIndex] || rally;
   }
 
   // ===================== PLANT CROPS SYSTEM =====================
 
   private togglePlantCropsMode(): void {
-    const canvasEl = document.getElementById(ENGINE_CONFIG.canvasId) as HTMLCanvasElement;
-    const wasActive = this.plantCropsMode;
-    this.clearAllModes();
-    this.plantCropsMode = !wasActive;
-    this.hud.setPlantCropsMode(this.plantCropsMode);
-    canvasEl.style.cursor = this.plantCropsMode ? 'crosshair' : 'default';
-    StrategyCamera.suppressLeftDrag = this.plantCropsMode;
-    SelectionManager.suppressBoxSelect = this.plantCropsMode;
+    this.interaction.toggle({ kind: 'plant_crops' });
   }
 
   /** Plant a crop on a cleared plains tile */
@@ -4415,119 +2958,96 @@ class Cubitopia {
       const delta = rawDelta * this.gameSpeed;
 
       this.updateRTS(delta);
+      this._updateMusic(delta);
       this.camera.update(); // Edge-of-screen panning
+
+      // Flush any dirty voxel chunks (incremental rebuild after mining)
+      if (this.currentMap && this.voxelBuilder.hasDirtyChunks()) {
+        this.voxelBuilder.flushDirtyChunks(this.currentMap);
+      }
 
       this.renderer.updateParticles(rawDelta);
       this.terrainDecorator.updateWater(rawDelta);
+      const camPos = this.camera.camera.position;
+      this.terrainDecorator.cameraWorldPos.x = camPos.x;
+      this.terrainDecorator.cameraWorldPos.z = camPos.z;
       this.terrainDecorator.updateGrass(rawDelta);
+      this.terrainDecorator.flushBounds();
       this.unitRenderer.updateBillboards(this.camera.camera);
       this.hud.update();
-      this.updateDebugOverlay();
+      this.debugOverlay.update();
       this.renderer.render(this.camera.camera);
+
+      // Performance stats overlay (F3)
+      this._fpsFrames++;
+      this._fpsTime += rawDelta;
+      if (this._fpsTime >= 0.5) {
+        this._fpsDisplay = Math.round(this._fpsFrames / this._fpsTime);
+        this._fpsFrames = 0;
+        this._fpsTime = 0;
+        if (this._perfVisible) this.updatePerfOverlay();
+      }
     };
 
     animate();
-    this.showMainMenu();
+    this.menuController.showMainMenu();
     console.log('CUBITOPIA v0.1 — Voxel Strategy');
   }
 
-  private updateDebugOverlay(): void {
-    if (!this.hud.debugFlags.showUnitOverlay) {
-      if (this.debugOverlayContainer) this.debugOverlayContainer.style.display = 'none';
-      return;
-    }
-    if (!this.debugOverlayContainer) {
-      this.debugOverlayContainer = document.createElement('div');
-      this.debugOverlayContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;';
-      document.body.appendChild(this.debugOverlayContainer);
-    }
-    this.debugOverlayContainer.style.display = 'block';
-    const cam = this.camera.camera;
-    const rect = document.getElementById(ENGINE_CONFIG.canvasId)!.getBoundingClientRect();
-    const activeIds = new Set<string>();
-    for (const unit of this.allUnits) {
-      if (unit.state === UnitState.DEAD) continue;
-      activeIds.add(unit.id);
-      const pos = new THREE.Vector3(unit.worldPosition.x, unit.worldPosition.y + 1.6, unit.worldPosition.z);
-      pos.project(cam);
-      if (pos.z > 1) continue;
-      const sx = (pos.x * 0.5 + 0.5) * rect.width + rect.left;
-      const sy = (-pos.y * 0.5 + 0.5) * rect.height + rect.top;
-      let lbl = this.debugOverlayLabels.get(unit.id);
-      if (!lbl) {
-        lbl = document.createElement('div');
-        lbl.style.cssText = 'position:fixed;font-size:9px;font-family:monospace;color:#fff;background:rgba(0,0,0,.75);padding:1px 4px;border-radius:3px;white-space:nowrap;pointer-events:none;transform:translate(-50%,-100%);border:1px solid rgba(255,255,255,.15);';
-        this.debugOverlayContainer.appendChild(lbl);
-        this.debugOverlayLabels.set(unit.id, lbl);
-      }
-      const oc = unit.owner === 0 ? '#4fc3f7' : '#ef5350';
-      lbl.innerHTML = `<span style="color:${oc}">${unit.type.substring(0,4).toUpperCase()}</span> <span style="color:#aaa">${unit.state.substring(0,4).toUpperCase()}</span> <span style="color:#81c784">${unit.currentHealth}/${unit.stats.maxHealth}</span> <span style="color:#ffb74d">A${unit.stats.attack} D${unit.stats.defense}</span>`;
-      lbl.style.left = sx + 'px';
-      lbl.style.top = sy + 'px';
-      lbl.style.display = '';
-    }
-    for (const [id, lbl] of this.debugOverlayLabels) {
-      if (!activeIds.has(id)) { lbl.remove(); this.debugOverlayLabels.delete(id); }
-    }
+  /** Delegate music update to ProceduralMusic (init + intensity + mood switching) */
+  private _updateMusic(delta: number): void {
+    this.music.updateFromGameState(delta, this.sound.audioContext, this.sound.musicVolume, this.allUnits as any);
   }
 
-  /**
-   * Spawn a 3D click indicator at a world position — a colored ring/circle that fades out
-   */
-  private spawnClickIndicator(worldPos: THREE.Vector3, color: number, size = 0.8): void {
-    // Outer ring
-    const ringGeo = new THREE.RingGeometry(size * 0.6, size, 16);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.7, side: THREE.DoubleSide, depthWrite: false,
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.rotation.x = -Math.PI / 2;
-    ring.position.copy(worldPos);
-    ring.position.y += 0.1;
-    this.renderer.scene.add(ring);
+  /** Start the cinematic title scene on its own canvas behind the menu. */
+  private _startTitleScene(): void {
+    if (this.titleScene?.isRunning) return;
+    this.titleScene = new TitleScene();
+    this.titleScene.start();
+  }
 
-    // Inner dot
-    const dotGeo = new THREE.CircleGeometry(size * 0.15, 8);
-    const dotMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
-    });
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    dot.rotation.x = -Math.PI / 2;
-    dot.position.copy(worldPos);
-    dot.position.y += 0.12;
-    this.renderer.scene.add(dot);
+  /** Stop and fully remove the title scene (canvas + all resources). */
+  private _stopTitleScene(): void {
+    if (!this.titleScene) return;
+    this.titleScene.dispose();
+    this.titleScene = null;
+  }
 
-    // Vertical line (flag pole)
-    const poleGeo = new THREE.BoxGeometry(0.03, 0.6, 0.03);
-    const poleMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.8,
-    });
-    const pole = new THREE.Mesh(poleGeo, poleMat);
-    pole.position.copy(worldPos);
-    pole.position.y += 0.4;
-    this.renderer.scene.add(pole);
+  // Squad indicators moved to SquadIndicatorSystem; debug overlay moved to DebugOverlayRenderer
 
-    // Animate: expand ring slightly, then fade out
-    let life = 1.0;
-    const animate = () => {
-      life -= 0.025;
-      if (life <= 0) {
-        this.renderer.scene.remove(ring);
-        this.renderer.scene.remove(dot);
-        this.renderer.scene.remove(pole);
-        ringGeo.dispose(); ringMat.dispose();
-        dotGeo.dispose(); dotMat.dispose();
-        poleGeo.dispose(); poleMat.dispose();
-        return;
-      }
-      ringMat.opacity = life * 0.7;
-      dotMat.opacity = life * 0.9;
-      poleMat.opacity = life * 0.8;
-      const scale = 1 + (1 - life) * 0.3;
-      ring.scale.set(scale, scale, scale);
-      requestAnimationFrame(animate);
-    };
-    requestAnimationFrame(animate);
+  /** Click indicator VFX — delegates to Renderer */
+  spawnClickIndicator(worldPos: THREE.Vector3, color: number, size = 0.8): void {
+    this.renderer.spawnClickIndicator(worldPos, color, size);
+  }
+
+  /** Toggle performance overlay (F3) */
+  togglePerfOverlay(): void {
+    this._perfVisible = !this._perfVisible;
+    if (!this._perfOverlay) {
+      this._perfOverlay = document.createElement('div');
+      this._perfOverlay.style.cssText = `
+        position:fixed; top:4px; right:4px; z-index:9999;
+        background:rgba(0,0,0,0.75); color:#0f0; font:11px monospace;
+        padding:6px 10px; border-radius:4px; pointer-events:none;
+        line-height:1.5;
+      `;
+      document.body.appendChild(this._perfOverlay);
+    }
+    this._perfOverlay.style.display = this._perfVisible ? 'block' : 'none';
+    if (this._perfVisible) this.updatePerfOverlay();
+  }
+
+  private updatePerfOverlay(): void {
+    if (!this._perfOverlay) return;
+    const perf = this.renderer.getPerfInfo();
+    const unitCount = this.allUnits.filter(u => u.state !== 'dead').length;
+    this._perfOverlay.innerHTML = [
+      `FPS: ${this._fpsDisplay}`,
+      `Draw calls: ${perf.drawCalls}`,
+      `Triangles: ${(perf.triangles / 1000).toFixed(1)}k`,
+      `Textures: ${perf.textures}  Geom: ${perf.geometries}`,
+      `Units: ${unitCount}  Speed: ${this.gameSpeed}x`,
+    ].join('<br>');
   }
 }
 

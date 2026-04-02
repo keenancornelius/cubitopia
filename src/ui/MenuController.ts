@@ -5,10 +5,13 @@
 
 import { MapType } from '../types';
 import { MAP_PRESETS } from '../game/MapPresets';
+import { MUSIC_GENRES, type MusicGenre } from '../engine/ProceduralMusic';
 
 export interface MenuCallbacks {
   onStartGame(mode: 'pvai' | 'aivai', mapType: MapType): void;
   onPlayAgain(): void;
+  onGenreChanged?(genreId: string): void;
+  onMenuShown?(): void;
 }
 
 export default class MenuController {
@@ -17,9 +20,17 @@ export default class MenuController {
   private callbacks: MenuCallbacks;
   private selectedMap: MapType = MapType.STANDARD;
   private selectedMode: 'pvai' | 'aivai' = 'pvai';
+  private selectedGenre: string = 'fantasy';
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks;
+    // Restore saved genre
+    try {
+      const saved = localStorage.getItem('cubitopia_music_genre');
+      if (saved && MUSIC_GENRES.some(g => g.id === saved)) {
+        this.selectedGenre = saved;
+      }
+    } catch {}
   }
 
   // ── Main Menu ─────────────────────────────────────────────
@@ -34,22 +45,24 @@ export default class MenuController {
     const overlay = document.createElement('div');
     overlay.style.cssText = `
       position:fixed; top:0; left:0; width:100%; height:100%;
-      background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a1a 100%);
+      background: linear-gradient(180deg, rgba(5,5,16,0.7) 0%, rgba(10,10,30,0.45) 40%, rgba(10,10,30,0.45) 60%, rgba(5,5,16,0.7) 100%);
       display:flex; flex-direction:column; align-items:center; justify-content:center;
       z-index:20000; font-family:'Courier New',monospace;
+      backdrop-filter: blur(2px);
     `;
 
     // Title
     const title = document.createElement('div');
     title.style.cssText = `
-      font-size:64px; font-weight:bold; color:#fff; text-shadow: 0 0 40px rgba(52,152,219,0.6), 0 0 80px rgba(52,152,219,0.3);
-      letter-spacing:8px; margin-bottom:8px;
+      font-size:72px; font-weight:bold; color:#fff;
+      text-shadow: 0 0 40px rgba(52,152,219,0.8), 0 0 80px rgba(52,152,219,0.4), 0 2px 8px rgba(0,0,0,0.9);
+      letter-spacing:10px; margin-bottom:8px;
     `;
     title.textContent = 'CUBITOPIA';
     overlay.appendChild(title);
 
     const subtitle = document.createElement('div');
-    subtitle.style.cssText = 'font-size:14px; color:#888; letter-spacing:4px; margin-bottom:40px; text-transform:uppercase;';
+    subtitle.style.cssText = 'font-size:14px; color:#aaa; letter-spacing:4px; margin-bottom:40px; text-transform:uppercase; text-shadow: 0 1px 4px rgba(0,0,0,0.8);';
     subtitle.textContent = 'Voxel Strategy';
     overlay.appendChild(subtitle);
 
@@ -153,6 +166,56 @@ export default class MenuController {
     overlay.appendChild(mapGrid);
     overlay.appendChild(descEl);
 
+    // --- Music Genre Selector ---
+    overlay.appendChild(sectionLabel('MUSIC'));
+
+    const genreRow = document.createElement('div');
+    genreRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:12px; max-width:600px;';
+
+    const genreButtons: HTMLButtonElement[] = [];
+    const genreDescEl = document.createElement('div');
+    genreDescEl.style.cssText = 'font-size:12px; color:#777; text-align:center; margin-bottom:30px; min-height:18px; max-width:400px;';
+
+    for (const genre of MUSIC_GENRES) {
+      const btn = document.createElement('button');
+      btn.style.cssText = `
+        background: transparent; color:${genre.color}; border:2px solid ${genre.color}; padding:6px 14px;
+        font-size:12px; font-family:'Courier New',monospace; font-weight:bold;
+        border-radius:4px; cursor:pointer; letter-spacing:1px; min-width:90px;
+        transition: all 0.2s;
+      `;
+      btn.textContent = `${genre.icon} ${genre.label}`;
+      btn.dataset.color = genre.color;
+      btn.dataset.genreId = genre.id;
+      genreButtons.push(btn);
+
+      const updateGenreSelection = () => {
+        genreButtons.forEach(b => {
+          b.style.background = 'transparent';
+          b.style.color = b.dataset.color!;
+        });
+        btn.style.background = genre.color;
+        btn.style.color = '#000';
+        genreDescEl.textContent = genre.description;
+      };
+
+      btn.addEventListener('click', () => {
+        this.selectedGenre = genre.id;
+        updateGenreSelection();
+        this.callbacks.onGenreChanged?.(genre.id);
+      });
+
+      // Highlight saved/default genre
+      if (genre.id === this.selectedGenre) {
+        setTimeout(() => updateGenreSelection(), 0);
+      }
+
+      genreRow.appendChild(btn);
+    }
+
+    overlay.appendChild(genreRow);
+    overlay.appendChild(genreDescEl);
+
     // --- Start Button ---
     const startBtn = document.createElement('button');
     startBtn.style.cssText = `
@@ -171,7 +234,8 @@ export default class MenuController {
       startBtn.style.transform = 'scale(1)';
       startBtn.style.boxShadow = 'none';
     });
-    startBtn.addEventListener('click', () => {
+    startBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent bubble to overlay (which would restart title scene)
       overlay.remove();
       this.mainMenuOverlay = null;
       this.callbacks.onStartGame(this.selectedMode, this.selectedMap);
@@ -186,6 +250,19 @@ export default class MenuController {
 
     document.body.appendChild(overlay);
     this.mainMenuOverlay = overlay;
+
+    // Start title music — fires immediately (works if returning from game)
+    // and also on first click (needed for initial page load when AudioContext is suspended)
+    this.callbacks.onMenuShown?.();
+    let titleStarted = false;
+    const tryStartTitle = () => {
+      if (!titleStarted) {
+        titleStarted = true;
+        this.callbacks.onMenuShown?.();
+        overlay.removeEventListener('click', tryStartTitle);
+      }
+    };
+    overlay.addEventListener('click', tryStartTitle);
   }
 
   // ── Game Over Screen ──────────────────────────────────────

@@ -7,13 +7,14 @@
 import * as THREE from 'three';
 import { Base, HexCoord, Unit, UnitState } from '../../types';
 import { Pathfinder } from './Pathfinder';
+import { GAME_CONFIG } from '../GameConfig';
 
 /** How long (seconds) full-majority capture takes */
-const CAPTURE_DURATION = 20;
+const CAPTURE_DURATION = GAME_CONFIG.captureZone.captureDuration;
 /** Hex radius of the capture zone */
-const ZONE_RADIUS = 5;
+const ZONE_RADIUS = GAME_CONFIG.captureZone.zoneRadius;
 /** Minimum unit advantage to make progress (prevents 1-unit trickle captures) */
-const MIN_ADVANTAGE = 1;
+const MIN_ADVANTAGE = GAME_CONFIG.captureZone.minAdvantage;
 /** Player IDs */
 const NEUTRAL_OWNER = 2;
 

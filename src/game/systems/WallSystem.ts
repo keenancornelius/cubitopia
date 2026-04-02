@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { HexCoord, GameContext, TerrainType, Unit, PlacedBuilding } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
+import { GAME_CONFIG } from '../GameConfig';
 import {
   buildAdaptiveWallMesh as createWallMesh,
   buildGateMesh as createGateMesh,
@@ -57,9 +58,9 @@ export default class WallSystem {
   gateMeshes: THREE.Group[] = [];
 
   // Constants
-  static readonly WALL_MAX_HP = 20;
-  static readonly GATE_MAX_HP = 20;
-  static readonly BARRACKS_MAX_HP = 250;
+  static readonly WALL_MAX_HP = GAME_CONFIG.defenses.wall.maxHealth;
+  static readonly GATE_MAX_HP = GAME_CONFIG.defenses.gate.maxHealth;
+  static readonly BARRACKS_MAX_HP = GAME_CONFIG.defenses.barracks.maxHealth;
 
   constructor(ctx: GameContext, ops: WallSystemOps) {
     this.ctx = ctx;
@@ -73,7 +74,7 @@ export default class WallSystem {
     const key = `${wallPos.q},${wallPos.r}`;
     if (this.wallsBuilt.has(key)) return;
 
-    if (this.ctx.stoneStockpile[unit.owner] < 1) return;
+    if (this.ctx.stoneStockpile[unit.owner] < GAME_CONFIG.defenses.wall.cost.stone) return;
 
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
@@ -83,7 +84,7 @@ export default class WallSystem {
     if (this.ops.isStockpileLocation(wallPos)) return;
 
     // Consume stone
-    this.ctx.stoneStockpile[unit.owner] -= 1;
+    this.ctx.stoneStockpile[unit.owner] -= GAME_CONFIG.defenses.wall.cost.stone;
     this.ops.updateResourceDisplay(unit.owner);
 
     this.wallsBuilt.add(key);
@@ -127,7 +128,7 @@ export default class WallSystem {
     const key = `${gatePos.q},${gatePos.r}`;
     if (this.gatesBuilt.has(key)) return;
 
-    if (this.ctx.stoneStockpile[unit.owner] < 2) return;
+    if (this.ctx.stoneStockpile[unit.owner] < GAME_CONFIG.defenses.gate.cost.stone) return;
 
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
@@ -137,7 +138,7 @@ export default class WallSystem {
     if (this.ops.isStockpileLocation(gatePos)) return;
 
     // Consume 2 stone
-    this.ctx.stoneStockpile[unit.owner] -= 2;
+    this.ctx.stoneStockpile[unit.owner] -= GAME_CONFIG.defenses.gate.cost.stone;
     this.ops.updateResourceDisplay(unit.owner);
 
     this.gatesBuilt.add(key);

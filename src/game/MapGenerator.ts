@@ -11,6 +11,7 @@ import {
   VoxelBlock,
   BlockType,
   ResourceType,
+  ENABLE_UNDERGROUND,
 } from '../types';
 
 // Seeded pseudo-random number generator (Mulberry32 — fast, good distribution)
@@ -215,6 +216,8 @@ export class MapGenerator {
         const temp = this.generateTemperature(q, r, elev, width, height);
 
         // Boost elevation near base zones so terrain is always solid land
+        // Also boost moisture in a ring around bases to create a small forest grove
+        let moistAdjusted = moist;
         for (const bz of baseZones) {
           const dq = q - bz.q;
           const dr = r - bz.r;
@@ -225,10 +228,20 @@ export class MapGenerator {
             const boost = 0.35 * (1 - t * t);
             elev = Math.min(1, elev + boost);
           }
+          // Forest ring: boost moisture in a band 4-8 tiles from base center
+          // This creates a natural tree line around each capital for wood access
+          const FOREST_INNER = 4;
+          const FOREST_OUTER = 8;
+          if (dist >= FOREST_INNER && dist <= FOREST_OUTER) {
+            const bandT = (dist - FOREST_INNER) / (FOREST_OUTER - FOREST_INNER);
+            // Peak moisture boost at center of band, fade at edges
+            const bandStrength = 1 - Math.abs(bandT - 0.5) * 2;
+            moistAdjusted = Math.min(1, moistAdjusted + 0.35 * bandStrength);
+          }
         }
 
         elevationMap.set(key, elev);
-        moistureMap.set(key, moist);
+        moistureMap.set(key, moistAdjusted);
         temperatureMap.set(key, temp);
       }
     }
@@ -273,7 +286,9 @@ export class MapGenerator {
     this.computeShellBlocks(gameMap, width, height);
 
     // === PASS 6b: Carve lava tubes — underground tunnels connecting map features ===
-    gameMap.undergroundBases = this.carveLavaTubes(gameMap, elevationMap, width, height);
+    if (ENABLE_UNDERGROUND) {
+      gameMap.undergroundBases = this.carveLavaTubes(gameMap, elevationMap, width, height);
+    }
 
     // === PASS 6c: Find surface neutral base locations (desert outposts + mountain forts) ===
     gameMap.surfaceBases = this.findSurfaceBaseLocations(gameMap, width, height);
@@ -1003,7 +1018,7 @@ export class MapGenerator {
     if (elevation < 0.32) {
       if (moisture > 0.6) return TerrainType.JUNGLE;
       if (temperature < 0.3) return TerrainType.SNOW;
-      if (moisture > 0.4) return TerrainType.FOREST; // coastal forests
+      if (moisture > 0.75) return TerrainType.FOREST; // sparse coastal forests (was 0.4)
       return TerrainType.DESERT;
     }
 
@@ -1016,14 +1031,14 @@ export class MapGenerator {
     // Mid-high elevation: rocky highlands — mostly mountains
     if (elevation > 0.5) {
       if (temperature < 0.25) return TerrainType.SNOW;
-      if (moisture > 0.7) return TerrainType.FOREST; // only very wet alpine forests
+      if (moisture > 0.88) return TerrainType.FOREST; // rare alpine forests (was 0.7)
       return TerrainType.MOUNTAIN;
     }
 
     // Upper-mid elevation: rocky terrain with some vegetation
     if (elevation > 0.42) {
       if (temperature < 0.3) return TerrainType.SNOW;
-      if (moisture > 0.65) return TerrainType.FOREST; // wet highlands get forest
+      if (moisture > 0.85) return TerrainType.FOREST; // rare highland forests (was 0.65)
       if (moisture < 0.25) return TerrainType.DESERT; // arid highlands
       // Drier elevated terrain reads as mountain, wetter as plains
       if (moisture < 0.5) return TerrainType.MOUNTAIN;
@@ -1033,23 +1048,23 @@ export class MapGenerator {
     // Mid-elevation: diverse biomes
     // Cold regions
     if (temperature < 0.3) {
-      if (moisture > 0.5) return TerrainType.FOREST; // boreal forest / taiga
+      if (moisture > 0.8) return TerrainType.FOREST; // sparse boreal forest (was 0.5)
       return TerrainType.SNOW;
     }
 
     // Hot regions
     if (temperature > 0.7) {
       if (moisture > 0.65) return TerrainType.JUNGLE; // tropical jungle
-      if (moisture > 0.45) return TerrainType.FOREST; // jungle
+      if (moisture > 0.78) return TerrainType.FOREST; // rare tropical forest (was 0.45)
       if (moisture > 0.3) return TerrainType.PLAINS; // savanna
       return TerrainType.DESERT;
     }
 
-    // Temperate regions
-    if (moisture > 0.6) return TerrainType.FOREST;
+    // Temperate regions — forests only in very wet areas
+    if (moisture > 0.82) return TerrainType.FOREST; // (was 0.6)
     if (moisture > 0.45) {
-      // Mixed forest / meadow transition
-      return temperature > 0.55 ? TerrainType.FOREST : TerrainType.PLAINS;
+      // Was mixed forest/meadow — now mostly plains with rare forest clumps
+      return (temperature > 0.55 && moisture > 0.78) ? TerrainType.FOREST : TerrainType.PLAINS;
     }
     if (moisture > 0.3) return TerrainType.PLAINS;
     if (moisture > 0.2) return TerrainType.DESERT; // steppe / dry grassland
@@ -1119,7 +1134,8 @@ export class MapGenerator {
   private static readonly SNOW_CAP_HEIGHT = 13;    // Height >= 13: snow appears on upper mountain peaks
   private static readonly RIDGE_HEIGHT = 10;        // Height >= 10: mountain ridge blocks can appear
   private static readonly STONE_LAYER_HEIGHT = 8;   // Height >= 8: exposed stone layers visible
-  private static readonly UNDERGROUND_DEPTH = -40;  // Depth of cube planet
+  // Depth of cube planet — shallow when underground is disabled (saves ~80% voxels)
+  private static readonly UNDERGROUND_DEPTH = ENABLE_UNDERGROUND ? -40 : -10;
 
   private generateVoxelColumn(terrain: TerrainType, height: number): VoxelBlock[] {
     // Minimal placeholder — will be replaced by computeShellBlocks second pass
@@ -1177,6 +1193,18 @@ export class MapGenerator {
           if ((b.type === BlockType.SAND || b.type === BlockType.DIRT || b.type === BlockType.STONE)
               && b.localPosition.y < tile.elevation - 2 && this.rng.next() < 0.20) {
             b.type = BlockType.GOLD;
+          }
+        }
+      }
+
+      // === Crystal veins: inject BlockType.CRYSTAL into snow/mountain tiles with crystal resource ===
+      if (tile.resource === ResourceType.CRYSTAL) {
+        const blocks = tile.voxelData.blocks;
+        // Replace ~25% of subsurface stone blocks with crystal ore
+        for (let bi = 0; bi < blocks.length; bi++) {
+          const b = blocks[bi];
+          if (b.type === BlockType.STONE && b.localPosition.y < tile.elevation - 1 && this.rng.next() < 0.25) {
+            b.type = BlockType.CRYSTAL;
           }
         }
       }
@@ -1387,8 +1415,10 @@ export class MapGenerator {
     };
 
     // Place 1-2 desert outposts and 1-2 mountain forts
+    console.log(`[MapGen] Desert candidates: ${desertCandidates.length}, Mountain candidates: ${mountainCandidates.length}`);
     tryPlace(desertCandidates, 'desert', 2);
     tryPlace(mountainCandidates, 'mountain', 2);
+    console.log(`[MapGen] Surface bases placed: ${results.length} (${results.map(r => r.terrain).join(', ')})`);
 
     // --- Carve walkable ramp paths to mountain forts ---
     for (const base of results) {
@@ -1408,7 +1438,7 @@ export class MapGenerator {
    *  - Sets the fort tile + immediate area to elevation 9 (high but below ridge threshold)
    *  - Traces a path downhill, lowering ridge tiles to create a passable route */
   private carveMountainPath(map: GameMap, fortCenter: { q: number; r: number }, w: number, h: number, ridgeThreshold: number): void {
-    const FORT_ELEVATION = 9; // High but walkable (below ridge threshold of 10)
+    const FORT_ELEVATION = 8; // High but walkable (below ridge threshold of 10)
     const PATH_WIDTH = 1; // Center tile + some neighbors
 
     // Step 1: Flatten the fort area — set center + neighbors to exactly FORT_ELEVATION
@@ -2045,21 +2075,22 @@ export class MapGenerator {
   }
 
   private generateResource(terrain: TerrainType): ResourceType | null {
-    // Snow tiles get special higher resource rates since they're already rare
-    if (terrain === TerrainType.SNOW) {
-      const roll = this.rng.next();
-      if (roll < 0.6) return ResourceType.CRYSTAL;  // 60% crystal vein
-      if (roll < 0.8) return ResourceType.STONE;     // 20% frozen stone
-      return null;                                     // 20% barren peak
-    }
-
     if (this.rng.next() > 0.2) return null;
 
     switch (terrain) {
       case TerrainType.PLAINS: return ResourceType.FOOD;
       case TerrainType.FOREST: return ResourceType.WOOD;
-      case TerrainType.MOUNTAIN:
-        return this.rng.next() > 0.5 ? ResourceType.IRON : ResourceType.STONE;
+      case TerrainType.MOUNTAIN: {
+        const roll = this.rng.next();
+        if (roll < 0.35) return ResourceType.IRON;
+        if (roll < 0.55) return ResourceType.CRYSTAL;
+        return ResourceType.STONE;
+      }
+      case TerrainType.SNOW: {
+        const roll = this.rng.next();
+        if (roll < 0.5) return ResourceType.CRYSTAL;
+        return ResourceType.STONE;
+      }
       case TerrainType.DESERT: return ResourceType.GOLD;
       case TerrainType.JUNGLE: return this.rng.next() > 0.5 ? ResourceType.WOOD : ResourceType.FOOD;
       case TerrainType.RIVER: return ResourceType.FOOD;
@@ -2101,7 +2132,7 @@ export class MapGenerator {
     const terrainResources: Record<string, ResourceType[]> = {
       [TerrainType.PLAINS]: [ResourceType.FOOD, ResourceType.WOOD],
       [TerrainType.FOREST]: [ResourceType.WOOD, ResourceType.FOOD],
-      [TerrainType.MOUNTAIN]: [ResourceType.STONE, ResourceType.IRON],
+      [TerrainType.MOUNTAIN]: [ResourceType.STONE, ResourceType.IRON, ResourceType.CRYSTAL],
       [TerrainType.DESERT]: [ResourceType.GOLD, ResourceType.IRON],
       [TerrainType.SNOW]: [ResourceType.CRYSTAL, ResourceType.STONE],
       [TerrainType.JUNGLE]: [ResourceType.WOOD, ResourceType.FOOD],

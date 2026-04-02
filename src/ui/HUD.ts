@@ -2,8 +2,9 @@
 // CUBITOPIA - RTS HUD / UI Overlay
 // ============================================
 
-import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType } from '../types';
+import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType, ENABLE_UNDERGROUND } from '../types';
 import { StrategyCamera } from '../engine/Camera';
+import { GAME_CONFIG } from '../game/GameConfig';
 
 export class HUD {
   private container: HTMLElement;
@@ -49,6 +50,18 @@ export class HUD {
   onFarmPatch(cb: () => void) { this._onFarmPatch = cb; }
   onMine(cb: () => void) { this._onMine = cb; }
   onHelp(cb: () => void) { this._onHelp = cb; }
+
+  // Tutorial music callbacks — fired when help overlay opens/closes
+  private _onHelpOpen: (() => void) | null = null;
+  private _onHelpClose: (() => void) | null = null;
+  onHelpOpen(cb: () => void) { this._onHelpOpen = cb; }
+  onHelpClose(cb: () => void) { this._onHelpClose = cb; }
+
+  /** Show/hide the entire HUD (used to hide during title screen). */
+  setVisible(visible: boolean): void {
+    this.container.style.display = visible ? '' : 'none';
+    if (this.controlPanel) this.controlPanel.style.display = visible ? '' : 'none';
+  }
 
   /** Update formation button highlights without rebuilding the entire panel */
   updateFormationHighlight(formation: FormationType): void {
@@ -437,7 +450,6 @@ export class HUD {
     [UnitType.ARCHER]: '🏹',
     [UnitType.RIDER]: '🐎',
     [UnitType.PALADIN]: '🛡️',
-    [UnitType.CATAPULT]: '💣',
     [UnitType.SCOUT]: '👁️',
     [UnitType.MAGE]: '🔮',
     [UnitType.HEALER]: '💚',
@@ -450,14 +462,15 @@ export class HUD {
     [UnitType.LUMBERJACK]: '🪓',
     [UnitType.VILLAGER]: '👤',
     [UnitType.TREBUCHET]: '🏗️',
+    [UnitType.OGRE]: '👹',
   };
   private static readonly UNIT_COLOR: Record<string, string> = {
     [UnitType.WARRIOR]: '#e74c3c',
     [UnitType.ARCHER]: '#e67e22',
     [UnitType.RIDER]: '#f1c40f',
     [UnitType.PALADIN]: '#3498db',
-    [UnitType.CATAPULT]: '#9b59b6',
     [UnitType.TREBUCHET]: '#795548',
+    [UnitType.OGRE]: '#4e342e',
     [UnitType.SCOUT]: '#1abc9c',
     [UnitType.MAGE]: '#8e44ad',
     [UnitType.BUILDER]: '#95a5a6',
@@ -466,18 +479,18 @@ export class HUD {
   };
   private static readonly UNIT_NAMES: Record<string, string> = {
     [UnitType.WARRIOR]: 'Warrior', [UnitType.ARCHER]: 'Archer', [UnitType.RIDER]: 'Rider',
-    [UnitType.PALADIN]: 'Paladin', [UnitType.CATAPULT]: 'Catapult', [UnitType.TREBUCHET]: 'Trebuchet',
+    [UnitType.PALADIN]: 'Paladin', [UnitType.TREBUCHET]: 'Trebuchet',
     [UnitType.SCOUT]: 'Scout', [UnitType.MAGE]: 'Mage', [UnitType.HEALER]: 'Healer',
     [UnitType.ASSASSIN]: 'Assassin', [UnitType.SHIELDBEARER]: 'Shieldbearer',
     [UnitType.BERSERKER]: 'Berserker', [UnitType.BATTLEMAGE]: 'Battlemage',
-    [UnitType.GREATSWORD]: 'Greatsword', [UnitType.BUILDER]: 'Builder',
+    [UnitType.GREATSWORD]: 'Greatsword', [UnitType.OGRE]: 'Ogre', [UnitType.BUILDER]: 'Builder',
     [UnitType.LUMBERJACK]: 'Lumberjack', [UnitType.VILLAGER]: 'Villager',
   };
   private static readonly COMBAT_TYPES = [
     UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.PALADIN,
-    UnitType.CATAPULT, UnitType.TREBUCHET, UnitType.SCOUT, UnitType.MAGE,
+    UnitType.TREBUCHET, UnitType.SCOUT, UnitType.MAGE,
     UnitType.HEALER, UnitType.ASSASSIN, UnitType.SHIELDBEARER,
-    UnitType.BERSERKER, UnitType.BATTLEMAGE, UnitType.GREATSWORD,
+    UnitType.BERSERKER, UnitType.BATTLEMAGE, UnitType.GREATSWORD, UnitType.OGRE,
   ];
   private static readonly WORKER_TYPES = [UnitType.BUILDER, UnitType.LUMBERJACK, UnitType.VILLAGER];
 
@@ -1071,7 +1084,7 @@ export class HUD {
     this.unitDropdownContent.innerHTML = html;
   }
 
-  updateResources(player: Player, woodStockpile?: number, foodStockpile?: number, stoneStockpile?: number): void {
+  updateResources(player: Player, woodStockpile?: number, foodStockpile?: number, stoneStockpile?: number, popInfo?: { current: number; cap: number }): void {
     const wood = woodStockpile ?? player.resources.wood;
     const food = foodStockpile ?? player.resources.food;
     const stone = stoneStockpile ?? 0;
@@ -1093,7 +1106,30 @@ export class HUD {
     // Standalone resources
     if (this.resFoodVal) this.resFoodVal.textContent = `${food} food`;
     if (this.resGoldVal) this.resGoldVal.textContent = `${player.resources.gold} gold`;
-    if (this.resUnitVal) this.resUnitVal.textContent = `${player.units.length}`;
+    // Unit count with pop cap indicator
+    if (this.resUnitVal) {
+      if (popInfo) {
+        const color = popInfo.current >= popInfo.cap ? '#e74c3c' : popInfo.current >= popInfo.cap * 0.8 ? '#e67e22' : '';
+        this.resUnitVal.textContent = `${player.units.length}`;
+        this.resUnitVal.style.color = color;
+        // Update the parent to show pop cap
+        const parent = this.resUnitVal.parentElement;
+        if (parent) {
+          // Find or create the pop cap indicator
+          let capSpan = parent.querySelector('.pop-cap-indicator') as HTMLElement;
+          if (!capSpan) {
+            capSpan = document.createElement('span');
+            capSpan.className = 'pop-cap-indicator';
+            capSpan.style.cssText = 'font-size:10px;opacity:0.7;margin-left:2px;';
+            parent.insertBefore(capSpan, parent.querySelector('.unit-arrow'));
+          }
+          capSpan.textContent = ` (${popInfo.current}/${popInfo.cap})`;
+          capSpan.style.color = color;
+        }
+      } else {
+        this.resUnitVal.textContent = `${player.units.length}`;
+      }
+    }
 
     // Cache units for dropdown refresh
     this._lastPlayerUnits = player.units;
@@ -1122,7 +1158,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.barracksModeIndicator.innerHTML = '🏗️ BARRACKS PLACEMENT — Click to place barracks (costs 10 wood) · [R] Rotate · [Tab] to close';
+      this.barracksModeIndicator.innerHTML = `🏗️ BARRACKS PLACEMENT — Click to place barracks (costs ${GAME_CONFIG.buildings.barracks.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.barracksModeIndicator);
     }
     this.barracksModeIndicator.style.display = active ? 'block' : 'none';
@@ -1139,7 +1175,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.forestryModeIndicator.innerHTML = '🌳 FORESTRY PLACEMENT — Click to place forestry (costs 8 wood) · [R] Rotate · [Tab] to close';
+      this.forestryModeIndicator.innerHTML = `🌳 FORESTRY PLACEMENT — Click to place forestry (costs ${GAME_CONFIG.buildings.forestry.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.forestryModeIndicator);
     }
     this.forestryModeIndicator.style.display = active ? 'block' : 'none';
@@ -1156,7 +1192,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.masonryModeIndicator.innerHTML = '⬜ MASONRY PLACEMENT — Click to place masonry (costs 8 wood) · [R] Rotate · [Tab] to close';
+      this.masonryModeIndicator.innerHTML = `⬜ MASONRY PLACEMENT — Click to place masonry (costs ${GAME_CONFIG.buildings.masonry.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.masonryModeIndicator);
     }
     this.masonryModeIndicator.style.display = active ? 'block' : 'none';
@@ -1178,7 +1214,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.farmhouseModeIndicator.innerHTML = '🏠 FARMHOUSE PLACEMENT — Click to place (costs 6 wood) · [R] Rotate · [Tab] to close';
+      this.farmhouseModeIndicator.innerHTML = `🏠 FARMHOUSE PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.farmhouse.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.farmhouseModeIndicator);
     }
     this.farmhouseModeIndicator.style.display = active ? 'block' : 'none';
@@ -1195,7 +1231,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.siloModeIndicator.innerHTML = '🏗️ SILO PLACEMENT — Click to place (costs 5 wood) · [R] Rotate · [Tab] to close';
+      this.siloModeIndicator.innerHTML = `🏗️ SILO PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.silo.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.siloModeIndicator);
     }
     this.siloModeIndicator.style.display = active ? 'block' : 'none';
@@ -1230,7 +1266,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.plantTreeModeIndicator.innerHTML = '🌱 PLANT TREES — Click & drag on plains to plant saplings (1 wood each) · [Tab] to close';
+      this.plantTreeModeIndicator.innerHTML = `🌱 PLANT TREES — Click & drag on plains to plant saplings (${GAME_CONFIG.economy.harvest.tree.plantCost.wood} wood each) · [Tab] to close`;
       this.container.appendChild(this.plantTreeModeIndicator);
     }
     this.plantTreeModeIndicator.style.display = active ? 'block' : 'none';
@@ -1293,7 +1329,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.workshopModeIndicator.innerHTML = '🔧 WORKSHOP PLACEMENT — Click to place (costs 12 wood + 4 stone) · [R] Rotate · [Tab] to close';
+      this.workshopModeIndicator.innerHTML = `🔧 WORKSHOP PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.workshop.cost.player.wood} wood + ${GAME_CONFIG.buildings.workshop.cost.player.stone} stone) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.workshopModeIndicator);
     }
     this.workshopModeIndicator.style.display = active ? 'block' : 'none';
@@ -1314,7 +1350,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.smelterModeIndicator.innerHTML = '🔥 SMELTER PLACEMENT — Click to place (costs 8 wood + 6 stone) · [R] Rotate · [Tab] to close';
+      this.smelterModeIndicator.innerHTML = `🔥 SMELTER PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.smelter.cost.player.wood} wood + ${GAME_CONFIG.buildings.smelter.cost.player.stone} stone) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.smelterModeIndicator);
     }
     this.smelterModeIndicator.style.display = active ? 'block' : 'none';
@@ -1331,7 +1367,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.armoryModeIndicator.innerHTML = '⚔️ ARMORY PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 steel) · [R] Rotate · [Tab] to close';
+      this.armoryModeIndicator.innerHTML = `⚔️ ARMORY PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.armory.cost.player.wood} wood + ${GAME_CONFIG.buildings.armory.cost.player.stone} stone + ${GAME_CONFIG.buildings.armory.cost.player.steel} steel) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.armoryModeIndicator);
     }
     this.armoryModeIndicator.style.display = active ? 'block' : 'none';
@@ -1348,7 +1384,7 @@ export class HUD {
         font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
         display: none; text-align: center;
       `;
-      this.wizardTowerModeIndicator.innerHTML = '🔮 WIZARD TOWER PLACEMENT — Click to place (costs 10 wood + 5 stone + 3 crystal) · [R] Rotate · [Tab] to close';
+      this.wizardTowerModeIndicator.innerHTML = `🔮 WIZARD TOWER PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.wizard_tower.cost.player.wood} wood + ${GAME_CONFIG.buildings.wizard_tower.cost.player.stone} stone + ${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.wizardTowerModeIndicator);
     }
     this.wizardTowerModeIndicator.style.display = active ? 'block' : 'none';
@@ -1545,7 +1581,7 @@ export class HUD {
   }
 
   /** Update capture zone HUD indicators — call every frame */
-  updateCaptureZones(zones: readonly { base: { id: string; owner: number; position: { q: number; r: number } }; controller: number; capturer: number; progress: number; unitCounts: number[]; contested: boolean; isMainBase: boolean }[]): void {
+  updateCaptureZones(zones: readonly { base: { id: string; owner: number; position: { q: number; r: number }; tier?: number }; controller: number; capturer: number; progress: number; unitCounts: number[]; contested: boolean; isMainBase: boolean }[]): void {
     this.ensureCaptureZoneStyles();
 
     // Show ALL zones (owned, neutral, enemy) so the player always has a strategic overview
@@ -1601,11 +1637,15 @@ export class HUD {
       card.style.borderColor = isCapturing ? capColor + 'aa' : 'rgba(255,255,255,0.12)';
       card.className = isCapturing ? 'cz-card cz-active' : 'cz-card';
 
-      // Labels
+      // Labels — include base tier if available
+      const TIER_NAMES = ['Camp', 'Fort', 'Castle'];
+      const TIER_ICONS = ['🏕️', '🏰', '👑'];
+      const tier = zone.base.tier ?? 0;
+      const tierStr = TIER_NAMES[tier] ?? 'Camp';
       const typeStr = zone.isMainBase ? 'Capital' : 'Outpost';
       const ownerStr = teamNames[zone.controller] ?? 'Neutral';
       const label = `${ownerStr} ${typeStr}`;
-      const icon = zone.isMainBase ? '&#9813;' : '&#9823;'; // chess king / pawn
+      const icon = TIER_ICONS[tier] ?? '🏕️';
 
       // Status badge
       let statusHTML = '';
@@ -1638,7 +1678,7 @@ export class HUD {
 
       card.innerHTML = `
         <div class="cz-header">
-          <span class="cz-label" style="color:${controlColor};">${icon} ${label}</span>
+          <span class="cz-label" style="color:${controlColor};">${icon} ${label} <span style="font-size:9px;opacity:0.7;">${tierStr}</span></span>
           ${statusHTML}
         </div>
         <div class="cz-troops">
@@ -1953,7 +1993,7 @@ export class HUD {
       font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
       display: none; text-align: center;
     `;
-    indicator.innerHTML = '🏰 WALL BUILD MODE — Click tiles for walls (1 stone) · Shift+click for gates (2 stone) · Walls auto-connect · [Tab] to close';
+    indicator.innerHTML = `🏰 WALL BUILD MODE — Click tiles for walls (${GAME_CONFIG.defenses.wall.cost.stone} stone) · Shift+click for gates (${GAME_CONFIG.defenses.gate.cost.stone} stone) · Walls auto-connect · [Tab] to close`;
     this.container.appendChild(indicator);
     return indicator;
   }
@@ -2097,122 +2137,131 @@ export class HUD {
               <div class="unit-icon" style="background:#c0392b; font-weight:bold; color:white;">1</div>
               <div>
                 <div class="unit-name" style="color:#c0392b;">Warrior</div>
-                <div class="unit-desc">Melee combat unit. 5 gold. Solid all-round fighter.</div>
+                <div class="unit-desc">Melee combat unit. ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold} gold. Solid all-round fighter.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#8e44ad; font-weight:bold; color:white;">2</div>
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Archer</div>
-                <div class="unit-desc">Ranged unit. 8 gold. Range 4, kites melee threats. Flees & fires when enemies close in.</div>
+                <div class="unit-desc">Ranged unit. ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold} gold. Range 4, kites melee threats. Flees & fires when enemies close in.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#d35400; font-weight:bold; color:white;">3</div>
               <div>
                 <div class="unit-name" style="color:#d35400;">Rider</div>
-                <div class="unit-desc">Fast cavalry. 10 gold. High speed, great for flanking and pursuit.</div>
+                <div class="unit-desc">Fast cavalry. ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold} gold. High speed, great for flanking and pursuit.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">4</div>
               <div>
                 <div class="unit-name" style="color:#3498db;">Scout</div>
-                <div class="unit-desc">Fast recon. 6 gold. Barracks <span class="key" style="font-size:9px;">4</span>. High speed, great vision range.</div>
+                <div class="unit-desc">Fast recon. ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">4</span>. High speed, great vision range.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#8B4513; font-weight:bold; color:white;">L</div>
               <div>
                 <div class="unit-name" style="color:#8B4513;">Lumberjack</div>
-                <div class="unit-desc">Wood harvester. 3 wood. Auto-chops marked trees <span class="key" style="font-size:9px;">H</span> and carries wood to stockpile.</div>
+                <div class="unit-desc">Wood harvester. ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood} wood. Auto-chops marked trees <span class="key" style="font-size:9px;">H</span> and carries wood to stockpile.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#b8860b; font-weight:bold; color:white;">B</div>
               <div>
                 <div class="unit-name" style="color:#b8860b;">Builder</div>
-                <div class="unit-desc">Miner & mason. 4 wood. Mines stone/clay/iron/gold/crystal <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
+                <div class="unit-desc">Miner & mason. ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood} wood. Mines stone/clay/iron/gold/crystal <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#daa520; font-weight:bold; color:white;">V</div>
               <div>
                 <div class="unit-name" style="color:#daa520;">Villager</div>
-                <div class="unit-desc">Farmer. 3 wood. Harvests farms & tall grass <span class="key" style="font-size:9px;">J</span> for food + grass fiber.</div>
-              </div>
-            </div>
-            <div class="unit-row">
-              <div class="unit-icon" style="background:#8e44ad; font-weight:bold; color:white;">C</div>
-              <div>
-                <div class="unit-name" style="color:#8e44ad;">Catapult</div>
-                <div class="unit-desc">Siege weapon. 3 rope + 3 stone + 3 wood. Range 4, damages walls. Built at Workshop.</div>
+                <div class="unit-desc">Farmer. ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood} wood. Harvests farms & tall grass <span class="key" style="font-size:9px;">J</span> for food + grass fiber.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#5d4037; font-weight:bold; color:white;">T</div>
               <div>
                 <div class="unit-name" style="color:#795548;">Trebuchet</div>
-                <div class="unit-desc">Heavy siege. 6 rope + 4 stone + 4 wood. Range 6, massive damage. Built at Workshop.</div>
+                <div class="unit-desc">Heavy siege. ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.rope} rope + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.stone} stone + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.wood} wood. Range 6, massive damage. Built at Workshop.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">5</div>
               <div>
                 <div class="unit-name" style="color:#3498db;">Paladin</div>
-                <div class="unit-desc">Holy knight. 12 gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. +2 defense aura to nearby allies. Mace smash. Holds choke points.</div>
+                <div class="unit-desc">Holy knight. ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. +${GAME_CONFIG.combat.paladin.auraDefenseBonus} defense aura to nearby allies. Mace smash. Holds choke points.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#2980b9;">🔮</div>
               <div>
                 <div class="unit-name" style="color:#2980b9;">Mage</div>
-                <div class="unit-desc">Ranged caster. 8g + 2 crystal. Wizard Tower <span class="key" style="font-size:9px;">0</span>. Range 3. Magic orbs.</div>
+                <div class="unit-desc">Ranged caster. ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">0</span>. Range 3. Magic orbs.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#27ae60;">💚</div>
               <div>
                 <div class="unit-name" style="color:#27ae60;">Healer</div>
-                <div class="unit-desc">Support. 6g + 1 crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧1</span>. Heals allies within 2 hex.</div>
+                <div class="unit-desc">Support. ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧1</span>. Heals allies within 2 hex.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#2c3e50;">🗡️</div>
               <div>
                 <div class="unit-name" style="color:#9b59b6;">Assassin</div>
-                <div class="unit-desc">Burst DPS. 7g + 1 steel. Armory <span class="key" style="font-size:9px;">7</span>. +3 attack from full HP. Dual daggers.</div>
+                <div class="unit-desc">Burst DPS. ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">7</span>. +${GAME_CONFIG.combat.assassin.fullHealthAttackBonus} attack from full HP. Dual daggers.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. 8g + 3 steel. Armory <span class="key" style="font-size:9px;">9</span>. Shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
+                <div class="unit-desc">Tank. ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">9</span>. Shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#e74c3c;">🪓</div>
               <div>
                 <div class="unit-name" style="color:#e74c3c;">Berserker</div>
-                <div class="unit-desc">Melee DPS. 7g + 2 steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +4 attack at low HP (rage). Ranged axe throw (range 7) once per unique target — slows enemy &amp; boosts chase speed. Deflected by shields.</div>
+                <div class="unit-desc">Melee DPS. ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +${GAME_CONFIG.combat.berserker.rageAttackBonusMax} attack at low HP (rage). Ranged axe throw (range 7) once per unique target — slows enemy &amp; boosts chase speed. Deflected by shields.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#8e44ad;">⚡</div>
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Battlemage</div>
-                <div class="unit-desc">AoE caster. 12g + 3 crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧2</span>. Splash damage to all adjacent enemies.</div>
+                <div class="unit-desc">AoE caster. ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧2</span>. Splash damage to all adjacent enemies.</div>
               </div>
             </div>
             <div class="unit-row">
               <div class="unit-icon" style="background:#546e7a;">⚔</div>
               <div>
                 <div class="unit-name" style="color:#546e7a;">Greatsword</div>
-                <div class="unit-desc">Heavy cleave. 8g + 2 steel. Armory <span class="key" style="font-size:9px;">6</span>. 360° spin hits all adjacent, knockback.</div>
+                <div class="unit-desc">Heavy cleave. ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">6</span>. 360° spin hits all adjacent, knockback.</div>
+              </div>
+            </div>
+            <div class="unit-row">
+              <div class="unit-icon" style="background:#4e342e;">👹</div>
+              <div>
+                <div class="unit-name" style="color:#4e342e;">Ogre</div>
+                <div class="unit-desc">Reward unit. FREE on base tier-up. Massive HP, ${GAME_CONFIG.combat.ogre.swipeRadius}-hex AOE club smash with knockback. Cannot be trained — earned by upgrading bases.</div>
               </div>
             </div>
           </div>
+
+          <div class="section-title" style="color: #f1c40f; margin-top: 12px;">🏰 Base Tiers & Population</div>
+          <div style="font-size: 12px; color: #ccc; margin-bottom: 6px;">
+            Bases upgrade through 3 tiers. Each tier-up spawns a free Ogre. Workers (builders, lumberjacks, villagers) are FREE — they don't count toward the population cap.
+          </div>
+          <div class="tip"><span class="tip-bullet">🏕️</span> <span><strong>Camp</strong> (starting tier) — No requirements.</span></div>
+          <div class="tip"><span class="tip-bullet">🏰</span> <span><strong>Fort</strong> — 30 population + 3 unique building types in zone. Spawns 1 Ogre.</span></div>
+          <div class="tip"><span class="tip-bullet">👑</span> <span><strong>Castle</strong> — 60 population + 6 unique building types in zone. Spawns 1 more Ogre.</span></div>
+          <div class="tip"><span class="tip-bullet">🍖</span> <span><strong>Food Pop Cap</strong> — Every ${GAME_CONFIG.population.foodPerCombatUnit} food supports 1 combat unit. Start with ${GAME_CONFIG.population.startingFood} food (${Math.floor(GAME_CONFIG.population.startingFood / GAME_CONFIG.population.foodPerCombatUnit)} unit cap). Build farms to grow your army.</span></div>
         </div>
 
         <!-- NESTED MENU SYSTEM -->
@@ -2222,27 +2271,28 @@ export class HUD {
             Press a number key to open a building category. <strong>Shift</strong> cycles buildings.
             <strong>Click</strong> to place. <strong>QWERTY</strong> keys queue units/actions. <strong>Tab</strong> to exit.
           </div>
+          <div class="tip" style="color:#f39c12; margin-top:4px;"><span class="tip-bullet" style="color:#f39c12;">⚠</span> <span>Buildings start as <strong>blueprints</strong> — a Builder must walk over and construct them before they become functional (~8s).</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #c0392b; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">1</span> COMBAT BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (10w) — Q: Warrior 5g · W: Archer 8g · E: Rider 10g · R: Scout 6g · T: Paladin 12g</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><strong style="color:#708090;">Armory</strong> (10w+5s+3 steel) — Q: Greatsword 8g+2s · W: Assassin 7g+1s · E: Berserker 7g+2s · R: Shieldbearer 8g+3s</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (10w+5s+3 crystal) — Q: Mage 8g+2c · W: Battlemage 12g+3c · E: Healer 6g+1c</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (${GAME_CONFIG.buildings.barracks.cost.player.wood}w) — Q: Warrior ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g · W: Archer ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g · E: Rider ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g · R: Scout ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g · T: Paladin ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><strong style="color:#708090;">Armory</strong> (${GAME_CONFIG.buildings.armory.cost.player.wood}w+${GAME_CONFIG.buildings.armory.cost.player.stone}s+${GAME_CONFIG.buildings.armory.cost.player.steel} steel) — Q: Greatsword ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s · W: Assassin ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s · E: Berserker ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s · R: Shieldbearer ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (${GAME_CONFIG.buildings.wizard_tower.cost.player.wood}w+${GAME_CONFIG.buildings.wizard_tower.cost.player.stone}s+${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) — Q: Mage ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c · W: Battlemage ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c · E: Healer ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">2</span> ECONOMY BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><strong style="color:#6b8e23;">Forestry</strong> (8w) — Q: Lumberjack 3w · W: Chop Trees · E: Plant Trees</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#b08050;">●</span> <span><strong style="color:#b08050;">Masonry</strong> (8w) — Q: Builder 3w · W: Mine Terrain · E: Build Walls</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><strong style="color:#daa520;">Farmhouse</strong> (6w) — Q: Villager 3w · W: Farm/Hay · E: Plant Crops</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><strong style="color:#5d4037;">Workshop</strong> (12w+4s) — Q: Catapult · W: Trebuchet · E: Craft Rope · R: Sell Wood</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><strong style="color:#6b8e23;">Forestry</strong> (${GAME_CONFIG.buildings.forestry.cost.player.wood}w) — Q: Lumberjack ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood}w · W: Chop Trees · E: Plant Trees</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#b08050;">●</span> <span><strong style="color:#b08050;">Masonry</strong> (${GAME_CONFIG.buildings.masonry.cost.player.wood}w) — Q: Builder ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood}w · W: Mine Terrain · E: Build Walls</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><strong style="color:#daa520;">Farmhouse</strong> (${GAME_CONFIG.buildings.farmhouse.cost.player.wood}w) — Q: Villager ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood}w · W: Farm/Hay · E: Plant Crops</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><strong style="color:#5d4037;">Workshop</strong> (${GAME_CONFIG.buildings.workshop.cost.player.wood}w+${GAME_CONFIG.buildings.workshop.cost.player.stone}s) — Q: Trebuchet · W: Craft Rope · E: Sell Wood</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #f39c12; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">3</span> CRAFTING BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><strong style="color:#8b4513;">Smelter</strong> (8w+6s) — Q: Smelt Steel (2 iron + 1 charcoal) · W: Craft Charcoal (3 wood + 2 clay)</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><strong style="color:#c0c0c0;">Silo</strong> (5w) — Extra food storage capacity.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><strong style="color:#8b4513;">Smelter</strong> (${GAME_CONFIG.buildings.smelter.cost.player.wood}w+${GAME_CONFIG.buildings.smelter.cost.player.stone}s) — Q: Smelt Steel (${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal) · W: Craft Charcoal (${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><strong style="color:#c0c0c0;">Silo</strong> (${GAME_CONFIG.buildings.silo.cost.player.wood}w) — Extra food storage capacity.</span></div>
         </div>
 
         <!-- GLOBAL ACTIONS -->
@@ -2252,7 +2302,7 @@ export class HUD {
           <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Y-slicer (Shift+scroll) is always available to view underground layers and right-click resources.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade 4 wood for 5 gold.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade ${GAME_CONFIG.economy.trade.sellWood.input.wood} wood for ${GAME_CONFIG.economy.trade.sellWood.output.gold} gold.</span></div>
         </div>
 
         <!-- RESOURCES -->
@@ -2262,14 +2312,14 @@ export class HUD {
             <div class="tip"><span class="tip-bullet" style="color:#f0c040;">🪵</span> <span><strong style="color:#f0c040;">Wood</strong> — Harvested from forests by Lumberjacks. Used to build structures and train workers.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#aaa;">🪨</span> <span><strong style="color:#aaa;">Stone</strong> — Mined from mountains/terrain by Builders. Used for advanced buildings.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">🌾</span> <span><strong style="color:#8bc34a;">Food</strong> — Harvested from farms/grass by Villagers. Feeds your population.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span>, killing enemies (3g/kill, 5g siege), or mining gold ore. Used to train combat units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span>, killing enemies (${GAME_CONFIG.economy.trade.combatRewards.unitKillGold}g/kill, ${GAME_CONFIG.economy.trade.combatRewards.siegeKillGold}g siege), or mining gold ore. Used to train combat units.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#66bb6a;">🌿</span> <span><strong style="color:#66bb6a;">Grass Fiber</strong> — Gathered by Villagers when harvesting grass. Used to craft Rope.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#bf8040;">🧱</span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope & Charcoal.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from 3 fiber + 2 clay. Required for Trebuchets.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from ${GAME_CONFIG.economy.recipes.rope.input.grass_fiber} fiber + ${GAME_CONFIG.economy.recipes.rope.input.clay} clay. Required for Trebuchets.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#c0652a;">⛏</span> <span><strong style="color:#c0652a;">Iron</strong> — Mined from iron ore veins on mountains (orange rocks). Foundation of the steel chain.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#444;">⚫</span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from 3 wood + 2 clay. Carbon needed for smelting steel.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#71797e;">🔨</span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from 2 iron + 1 charcoal (requires Smelter). Used for Armory units.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Mined from gem ores (ruby, emerald, sapphire, amethyst) found in tunnel walls. Yields 3 per block. Used for Wizard Tower units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#444;">⚫</span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from ${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay. Carbon needed for smelting steel.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#71797e;">🔨</span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from ${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal (requires Smelter). Used for Armory units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Mined from gem ores (ruby, emerald, sapphire, amethyst) found in tunnel walls. Yields ${GAME_CONFIG.economy.mining.crystalYield} per block. Used for Wizard Tower units.</span></div>
             <div class="tip"><span class="tip-bullet" style="color:#ffd700;">⛏</span> <span><strong style="color:#ffd700;">Gold (mined)</strong> — Found in desert terrain and mountain gold veins. Builders mine gold blocks and deposit them at base.</span></div>
           </div>
         </div>
@@ -2312,16 +2362,18 @@ export class HUD {
           <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
+          ${ENABLE_UNDERGROUND ? `
           <div class="tip"><span class="tip-bullet">★</span> <span>Lava tubes are natural underground tunnels connecting mountains. Mine gem veins (ruby, emerald, sapphire, amethyst) for crystal — found only in tunnel walls!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Y-Slicer:</strong> Always available! Use Shift+scroll or the slider to cut through terrain layers. Right-click underground tiles to see block resources. Works without selecting a unit.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Underground Combat:</strong> Units auto-enter tunnels when walking through an entrance and auto-surface when exiting. AI commanders route armies through tunnels for long-distance flanks.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Desert Tunnels Map:</strong> Features 3-4 surface openings, a deep underground network, and a central battle cavern with a capturable neutral outpost.</span></div>
+          ` : ''}
           <div class="tip"><span class="tip-bullet">★</span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish. Enemy buildings show an <strong style="color:#e74c3c;">Attack</strong> button; bases show a <strong style="color:#27ae60;">Capture Zone</strong> button.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Your units spread their attacks across multiple enemies instead of all targeting one — fewer wasted hits!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Archers automatically flee from melee threats and reposition to maintain range advantage.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Zone Control:</strong> Every base has a 5-hex capture zone. Hold more units in the zone than the enemy to capture it. A progress bar shows capture advancement. Contested zones stall when both sides are present. The zone HUD on the right shows all zones at a glance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture = Victory:</strong> Capturing the enemy's main base wins the game instantly. Neutral outposts flip to your team and you inherit all buildings in the zone. Use Defensive stance to hold zones without getting lured out!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Catapult, Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
+          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Unit Stats <span class="key" style="font-size:9px;">I</span>:</strong> Press I to toggle a live unit stats panel showing both teams' alive units with kill counts, levels, HP, and current state.</span></div>
@@ -2372,6 +2424,7 @@ export class HUD {
       this.helpVisible = true;
       StrategyCamera.suppressInput = true;
       localStorage.setItem('cubitopia_seen_help', '1');
+      this._onHelpOpen?.();
     }
   }
 
@@ -2380,6 +2433,7 @@ export class HUD {
       this.helpOverlay.style.display = 'none';
       this.helpVisible = false;
       StrategyCamera.suppressInput = false;
+      this._onHelpClose?.();
     }
   }
 
@@ -2999,7 +3053,7 @@ export class HUD {
 
     const typeColors: Record<string, string> = {
       warrior: '#c0392b', archer: '#8e44ad', rider: '#d35400', paladin: '#3498db',
-      mage: '#2980b9', trebuchet: '#5d4037', catapult: '#795548', scout: '#1abc9c',
+      mage: '#2980b9', trebuchet: '#5d4037', scout: '#1abc9c',
       healer: '#27ae60', assassin: '#2c3e50', shieldbearer: '#7f8c8d', berserker: '#e74c3c',
       battlemage: '#9b59b6', greatsword: '#546e7a', builder: '#b8860b', lumberjack: '#6d4c41',
       villager: '#daa520',

@@ -5,6 +5,7 @@
 
 import { Unit, UnitType, GameMap } from '../../types';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
+import { GAME_CONFIG } from '../GameConfig';
 
 export interface CombatResult {
   attackerDamage: number;
@@ -41,10 +42,10 @@ export class CombatSystem {
         const atkElev = atkTile.walkableFloor ?? atkTile.elevation;
         const defElev = defTile.walkableFloor ?? defTile.elevation;
         const elevDiff = atkElev - defElev;
-        if (elevDiff >= 3) {
-          atkStat += 2; // Attacker has high ground — bonus attack
-        } else if (elevDiff <= -3) {
-          defStat += 2; // Defender has high ground — bonus defense
+        if (elevDiff >= GAME_CONFIG.combat.highGround.threshold) {
+          atkStat += GAME_CONFIG.combat.highGround.attackBonus; // Attacker has high ground — bonus attack
+        } else if (elevDiff <= -GAME_CONFIG.combat.highGround.threshold) {
+          defStat += GAME_CONFIG.combat.highGround.defenseBonus; // Defender has high ground — bonus defense
         }
       }
     }
@@ -53,15 +54,15 @@ export class CombatSystem {
     if (attacker.type === UnitType.BERSERKER) {
       // Axe throw (ranged opener) deals reduced damage — 40% of base attack
       if (attacker._axeThrowReady) {
-        atkStat = Math.ceil(atkStat * 0.4);
+        atkStat = Math.ceil(atkStat * GAME_CONFIG.combat.berserker.axeThrowDamageMultiplier);
       }
       const missingHpRatio = 1 - (attacker.currentHealth / attacker.stats.maxHealth);
-      atkStat += Math.round(missingHpRatio * 4); // Up to +4 attack at 1 HP
+      atkStat += Math.round(missingHpRatio * GAME_CONFIG.combat.berserker.rageAttackBonusMax); // Up to +4 attack at 1 HP
     }
 
     // --- Assassin Burst: first strike bonus when attacking from full HP ---
     if (attacker.type === UnitType.ASSASSIN && attacker.currentHealth === attacker.stats.maxHealth) {
-      atkStat += 3; // Ambush bonus
+      atkStat += GAME_CONFIG.combat.assassin.fullHealthAttackBonus; // Ambush bonus
     }
 
     // --- Paladin Holy Aura: adjacent allies get +2 defense ---
@@ -70,8 +71,8 @@ export class CombatSystem {
         if (ally.type === UnitType.PALADIN && ally.owner === defender.owner &&
             ally.currentHealth > 0 && ally !== defender) {
           const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
-          if (dist <= 2) {
-            defStat += 2;
+          if (dist <= GAME_CONFIG.combat.paladin.auraRange) {
+            defStat += GAME_CONFIG.combat.paladin.auraDefenseBonus;
             break; // Only one aura stacks
           }
         }
@@ -85,7 +86,7 @@ export class CombatSystem {
     const attackerRatio = attackForce / totalForce;
     const defenderRatio = defenseForce / totalForce;
 
-    let defenderDamage = Math.round(attackerRatio * atkStat * 4.5);
+    let defenderDamage = Math.round(attackerRatio * atkStat * GAME_CONFIG.combat.damage.attackerMultiplier);
 
     // --- Shared flags ---
     const isRangedAttacker = attacker.stats.range > 1;
@@ -99,26 +100,29 @@ export class CombatSystem {
     const isUnblockable = attacker.type === UnitType.ASSASSIN;
     let blocked = false;
     if (isMeleeAttacker && isMeleeDefender && !isUnblockable) {
-      const baseBlockChance = Math.min(0.55, 0.1 + defStat * 0.05);
-      const shieldBonus = isShieldDefender ? 0.15 : 0;
-      const blockChance = Math.min(0.65, baseBlockChance + shieldBonus);
+      const baseBlockChance = Math.min(
+        GAME_CONFIG.combat.block.baseCap,
+        GAME_CONFIG.combat.block.baseChance + defStat * GAME_CONFIG.combat.block.defenseScaling
+      );
+      const shieldBonus = isShieldDefender ? GAME_CONFIG.combat.block.shieldBonus : 0;
+      const blockChance = Math.min(GAME_CONFIG.combat.block.finalCap, baseBlockChance + shieldBonus);
       if (Math.random() < blockChance) {
         blocked = true;
-        defenderDamage = Math.max(1, Math.round(defenderDamage * 0.35)); // 65% damage reduction on block
+        defenderDamage = Math.max(1, Math.round(defenderDamage * GAME_CONFIG.combat.block.damageMultiplier)); // 65% damage reduction on block
       }
     }
 
     // --- Shield Deflect: shieldbearers and paladins take 80% reduced damage from ranged attacks ---
     const deflected = isRangedAttacker && isShieldDefender;
     if (deflected) {
-      defenderDamage = Math.max(1, Math.round(defenderDamage * 0.2)); // 80% reduction, min 1
+      defenderDamage = Math.max(1, Math.round(defenderDamage * GAME_CONFIG.combat.deflect.damageMultiplier)); // 80% reduction, min 1
     }
 
     // Counter-attack: defender can only retaliate if attacker is within defender's range.
     // Ranged units attacking from outside melee range take zero counter-damage.
     const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
     const canCounter = dist <= defender.stats.range;
-    const attackerDamage = canCounter ? Math.round(defenderRatio * defStat * 3.5) : 0;
+    const attackerDamage = canCounter ? Math.round(defenderRatio * defStat * GAME_CONFIG.combat.damage.counterMultiplier) : 0;
 
     const attackerHealth = attacker.currentHealth - attackerDamage;
     const defenderHealth = defender.currentHealth - defenderDamage;
@@ -128,7 +132,7 @@ export class CombatSystem {
       defenderDamage,
       attackerSurvived: attackerHealth > 0,
       defenderSurvived: defenderHealth > 0,
-      experienceGained: defenderHealth <= 0 ? 3 : 1,
+      experienceGained: defenderHealth <= 0 ? GAME_CONFIG.combat.experience.kill : GAME_CONFIG.combat.experience.hit,
       deflected,
       blocked,
     };
@@ -149,12 +153,12 @@ export class CombatSystem {
     if (result.attackerSurvived) {
       xpGained = result.experienceGained;
       attacker.experience += xpGained;
-      if (attacker.experience >= attacker.level * 5) {
+      if (attacker.experience >= attacker.level * GAME_CONFIG.combat.experience.levelThresholdMultiplier) {
         attacker.level++;
         newLevel = attacker.level;
         leveledUp = true;
         // Partial heal on level-up: restore 30% of max HP (not full heal)
-        const healAmt = Math.round(attacker.stats.maxHealth * 0.3);
+        const healAmt = Math.round(attacker.stats.maxHealth * GAME_CONFIG.combat.experience.levelUpHealRatio);
         attacker.currentHealth = Math.min(attacker.stats.maxHealth, attacker.currentHealth + healAmt);
       }
     }
@@ -188,7 +192,7 @@ export class CombatSystem {
     }
 
     if (!bestTarget) return [];
-    healer.attackCooldown = 2.0; // Slightly longer cooldown for projectile heal
+    healer.attackCooldown = GAME_CONFIG.combat.healer.projectileCooldown; // Slightly longer cooldown for projectile heal
     return [bestTarget.id]; // Single target — projectile handles HP on impact
   }
 
@@ -197,7 +201,7 @@ export class CombatSystem {
    */
   static applyHeal(healer: Unit, target: Unit): number {
     if (target.currentHealth <= 0 || target.currentHealth >= target.stats.maxHealth) return 0;
-    const healAmount = 3; // Slightly stronger per-cast since it's single-target
+    const healAmount = GAME_CONFIG.combat.healer.healAmount; // Slightly stronger per-cast since it's single-target
     const actual = Math.min(healAmount, target.stats.maxHealth - target.currentHealth);
     target.currentHealth += actual;
     CombatLog.logHeal(healer, target, actual);
@@ -211,12 +215,12 @@ export class CombatSystem {
   static applyBattlemageAoE(attacker: Unit, target: Unit, allUnits: Unit[]): string[] {
     if (attacker.type !== UnitType.BATTLEMAGE) return [];
     const splashed: string[] = [];
-    const splashDamage = Math.max(1, Math.round(attacker.stats.attack * 0.75));
+    const splashDamage = Math.max(1, Math.round(attacker.stats.attack * GAME_CONFIG.combat.battlemage.splashDamageMultiplier));
 
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit === target || unit.currentHealth <= 0) continue;
       const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, target.position.q, target.position.r);
-      if (dist <= 1) {
+      if (dist <= GAME_CONFIG.combat.battlemage.splashRadius) {
         unit.currentHealth = Math.max(0, unit.currentHealth - splashDamage);
         splashed.push(unit.id);
         CombatLog.logSplash(attacker, unit.id, unit.type);
@@ -236,14 +240,14 @@ export class CombatSystem {
   ): { unitId: string; knockQ: number; knockR: number }[] {
     if (attacker.type !== UnitType.GREATSWORD) return [];
     const results: { unitId: string; knockQ: number; knockR: number }[] = [];
-    const cleaveDamage = Math.max(1, Math.round(attacker.stats.attack * 0.6));
+    const cleaveDamage = Math.max(1, Math.round(attacker.stats.attack * GAME_CONFIG.combat.greatsword.cleaveDamageMultiplier));
 
     // Collect all enemies within 1 hex of attacker (cleave radius)
     const victims: Unit[] = [];
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
       const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
-      if (dist <= 1 && unit !== target) {
+      if (dist <= GAME_CONFIG.combat.greatsword.cleaveRadius && unit !== target) {
         victims.push(unit);
       }
     }
@@ -274,6 +278,57 @@ export class CombatSystem {
       const newR = victim.position.r + kr;
 
       // Only knockback if destination is not blocked
+      if (!isTileBlocked(newQ, newR)) {
+        results.push({ unitId: victim.id, knockQ: newQ, knockR: newR });
+        CombatLog.logKnockback(attacker, victim, newQ, newR);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Ogre Club Swipe — massive AOE attack hitting all enemies within 2 hex of attacker.
+   * Deals 70% of base attack as club damage and knocks ALL victims back 1 hex away.
+   * Radius is larger than Greatsword cleave (2 vs 1) to sell the Ogre's massive size.
+   */
+  static applyOgreClubSwipe(
+    attacker: Unit, target: Unit, allUnits: Unit[],
+    isTileBlocked: (q: number, r: number) => boolean
+  ): { unitId: string; knockQ: number; knockR: number }[] {
+    if (attacker.type !== UnitType.OGRE) return [];
+    const results: { unitId: string; knockQ: number; knockR: number }[] = [];
+    const clubDamage = Math.max(1, Math.round(attacker.stats.attack * GAME_CONFIG.combat.ogre.swipeDamageMultiplier));
+
+    // Collect all enemies within 2 hex of attacker (larger AOE than Greatsword)
+    const victims: Unit[] = [];
+    for (const unit of allUnits) {
+      if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
+      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
+      if (dist <= GAME_CONFIG.combat.ogre.swipeRadius && unit !== target) {
+        victims.push(unit);
+      }
+    }
+
+    // Apply club damage to secondary targets
+    for (const victim of victims) {
+      victim.currentHealth = Math.max(0, victim.currentHealth - clubDamage);
+    }
+
+    // Apply knockback to ALL hit enemies (primary target + secondary victims)
+    const allHit = [target, ...victims];
+    for (const victim of allHit) {
+      if (victim.currentHealth <= 0) continue;
+      const dq = victim.position.q - attacker.position.q;
+      const dr = victim.position.r - attacker.position.r;
+      let kq = 0, kr = 0;
+      if (Math.abs(dq) >= Math.abs(dr)) {
+        kq = dq > 0 ? 1 : (dq < 0 ? -1 : 0);
+      } else {
+        kr = dr > 0 ? 1 : (dr < 0 ? -1 : 0);
+      }
+      if (kq === 0 && kr === 0) kq = 1;
+      const newQ = victim.position.q + kq;
+      const newR = victim.position.r + kr;
       if (!isTileBlocked(newQ, newR)) {
         results.push({ unitId: victim.id, knockQ: newQ, knockR: newR });
         CombatLog.logKnockback(attacker, victim, newQ, newR);
