@@ -26,6 +26,7 @@ import { FOOD_PER_COMBAT_UNIT } from './PopulationSystem';
 import type { PlacedBuilding, BuildingKind } from '../../types';
 import { TacticalGroupManager, TacticalGroup, getTacticalRole, TacticalRole } from './TacticalGroup';
 import { GAME_CONFIG } from '../GameConfig';
+import { GameRNG } from '../SeededRandom';
 
 /** Slim interface for garrison operations AIController needs */
 export interface AIGarrisonOps {
@@ -406,7 +407,7 @@ export default class AIController {
 
       // Weighted random selection from the full roster
       const totalWeight = roster.reduce((sum, r) => sum + r.weight, 0);
-      let roll = Math.random() * totalWeight;
+      let roll = GameRNG.rng.next() * totalWeight;
       let pick = roster[roster.length - 1]; // fallback
       for (const entry of roster) {
         roll -= entry.weight;

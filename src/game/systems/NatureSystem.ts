@@ -7,6 +7,7 @@ import { HexCoord, TerrainType, GameMap } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import { GAME_CONFIG } from '../GameConfig';
+import { GameRNG } from '../SeededRandom';
 
 /** Slim interface — only what NatureSystem needs from the outside */
 export interface NatureOps {
@@ -133,7 +134,7 @@ export default class NatureSystem {
     if (!map) return;
     for (const [key, tile] of map.tiles) {
       if (tile.terrain === TerrainType.PLAINS && this.ops.hasGrass(key)) {
-        const stage = Math.random() > GAME_CONFIG.timers.nature.initialGrassMatureChance ? 2 : 1;
+        const stage = GameRNG.rng.next() > GAME_CONFIG.timers.nature.initialGrassMatureChance ? 2 : 1;
         this.grassAge.set(key, stage);
         if (stage < 2) {
           this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
@@ -161,7 +162,7 @@ export default class NatureSystem {
         const harvests = this.harvestCount.get(key) ?? 0;
         if (harvests >= this.MAX_HARVESTS) continue;
         const regrowChance = 1 / (1 + harvests); // 100%, 50%, 33%
-        if (Math.random() > regrowChance) continue;
+        if (GameRNG.rng.next() > regrowChance) continue;
 
         tile.terrain = TerrainType.FOREST;
         const [q, r] = key.split(',').map(Number);
@@ -286,7 +287,7 @@ export default class NatureSystem {
         if (UnitAI.farmPatches.has(nKey)) continue;
         if (nTile.elevation * 0.5 >= GAME_CONFIG.timers.nature.grassSpreadElevationCap) continue;
 
-        if (Math.random() < this.GRASS_SPREAD_CHANCE) {
+        if (GameRNG.rng.next() < this.GRASS_SPREAD_CHANCE) {
           this.ops.addGrassAtStage({ q: nq, r: nr }, nTile.elevation * 0.5, 0);
           this.grassAge.set(nKey, 0);
           this.grassGrowthTimers.set(nKey, this.GRASS_GROWTH_TIME);

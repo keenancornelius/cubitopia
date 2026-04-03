@@ -6,6 +6,7 @@
 import { Unit, UnitType, GameMap } from '../../types';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { GAME_CONFIG } from '../GameConfig';
+import { GameRNG } from '../SeededRandom';
 import { StatusEffectSystem } from './StatusEffectSystem';
 
 export interface CombatResult {
@@ -120,7 +121,7 @@ export class CombatSystem {
       );
       const shieldBonus = isShieldDefender ? GAME_CONFIG.combat.block.shieldBonus : 0;
       const blockChance = Math.min(GAME_CONFIG.combat.block.finalCap, baseBlockChance + shieldBonus);
-      if (Math.random() < blockChance) {
+      if (GameRNG.rng.next() < blockChance) {
         blocked = true;
         defenderDamage = Math.max(1, Math.round(defenderDamage * GAME_CONFIG.combat.block.damageMultiplier)); // 65% damage reduction on block
       }

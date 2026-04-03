@@ -14,31 +14,7 @@ import {
   ENABLE_UNDERGROUND,
 } from '../types';
 import { Logger } from '../engine/Logger';
-
-// Seeded pseudo-random number generator (Mulberry32 — fast, good distribution)
-class SeededRandom {
-  private seed: number;
-
-  constructor(seed: number) {
-    // Hash the seed so even consecutive seeds (1, 2, 3…) diverge immediately
-    this.seed = seed ^ 0xDEADBEEF;
-    // Warm up: discard a few values to mix the state
-    this.next(); this.next(); this.next();
-  }
-
-  next(): number {
-    // Mulberry32: full-period 32-bit PRNG with excellent avalanche
-    let t = (this.seed += 0x6D2B79F5) | 0;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    t = ((t ^ (t >>> 14)) >>> 0);
-    return t / 4294967296;
-  }
-
-  nextRange(min: number, max: number): number {
-    return Math.floor(this.next() * (max - min + 1)) + min;
-  }
-}
+import { SeededRandom, GameRNG } from './SeededRandom';
 
 // Simple 2D noise function (value noise)
 class SimpleNoise {
@@ -134,7 +110,7 @@ export class MapGenerator {
   private noiseOffsetY: number;
 
   constructor(seed?: number) {
-    const s = seed ?? Math.floor(Math.random() * 999999);
+    const s = seed ?? GameRNG.rng.nextRange(0, 999999);
     this.rng = new SeededRandom(s);
     this.noise = new SimpleNoise(s);
     this.noiseB = new SimpleNoise(s + 7919); // offset seed for second layer

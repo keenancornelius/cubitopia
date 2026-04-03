@@ -8,6 +8,7 @@ import {
   ResourceType, MapType, MapPreset, ENABLE_UNDERGROUND,
 } from '../types';
 import { MapGenerator } from './MapGenerator';
+import { GameRNG } from './SeededRandom';
 import { Logger } from '../engine/Logger';
 
 // --- Map Preset Definitions ---
@@ -80,7 +81,7 @@ export interface DesertTunnelsMap extends GameMap {
 }
 
 export function generateArenaMap(size: number, seed?: number): ArenaMap {
-  const actualSeed = seed ?? Math.floor(Math.random() * 999999);
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
   const tiles = new Map<string, Tile>();
   const center = Math.floor(size / 2);
   const wallRing: HexCoord[] = [];
@@ -281,7 +282,7 @@ class DesertRng {
 }
 
 export function generateDesertTunnelsMap(size: number, seed?: number): GameMap {
-  const actualSeed = seed ?? Math.floor(Math.random() * 999999);
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
   const rng = new DesertRng(actualSeed);
   const noise = new SimpleDesertNoise(actualSeed);
   const tiles = new Map<string, Tile>();

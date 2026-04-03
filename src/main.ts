@@ -54,6 +54,7 @@ import { TacticalGroupManager } from './game/systems/TacticalGroup';
 import { InputManager } from './game/InputManager';
 import { InteractionStateMachine, InteractionState, InteractionCallbacks } from './game/InteractionStateMachine';
 import { GAME_CONFIG } from './game/GameConfig';
+import { GameRNG } from './game/SeededRandom';
 import {
   EngineConfig,
   CameraConfig,
@@ -2644,14 +2645,14 @@ class Cubitopia {
 
     // Hay yield: 2-3 food per tall grass tile
     const hayYield = GAME_CONFIG.economy.harvest.grass.hayBase
-      + Math.floor(Math.random() * GAME_CONFIG.economy.harvest.grass.hayVariance);
+      + GameRNG.rng.nextRange(0, GAME_CONFIG.economy.harvest.grass.hayVariance - 1);
 
     // Reset grass to short (stage 0) — it will regrow; mark as cleared plains
     this.natureSystem.onGrassHarvested(key, pos, tile.elevation * 0.5);
 
     // Grass fiber bonus — harvesting grass also yields fiber (plant material for rope)
     const fiberYield = GAME_CONFIG.economy.harvest.grass.fiberBase
-      + Math.floor(Math.random() * GAME_CONFIG.economy.harvest.grass.fiberVariance); // 1-2 fiber
+      + GameRNG.rng.nextRange(0, GAME_CONFIG.economy.harvest.grass.fiberVariance - 1); // 1-2 fiber
     this.grassFiberStockpile[unit.owner] += fiberYield;
     this.players[unit.owner].resources.grass_fiber += fiberYield;
     if (unit.owner === 0) {

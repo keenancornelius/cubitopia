@@ -4,6 +4,7 @@
 // ============================================
 
 import { Unit, UnitType, UnitStats, UnitState, UnitStance, HexCoord, ElementType } from '../../types';
+import { GameRNG } from '../SeededRandom';
 
 // --- Unified Unit Config Table ---
 // Every per-type value lives here. No switch/ternary chains elsewhere.
@@ -145,7 +146,7 @@ export class UnitFactory {
       // Mages get a random starting element and cycle through all 5
       ...(type === UnitType.MAGE || type === UnitType.BATTLEMAGE ? {
         element: UnitFactory._randomElement(),
-        _elementCycleIndex: Math.floor(Math.random() * 5),
+        _elementCycleIndex: GameRNG.rng.nextRange(0, 4),
       } : {}),
       // Berserkers start with axe throw ready (one ranged attack per unique target)
       ...(type === UnitType.BERSERKER ? {
@@ -158,7 +159,7 @@ export class UnitFactory {
   /** Pick a random element from the 5 available */
   private static _randomElement(): ElementType {
     const elements = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
-    return elements[Math.floor(Math.random() * elements.length)];
+    return GameRNG.rng.pick(elements);
   }
 
   static getStats(type: UnitType): UnitStats {

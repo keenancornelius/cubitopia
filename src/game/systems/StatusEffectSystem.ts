@@ -27,6 +27,7 @@
 
 import { Unit, UnitType, ElementType } from '../../types';
 import { GAME_CONFIG } from '../GameConfig';
+import { GameRNG } from '../SeededRandom';
 
 export interface StatusEvent {
   type: 'status:applied' | 'status:consumed' | 'status:tick' | 'status:interaction';
@@ -356,7 +357,7 @@ export class StatusEffectSystem {
         const dmg = unit._ablazeDPS * delta;
         unit.currentHealth = Math.max(0, unit.currentHealth - dmg);
         // Only emit events periodically (every 0.5s worth) to avoid spam
-        if (Math.random() < delta * 2) {
+        if (GameRNG.rng.next() < delta * 2) {
           events.push({ type: 'status:tick', unitId: unit.id, effect: 'ablaze', damage: dmg });
         }
       }
