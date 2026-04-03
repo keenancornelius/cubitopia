@@ -1,6 +1,165 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { UnitType } from '../types';
 import { UNIT_COLORS } from '../game/entities/UnitFactory';
+
+// ═══════════════════════════════════════════════════════════
+// GLOBAL MATERIAL CACHE — shared across all units to reduce
+// GPU state switches. Keyed by hex color integer.
+// ═══════════════════════════════════════════════════════════
+const materialCache = new Map<number, THREE.MeshLambertMaterial>();
+const basicMaterialCache = new Map<number, THREE.MeshBasicMaterial>();
+
+function getCachedLambert(color: number): THREE.MeshLambertMaterial {
+  let mat = materialCache.get(color);
+  if (!mat) {
+    mat = new THREE.MeshLambertMaterial({ color });
+    materialCache.set(color, mat);
+  }
+  return mat;
+}
+
+function getCachedBasic(color: number): THREE.MeshBasicMaterial {
+  let mat = basicMaterialCache.get(color);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({ color });
+    basicMaterialCache.set(color, mat);
+  }
+  return mat;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MESH MERGE — merges static (non-animated) meshes per unit
+// into a small number of merged geometries grouped by material.
+// Animated parts (arms, legs, wheels, throw-arm, aura elements)
+// are kept separate for per-frame rotation.
+// ═══════════════════════════════════════════════════════════
+
+/** Names of groups/objects that are animated and must NOT be merged */
+const ANIMATED_NAMES = new Set([
+  'arm-left', 'arm-right', 'leg-left', 'leg-right',
+  'leg-back-left', 'leg-back-right',
+  'throw-arm',
+  'wheel-fl', 'wheel-fr', 'wheel-bl', 'wheel-br',
+  // Healer aura
+  'heal-crystal', 'heal-crystal-glow', 'heal-palm-orb', 'heal-palm-glow',
+  // Paladin aura
+  'paladin-halo', 'paladin-aura-ring',
+  // Battlemage aura
+  'battlemage-orb', 'bm-orb-glow', 'bm-palm-rune', 'bm-circlet-gem',
+  'bm-buckle-gem', 'bm-ground-aura',
+  // Dynamic
+  'carry-wood', 'bowstring', 'nocked-arrow',
+]);
+
+/** Check if a name matches animated pattern (includes mote-* patterns) */
+function isAnimatedName(name: string): boolean {
+  if (!name) return false;
+  if (ANIMATED_NAMES.has(name)) return true;
+  // Mote patterns: healer-mote-0, paladin-mote-1, bm-mote-2, etc.
+  if (name.includes('-mote-')) return true;
+  return false;
+}
+
+/** Check if a mesh or any of its ancestors is an animated group */
+function hasAnimatedAncestor(obj: THREE.Object3D, root: THREE.Group): boolean {
+  let current: THREE.Object3D | null = obj;
+  while (current && current !== root) {
+    if (current.name && isAnimatedName(current.name)) return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+/**
+ * Post-process a unit group: merge all static meshes by material color
+ * into combined geometries. This dramatically reduces draw calls.
+ *
+ * @returns the number of meshes removed (replaced by merged ones)
+ */
+function mergeStaticMeshes(group: THREE.Group): number {
+  // Force matrix update on entire hierarchy (group may not be in scene yet)
+  group.updateMatrixWorld(true);
+
+  // Collect static meshes grouped by material color hex
+  const buckets = new Map<number, { meshes: THREE.Mesh[], material: THREE.Material }>();
+
+  group.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return;
+    // Skip sprites, lines, etc.
+    if (child instanceof THREE.Sprite) return;
+    // Skip if inside an animated group
+    if (hasAnimatedAncestor(child, group)) return;
+    // Skip if the mesh itself is animated
+    if (child.name && isAnimatedName(child.name)) return;
+
+    const mat = child.material as THREE.Material;
+    if (!mat || !(mat instanceof THREE.MeshLambertMaterial || mat instanceof THREE.MeshBasicMaterial)) return;
+
+    const colorHex = (mat as THREE.MeshLambertMaterial).color?.getHex() ?? 0;
+    const isBasic = mat instanceof THREE.MeshBasicMaterial;
+    // Use high bit to separate Lambert vs Basic materials
+    const key = isBasic ? (colorHex | 0x1000000) : colorHex;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = { meshes: [], material: mat };
+      buckets.set(key, bucket);
+    }
+    bucket.meshes.push(child);
+  });
+
+  let removed = 0;
+
+  for (const [key, bucket] of buckets) {
+    if (bucket.meshes.length < 2) continue; // Not worth merging single meshes
+
+    // Build transformed geometries
+    const geos: THREE.BufferGeometry[] = [];
+    for (const mesh of bucket.meshes) {
+      const geo = mesh.geometry.clone();
+      // Apply the mesh's world transform relative to group root
+      mesh.updateWorldMatrix(true, false);
+      group.updateWorldMatrix(true, false);
+      const relativeMatrix = new THREE.Matrix4();
+      relativeMatrix.copy(group.matrixWorld).invert().multiply(mesh.matrixWorld);
+      geo.applyMatrix4(relativeMatrix);
+      geos.push(geo);
+    }
+
+    const merged = mergeGeometries(geos, false);
+    if (!merged) {
+      // Dispose cloned geos on failure
+      for (const g of geos) g.dispose();
+      continue;
+    }
+
+    // Dispose the temporary cloned geometries
+    for (const g of geos) g.dispose();
+
+    // Create the merged mesh with a cached material
+    const colorHex = key & 0xFFFFFF;
+    const isBasic = (key & 0x1000000) !== 0;
+    const cachedMat = isBasic ? getCachedBasic(colorHex) : getCachedLambert(colorHex);
+    const mergedMesh = new THREE.Mesh(merged, cachedMat);
+    mergedMesh.name = `merged-${colorHex.toString(16)}`;
+
+    // Remove originals
+    for (const mesh of bucket.meshes) {
+      mesh.geometry.dispose();
+      // Don't dispose materials — they may be shared; cache handles lifecycle
+      if (mesh.parent) {
+        mesh.parent.remove(mesh);
+      }
+      removed++;
+    }
+
+    // Add merged mesh directly to group
+    group.add(mergedMesh);
+  }
+
+  return removed;
+}
 
 export class UnitModels {
   constructor(_scene: THREE.Scene) {
@@ -4711,5 +4870,8 @@ export class UnitModels {
         break;
       }
     }
+
+    // ═══ POST-PROCESS: Merge static meshes to reduce draw calls ═══
+    mergeStaticMeshes(group);
   }
 }

@@ -163,9 +163,12 @@ export class UnitRenderer {
       entry.group.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
-          if (child.material instanceof THREE.Material) {
-            child.material.dispose();
-          }
+          // Don't dispose materials — they may be shared via the global material cache.
+          // Cache manages material lifecycle. Only dispose non-cached materials (sprites, etc.)
+        }
+        if (child instanceof THREE.Sprite) {
+          child.material.map?.dispose();
+          child.material.dispose();
         }
       });
       this.unitMeshes.delete(unitId);
