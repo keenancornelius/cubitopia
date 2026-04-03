@@ -917,39 +917,147 @@ Capturable map objectives that create contested territory and drive strategic de
 - NavalSystem.ts as its own subsystem
 - Tidecallers tribe gets full naval advantage here
 
-### Phase 5: Competitive Multiplayer (Primary Revenue Target) [BLOCKED on Phase 3]
-Online competitive multiplayer is the core revenue driver. Architecture decisions made NOW must keep this feasible.
+### Phase 5: Competitive Multiplayer (Primary Revenue Target)
+Online competitive multiplayer is the core revenue driver. Uses **WebRTC peer-to-peer** with **Firebase** for matchmaking/signaling/leaderboards. Zero game server costs — browsers talk directly to each other.
 
-**Networking Model: Deterministic Lockstep**
-- All clients run identical game simulation; only player commands are exchanged over network
-- Requires: seeded RNG (no `Math.random()` in game logic), deterministic floating point, command queue
-- Fallback: if lockstep proves too strict, switch to server-authoritative with client prediction
-- Protocol: WebSocket for real-time, with reconnect support via state snapshots
+#### Phase 5A: Deterministic Foundation [BLOCKED on Phase 1]
+Before any networking, the game simulation must produce identical results on two separate clients given the same inputs and seed.
 
-**Multiplayer Modes:**
-- **Ranked 1v1** — primary competitive mode, ELO matchmaking, seasonal ladders
+**Replace Math.random() with SeededRandom in all game logic:**
+- `SeededRandom` class already exists in `MapGenerator.ts` (Mulberry32 PRNG) — export it as a shared utility
+- Files requiring conversion (game logic only, NOT visuals/audio):
+  - `CombatSystem.ts` — block chance calculation (line ~123)
+  - `StatusEffectSystem.ts` — ablaze damage tick sampling (line ~359)
+  - `AIController.ts` — weighted random unit selection (line ~409)
+  - `NatureSystem.ts` — grass stage, regrowth, spread (lines ~136, 164, 289)
+  - `UnitFactory.ts` — mage element cycle index (lines ~148, 161)
+  - `main.ts` — harvest yield variance (lines ~2647, 2654)
+- Keep `Math.random()` for: particle VFX, animations, music, sound, terrain decoration, projectile variation
+- Inject a single `GameRNG` instance created from the match seed, passed to all systems
+- Every system that uses randomness takes `rng: SeededRandom` as a parameter
+
+**Command serialization:**
+- `UnitCommand` type already exists in `types/index.ts` — extend it to cover ALL player actions
+- New `NetworkCommand` interface: `{ tick: number, playerId: string, type: CommandType, payload: any }`
+- `CommandQueue` class: buffers commands per tick, processes them deterministically
+- Both players replay identical command streams against identical seeded simulations
+- Game state hash (CRC32 of unit positions + HP + resources) sent every N ticks to detect desync
+
+**Architecture prep status:**
+- `[EXISTS]` `SeededRandom` class (Mulberry32) in MapGenerator.ts
+- `[EXISTS]` `UnitCommand` + `CommandType` enum in types/index.ts
+- `[TODO]` Export SeededRandom as shared utility, create GameRNG singleton
+- `[TODO]` Replace all game-logic Math.random() calls (6 files)
+- `[TODO]` NetworkCommand interface + CommandQueue class
+- `[TODO]` Game state hash for desync detection
+- `[TODO]` Separate simulation tick rate from render frame rate
+
+#### Phase 5B: Firebase + WebRTC Networking [BLOCKED on 5A]
+The only server-side infrastructure. Firebase free tier handles all of it (1GB storage, 10GB/month transfer — massive overkill for alpha).
+
+**Stack:**
+- **Firebase Realtime Database** — matchmaking queue, signaling relay, user profiles, ELO leaderboard
+- **PeerJS** (wraps WebRTC) — peer-to-peer DataChannel for game commands during match
+- **GitHub Pages** — static frontend host, zero changes needed
+
+**User Registration (lightweight for alpha):**
+- Reddit username as display name (text input, no OAuth needed for alpha)
+- Firebase anonymous auth → persistent user ID
+- Profile stored in Firebase: `{ uid, displayName, elo: 1000, wins: 0, losses: 0, streak: 0 }`
+
+**Matchmaking Flow:**
+1. Player clicks "Find Match" → writes `{ uid, elo, timestamp }` to Firebase `/matchmaking/queue`
+2. Firebase Cloud Function (or client-side listener) pairs two players closest in ELO
+3. Pairing creates a `/matches/{matchId}` entry with both player UIDs + shared map seed
+4. Players exchange WebRTC signaling data through `/matches/{matchId}/signaling`
+5. PeerJS establishes direct DataChannel connection
+6. Once connected, Firebase is out of the loop — all game data flows P2P
+7. Match starts: both clients load same map seed, Player 1 = host (resolves any disputes)
+
+**Ghost Player System (cold-start AI impersonation):**
+- When no real opponent is available within 15 seconds, silently match the player against the AI
+- AI opponent gets a fake profile: procedurally generated Reddit-style username, ELO near the player's rating
+- The game runs exactly as single-player but with the multiplayer UI (opponent name, ELO display, surrender button)
+- Player sees "Opponent found!" and a realistic loading delay (2-3 seconds) before match starts
+- Ghost matches still affect ELO: wins give reduced ELO (+50% of normal), losses give reduced penalty (-50% of normal)
+- Ghost flag stored on match record but NEVER exposed to the player
+- As player pool grows, ghost match rate naturally decreases
+- Ghost AI difficulty scales with the player's ELO bracket:
+  - < 800 ELO: easy AI (slower build, fewer attacks)
+  - 800-1200 ELO: medium AI (current default)
+  - 1200-1600 ELO: hard AI (aggressive expansion, smart army composition)
+  - 1600+ ELO: brutal AI (optimal build orders, focus-fire, flanking)
+- Ghost username generator: adjective + noun + 2-4 digits (e.g., "SilentWolf_42", "CubeKing2099")
+
+**During Match — P2P Protocol:**
+- Host (Player 1) and Guest (Player 2) both run full simulation
+- Every simulation tick: player sends their commands (if any) to peer via DataChannel
+- Both clients apply commands in identical order (host commands first, then guest)
+- Every 60 ticks (~1 second): exchange game state hash — if mismatch, flag desync
+- On desync: host state is authoritative, guest resyncs (requires state serialization)
+- Ping displayed in UI, connection quality indicator
+
+#### Phase 5C: ELO & Leaderboard System [BLOCKED on 5B]
+
+**ELO Calculation:**
+- Standard ELO formula: `newElo = oldElo + K * (actual - expected)`
+- K-factor: 32 for new players (first 20 games), 16 for established players
+- Expected score: `1 / (1 + 10^((opponentElo - playerElo) / 400))`
+- Floor of 100 ELO (can't go below)
+- Starting ELO: 1000 for all new players
+
+**Match Result Reporting:**
+- Both players report result to Firebase `/matches/{matchId}/result`
+- If reports agree → update ELO immediately
+- If reports disagree → flag for review, use host's report as tiebreaker
+- Disconnect = loss for the disconnecting player (after 30s grace period for reconnect)
+- Surrender button = immediate loss
+
+**Leaderboard:**
+- Firebase query: `/users` ordered by `elo` descending
+- Leaderboard page on the game site: top 100 players with rank, name, ELO, W/L, win streak
+- Player's own rank always shown even if not in top 100
+- Seasonal resets: every 30 days, all ELO compressed toward 1000 by 50% (e.g., 1400 → 1200)
+- Season history preserved in `/seasons/{seasonId}/`
+
+**Stats Tracked Per Player:**
+- Total games, wins, losses, win rate
+- Current streak, best streak
+- Average game duration
+- Most played tribe
+- Ghost match rate (internal only, never shown)
+
+#### Phase 5D: Match Flow & UI [BLOCKED on 5C]
+
+**Multiplayer Menu:**
+- New "MULTIPLAYER" button on main menu (alongside PLAYER vs AI / AI vs AI)
+- Multiplayer screen: username input (first time), ELO display, "FIND MATCH" button, leaderboard preview
+- Match found → show opponent name + ELO + tribe → 5-second countdown → game starts
+- In-game: opponent info bar (name, ELO, tribe) at top of screen
+
+**Match Rules (Ranked 1v1):**
+- Map: randomly selected from competitive pool (Standard, Highland — no Arena/Underground)
+- Map seed: generated by host, shared with guest
+- Tribe: each player picks before match starts (hidden from opponent until game loads)
+- Starting conditions: identical resources, symmetric spawn positions
+- Win condition: destroy opponent's main base OR opponent surrenders/disconnects
+
+**End-of-Match Screen:**
+- Result: VICTORY / DEFEAT
+- ELO change: +/- with new rating shown
+- Stats: game duration, units trained, units killed, bases captured
+- "PLAY AGAIN" (re-queue) / "MAIN MENU" buttons
+
+**Future Multiplayer Modes (post-alpha):**
 - **2v2 / FFA** — team and free-for-all variants (2-4 players)
-- **Custom lobbies** — private games with configurable rules (map size, starting resources, city count, timer)
+- **Custom lobbies** — private games with configurable rules
 - **Spectator mode** — watch live games with fog of war toggle
-
-**Competitive Features:**
-- **Turn timer** — configurable per-turn time limit (30s / 60s / 90s / unlimited)
-- **Fog of war** — tile visibility based on unit sight radius + city vision (critical for competitive)
-- **Ranked seasons** — seasonal resets, placement matches, reward tracks
 - **Replay system** — full game replay from serialized command log (comes free with lockstep)
-- **Anti-cheat** — server validates command legality, detects desync (lockstep hash comparison)
-
-**Architecture Prep (start in Phase 0, enforce throughout):**
-- `[READY]` Replace all `Math.random()` in game logic with seeded PRNG (keep Math.random for visuals only)
-- `[READY]` All game state mutations go through `CommandQueue` — no direct state writes from input handlers
-- `[READY]` Game state must be fully serializable (for snapshots, reconnect, replays)
-- `[READY]` Separate "simulation tick" from "render frame" — simulation runs at fixed rate, renderer interpolates
-- `[READY]` Player input → Command object → CommandQueue → simulation processes commands deterministically
-- Network layer wraps CommandQueue: local mode processes immediately, online mode broadcasts then processes on confirmation
+- **Ranked seasons** — seasonal resets, placement matches, reward tracks
 
 **Revenue Model:**
 - Base game free (4 tribes, ranked play, all gameplay features)
-- **DLC tribes** — additional paid tribes with unique units/buildings/passives
+- **DLC tribes** — additional paid tribes with unique units/buildings/passives ($2.99-4.99 each)
 - **Cosmetic packs** — voxel skins, city themes, terrain themes, victory animations
 - **Battle pass** — seasonal cosmetic reward track
 - **Steam Workshop** — custom maps, mods (drives retention)
