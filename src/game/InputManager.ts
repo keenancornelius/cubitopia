@@ -334,19 +334,24 @@ export class InputManager {
         }
       }
 
-      // ── Squad / Control Group hotkeys: Ctrl+A/S/D/F/G to assign, plain to recall ──
+      // ── Squad / Control Group hotkeys: Ctrl/Cmd+A/S/D/F/G to assign, plain to recall ──
       {
         const SQUAD_KEYS: Record<string, number> = { a: 0, s: 1, d: 2, f: 3, g: 4 };
         const keyLower = e.key.toLowerCase();
         const squadSlot = SQUAD_KEYS[keyLower];
+        const isModifier = e.ctrlKey || e.metaKey; // Support both Ctrl (Win/Linux) and Cmd (Mac)
         if (squadSlot !== undefined && this.game.menuCategory === 0 && !e.altKey) {
+          // Always prevent browser defaults for modifier+squad keys (Cmd+A=SelectAll, Cmd+S=Save, etc.)
+          if (isModifier) {
+            e.preventDefault();
+          }
+
           const sm = this.game.selectionManager;
           const selected = sm.getSelectedUnits();
 
-          if (e.ctrlKey) {
-            // Ctrl+key: ASSIGN selected combat units to this squad slot
+          if (isModifier) {
+            // Ctrl/Cmd+key: ASSIGN selected combat units to this squad slot
             if (selected.length > 0) {
-              e.preventDefault();
               const assigned = sm.assignControlGroup(squadSlot, selected, true);
               const slotLabel = ['A', 'S', 'D', 'F', 'G'][squadSlot];
               this.hud.showNotification(
@@ -358,6 +363,7 @@ export class InputManager {
           } else if (keyLower !== 'a') {
             // Plain S/D/F/G: recall squad (S/D/F/G are purely squad keys)
             if (sm.hasControlGroup(squadSlot)) {
+              e.preventDefault();
               const recalled = sm.selectControlGroup(squadSlot);
               if (recalled.length > 0) {
                 const slotLabel = ['A', 'S', 'D', 'F', 'G'][squadSlot];
@@ -372,6 +378,7 @@ export class InputManager {
             // Plain A key: recall squad only if NO units are currently selected
             // (if units ARE selected, fall through to attack-move below)
             if (selected.length === 0 && sm.hasControlGroup(0)) {
+              e.preventDefault();
               const recalled = sm.selectControlGroup(0);
               if (recalled.length > 0) {
                 this.hud.showNotification(

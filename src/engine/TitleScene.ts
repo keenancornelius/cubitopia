@@ -18,20 +18,21 @@ const ARENA_RADIUS = 10;        // hex tiles from center
 const RESPAWN_THRESHOLD = 4;    // respawn wave when ≤ this many alive per side
 const RESPAWN_DELAY = 2.0;      // seconds before fresh wave spawns
 const DETECTION_RANGE = 12;     // how far units look for enemies
+// Each value = 1/animSpeed — prevents re-attack before animation cycle completes
 const MIN_ATTACK_COOLDOWN: Partial<Record<UnitType, number>> = {
-  [UnitType.WARRIOR]: 0.91,
-  [UnitType.ARCHER]: 0.67,
+  [UnitType.WARRIOR]: 0.95,
+  [UnitType.ARCHER]: 1.33,
   [UnitType.RIDER]: 0.83,
-  [UnitType.PALADIN]: 1.67,
-  [UnitType.MAGE]: 1.25,
-  [UnitType.ASSASSIN]: 0.56,
-  [UnitType.SHIELDBEARER]: 2.0,
-  [UnitType.BERSERKER]: 0.77,
-  [UnitType.BATTLEMAGE]: 2.0,
-  [UnitType.GREATSWORD]: 1.43,
-  [UnitType.OGRE]: 2.5,
-  [UnitType.SCOUT]: 0.67,
-  [UnitType.HEALER]: 1.5,
+  [UnitType.PALADIN]: 0.83,
+  [UnitType.MAGE]: 1.05,
+  [UnitType.ASSASSIN]: 0.83,
+  [UnitType.SHIELDBEARER]: 1.00,
+  [UnitType.BERSERKER]: 1.00,
+  [UnitType.BATTLEMAGE]: 1.11,
+  [UnitType.GREATSWORD]: 1.25,
+  [UnitType.OGRE]: 1.67,
+  [UnitType.SCOUT]: 0.71,
+  [UnitType.HEALER]: 1.11,
 };
 
 // Ranged units that kite away from melee threats
@@ -43,17 +44,19 @@ const ELEMENT_CYCLE: ElementType[] = [
   ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH,
 ];
 
-// Melee strike delays — how long to wait before applying damage visuals (syncs to animation)
+// Melee strike delays — syncs damage flash to when weapon visually connects
+// Each delay = impactCyclePoint / animSpeed * 1000
 const MELEE_STRIKE_DELAY: Partial<Record<UnitType, number>> = {
-  [UnitType.WARRIOR]: 420,
-  [UnitType.PALADIN]: 390,
-  [UnitType.RIDER]: 420,
-  [UnitType.SCOUT]: 230,
-  [UnitType.ASSASSIN]: 360,
-  [UnitType.BERSERKER]: 420,
+  [UnitType.WARRIOR]: 440,
+  [UnitType.PALADIN]: 400,
+  [UnitType.RIDER]: 335,
+  [UnitType.SCOUT]: 215,
+  [UnitType.ASSASSIN]: 275,
+  [UnitType.BERSERKER]: 440,
   [UnitType.SHIELDBEARER]: 460,
-  [UnitType.GREATSWORD]: 510,
-  [UnitType.OGRE]: 580,
+  [UnitType.GREATSWORD]: 550,
+  [UnitType.OGRE]: 830,
+  [UnitType.LUMBERJACK]: 180,
 };
 
 // Combat unit types used in the arena — one of each
@@ -136,6 +139,7 @@ export class TitleScene {
   // Particles
   private _particles: THREE.Points | null = null;
   private _particleTime = 0;
+  private _vfxCleanupTimer = 0;
 
   constructor() {
     this.scene = new THREE.Scene();
@@ -151,6 +155,11 @@ export class TitleScene {
     this._setupKeyframes();
 
     this.unitRenderer = new UnitRenderer(this.scene);
+
+    // Tag all existing scene children as permanent so the VFX cleanup sweep skips them
+    for (const child of this.scene.children) {
+      child.userData._permanent = true;
+    }
   }
 
   // ── Public API ──────────────────────────────────────────
@@ -205,6 +214,7 @@ export class TitleScene {
       this._updateCamera(delta);
       this._updateParticles(delta);
       this._checkRespawn(delta);
+      this._sweepOrphanedVFX(delta);
 
       this.webglRenderer!.render(this.scene, this.camera);
     };
@@ -1005,6 +1015,7 @@ export class TitleScene {
     // Update VFX
     this.unitRenderer.updateSwingTrails(time);
     this.unitRenderer.updateProjectiles(delta);
+    this.unitRenderer.updateTrailParticles();
     this.unitRenderer.updateDeferredEffects();
   }
 
@@ -1176,6 +1187,48 @@ export class TitleScene {
       blending: THREE.AdditiveBlending, sizeAttenuation: true,
     }));
     this.scene.add(this._particles);
+  }
+
+  // ── Orphaned VFX Cleanup ───────────────────────────────
+  // UnitVFX spawns particle meshes with self-cleaning rAF loops, but some
+  // persist due to timing edge cases. Every ~2 seconds we sweep the scene
+  // and remove any transient Mesh/Sprite that has faded to near-zero opacity
+  // or fallen out of the arena bounds.
+  private _sweepOrphanedVFX(delta: number): void {
+    this._vfxCleanupTimer += delta;
+    if (this._vfxCleanupTimer < 2.0) return;
+    this._vfxCleanupTimer = 0;
+
+    const toRemove: THREE.Object3D[] = [];
+    for (const child of this.scene.children) {
+      // Skip permanent scene objects (lights, sky, ambient particles)
+      if (child.userData._permanent) continue;
+      // Skip unit groups managed by UnitRenderer (they have children = body parts)
+      if (child instanceof THREE.Group) continue;
+
+      // Check Mesh and Sprite objects for near-zero opacity (finished VFX)
+      if (child instanceof THREE.Mesh || child instanceof THREE.Sprite) {
+        const mat = child.material as THREE.Material;
+        if (mat && 'opacity' in mat && (mat as any).transparent) {
+          if ((mat as any).opacity <= 0.02) {
+            toRemove.push(child);
+            continue;
+          }
+        }
+        // Also catch anything that fell far below the arena
+        if (child.position.y < -10) {
+          toRemove.push(child);
+          continue;
+        }
+      }
+    }
+
+    for (const obj of toRemove) {
+      this.scene.remove(obj);
+      if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry.dispose();
+      const mat = (obj as THREE.Mesh).material;
+      if (mat instanceof THREE.Material) mat.dispose();
+    }
   }
 
   private _updateParticles(delta: number): void {

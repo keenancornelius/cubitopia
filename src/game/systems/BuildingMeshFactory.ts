@@ -5,7 +5,7 @@
  */
 import * as THREE from 'three';
 import { HexCoord } from '../../types';
-import { Pathfinder } from './Pathfinder';
+// Pathfinder import removed — blockedTiles now managed by BuildingSystem
 
 /** Helper: create a mesh and set its position */
 function bm(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
@@ -272,7 +272,7 @@ export function buildForestryMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   g.add(bm(new THREE.BoxGeometry(0.2, 0.3, 0.03), mat(tc), -0.32, 1.2, 0.56));
   g.add(bm(new THREE.BoxGeometry(0.22, 0.02, 0.025), mat(gold), -0.32, 1.04, 0.56)); // fringe
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -550,7 +550,7 @@ export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   g.add(bm(new THREE.BoxGeometry(0.2, 0.02, 0.025), mat(gold), -0.3, 1.28, 0.25));
   g.add(bm(new THREE.BoxGeometry(0.2, 0.02, 0.025), mat(gold), 0.3, 1.28, 0.25));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -739,7 +739,7 @@ export function buildMasonryMesh(pos: HexCoord, owner: number, scene: THREE.Scen
   g.add(bm(new THREE.BoxGeometry(0.2, 0.28, 0.04), mat(tc), 0.22, 1.35, 0.48));
   g.add(bm(new THREE.BoxGeometry(0.22, 0.02, 0.03), mat(gold), 0.22, 1.2, 0.48)); // fringe
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -951,7 +951,7 @@ export function buildFarmhouseMesh(pos: HexCoord, owner: number, scene: THREE.Sc
   g.add(bm(new THREE.BoxGeometry(0.18, 0.26, 0.03), mat(tc), 0.42, 0.85, 0.48));
   g.add(bm(new THREE.BoxGeometry(0.2, 0.02, 0.025), mat(gold), 0.42, 0.71, 0.48));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -1148,7 +1148,7 @@ export function buildWorkshopMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   g.add(bm(new THREE.BoxGeometry(0.18, 0.28, 0.03), mat(tc), -0.55, 1.0, 0.43));
   g.add(bm(new THREE.BoxGeometry(0.2, 0.02, 0.025), mat(gold), -0.55, 0.85, 0.43));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -1345,7 +1345,7 @@ export function buildSiloMesh(pos: HexCoord, owner: number, scene: THREE.Scene, 
   g.add(bm(new THREE.BoxGeometry(0.16, 0.25, 0.03), mat(tc), 0.55, 0.6, 0.63));
   g.add(bm(new THREE.BoxGeometry(0.18, 0.02, 0.025), mat(gold), 0.55, 0.46, 0.63));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -1536,7 +1536,7 @@ export function buildSmelterMesh(pos: HexCoord, owner: number, scene: THREE.Scen
   g.add(bm(new THREE.BoxGeometry(0.16, 0.24, 0.03), mat(tc), 0.4, 0.7, 0.49));
   g.add(bm(new THREE.BoxGeometry(0.18, 0.02, 0.025), mat(gold), 0.4, 0.57, 0.49));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -1731,7 +1731,7 @@ export function buildArmoryMesh(pos: HexCoord, owner: number, scene: THREE.Scene
   // Team color base ring
   g.add(bm(new THREE.BoxGeometry(1.65, 0.05, 1.65), mat(tc), 0, 0.18, 0));
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }
 
@@ -1981,6 +1981,6 @@ export function buildWizardTowerMesh(pos: HexCoord, owner: number, scene: THREE.
   g.add(bm(new THREE.BoxGeometry(0.2, 0.35, 0.03), mat(tc), 0.15, 2.48, 0.52));
   g.add(bm(new THREE.BoxGeometry(0.22, 0.02, 0.025), mat(gold), 0.15, 2.3, 0.52)); // fringe
 
-  scene.add(g); Pathfinder.blockedTiles.add(`${pos.q},${pos.r}`);
+  scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
   return g;
 }

@@ -13,6 +13,7 @@ import {
   ResourceType,
   ENABLE_UNDERGROUND,
 } from '../types';
+import { Logger } from '../engine/Logger';
 
 // Seeded pseudo-random number generator (Mulberry32 — fast, good distribution)
 class SeededRandom {
@@ -1415,10 +1416,10 @@ export class MapGenerator {
     };
 
     // Place 1-2 desert outposts and 1-2 mountain forts
-    console.log(`[MapGen] Desert candidates: ${desertCandidates.length}, Mountain candidates: ${mountainCandidates.length}`);
+    Logger.info('MapGen', `Desert candidates: ${desertCandidates.length}, Mountain candidates: ${mountainCandidates.length}`);
     tryPlace(desertCandidates, 'desert', 2);
     tryPlace(mountainCandidates, 'mountain', 2);
-    console.log(`[MapGen] Surface bases placed: ${results.length} (${results.map(r => r.terrain).join(', ')})`);
+    Logger.info('MapGen', `Surface bases placed: ${results.length} (${results.map(r => r.terrain).join(', ')})`);
 
     // --- Carve walkable ramp paths to mountain forts ---
     for (const base of results) {
@@ -1430,7 +1431,7 @@ export class MapGenerator {
       const t = map.tiles.get(r.center.q + ',' + r.center.r);
       return r.terrain + '(' + r.center.q + ',' + r.center.r + ') elev=' + (t?.elevation ?? '?');
     });
-    console.log('[SurfaceBases] Found ' + results.length + ' surface base locations: ' + baseDescs.join(', '));
+    Logger.info('SurfaceBases', 'Found ' + results.length + ' surface base locations: ' + baseDescs.join(', '));
     return results;
   }
 
@@ -1480,7 +1481,7 @@ export class MapGenerator {
     }
 
     if (!bestTarget) {
-      console.log(`[MountainPath] No low terrain found near fort (${fortCenter.q},${fortCenter.r})`);
+      Logger.debug('MountainPath', `No low terrain found near fort (${fortCenter.q},${fortCenter.r})`);
       return;
     }
 
@@ -1541,7 +1542,7 @@ export class MapGenerator {
       visited.add(`${cq},${cr}`);
     }
 
-    console.log(`[MountainPath] Carved ramp from (${fortCenter.q},${fortCenter.r}) toward (${bestTarget.q},${bestTarget.r}), ${visited.size} tiles modified`);
+    Logger.info('MountainPath', `Carved ramp from (${fortCenter.q},${fortCenter.r}) toward (${bestTarget.q},${bestTarget.r}), ${visited.size} tiles modified`);
   }
 
   // =====================================================
@@ -1576,9 +1577,9 @@ export class MapGenerator {
       }
     });
 
-    console.log(`[LavaTubes] Candidates: ${highPoints.length} high, ${lowPoints.length} low, ${waterfallPoints.length} waterfall`);
+    Logger.info('LavaTubes', `Candidates: ${highPoints.length} high, ${lowPoints.length} low, ${waterfallPoints.length} waterfall`);
     if (highPoints.length === 0 || (lowPoints.length === 0 && waterfallPoints.length === 0)) {
-      console.log('[LavaTubes] Not enough endpoints, skipping tube generation');
+      Logger.debug('LavaTubes', 'Not enough endpoints, skipping tube generation');
       return [];
     }
 
@@ -1625,20 +1626,20 @@ export class MapGenerator {
         }
       }
       if (!end) {
-        console.log(`[LavaTubes] Tube ${t}: no valid endpoint found for start (${start.q},${start.r})`);
+        Logger.debug('LavaTubes', `Tube ${t}: no valid endpoint found for start (${start.q},${start.r})`);
         continue;
       }
 
-      console.log(`[LavaTubes] Tube ${t}: (${start.q},${start.r}) → (${end.q},${end.r})`);
+      Logger.debug('LavaTubes', `Tube ${t}: (${start.q},${start.r}) → (${end.q},${end.r})`);
 
       // --- Step 3: Trace a winding tunnel path from start to end ---
       const tubePath = this.traceTubePath(start, end, map, w, h);
-      console.log(`[LavaTubes] Tube ${t}: path length = ${tubePath.length}`);
+      Logger.debug('LavaTubes', `Tube ${t}: path length = ${tubePath.length}`);
       if (tubePath.length < 4) continue;
 
       // --- Step 4: Carve tunnel blocks and set tile properties ---
       this.carveTunnelBlocks(tubePath, map);
-      console.log(`[LavaTubes] Tube ${t}: carved ${tubePath.length} tiles`);
+      Logger.debug('LavaTubes', `Tube ${t}: carved ${tubePath.length} tiles`);
 
       // Record the midpoint for cavern placement — take the deepest point (~40-60% along tube)
       if (tubePath.length >= 6) {
@@ -1660,7 +1661,7 @@ export class MapGenerator {
     // Greedy selection: pick midpoints that maximize spread across the map
     // First pick goes to the midpoint closest to map center, then each subsequent pick
     // goes to the midpoint farthest from all already-selected caverns
-    console.log(`[LavaTubes] ${tubeMidpoints.length} tube midpoints available for cavern placement`);
+    Logger.debug('LavaTubes', `${tubeMidpoints.length} tube midpoints available for cavern placement`);
     const remaining = [...tubeMidpoints];
     while (cavernResults.length < 4 && remaining.length > 0) {
       let bestIdx = -1;
@@ -1691,14 +1692,14 @@ export class MapGenerator {
 
       // Still enforce a minimum separation of 8 hex
       if (cavernResults.length > 0 && bestScore < 8) {
-        console.log(`[LavaTubes] Best remaining midpoint (${picked.q},${picked.r}) only ${bestScore.toFixed(1)} hex from nearest cavern, stopping`);
+        Logger.debug('LavaTubes', `Best remaining midpoint (${picked.q},${picked.r}) only ${bestScore.toFixed(1)} hex from nearest cavern, stopping`);
         break;
       }
 
       const cavernFloorY = picked.floorY - 2;
       this.carveCavern({ q: picked.q, r: picked.r }, CAVERN_RADIUS, cavernFloorY, CAVERN_HEIGHT, map);
       cavernResults.push({ center: { q: picked.q, r: picked.r }, floorY: cavernFloorY });
-      console.log(`[LavaTubes] Cavern carved at (${picked.q},${picked.r}), floorY=${cavernFloorY}, radius=${CAVERN_RADIUS}, minDist=${bestScore === -Infinity ? 'first' : bestScore.toFixed(1)}`);
+      Logger.debug('LavaTubes', `Cavern carved at (${picked.q},${picked.r}), floorY=${cavernFloorY}, radius=${CAVERN_RADIUS}, minDist=${bestScore === -Infinity ? 'first' : bestScore.toFixed(1)}`);
     }
 
     // --- Step 6: Deep underground tunnel network ---
@@ -1727,7 +1728,7 @@ export class MapGenerator {
         deepCarved++;
       }
     }
-    console.log(`[LavaTubes] Deep tunnels carved: ${deepCarved}`);
+    Logger.info('LavaTubes', `Deep tunnels carved: ${deepCarved}`);
 
     // --- Step 7: Connect caverns to nearby tunnel tiles ---
     // Route deep tunnels from each cavern outward to ensure connectivity
@@ -1778,7 +1779,7 @@ export class MapGenerator {
         }
       }
     }
-    console.log(`[LavaTubes] Total tunnel tiles: ${allTunnelTiles.length}, caverns: ${cavernResults.length}`);
+    Logger.info('LavaTubes', `Total tunnel tiles: ${allTunnelTiles.length}, caverns: ${cavernResults.length}`);
 
     return cavernResults;
   }
@@ -2015,7 +2016,7 @@ export class MapGenerator {
 
       if (i === 0 || i === path.length - 1 || i === Math.floor(path.length / 2)) {
         const label = i === 0 ? 'Entrance' : i === path.length - 1 ? 'Exit' : 'Mid';
-        console.log(`[LavaTubes] ${label} (${q},${r}): surfaceY=${surfaceY}, floorY=${tunnelFloorY}, ceilingY=${tunnelCeilingY}`);
+        Logger.debug('LavaTubes', `${label} (${q},${r}): surfaceY=${surfaceY}, floorY=${tunnelFloorY}, ceilingY=${tunnelCeilingY}`);
       }
     }
   }

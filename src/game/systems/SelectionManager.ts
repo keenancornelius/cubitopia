@@ -175,14 +175,23 @@ export class SelectionManager {
         mouseIsDown = false;
         if (boxTimeout) { clearTimeout(boxTimeout); boxTimeout = null; }
 
+        // Always consume suppressNextClear on mouseup to prevent stale flag
+        // from eating a future click (e.g. mousedown on building → drag → box select
+        // would leave the flag set if only cleared inside handleClick)
+        const wasSupprClear = SelectionManager.suppressNextClear;
+        SelectionManager.suppressNextClear = false;
+
         if (SelectionManager.suppressNextClick) {
           SelectionManager.suppressNextClick = false;
           // Skip selection — attack-move consumed this click
         } else if (this.isBoxSelecting) {
           this.finishBoxSelect();
         } else {
-          // Single click selection
-          this.handleClick(e);
+          // Single click selection — pass the suppress-clear flag through
+          if (!wasSupprClear) {
+            this.handleClick(e);
+          }
+          // If wasSupprClear, skip selection change (building/base/wall was clicked)
         }
         this.isBoxSelecting = false;
         this.boxElement.style.display = 'none';
@@ -247,12 +256,8 @@ export class SelectionManager {
   }
 
   private handleClick(e: MouseEvent): void {
-    // If a building/wall/gate was clicked, keep the current selection intact
-    // so garrison operations can read it from the tooltip
-    if (SelectionManager.suppressNextClear) {
-      SelectionManager.suppressNextClear = false;
-      return; // Don't change selection at all
-    }
+    // suppressNextClear is now handled in the mouseup listener above
+    // to prevent stale flags from eating future clicks
 
     const closestUnit = this.unitUnderCursor(e);
 

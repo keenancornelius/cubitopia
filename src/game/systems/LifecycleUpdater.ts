@@ -7,6 +7,7 @@
 
 import { UnitType, UnitState, BaseTier, HexCoord, Unit, Base } from '../../types';
 import { UnitFactory } from '../entities/UnitFactory';
+import { Logger } from '../../engine/Logger';
 
 export interface LifecycleOps {
   // Base upgrade
@@ -69,7 +70,7 @@ export default class LifecycleUpdater {
           this.ops.showNotification(msg, '#f1c40f');
           this.ops.playSound('queue_confirm', 0.8);
         }
-        console.log(`[BaseUpgrade] Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
+        Logger.info('BaseUpgrade', `Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
 
         // Spawn reward Ogre at the upgraded base
         const ogresForTier = evt.newTier;
@@ -87,7 +88,7 @@ export default class LifecycleUpdater {
             this.ops.showNotification('👹 An Ogre has joined your army!', '#4e342e');
             this.ops.setPlayerUnits(allUnits, 0);
           }
-          console.log(`[BaseUpgrade] Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
+          Logger.info('BaseUpgrade', `Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
         }
       }
     }
@@ -106,7 +107,7 @@ export default class LifecycleUpdater {
           if (pid === 0) {
             this.ops.showNotification(`⚠️ ${unit.type} disbanded — not enough food!`, '#e74c3c');
           }
-          console.log(`[PopDisband] Player ${pid} ${unit.type}(${uid}) disbanded (over food cap)`);
+          Logger.info('PopDisband', `Player ${pid} ${unit.type}(${uid}) disbanded (over food cap)`);
         }
       }
     }
@@ -122,13 +123,13 @@ export default class LifecycleUpdater {
     for (let i = allUnits.length - 1; i >= 0; i--) {
       const u = allUnits[i];
       if (u.state === UnitState.DEAD) {
-        console.warn(`[DeadCleanup] Force-removing dead unit ${u.type}(${u.id})`);
+        Logger.warn('DeadCleanup', `Force-removing dead unit ${u.type}(${u.id})`);
         this.ops.removeUnitFromGame(u);
       } else if (u._pendingRangedDeath) {
         if (!u._pendingDeathTimestamp) {
           u._pendingDeathTimestamp = now;
         } else if (now - u._pendingDeathTimestamp > 3000) {
-          console.warn(`[DeadCleanup] Force-removing stale pending-death unit ${u.type}(${u.id})`);
+          Logger.warn('DeadCleanup', `Force-removing stale pending-death unit ${u.type}(${u.id})`);
           u.state = UnitState.DEAD;
           u._pendingRangedDeath = false;
           this.ops.removeUnitFromGame(u);

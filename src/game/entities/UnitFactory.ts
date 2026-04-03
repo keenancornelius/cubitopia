@@ -100,7 +100,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
   },
   // --- Reward unit (spawns on base tier-up, cannot be queued) ---
   [UnitType.OGRE]: {
-    stats: { maxHealth: 50, attack: 8, defense: 4, movement: 1, range: 1 },
+    stats: { maxHealth: 50, attack: 8, defense: 4, movement: 1, range: 2 },
     moveSpeed: 0.6, attackSpeed: 0.4, color: 0x4e342e,
     carryCapacity: 0, isSiege: true,  // Can smash walls/buildings
   },

@@ -5,6 +5,8 @@
 // distortion, ring modulation, and envelope sculpting.
 // ============================================
 
+import { Logger } from './Logger';
+
 export interface SoundConfig {
   masterVolume: number;
   sfxVolume: number;
@@ -26,8 +28,8 @@ type SoundName =
 export default class SoundManager {
   private ctx: AudioContext | null = null;
   private config: SoundConfig = {
-    masterVolume: 0.3,
-    sfxVolume: 0.7,
+    masterVolume: 0.7,
+    sfxVolume: 1.0,
     musicVolume: 0.5,
     muted: false,
   };
@@ -42,14 +44,14 @@ export default class SoundManager {
         this.ctx = new AudioContext();
         this.noiseBuffer = this.createNoiseBuffer(2);
         this.distortionCurve = this.createDistortionCurve(400);
-        console.log('[SoundManager] AudioContext created, state:', this.ctx.state);
+        Logger.info('Sound', `AudioContext created, state: ${this.ctx.state}`);
       }
       // Browsers require explicit resume after user gesture — without this,
       // AudioContext stays "suspended" and all audio output is silenced
       if (this.ctx.state === 'suspended') {
         this.ctx.resume()
-          .then(() => console.log('[SoundManager] AudioContext resumed, state:', this.ctx!.state))
-          .catch(e => console.warn('[SoundManager] Failed to resume AudioContext:', e));
+          .then(() => Logger.debug('Sound', `AudioContext resumed, state: ${this.ctx!.state}`))
+          .catch(e => Logger.warn('Sound', `Failed to resume AudioContext: ${e}`));
       }
       document.removeEventListener('click', initAudio);
       document.removeEventListener('keydown', initAudio);

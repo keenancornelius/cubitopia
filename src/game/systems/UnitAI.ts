@@ -9,6 +9,7 @@ import { CombatSystem } from './CombatSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { TacticalGroupManager, TacticalGroup, getTacticalRole, TacticalRole, isAlive } from './TacticalGroup';
 import { GAME_CONFIG } from '../GameConfig';
+import { Logger } from '../../engine/Logger';
 
 /** Mine blueprint: defines a Y range to excavate. Miners remove blocks top-down
  *  from startY to (startY - depth + 1). Works for both surface and tunnel mining. */
@@ -132,15 +133,17 @@ export class UnitAI {
    * Ensures the attack animation has time to complete one full cycle
    * before the next attack can fire. Calculated from 1/animSpeed.
    */
+  // Each value = 1/animSpeed — prevents re-attack before animation cycle completes
   private static readonly MIN_ATTACK_COOLDOWN: Partial<Record<UnitType, number>> = {
-    [UnitType.WARRIOR]:      0.91, // 1/1.1
+    [UnitType.WARRIOR]:      0.95, // 1/1.05
     [UnitType.PALADIN]:      0.83, // 1/1.2
     [UnitType.RIDER]:        0.83, // 1/1.2
     [UnitType.SCOUT]:        0.71, // 1/1.4
     [UnitType.ASSASSIN]:     0.83, // 1/1.2
-    [UnitType.BERSERKER]:    0.91, // 1/1.1
+    [UnitType.BERSERKER]:    1.00, // 1/1.0
     [UnitType.SHIELDBEARER]: 1.00, // 1/1.0
-    [UnitType.GREATSWORD]:   1.18, // 1/0.85
+    [UnitType.GREATSWORD]:   1.25, // 1/0.8
+    [UnitType.OGRE]:         1.67, // 1/0.6
     [UnitType.LUMBERJACK]:   0.71, // 1/1.4
   };
 
@@ -608,12 +611,7 @@ export class UnitAI {
       // Debug: if both mine and build are disabled, skip all builder AI
       if (UnitAI.debugFlags.disableMine && UnitAI.debugFlags.disableBuild) return;
 
-      // === BUILDER IDLE DEBUG ===
-      if (unit.owner === 0) {
-        const bpCount = UnitAI.placedBuildings.filter(pb => pb.owner === unit.owner && pb.isBlueprint).length;
-        const bpAll = UnitAI.placedBuildings.filter(pb => pb.owner === unit.owner).length;
-        console.log(`[Builder IDLE] ${unit.id} at (${unit.position.q},${unit.position.r}) | blueprints=${bpCount}/${bpAll} total | assigned=${unit._assignedBlueprintId ?? 'none'} | state=${unit.state}`);
-      }
+      // === BUILDER IDLE DEBUG (throttled) ===
 
       // Priority 0: Player-assigned building blueprint (overrides ALL auto-assignment)
       if (unit._assignedBlueprintId) {
@@ -625,24 +623,84 @@ export class UnitAI {
             unit.state = UnitState.CONSTRUCTING;
             unit.command = { type: CommandType.CONSTRUCT, targetPosition: assigned.position, targetUnitId: assigned.id };
             unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-            console.log(`[Builder] ${unit.id} Priority 0: constructing assigned blueprint ${assigned.id} (${assigned.kind}), adjacent`);
+            Logger.debug('Builder', `${unit.id} Priority 0: constructing assigned blueprint ${assigned.id} (${assigned.kind}), adjacent`);
             return;
           } else {
-            console.log(`[Builder] ${unit.id} Priority 0: moving to assigned blueprint ${assigned.id} (${assigned.kind}), dist=${dist}`);
             UnitAI.commandMove(unit, assigned.position, map);
-            return;
+            if (unit.state !== UnitState.MOVING) {
+              // Pathfinding failed — blacklist this blueprint and clear assignment
+              if (!(unit as any)._failedBlueprintIds?.has(assigned.id))
+                Logger.debug('Builder', `${unit.id} path to blueprint ${assigned.id} failed, blacklisting`);
+              if (!(unit as any)._failedBlueprintIds) (unit as any)._failedBlueprintIds = new Set<string>();
+              (unit as any)._failedBlueprintIds.add(assigned.id);
+              unit._assignedBlueprintId = undefined;
+              if (assigned.assignedBuilderId === unit.id) assigned.assignedBuilderId = undefined;
+              // Fall through to try other tasks
+            } else {
+              return;
+            }
           }
         }
-        // Blueprint no longer exists or is complete — clear assignment
-        console.log(`[Builder] ${unit.id} Priority 0: blueprint ${unit._assignedBlueprintId} gone/complete, clearing`);
-        unit._assignedBlueprintId = undefined;
+        // Blueprint no longer exists or is complete — clear assignment (guard against double-clear)
+        if (unit._assignedBlueprintId) {
+          Logger.debug('Builder', `${unit.id} Priority 0: blueprint ${unit._assignedBlueprintId} gone/complete, clearing`);
+          unit._assignedBlueprintId = undefined;
+        }
       }
 
-      // Builder priority: 1) player mine blueprints  2) wall building  3) auto-mine fallback
+      // Builder priority: 1) building blueprints  2) mine blueprints  3) wall building  4) auto-mine
+      // Building blueprints take priority over mining so player-placed structures get built first.
       // Both human and AI builders share the same fallback auto-mine behavior.
       UnitAI.releaseMineClaim(unit.id);
 
-      // Human builders check mine blueprints first (skip if disableMine)
+      // Periodically clear the pathfind-failure blacklist so builders retry blueprints.
+      // Without this, a single pathfind failure permanently hides a blueprint from this builder
+      // because the blacklist only clears on successful movement (which never happens if the
+      // builder keeps falling through to adjacent auto-mine).
+      const failedSet = (unit as any)._failedBlueprintIds as Set<string> | undefined;
+      if (failedSet && failedSet.size > 0) {
+        const now = Date.now();
+        const lastClear = (unit as any)._lastBlacklistClear ?? 0;
+        if (now - lastClear > 10000) { // retry every 10 seconds
+          failedSet.clear();
+          (unit as any)._lastBlacklistClear = now;
+          Logger.debug('Builder', `${unit.id} cleared blueprint blacklist (periodic retry)`);
+        }
+      }
+
+      // Building construction: builders auto-seek unfinished blueprint buildings FIRST
+      if (!UnitAI.debugFlags.disableBuild) {
+        const blueprint = UnitAI.findNearestBlueprint(unit);
+        if (blueprint) {
+          blueprint.assignedBuilderId = unit.id;
+          unit._assignedBlueprintId = blueprint.id; // Persist so Priority 0 catches it on re-idle
+          const dist = Pathfinder.heuristic(unit.position, blueprint.position);
+          if (dist <= 1) {
+            // Adjacent — start constructing
+            unit.state = UnitState.CONSTRUCTING;
+            unit.command = { type: CommandType.CONSTRUCT, targetPosition: blueprint.position, targetUnitId: blueprint.id };
+            unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
+            Logger.debug('Builder', `${unit.id} auto-assigned to adjacent blueprint ${blueprint.id} (${blueprint.kind})`);
+            return;
+          } else {
+            // Walk to blueprint
+            UnitAI.commandMove(unit, blueprint.position, map);
+            if (unit.state !== UnitState.MOVING) {
+              // Pathfinding failed — blacklist and release assignment
+              Logger.debug('Builder', `${unit.id} auto-assign path to ${blueprint.id} (${blueprint.kind}) failed, blacklisting`);
+              if (!(unit as any)._failedBlueprintIds) (unit as any)._failedBlueprintIds = new Set<string>();
+              (unit as any)._failedBlueprintIds.add(blueprint.id);
+              unit._assignedBlueprintId = undefined;
+              if (blueprint.assignedBuilderId === unit.id) blueprint.assignedBuilderId = undefined;
+              // Fall through to try mining/walls
+            } else {
+              return;
+            }
+          }
+        }
+      }
+
+      // Human builders check mine blueprints (skip if disableMine)
       let mineTile: HexCoord | null = null;
       if (!UnitAI.debugFlags.disableMine && !player.isAI && UnitAI.playerMineBlueprint.size > 0) {
         mineTile = UnitAI.findNearestMineBlueprint(unit, map);
@@ -664,42 +722,12 @@ export class UnitAI {
           const bpMineTile = map.tiles.get(bpMineKey);
           const bpNeedsUnderground = bpMineTile?.hasTunnel === true;
           UnitAI.commandMove(unit, mineTile, map, bpNeedsUnderground);
-        }
-        return;
-      }
-
-      // Building construction: builders auto-seek unfinished blueprint buildings
-      if (!UnitAI.debugFlags.disableBuild) {
-        const blueprint = UnitAI.findNearestBlueprint(unit);
-        if (unit.owner === 0) {
-          if (blueprint) {
-            console.log(`[Builder] ${unit.id} found blueprint ${blueprint.id} (${blueprint.kind}) at (${blueprint.position.q},${blueprint.position.r}), isBlueprint=${blueprint.isBlueprint}, assignedTo=${blueprint.assignedBuilderId}`);
-          } else {
-            // Log why no blueprint was found
-            const allBP = UnitAI.placedBuildings.filter(pb => pb.owner === unit.owner);
-            for (const pb of allBP) {
-              console.log(`[Builder] ${unit.id} SKIPPED ${pb.id} (${pb.kind}): isBlueprint=${pb.isBlueprint}, assignedTo=${pb.assignedBuilderId}, owner=${pb.owner}`);
-            }
+          if (unit.state !== UnitState.MOVING) {
+            // Path to mine failed — release claim and fall through
+            UnitAI.claimedMines.delete(claimKey);
           }
         }
-        if (blueprint) {
-          blueprint.assignedBuilderId = unit.id;
-          unit._assignedBlueprintId = blueprint.id; // Persist so Priority 0 catches it on re-idle
-          const dist = Pathfinder.heuristic(unit.position, blueprint.position);
-          if (dist <= 1) {
-            // Adjacent — start constructing
-            unit.state = UnitState.CONSTRUCTING;
-            unit.command = { type: CommandType.CONSTRUCT, targetPosition: blueprint.position, targetUnitId: blueprint.id };
-            unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-            console.log(`[Builder] ${unit.id} auto-assigned to adjacent blueprint ${blueprint.id} (${blueprint.kind})`);
-            return;
-          } else {
-            // Walk to blueprint
-            UnitAI.commandMove(unit, blueprint.position, map);
-            console.log(`[Builder] ${unit.id} auto-assigned to distant blueprint ${blueprint.id} (${blueprint.kind}), moving...`);
-            return;
-          }
-        }
+        if (unit.state === UnitState.GATHERING || unit.state === UnitState.MOVING) return;
       }
 
       // Wall building: both AI and human builders build walls when they have stone.
@@ -727,10 +755,17 @@ export class UnitAI {
       }
 
       // Auto-mine: ALL builders auto-mine for resources when idle.
-      // Priority order: mine blueprints (human only, above) → wall building → auto-mine.
+      // Priority order: building blueprints → mine blueprints → wall building → auto-mine.
       // This keeps builders productive without requiring constant micromanagement.
       if (!UnitAI.debugFlags.disableMine) {
-        if (unit.owner === 0) console.log(`[Builder] ${unit.id} fell through to auto-mine (no blueprints/walls found)`);
+        // Throttled debug log — only every 5 seconds per builder
+        if (unit.owner === 0) {
+          const now = Date.now();
+          if (!(unit as any)._lastAutoMineLog || now - (unit as any)._lastAutoMineLog > 5000) {
+            (unit as any)._lastAutoMineLog = now;
+            Logger.debug('Builder', `${unit.id} fell through to auto-mine (no blueprints/walls found)`);
+          }
+        }
         const autoMineTile = UnitAI.findNearestMineSite(unit, map);
         if (autoMineTile) {
           const claimKey = `${autoMineTile.q},${autoMineTile.r}`;
@@ -805,14 +840,7 @@ export class UnitAI {
       // Debug: if harvest is disabled, skip villager AI
       if (UnitAI.debugFlags.disableHarvest) return;
 
-      // Throttled debug logging for player villagers
-      if (!player.isAI) {
-        const now = Date.now();
-        if (!((unit as any)._lastVillagerLog) || now - (unit as any)._lastVillagerLog > 3000) {
-          (unit as any)._lastVillagerLog = now;
-          console.log(`[Villager] ${unit.id} owner=${unit.owner} pos=(${unit.position.q},${unit.position.r}) state=IDLE, grassTiles=${UnitAI.grassTiles.size} farmPatches=${UnitAI.farmPatches.size} playerGrass=${UnitAI.playerGrassBlueprint.size}`);
-        }
-      }
+      // Villager IDLE debug logging removed — was spamming console
 
       // Villager: find farm patch or tall grass to harvest, carry food to silo/base
       UnitAI.releaseTreeClaim(unit.id); // reuse claim system
@@ -879,26 +907,23 @@ export class UnitAI {
           unit.state = UnitState.GATHERING;
           unit.command = { type: CommandType.GATHER, targetPosition: target, targetUnitId: null };
           unit.gatherCooldown = isGrass ? GAME_CONFIG.gather.villagerGrassCooldown : GAME_CONFIG.gather.villagerFarmCooldown;
-          if (!player.isAI) console.log(`[Villager] ${unit.id} harvesting ${isGrass ? 'grass' : 'farm'} at (${target.q},${target.r})`);
+          if (!player.isAI) Logger.verbose('Villager', `${unit.id} harvesting ${isGrass ? 'grass' : 'farm'} at (${target.q},${target.r})`);
         } else {
           UnitAI.commandMove(unit, target, map);
-          if (!player.isAI) console.log(`[Villager] ${unit.id} moving to ${isGrass ? 'grass' : 'farm'} at (${target.q},${target.r}) dist=${dist}`);
+          if (!player.isAI) Logger.verbose('Villager', `${unit.id} moving to ${isGrass ? 'grass' : 'farm'} at (${target.q},${target.r}) dist=${dist}`);
           // If pathfinding failed (unit still idle), blacklist this tile temporarily
           if (unit.state === UnitState.IDLE) {
             UnitAI.claimedFarms.delete(tKey);
             UnitAI.markUnreachable(unit.id, tKey);
-            if (!player.isAI) console.log(`[Villager] ${unit.id} PATHFIND FAILED to (${target.q},${target.r}), blacklisted`);
+            if (!player.isAI) Logger.verbose('Villager', `${unit.id} PATHFIND FAILED to (${target.q},${target.r}), blacklisted`);
           }
         }
       } else {
+        // No harvest target found — log diagnostics and try to escape base area
         if (!player.isAI) {
-          const now = Date.now();
-          if (!((unit as any)._lastNoTargetLog) || now - (unit as any)._lastNoTargetLog > 3000) {
-            (unit as any)._lastNoTargetLog = now;
-            console.log(`[Villager] ${unit.id} NO TARGET FOUND — grassTiles=${UnitAI.grassTiles.size} basePos=${JSON.stringify(UnitAI.basePositions.get(unit.owner))}`);
-          }
+          Logger.throttle(4 /* DEBUG */, 'Villager', 5000,
+            `${unit.id} no target: farmPatches=${UnitAI.farmPatches.size} playerGrass=${UnitAI.playerGrassBlueprint.size} autoGrass=${UnitAI.grassTiles.size}`);
         }
-        // Stuck escape: if villager is near a base and can't find any work, move away
         UnitAI.tryEscapeBaseArea(unit, map);
       }
       return;
@@ -1242,7 +1267,7 @@ export class UnitAI {
     const building = UnitAI.placedBuildings.find(pb => pb.id === targetBuildingId);
     if (!building || !building.isBlueprint) {
       // Building complete or destroyed — immediately seek next blueprint
-      console.log(`[Builder] ${unit.id} construction target ${targetBuildingId} complete/gone, seeking next...`);
+      Logger.debug('Builder', `${unit.id} construction target ${targetBuildingId} complete/gone, seeking next...`);
       unit._assignedBlueprintId = undefined;
       unit.command = null;
 
@@ -1256,18 +1281,18 @@ export class UnitAI {
           unit.state = UnitState.CONSTRUCTING;
           unit.command = { type: CommandType.CONSTRUCT, targetPosition: nextBlueprint.position, targetUnitId: nextBlueprint.id };
           unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-          console.log(`[Builder] ${unit.id} chained to adjacent blueprint ${nextBlueprint.id} (${nextBlueprint.kind})`);
+          Logger.debug('Builder', `${unit.id} chained to adjacent blueprint ${nextBlueprint.id} (${nextBlueprint.kind})`);
         } else if (map) {
           unit.state = UnitState.IDLE;
           UnitAI.commandMove(unit, nextBlueprint.position, map);
-          console.log(`[Builder] ${unit.id} chained to distant blueprint ${nextBlueprint.id} (${nextBlueprint.kind}), moving...`);
+          Logger.debug('Builder', `${unit.id} chained to distant blueprint ${nextBlueprint.id} (${nextBlueprint.kind}), moving...`);
         } else {
           unit.state = UnitState.IDLE;
         }
         return;
       }
 
-      console.log(`[Builder] ${unit.id} no more blueprints found, going IDLE`);
+      Logger.info('Builder', `${unit.id} no more blueprints found, going IDLE`);
       unit.state = UnitState.IDLE;
       return;
     }
@@ -1297,15 +1322,27 @@ export class UnitAI {
     let best: PlacedBuilding | null = null;
     let bestDist = Infinity;
     const buildings = UnitAI.placedBuildings;
+    const failed = (unit as any)._failedBlueprintIds as Set<string> | undefined;
+    let ownBlueprints = 0;
+    let skippedAssigned = 0;
+    let skippedFailed = 0;
     for (let i = 0, len = buildings.length; i < len; i++) {
       const pb = buildings[i];
-      if (pb.owner !== unit.owner || !pb.isBlueprint) continue;
-      if (pb.assignedBuilderId && pb.assignedBuilderId !== unit.id) continue;
+      if (!pb.isBlueprint || pb.owner !== unit.owner) continue;
+      ownBlueprints++;
+      if (pb.assignedBuilderId && pb.assignedBuilderId !== unit.id) { skippedAssigned++; continue; }
+      if (failed && failed.has(pb.id)) { skippedFailed++; continue; }
       const d = Math.abs(pb.position.q - unit.position.q) + Math.abs(pb.position.r - unit.position.r);
       if (d < bestDist) {
         bestDist = d;
         best = pb;
       }
+    }
+    // Diagnostic: log when own blueprints exist but none are eligible
+    if (!best && ownBlueprints > 0) {
+      Logger.throttle(4 /* DEBUG */, 'Builder', 3000,
+        `${unit.id} findNearestBlueprint: ${ownBlueprints} own blueprints, none eligible — ` +
+        `skippedAssigned=${skippedAssigned} skippedFailed=${skippedFailed}`);
     }
     return best;
   }
@@ -1477,13 +1514,13 @@ export class UnitAI {
             unit.state = UnitState.CONSTRUCTING;
             unit.command = { type: CommandType.CONSTRUCT, targetPosition: bp.position, targetUnitId: bp.id };
             unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-            console.log(`[Builder] ${unit.id} deposited(early) → blueprint ${bp.id} (${bp.kind}) adjacent, constructing`);
+            Logger.debug('Builder', `${unit.id} deposited(early) → blueprint ${bp.id} (${bp.kind}) adjacent, constructing`);
             return;
           } else {
             unit.state = UnitState.IDLE;
             unit.command = null;
             UnitAI.commandMove(unit, bp.position, map);
-            console.log(`[Builder] ${unit.id} deposited(early) → blueprint ${bp.id} (${bp.kind}) dist=${bpDist}, moving`);
+            Logger.debug('Builder', `${unit.id} deposited(early) → blueprint ${bp.id} (${bp.kind}) dist=${bpDist}, moving`);
             return;
           }
         }
@@ -1559,14 +1596,14 @@ export class UnitAI {
               unit.command = { type: CommandType.CONSTRUCT, targetPosition: bp.position, targetUnitId: bp.id };
               unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
               unit._path = null;
-              console.log(`[Builder] ${unit.id} deposited → found adjacent blueprint ${bp.id} (${bp.kind}), constructing`);
+              Logger.debug('Builder', `${unit.id} deposited → found adjacent blueprint ${bp.id} (${bp.kind}), constructing`);
               return;
             } else {
               unit.state = UnitState.IDLE;
               unit.command = null;
               unit._path = null;
               UnitAI.commandMove(unit, bp.position, map);
-              console.log(`[Builder] ${unit.id} deposited → found blueprint ${bp.id} (${bp.kind}) dist=${bpDist}, moving to it`);
+              Logger.debug('Builder', `${unit.id} deposited → found blueprint ${bp.id} (${bp.kind}) dist=${bpDist}, moving to it`);
               return;
             }
           }
@@ -2113,6 +2150,9 @@ export class UnitAI {
   private static findNearestTallGrass(unit: Unit, map: GameMap): HexCoord | null {
     let best: HexCoord | null = null;
     let bestScore = Infinity;
+    // Fallback: best grass ignoring min-distance filter (used if all grass is near base)
+    let bestClose: HexCoord | null = null;
+    let bestCloseScore = Infinity;
     const midQ = Math.floor(map.width / 2);
     const basePos = UnitAI.basePositions.get(unit.owner);
     if (!basePos) return null;
@@ -2120,7 +2160,7 @@ export class UnitAI {
     // Get silo/return position — grass too close to it causes stuck-at-base loops
     // where the villager harvests without moving, returns without moving, repeat
     const siloPos = UnitAI.siloPositions.get(unit.owner) ?? basePos;
-    const MIN_DIST_FROM_RETURN = 3; // Must be at least 3 hexes from silo/base
+    const MIN_DIST_FROM_RETURN = 2; // Must be at least 2 hexes from silo/base
 
     for (const key of UnitAI.grassTiles) {
       const tile = map.tiles.get(key);
@@ -2138,14 +2178,22 @@ export class UnitAI {
       if (unit.owner === 1 && q < midQ - 2) continue;
 
       const coord = { q, r };
+      const baseDist = Pathfinder.heuristic(basePos, coord);
+      const unitDist = Pathfinder.heuristic(unit.position, coord);
 
       // Skip grass too close to the return point (base/silo) —
       // villagers would harvest in place and never venture outward
       const returnDist = Pathfinder.heuristic(siloPos, coord);
-      if (returnDist < MIN_DIST_FROM_RETURN) continue;
+      if (returnDist < MIN_DIST_FROM_RETURN) {
+        // Track as close fallback in case no distant grass exists
+        const closeScore = baseDist * 2 + unitDist;
+        if (closeScore < bestCloseScore) {
+          bestCloseScore = closeScore;
+          bestClose = coord;
+        }
+        continue;
+      }
 
-      const baseDist = Pathfinder.heuristic(basePos, coord);
-      const unitDist = Pathfinder.heuristic(unit.position, coord);
       // Worker clustering: prefer tiles near other friendly villagers
       let buddyBonus = 0;
       const allU = UnitAI._allUnitsCache;
@@ -2164,7 +2212,9 @@ export class UnitAI {
       }
     }
 
-    return best;
+    // Fallback: if all grass is near the silo/base, allow harvesting close grass
+    // rather than leaving villagers completely idle
+    return best ?? bestClose;
   }
 
   /** If a villager/builder is stuck near a base with no work, try to move it outward to open ground */
@@ -2445,7 +2495,7 @@ export class UnitAI {
             unit.state = UnitState.CONSTRUCTING;
             unit.command = { type: CommandType.CONSTRUCT, targetPosition: assigned.position, targetUnitId: assigned.id };
             unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-            console.log(`[Builder] ${unit.id} arrived adjacent to blueprint ${assigned.id} (${assigned.kind}), starting construction`);
+            Logger.debug('Builder', `${unit.id} arrived adjacent to blueprint ${assigned.id} (${assigned.kind}), starting construction`);
             return;
           }
         }
@@ -2462,7 +2512,7 @@ export class UnitAI {
             unit.state = UnitState.CONSTRUCTING;
             unit.command = { type: CommandType.CONSTRUCT, targetPosition: blueprint.position, targetUnitId: blueprint.id };
             unit.gatherCooldown = GAME_CONFIG.gather.initialConstructionDelay;
-            console.log(`[Builder] ${unit.id} arrived near unassigned blueprint ${blueprint.id} (${blueprint.kind}), starting construction`);
+            Logger.debug('Builder', `${unit.id} arrived near unassigned blueprint ${blueprint.id} (${blueprint.kind}), starting construction`);
             return;
           }
         }
@@ -2470,6 +2520,10 @@ export class UnitAI {
 
       if (!UnitAI.tryResumeSquadMarch(unit, map)) {
         unit.state = UnitState.IDLE;
+        // Builder moved to a new position — clear path-failure blacklist so it can retry
+        if (unit.type === UnitType.BUILDER && (unit as any)._failedBlueprintIds) {
+          (unit as any)._failedBlueprintIds.clear();
+        }
       }
       return;
     }

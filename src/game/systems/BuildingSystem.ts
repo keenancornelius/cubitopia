@@ -98,6 +98,13 @@ class BuildingSystem {
     UnitAI.buildingPositions.add(key);
     UnitAI.buildingOwners.set(key, owner);
 
+    // Only block pathfinding for completed buildings — blueprints must remain
+    // pathable so builders can reach them. blockedTiles is added in
+    // advanceConstruction() when construction completes.
+    if (!startAsBlueprint) {
+      Pathfinder.blockedTiles.add(key);
+    }
+
     // Blueprint visual: make mesh semi-transparent + add wireframe overlay
     if (startAsBlueprint) {
       this.applyBlueprintVisual(mesh, 0);
@@ -149,6 +156,9 @@ class BuildingSystem {
       pb.isBlueprint = false;
       pb.assignedBuilderId = null;
       this.clearBlueprintVisual(pb.mesh);
+      // Now that construction is complete, block the tile for pathfinding
+      const key = `${pb.position.q},${pb.position.r}`;
+      Pathfinder.blockedTiles.add(key);
       return true; // construction complete
     }
     return false;

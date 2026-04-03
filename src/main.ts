@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { Renderer } from './engine/Renderer';
 import { StrategyCamera } from './engine/Camera';
+import { Logger } from './engine/Logger';
 import { VoxelBuilder } from './engine/VoxelBuilder';
 import { UnitRenderer } from './engine/UnitRenderer';
 import { TileHighlighter } from './engine/TileHighlighter';
@@ -437,7 +438,7 @@ class Cubitopia {
       const cfg = this.BUILDING_PLACEMENT_CONFIG[pb.kind];
       if (cfg?.unitAIHook) cfg.unitAIHook(pb.position);
       this.hud.showNotification(`${pb.kind} construction complete!`, '#2ecc71');
-      console.log(`[Construction] ${pb.kind} at (${pb.position.q},${pb.position.r}) completed for player ${pb.owner}`);
+      Logger.info('Construction', `${pb.kind} at (${pb.position.q},${pb.position.r}) completed for player ${pb.owner}`);
     }
   }
 
@@ -2152,7 +2153,7 @@ class Cubitopia {
     const base = this.bases.find(b => b.id === evt.baseId);
     if (!base) return;
 
-    console.log(`[CaptureZone] Base ${evt.baseId} captured by player ${evt.newOwner} (was ${evt.previousOwner})`);
+    Logger.info('CaptureZone', `Base ${evt.baseId} captured by player ${evt.newOwner} (was ${evt.previousOwner})`);
 
     // Re-render base with new team colors and flag — preserve original Y for underground bases
     const zone = this.captureZoneSystem.getZoneForBase(evt.baseId);
@@ -2172,7 +2173,7 @@ class Cubitopia {
           pb.owner = evt.newOwner;
           // Re-render building with new team colors
           this.buildingSystem.refreshBuildingMesh(pb);
-          console.log(`  Transferred ${pb.kind} at (${pb.position.q},${pb.position.r}) to player ${evt.newOwner}`);
+          Logger.debug('CaptureZone', `Transferred ${pb.kind} at (${pb.position.q},${pb.position.r}) to player ${evt.newOwner}`);
         }
       }
     }
@@ -2844,7 +2845,7 @@ class Cubitopia {
   }
 
   private removeUnitFromGame(unit: Unit, killer?: Unit): void {
-    console.log(`[DEATH] ${unit.type}(${unit.id}) owner=${unit.owner} hp=${unit.currentHealth}/${unit.stats.maxHealth}${killer ? ` killer=${killer.type}(${killer.id})` : ''}`);
+    Logger.debug('Combat', `${unit.type}(${unit.id}) owner=${unit.owner} hp=${unit.currentHealth}/${unit.stats.maxHealth}${killer ? ` killer=${killer.type}(${killer.id})` : ''}`);
     for (const player of this.players) {
       const idx = player.units.indexOf(unit);
       if (idx !== -1) {
@@ -3015,8 +3016,14 @@ class Cubitopia {
 
   // Squad indicators moved to SquadIndicatorSystem; debug overlay moved to DebugOverlayRenderer
 
-  /** Click indicator VFX — delegates to Renderer */
+  /** Click indicator VFX — delegates to Renderer.
+   *  Adjusts Y to the actual terrain elevation so the indicator sits on the ground. */
   spawnClickIndicator(worldPos: THREE.Vector3, color: number, size = 0.8): void {
+    // Snap Y to terrain elevation so the indicator shows on top of the terrain
+    const hex = this.worldToHex(worldPos);
+    if (hex) {
+      worldPos.y = this.getElevation(hex) + 0.25;
+    }
     this.renderer.spawnClickIndicator(worldPos, color, size);
   }
 

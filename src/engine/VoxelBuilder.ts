@@ -11,6 +11,7 @@
 
 import * as THREE from 'three';
 import { BlockType, VoxelBlock, GridPosition, GameMap } from '../types';
+import { Logger } from './Logger';
 
 // Vibrant color palette inspired by Polytopia/Minecraft aesthetic
 const BLOCK_COLORS: Record<BlockType, number> = {
@@ -533,7 +534,7 @@ export class VoxelBuilder {
   // ── Legacy API: removeBlock ──────────────────────────────────────
 
   removeBlock(_position: GridPosition, _type: BlockType): void {
-    console.log('Block removal — use markTileDirty + flushDirtyChunks instead');
+    Logger.warn('VoxelBuilder', 'Block removal — use markTileDirty + flushDirtyChunks instead');
   }
 
   // ── Raycast ──────────────────────────────────────────────────────

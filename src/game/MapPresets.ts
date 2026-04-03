@@ -8,6 +8,7 @@ import {
   ResourceType, MapType, MapPreset, ENABLE_UNDERGROUND,
 } from '../types';
 import { MapGenerator } from './MapGenerator';
+import { Logger } from '../engine/Logger';
 
 // --- Map Preset Definitions ---
 const ALL_MAP_PRESETS: MapPreset[] = [
@@ -466,7 +467,7 @@ function carveDesertTunnels(
   const CAVERN_FLOOR_Y = -16;
   const CAVERN_HEIGHT = 12; // tall ceiling for an epic feel
   gen.carveCavern(cavernCenter, CAVERN_RADIUS, CAVERN_FLOOR_Y, CAVERN_HEIGHT, map);
-  console.log(`[DesertTunnels] Central cavern at (${center},${center}), floorY=${CAVERN_FLOOR_Y}, radius=${CAVERN_RADIUS}`);
+  Logger.debug('DesertTunnels', `Central cavern at (${center},${center}), floorY=${CAVERN_FLOOR_Y}, radius=${CAVERN_RADIUS}`);
 
   // --- Step 2: Pick 3-4 surface entrance locations ---
   // Spread them around the map edges (NW, NE, SW, SE quadrants)
@@ -500,7 +501,7 @@ function carveDesertTunnels(
     const path = gen.traceTubePath(entrance, cavernCenter, map, size, size);
     if (path.length >= 6) {
       gen.carveTunnelBlocks(path, map, false, true); // Cave mouth at surface entrance only, not at cavern end
-      console.log(`[DesertTunnels] Surface entrance at (${entrance.q},${entrance.r}) → cavern`);
+      Logger.debug('DesertTunnels', `Surface entrance at (${entrance.q},${entrance.r}) -> cavern`);
     }
   }
 
@@ -613,13 +614,13 @@ function carveDesertTunnels(
       r: Math.max(SIDE_CAVERN_RADIUS + 2, Math.min(size - SIDE_CAVERN_RADIUS - 2, center + offset.dr)),
     };
     gen.carveCavern(scCenter, SIDE_CAVERN_RADIUS, SIDE_CAVERN_FLOOR_Y, SIDE_CAVERN_HEIGHT, map);
-    console.log(`[DesertTunnels] Side cavern at (${scCenter.q},${scCenter.r}), floorY=${SIDE_CAVERN_FLOOR_Y}, radius=${SIDE_CAVERN_RADIUS}`);
+    Logger.debug('DesertTunnels', `Side cavern at (${scCenter.q},${scCenter.r}), floorY=${SIDE_CAVERN_FLOOR_Y}, radius=${SIDE_CAVERN_RADIUS}`);
 
     // Connect side cavern to central cavern via deep tunnel
     const connPath = gen.traceTubePath(scCenter, cavernCenter, map, size, size);
     if (connPath.length >= 3) {
       gen.carveTunnelBlocks(connPath, map, true); // Deep only, no surface opening
-      console.log(`[DesertTunnels] Connected side cavern (${scCenter.q},${scCenter.r}) to central cavern`);
+      Logger.debug('DesertTunnels', `Connected side cavern (${scCenter.q},${scCenter.r}) to central cavern`);
     }
 
     extraCaverns.push({ center: scCenter, floorY: SIDE_CAVERN_FLOOR_Y });

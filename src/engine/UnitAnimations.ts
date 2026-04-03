@@ -128,6 +128,16 @@ export class UnitAnimations {
     const legLeft = entry.group.getObjectByName('leg-left');
     const legRight = entry.group.getObjectByName('leg-right');
 
+    // Save the base world position before animation modifies it.
+    // Animation code sets position.y (and sometimes .x) to small absolute offsets,
+    // which must be ADDED to the world position, not replace it.
+    const baseX = entry.group.position.x;
+    const baseY = entry.group.position.y;
+    const baseZ = entry.group.position.z;
+    // Reset position offsets to 0 so animation writes pure offsets
+    entry.group.position.y = 0;
+    entry.group.position.x = 0;
+
     // Smoothly decay body rotation each frame (don't let it stay tilted)
     entry.group.rotation.z *= 0.85;
     entry.group.rotation.x *= 0.85;
@@ -197,6 +207,13 @@ export class UnitAnimations {
     if (type === UnitType.BATTLEMAGE) {
       this._animateBattlemageAura(entry, time);
     }
+
+    // ─── RESTORE WORLD POSITION ───────────────────────────────────
+    // Animation branches above wrote pure offsets (e.g. -0.03 crouch, 0.05 rise).
+    // Add the saved base world position back so the unit renders at the correct spot.
+    entry.group.position.x += baseX;
+    entry.group.position.y += baseY;
+    entry.group.position.z = baseZ; // Z is never modified by animations
   }
 
   // ─── GATHERING ─────────────────────────────────────────

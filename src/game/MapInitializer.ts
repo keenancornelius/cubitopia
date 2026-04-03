@@ -21,6 +21,7 @@
 import * as THREE from 'three';
 import { Pathfinder, tileKey } from '../game/systems/Pathfinder';
 import { MapGenerator } from './MapGenerator';
+import { Logger } from '../engine/Logger';
 import {
   GameMap,
   HexCoord,
@@ -202,7 +203,7 @@ export default class MapInitializer {
           if (hexDist(c, p1) < MIN_DIST || hexDist(c, p2) < MIN_DIST) continue;
           if (placed.some(p => hexDist(c, p) < MIN_DIST)) continue;
           placed.push(c);
-          console.log(`[BaseSmooth] Smoothing neutral ${sb.terrain} base at (${c.q},${c.r})`);
+          Logger.debug('BaseSmooth', `Smoothing neutral ${sb.terrain} base at (${c.q},${c.r})`);
           this.smoothNeutralBaseArea(map, c, sb.terrain);
         }
       }
@@ -729,7 +730,7 @@ export default class MapInitializer {
         };
         bases.push(neutralBase);
         this.ops.addBase(neutralBase, neutralY);
-        console.log(`[DesertTunnels] Neutral underdark city at (${neutralCoord.q},${neutralCoord.r}), Y=${neutralY}`);
+        Logger.info('DesertTunnels', `Neutral underdark city at (${neutralCoord.q},${neutralCoord.r}), Y=${neutralY}`);
       }
 
       // Extra underground outposts
@@ -755,7 +756,7 @@ export default class MapInitializer {
           };
           bases.push(extraBase);
           this.ops.addBase(extraBase, yLevel);
-          console.log(`[DesertTunnels] Extra underground outpost ${i + 1} at (${coord.q},${coord.r}), Y=${yLevel}`);
+          Logger.debug('DesertTunnels', `Extra underground outpost ${i + 1} at (${coord.q},${coord.r}), Y=${yLevel}`);
         }
       }
     }
@@ -783,7 +784,7 @@ export default class MapInitializer {
         };
         bases.push(ugBase);
         this.ops.addBase(ugBase, yLevel);
-        console.log(`[Underground] Neutral base ${i} at (${coord.q},${coord.r}), Y=${yLevel}`);
+        Logger.info('Underground', `Neutral base ${i} at (${coord.q},${coord.r}), Y=${yLevel}`);
       }
     }
   }
@@ -811,9 +812,7 @@ export default class MapInitializer {
           Math.abs((-coord.q - coord.r) - (-p2BaseCoord.q - p2BaseCoord.r))) /
         2;
       if (distP1 < MIN_DIST_FROM_CAPITAL || distP2 < MIN_DIST_FROM_CAPITAL) {
-        console.log(
-          `[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d1=${distP1}, d2=${distP2})`,
-        );
+        Logger.debug('Surface', `Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d1=${distP1}, d2=${distP2})`);
         continue;
       }
 
@@ -828,7 +827,7 @@ export default class MapInitializer {
         return d < MIN_DIST_FROM_CAPITAL;
       });
       if (tooCloseToOther) {
-        console.log(`[Surface] Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to another neutral base`);
+        Logger.debug('Surface', `Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to another neutral base`);
         continue;
       }
 
@@ -852,7 +851,7 @@ export default class MapInitializer {
       };
       bases.push(surfBase);
       this.ops.addBase(surfBase, surfY);
-      console.log(`[Surface] Neutral ${sb.terrain} base ${i} at (${coord.q},${coord.r}), Y=${surfY}`);
+      Logger.info('Surface', `Neutral ${sb.terrain} base ${i} at (${coord.q},${coord.r}), Y=${surfY}`);
     }
   }
 }

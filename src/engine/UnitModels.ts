@@ -3371,7 +3371,8 @@ export class UnitModels {
         // Elbow
         const oElbowR = new THREE.Group();
         oElbowR.name = 'arm-right-elbow';
-        oElbowR.position.y = -0.18;
+        oElbowR.position.set(0.0000, -0.1800, 0.0000);
+        oElbowR.rotation.set(-1.0516, -0.4516, 0.2884);
         // Forearm
         const oForearmR = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.20, 0.14), ogreSkin);
         oForearmR.position.y = -0.10;
@@ -3385,8 +3386,8 @@ export class UnitModels {
         // === THE CLUB — massive crude weapon ===
         const clubGrp = new THREE.Group();
         clubGrp.name = 'club-group';
-        clubGrp.position.y = -0.26;
-        clubGrp.rotation.x = 0.3; // angled forward slightly
+        clubGrp.position.set(0.0000, -0.1800, 0.0000);
+        clubGrp.rotation.set(-1.0516, -0.4516, 0.2884);
         // Shaft (thick log)
         const clubShaft = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.60, 0.10), ogreWood);
         clubShaft.name = 'club-shaft';

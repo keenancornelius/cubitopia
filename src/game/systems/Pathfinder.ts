@@ -4,6 +4,7 @@
 // ============================================
 
 import { HexCoord, GameMap, TerrainType } from '../../types';
+import { Logger } from '../../engine/Logger';
 
 interface PathNode {
   coord: HexCoord;
@@ -104,6 +105,7 @@ export class Pathfinder {
         const nKey = `${n.q},${n.r}`;
         const nTile = map.tiles.get(nKey);
         if (nTile && nTile.terrain !== TerrainType.WATER
+            && (canTraverseForest || nTile.terrain !== TerrainType.FOREST)
             && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
           if (dist < bestDist) {
@@ -113,9 +115,20 @@ export class Pathfinder {
         }
       }
       if (bestNeighbor) {
+        const bTile = map.tiles.get(`${bestNeighbor.q},${bestNeighbor.r}`);
+        Logger.debug('Pathfinder', `Blocked goal (${goal.q},${goal.r}) → redirect to (${bestNeighbor.q},${bestNeighbor.r}) terrain=${bTile?.terrain} elev=${bTile ? (bTile.walkableFloor ?? bTile.elevation) : '?'} | start=(${start.q},${start.r})`);
         effectiveGoal = bestNeighbor;
         effectiveGoalKey = `${bestNeighbor.q},${bestNeighbor.r}`;
       } else {
+        // Log what candidates were rejected
+        const ring1 = Pathfinder.getHexNeighbors(goal);
+        const reasons: string[] = [];
+        for (const n of ring1) {
+          const nk = `${n.q},${n.r}`;
+          const nt = map.tiles.get(nk);
+          reasons.push(`(${n.q},${n.r}):${!nt?'noTile':nt.terrain}${Pathfinder.blockedTiles.has(nk)?'/blocked':''}${nt?.terrain===TerrainType.FOREST?'/forest':''}`);
+        }
+        Logger.debug('Pathfinder', `Blocked goal (${goal.q},${goal.r}) — NO redirect found! Neighbors: ${reasons.join(', ')}`);
         return []; // Completely walled off — no path possible
       }
     }
@@ -194,7 +207,7 @@ export class Pathfinder {
           moveCost += 3; // Reduced from 8 — still discourages but doesn't block
         }
         const g = current.g + moveCost;
-        const h = Pathfinder.heuristic(neighbor, goal);
+        const h = Pathfinder.heuristic(neighbor, effectiveGoal);
         const f = g + h;
 
         // Check if this neighbor is already in open with a better path
@@ -212,6 +225,7 @@ export class Pathfinder {
       }
     }
 
+    Logger.debug('Pathfinder', `A* exhausted: (${start.q},${start.r}) → effective (${effectiveGoal.q},${effectiveGoal.r}) | explored ${closed.size} nodes, open=${open.length}`);
     return []; // No path found
   }
 

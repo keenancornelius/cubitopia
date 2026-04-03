@@ -102,17 +102,19 @@ export default class CombatEventHandler {
    * damage numbers / hit effects appear. Calculated from:
    *   delay = (strike_cycle_midpoint / anim_speed) * 1000
    */
+  // Each delay = impactCyclePoint / animSpeed * 1000
+  // Syncs damage flash to exact frame where weapon visually connects
   static readonly MELEE_STRIKE_DELAY: Partial<Record<UnitType, number>> = {
-    [UnitType.WARRIOR]:      420,  // speed=1.1, strike mid ~0.45 → 409ms
-    [UnitType.PALADIN]:      390,  // speed=1.2, strike mid ~0.45 → 375ms
-    [UnitType.RIDER]:        420,  // speed=1.2, strike mid ~0.50 → 417ms
-    [UnitType.SCOUT]:        230,  // speed=1.4, strike mid ~0.30 → 214ms (fast jab)
-    [UnitType.ASSASSIN]:     360,  // speed=1.2, strike mid ~0.42 → 350ms
-    [UnitType.BERSERKER]:    420,  // speed=1.1, strike mid ~0.45 → 409ms
-    [UnitType.SHIELDBEARER]: 460,  // speed=1.0, strike mid ~0.45 → 450ms (heavy tank)
-    [UnitType.GREATSWORD]:   510,  // speed=0.85, strike mid ~0.42 → 494ms (massive wind-up)
-    [UnitType.OGRE]:         580,  // speed=0.6, strike mid ~0.42 → 700ms (heaviest unit in game)
-    [UnitType.LUMBERJACK]:   350,  // speed=1.4, generic melee
+    [UnitType.WARRIOR]:      440,  // speed=1.05, strike lands at cycle ~0.46 → 438ms
+    [UnitType.PALADIN]:      400,  // speed=1.2,  mace smash at cycle ~0.48 → 400ms
+    [UnitType.RIDER]:        335,  // speed=1.2,  lance thrust at cycle ~0.40 → 333ms
+    [UnitType.SCOUT]:        215,  // speed=1.4,  stab lands at cycle ~0.30 → 214ms
+    [UnitType.ASSASSIN]:     275,  // speed=1.2,  jump-stab at cycle ~0.33 → 275ms
+    [UnitType.BERSERKER]:    440,  // speed=1.0,  axe chop at cycle ~0.44 → 440ms
+    [UnitType.SHIELDBEARER]: 460,  // speed=1.0,  shield bash at cycle ~0.46 → 460ms
+    [UnitType.GREATSWORD]:   550,  // speed=0.8,  cleave at cycle ~0.44 → 550ms
+    [UnitType.OGRE]:         830,  // speed=0.6,  club slam at cycle ~0.50 → 833ms
+    [UnitType.LUMBERJACK]:   180,  // speed=1.4,  swing peak at cycle ~0.25 → 179ms
   };
 
   constructor(ops: CombatEventOps) {

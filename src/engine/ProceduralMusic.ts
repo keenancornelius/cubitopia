@@ -6,6 +6,8 @@
 // Crossfades between peaceful and combat tracks based on game state.
 // ============================================
 
+import { Logger } from './Logger';
+
 /** Mood presets the game can request. */
 export enum MusicMood {
   CHILL_AMBIENT = 'chill_ambient',
@@ -210,7 +212,7 @@ export class ProceduralMusic {
     this._currentGenre = genreId;
     try { localStorage.setItem(GENRE_STORAGE_KEY, genreId); } catch {}
 
-    console.log(`[Music] Genre changed to: ${genre.label}`);
+    Logger.info('Music', `Genre changed to: ${genre.label}`);
 
     // If already initialized, reload tracks immediately
     if (this._initialized && !this._loading) {
@@ -219,6 +221,13 @@ export class ProceduralMusic {
       this.combatBuffers = [];
       this._loadedAny = false;
       this._loadTracks();
+    }
+
+    // If title music is playing, swap to the genre's title track
+    if (this._titlePlaying || this._titleWanted) {
+      this._stopTitleSource();
+      this._titleBuffer = null; // Force reload from new genre folder
+      this.playTitleMusic();
     }
   }
 
@@ -273,7 +282,7 @@ export class ProceduralMusic {
       this.masterGain.connect(this.ctx.destination);
       this._volume = musicVolume;
       this._initialized = true;
-      console.log('[Music] AudioContext ready, loading tracks...');
+      Logger.info('Music', 'AudioContext ready, loading tracks...');
 
       this._loadTracks();
       return;
@@ -381,7 +390,7 @@ export class ProceduralMusic {
 
     // Fallback: if genre folder is empty, try legacy flat layout
     if (this.peacefulBuffers.length === 0 && this.combatBuffers.length === 0) {
-      console.log(`[Music] No tracks in ${folder}/, trying legacy flat layout...`);
+      Logger.debug('Music', `No tracks in ${folder}/, trying legacy flat layout...`);
       const [legacyPeaceful, legacyCombat] = await Promise.all([
         Promise.all(LEGACY_PEACEFUL.map(loadTrack)),
         Promise.all(LEGACY_COMBAT.map(loadTrack)),
@@ -394,11 +403,9 @@ export class ProceduralMusic {
     this._loadedAny = totalLoaded > 0;
 
     if (totalLoaded > 0) {
-      console.log(`[Music] Genre "${this._currentGenre}" — loaded ${this.peacefulBuffers.length} peaceful + ${this.combatBuffers.length} combat tracks`);
+      Logger.info('Music', `Genre "${this._currentGenre}" — loaded ${this.peacefulBuffers.length} peaceful + ${this.combatBuffers.length} combat tracks`);
     } else {
-      console.log(`[Music] No tracks found for genre "${this._currentGenre}". Add MP3s to public/${folder}/:`);
-      console.log('  Peaceful: peaceful1.mp3, peaceful2.mp3, ...');
-      console.log('  Combat:   combat1.mp3, combat2.mp3, ...');
+      Logger.warn('Music', `No tracks found for genre "${this._currentGenre}". Add MP3s to public/${folder}/:  Peaceful: peaceful1.mp3, peaceful2.mp3, ...  Combat: combat1.mp3, combat2.mp3, ...`);
     }
 
     this._loading = false;
@@ -419,7 +426,7 @@ export class ProceduralMusic {
 
     this._playBuffer(buffers[this._currentTrackIndex]);
     this._playing = true;
-    console.log(`[Music] Playing ${this._isCombatTrack ? 'combat' : 'peaceful'} track ${this._currentTrackIndex}`);
+    Logger.info('Music', `Playing ${this._isCombatTrack ? 'combat' : 'peaceful'} track ${this._currentTrackIndex}`);
   }
 
   private _playBuffer(buffer: AudioBuffer): void {
@@ -462,16 +469,16 @@ export class ProceduralMusic {
     // Combat track just finished — decide whether to keep playing combat or return to peaceful
     if (this._isCombatTrack && this._combatTrackLocked) {
       if (this._combatDuringTrack && this._intensity > 0.05) {
-        console.log('[Music] Combat still active, playing next combat track');
+        Logger.info('Music', 'Combat still active, playing next combat track');
         this._combatDuringTrack = false;
         const buffers = this.combatBuffers;
         if (buffers.length === 0) return;
         this._currentTrackIndex = (this._currentTrackIndex + 1) % buffers.length;
         this._playBuffer(buffers[this._currentTrackIndex]);
-        console.log(`[Music] Advanced to combat track ${this._currentTrackIndex}`);
+        Logger.debug('Music', `Advanced to combat track ${this._currentTrackIndex}`);
         return;
       } else {
-        console.log('[Music] Combat ended, returning to peaceful music');
+        Logger.info('Music', 'Combat ended, returning to peaceful music');
         this._combatTrackLocked = false;
         this._combatDuringTrack = false;
         if (this.peacefulBuffers.length > 0) {
@@ -486,7 +493,7 @@ export class ProceduralMusic {
 
     this._currentTrackIndex = (this._currentTrackIndex + 1) % buffers.length;
     this._playBuffer(buffers[this._currentTrackIndex]);
-    console.log(`[Music] Advanced to ${this._isCombatTrack ? 'combat' : 'peaceful'} track ${this._currentTrackIndex}`);
+    Logger.info('Music', `Advanced to ${this._isCombatTrack ? 'combat' : 'peaceful'} track ${this._currentTrackIndex}`);
   }
 
   private _checkTrackEnd(): void {
@@ -541,7 +548,7 @@ export class ProceduralMusic {
     this._isCombatTrack = combat;
     this._currentTrackIndex = nextIndex;
 
-    console.log(`[Music] Crossfading to ${combat ? 'combat' : 'peaceful'} track ${nextIndex}`);
+    Logger.info('Music', `Crossfading to ${combat ? 'combat' : 'peaceful'} track ${nextIndex}`);
 
     setTimeout(() => { this._crossfading = false; }, CROSSFADE_TIME * 1000);
   }
@@ -556,6 +563,7 @@ export class ProceduralMusic {
   private _titleLoading = false;
   private _titlePlaying = false;
   private _titleWanted = false; // Cancellation flag for async load
+  private _titleGenre: string = ''; // Genre the cached title buffer belongs to
 
   /**
    * Play Title.mp3 on a loop for the main menu.
@@ -572,7 +580,7 @@ export class ProceduralMusic {
         this.masterGain.gain.value = this._volume;
         this.masterGain.connect(this.ctx.destination);
       } catch {
-        console.log('[Music] Could not create AudioContext for title music');
+        Logger.warn('Music', 'Could not create AudioContext for title music');
         return;
       }
     }
@@ -581,19 +589,27 @@ export class ProceduralMusic {
       try { await this.ctx.resume(); } catch { return; }
     }
 
-    // Load title track if not cached
-    if (!this._titleBuffer && !this._titleLoading) {
+    // Load title track if not cached or genre changed
+    const genre = MUSIC_GENRES.find(g => g.id === this._currentGenre);
+    const genreFolder = genre?.folder ?? 'fantasy';
+    if ((!this._titleBuffer || this._titleGenre !== this._currentGenre) && !this._titleLoading) {
       this._titleLoading = true;
+      this._titleBuffer = null; // Clear stale buffer
       try {
-        const resp = await fetch('music/Title.mp3');
+        // Try genre-specific Title.mp3 first, then fall back to root
+        let resp = await fetch(`music/${genreFolder}/Title.mp3`);
+        if (!resp.ok) {
+          resp = await fetch('music/Title.mp3');
+        }
         if (resp.ok) {
           const arrayBuf = await resp.arrayBuffer();
           this._titleBuffer = await this.ctx!.decodeAudioData(arrayBuf);
+          this._titleGenre = this._currentGenre;
         } else {
-          console.log('[Music] Title.mp3 not found — add it to public/music/');
+          Logger.warn('Music', 'Title.mp3 not found — add it to public/music/ or genre folder');
         }
       } catch {
-        console.log('[Music] Failed to load Title.mp3');
+        Logger.warn('Music', 'Failed to load Title.mp3');
       }
       this._titleLoading = false;
     }
@@ -619,7 +635,7 @@ export class ProceduralMusic {
     this._titleSource = source;
     this._titleGain = gain;
     this._titlePlaying = true;
-    console.log('[Music] Title screen music playing');
+    Logger.info('Music', 'Title screen music playing');
   }
 
   /** Fade out and stop title music (called when game starts). */
@@ -643,7 +659,7 @@ export class ProceduralMusic {
     }
 
     this._titlePlaying = false;
-    console.log('[Music] Title screen music stopped');
+    Logger.info('Music', 'Title screen music stopped');
   }
 
   private _stopTitleSource(): void {
@@ -669,6 +685,7 @@ export class ProceduralMusic {
   private _tutorialGain: GainNode | null = null;
   private _tutorialLoading = false;
   private _savedMasterVolume = 0.5;
+  private _tutorialGenre: string = ''; // Genre the cached tutorial buffer belongs to
 
   /** Load and play Tutorial.mp3, ducking the game music volume. */
   async playTutorial(): Promise<void> {
@@ -678,19 +695,27 @@ export class ProceduralMusic {
     this._savedMasterVolume = this._volume;
     this.masterGain.gain.setTargetAtTime(this._volume * 0.15, this.ctx.currentTime, 0.3);
 
-    // Load tutorial track if not cached
-    if (!this._tutorialBuffer && !this._tutorialLoading) {
+    // Load tutorial track if not cached or genre changed
+    const tutGenre = MUSIC_GENRES.find(g => g.id === this._currentGenre);
+    const tutFolder = tutGenre?.folder ?? 'fantasy';
+    if ((!this._tutorialBuffer || this._tutorialGenre !== this._currentGenre) && !this._tutorialLoading) {
       this._tutorialLoading = true;
+      this._tutorialBuffer = null;
       try {
-        const resp = await fetch('music/Tutorial.mp3');
+        // Try genre-specific tutorial first, then fall back to root
+        let resp = await fetch(`music/${tutFolder}/tutorial.mp3`);
+        if (!resp.ok) {
+          resp = await fetch('music/Tutorial.mp3');
+        }
         if (resp.ok) {
           const arrayBuf = await resp.arrayBuffer();
           this._tutorialBuffer = await this.ctx.decodeAudioData(arrayBuf);
+          this._tutorialGenre = this._currentGenre;
         } else {
-          console.log('[Music] Tutorial.mp3 not found — add it to public/music/');
+          Logger.warn('Music', 'Tutorial.mp3 not found — add it to public/music/ or genre folder');
         }
       } catch {
-        console.log('[Music] Failed to load Tutorial.mp3');
+        Logger.warn('Music', 'Failed to load Tutorial.mp3');
       }
       this._tutorialLoading = false;
     }
@@ -713,7 +738,7 @@ export class ProceduralMusic {
     source.start(0);
     this._tutorialSource = source;
     this._tutorialGain = gain;
-    console.log('[Music] Tutorial track playing');
+    Logger.info('Music', 'Tutorial track playing');
   }
 
   /** Stop tutorial track and restore game music volume. */
@@ -724,7 +749,7 @@ export class ProceduralMusic {
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(this._savedMasterVolume, this.ctx.currentTime, 0.3);
     }
-    console.log('[Music] Tutorial track stopped');
+    Logger.info('Music', 'Tutorial track stopped');
   }
 
   private _stopTutorialSource(): void {
