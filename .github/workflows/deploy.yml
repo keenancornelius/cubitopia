@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 20
 
-      - run: rm -f package-lock.json && npm install
+      - run: npm install
 
       - run: npm run build
         env:

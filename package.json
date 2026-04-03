@@ -14,7 +14,6 @@
     "vite": "^5.4.14"
   },
   "dependencies": {
-    "@rollup/rollup-linux-arm64-gnu": "^4.60.1",
     "@types/three": "^0.183.1",
     "three": "^0.183.2"
   }
