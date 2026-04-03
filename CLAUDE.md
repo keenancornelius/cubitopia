@@ -22,7 +22,7 @@ These must be addressed BEFORE adding major new features. Technical debt is acti
 1. ~~**Shrink main.ts to <3000 lines**~~ **DONE (2026-04-01).** Currently **3063 lines** (down from 5043, 39% cut). Extracted modules: InputManager (1267), MapInitializer (560), RallyPointSystem (229), InteractionStateMachine (241), SquadIndicatorSystem (87), LifecycleUpdater (137), DebugOverlayRenderer (93). Moved: _updateMusic → ProceduralMusic.updateFromGameState(), spawnClickIndicator → Renderer, spawnTestArmies + spawnFormationArmy → DebugController, killSelected → DebugController. Removed: 37 dead legacy ISM getters.
 2. ~~**Split UnitRenderer.ts (8981 lines)**~~ **DONE (2026-04-01).** UnitRenderer.ts is now a 938-line facade. Heavy logic split into: UnitModels.ts (3526 lines — mesh factories), UnitAnimations.ts (2175 — idle/attack/move/hit), ProjectileSystem.ts (1505 — all projectile/spell methods), UnitVFX.ts (1053 — health bars, selection rings, particles, effects). Public API preserved — no external import changes needed.
 3. ~~**Consolidate placement mode flags**~~ **DONE (2026-04-01).** Replaced 26 boolean flags + 10 rotation fields with `InteractionStateMachine.ts` — typed discriminated union FSM with proper enter/exit transitions. See `src/game/InteractionStateMachine.ts`.
-4. ~~**Centralize magic numbers**~~ **DONE (2026-04-01).** `src/game/GameConfig.ts` (490 lines) centralizes all balance constants: unit costs, building costs, AI weights, combat values (damage/block/deflect/XP), timers, formation params, economy recipes, mining priorities, boids perception radii, capture zone params, tactical group thresholds, and gather cooldowns. Used by 10+ consumer files via `GAME_CONFIG.*` references.
+4. ~~**Centralize magic numbers**~~ **DONE (2026-04-01).** `src/game/GameConfig.ts` (490 lines) centralizes all balance constants: unit costs, building costs, AI weights, combat values (damage/block/deflect/XP), timers, formation params, economy recipes, mining priorities, capture zone params, tactical group thresholds, and gather cooldowns. Used by 10+ consumer files via `GAME_CONFIG.*` references.
 
 ### Performance Goals (Priority 2 — Required for Shipping)
 These directly affect whether the game feels good to play.
@@ -245,7 +245,6 @@ Leg swing + arm counter-swing + body bob. Usually simpler than idle/attack. Same
 - `src/engine/UnitAnimations.ts` — **Unit animation system (~2175 lines)**. Idle/attack/move/hit/constructing animations per unit type with phase-based easing. Fixed animation position override bug — saves base position at start, resets to 0 for pure offsets, restores at end.
 - `src/engine/ProjectileSystem.ts` — **Projectile & spell VFX (~1505 lines)**. Arrows, magic orbs, elemental projectiles, axe throws, heal orbs, boulders, deflection effects.
 - `src/engine/UnitVFX.ts` — **Unit visual effects (~1053 lines)**. Health bars, selection rings, damage particles, block sparks, knockback, XP text, level-up effects.
-- `src/game/systems/BoidsSteering.ts` — **Flocking behavior (~524 lines)**. Boids-based unit movement steering for natural group movement.
 - `src/game/systems/TacticalGroup.ts` — **Tactical grouping (~520 lines)**. Groups nearby units into tactical formations for coordinated combat behavior.
 - `src/game/MapInitializer.ts` — **Map generation orchestrator (~858 lines)**. Coordinates map creation, resource placement, base setup. Uses `MapInitOps` slim interface.
 - `src/engine/InstancedObjectManager.ts` — **Instanced rendering (~292 lines)**. Manages InstancedMesh for repeated objects (trees, grass).
@@ -513,7 +512,7 @@ Resolved items are struck through. Remaining items should be addressed during th
 
 14. **DebugPanel.ts at ~1566 lines**: Nearly doubled from 777. The UNITS tab (weapon debug, 3D preview) added significant code. Consider splitting into DebugPanelTools.ts, DebugPanelArmy.ts, DebugPanelUnits.ts.
 
-15. ~~**BoidsSteering.ts has TS errors**~~ — RESOLVED: Added boids config section to GameConfig.ts (separationRadius, alignmentRadius, cohesionRadius, maxSpeed, maxForce) fixing all TS compile errors.
+15. ~~**BoidsSteering.ts has TS errors**~~ — RESOLVED: Deleted BoidsSteering.ts entirely — boids system was never wired in and caused movement problems. Removed boids config from GameConfig.ts.
 
 ---
 
@@ -545,7 +544,7 @@ The debug panel "Kill" button callback was wired through `main.respawnSelectedUn
 ## Current Mission: Architecture Cleanup & Performance
 
 ### Status (2026-04-02)
-main.ts at **3063 lines** (target <3000, 63 lines over). UnitRenderer.ts split into 867-line facade + 4 subsystem modules. **All 4 architecture goals DONE.** GameConfig.ts (490 lines) centralizes all balance constants including boids config. **Performance Goal #1 DONE**: chunked voxel meshing. Title scene cinematic fully operational with real combat VFX, tactical formations, balanced respawn, and healer AI. ProceduralMusic system handles title/gameplay/tutorial music transitions. **Total codebase: ~45,775 lines.**
+main.ts at **3063 lines** (target <3000, 63 lines over). UnitRenderer.ts split into 867-line facade + 4 subsystem modules. **All 4 architecture goals DONE.** GameConfig.ts (482 lines) centralizes all balance constants. **Performance Goal #1 DONE**: chunked voxel meshing. Title scene cinematic fully operational with real combat VFX, tactical formations, balanced respawn, and healer AI. ProceduralMusic system handles title/gameplay/tutorial music transitions. **Total codebase: ~45,775 lines.**
 
 ### Bug Fixes (2026-04-01)
 - **Spawn building rotation**: `getNextSpawnBuilding()` was advancing the round-robin index on every call. `SpawnQueueSystem` called it twice per spawn (once to check, once to use), causing frame-rate-dependent building skipping. Fix: `getNextSpawnBuilding()` now peeks without advancing; separate `advanceSpawnIndex()` called after actual spawn.

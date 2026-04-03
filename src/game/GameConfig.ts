@@ -479,12 +479,4 @@ export const GAME_CONFIG = {
     workerGroupFleeRange: 5,   // hex range for group flee
     workerFleeDistance: 3,     // hex distance to flee from base
   },
-
-  boids: {
-    separationRadius: 2.0,
-    alignmentRadius: 4.0,
-    cohesionRadius: 5.0,
-    enemyRepelRadius: 6.0,
-    tankAttractRadius: 5.0,
-  },
 } as const;
