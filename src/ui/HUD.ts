@@ -5,6 +5,7 @@
 import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType, ENABLE_UNDERGROUND } from '../types';
 import { StrategyCamera } from '../engine/Camera';
 import { GAME_CONFIG } from '../game/GameConfig';
+import { getUnitPortrait } from '../engine/UnitPortraits';
 
 export class HUD {
   private container: HTMLElement;
@@ -21,6 +22,7 @@ export class HUD {
   private buildModeIndicator: HTMLElement | null = null;
   private helpOverlay: HTMLElement | null = null;
   private helpVisible = false;
+  private helpPortraitsLoaded = false;
   private controlPanel: HTMLElement | null = null;
 
   // Callbacks for control panel buttons (global actions + nested menu)
@@ -2106,10 +2108,12 @@ export class HUD {
         padding: 4px 0;
       }
       #help-overlay .unit-icon {
-        width: 28px; height: 28px;
+        width: 32px; height: 32px;
         border-radius: 4px;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 16px; flex-shrink: 0;
+        flex-shrink: 0;
+        image-rendering: pixelated;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.12);
       }
       #help-overlay .unit-name {
         font-weight: bold; font-size: 13px; min-width: 90px;
@@ -2148,122 +2152,122 @@ export class HUD {
           <div class="section-title" style="color: #9b59b6;">⚔️ Unit Types</div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px;">
             <div class="unit-row">
-              <div class="unit-icon" style="background:#c0392b; font-weight:bold; color:white;">1</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.WARRIOR}" alt="Warrior">
               <div>
                 <div class="unit-name" style="color:#c0392b;">Warrior</div>
-                <div class="unit-desc">Melee combat unit. ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold} gold. Solid all-round fighter.</div>
+                <div class="unit-desc">Melee fighter. ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">Q</span>. Solid all-round frontline unit.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#8e44ad; font-weight:bold; color:white;">2</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.ARCHER}" alt="Archer">
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Archer</div>
-                <div class="unit-desc">Ranged unit. ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold} gold. Range 4, kites melee threats. Flees & fires when enemies close in.</div>
+                <div class="unit-desc">Ranged unit. ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">W</span>. Range 4, auto-kites melee threats.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#d35400; font-weight:bold; color:white;">3</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.RIDER}" alt="Rider">
               <div>
                 <div class="unit-name" style="color:#d35400;">Rider</div>
-                <div class="unit-desc">Fast cavalry. ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold} gold. High speed, great for flanking and pursuit.</div>
+                <div class="unit-desc">Fast cavalry. ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">E</span>. High speed, great for flanking and pursuit.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">4</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.SCOUT}" alt="Scout">
               <div>
                 <div class="unit-name" style="color:#3498db;">Scout</div>
-                <div class="unit-desc">Fast recon. ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">4</span>. High speed, great vision range.</div>
+                <div class="unit-desc">Fast recon. ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">R</span>. Highest vision range (${GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.SCOUT]}).</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#8B4513; font-weight:bold; color:white;">L</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.LUMBERJACK}" alt="Lumberjack">
               <div>
                 <div class="unit-name" style="color:#8B4513;">Lumberjack</div>
-                <div class="unit-desc">Wood harvester. ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood} wood. Auto-chops marked trees <span class="key" style="font-size:9px;">H</span> and carries wood to stockpile.</div>
+                <div class="unit-desc">Wood harvester. ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood} wood. Forestry <span class="key" style="font-size:9px;">Q</span>. Auto-chops marked trees <span class="key" style="font-size:9px;">H</span> and carries wood to stockpile.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#b8860b; font-weight:bold; color:white;">B</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.BUILDER}" alt="Builder">
               <div>
                 <div class="unit-name" style="color:#b8860b;">Builder</div>
-                <div class="unit-desc">Miner & mason. ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood} wood. Mines stone/clay/iron/gold/crystal <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>.</div>
+                <div class="unit-desc">Miner &amp; mason. ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood} wood. Masonry <span class="key" style="font-size:9px;">Q</span>. Mines stone/clay/iron/gold/crystal <span class="key" style="font-size:9px;">N</span>, builds walls <span class="key" style="font-size:9px;">B</span>, constructs blueprints.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#daa520; font-weight:bold; color:white;">V</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.VILLAGER}" alt="Villager">
               <div>
                 <div class="unit-name" style="color:#daa520;">Villager</div>
-                <div class="unit-desc">Farmer. ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood} wood. Harvests farms & tall grass <span class="key" style="font-size:9px;">J</span> for food + grass fiber.</div>
+                <div class="unit-desc">Farmer. ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood} wood. Farmhouse <span class="key" style="font-size:9px;">Q</span>. Harvests farms &amp; tall grass <span class="key" style="font-size:9px;">J</span> for food + grass fiber.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#5d4037; font-weight:bold; color:white;">T</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.TREBUCHET}" alt="Trebuchet">
               <div>
                 <div class="unit-name" style="color:#795548;">Trebuchet</div>
-                <div class="unit-desc">Heavy siege. ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.rope} rope + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.stone} stone + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.wood} wood. Range 6, massive damage. Built at Workshop.</div>
+                <div class="unit-desc">Heavy siege. ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.rope} rope + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.stone} stone + ${GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue.wood} wood. Workshop <span class="key" style="font-size:9px;">Q</span>. Range 6, massive damage vs buildings. Full damage to walls.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#3498db; font-weight:bold; color:white;">5</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.PALADIN}" alt="Paladin">
               <div>
                 <div class="unit-name" style="color:#3498db;">Paladin</div>
-                <div class="unit-desc">Holy knight. ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">5</span>. High HP & defense. +${GAME_CONFIG.combat.paladin.auraDefenseBonus} defense aura to nearby allies. Mace smash. Holds choke points.</div>
+                <div class="unit-desc">Holy knight. ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">T</span>. High HP &amp; defense. +${GAME_CONFIG.combat.paladin.auraDefenseBonus} defense aura (${GAME_CONFIG.combat.paladin.auraRange} hex) to nearby allies.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#2980b9;">🔮</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.MAGE}" alt="Mage">
               <div>
                 <div class="unit-name" style="color:#2980b9;">Mage</div>
-                <div class="unit-desc">Ranged caster. ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">0</span>. Range 3. Magic orbs.</div>
+                <div class="unit-desc">Ranged caster. ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">Q</span>. Range 3, magic orbs.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#27ae60;">💚</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.HEALER}" alt="Healer">
               <div>
                 <div class="unit-name" style="color:#27ae60;">Healer</div>
-                <div class="unit-desc">Support. ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧1</span>. Heals allies within 2 hex.</div>
+                <div class="unit-desc">Support. ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">E</span>. Heals ${GAME_CONFIG.combat.healer.healAmount} HP every ${GAME_CONFIG.combat.healer.projectileCooldown}s within 2 hex.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#2c3e50;">🗡️</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.ASSASSIN}" alt="Assassin">
               <div>
                 <div class="unit-name" style="color:#9b59b6;">Assassin</div>
-                <div class="unit-desc">Burst DPS. ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">7</span>. +${GAME_CONFIG.combat.assassin.fullHealthAttackBonus} attack from full HP. Dual daggers.</div>
+                <div class="unit-desc">Burst DPS. ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">W</span>. +${GAME_CONFIG.combat.assassin.fullHealthAttackBonus} attack from full HP. Dual daggers.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#7f8c8d;">🛡️</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.SHIELDBEARER}" alt="Shieldbearer">
               <div>
                 <div class="unit-name" style="color:#7f8c8d;">Shieldbearer</div>
-                <div class="unit-desc">Tank. ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">9</span>. Shield bash knockback. Deflects 80% ranged damage (arrows bounce off!). Peels for squishies.</div>
+                <div class="unit-desc">Tank. ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">R</span>. Shield bash knockback. Deflects ${Math.round((1 - GAME_CONFIG.combat.deflect.damageMultiplier) * 100)}% ranged damage.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#e74c3c;">🪓</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.BERSERKER}" alt="Berserker">
               <div>
                 <div class="unit-name" style="color:#e74c3c;">Berserker</div>
-                <div class="unit-desc">Melee DPS. ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">8</span>. Up to +${GAME_CONFIG.combat.berserker.rageAttackBonusMax} attack at low HP (rage). Ranged axe throw (range 7) once per unique target — slows enemy &amp; boosts chase speed. Deflected by shields.</div>
+                <div class="unit-desc">Melee DPS. ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">E</span>. Up to +${GAME_CONFIG.combat.berserker.rageAttackBonusMax} attack at low HP (rage). Ranged axe throw once per target — slows enemy. Deflected by shields.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#8e44ad;">⚡</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.BATTLEMAGE}" alt="Battlemage">
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Battlemage</div>
-                <div class="unit-desc">AoE caster. ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">⇧2</span>. Splash damage to all adjacent enemies.</div>
+                <div class="unit-desc">AoE caster. ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">W</span>. Splash ${Math.round(GAME_CONFIG.combat.battlemage.splashDamageMultiplier * 100)}% damage (${GAME_CONFIG.combat.battlemage.splashRadius}-hex radius) to all adjacent enemies.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#546e7a;">⚔</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.GREATSWORD}" alt="Greatsword">
               <div>
                 <div class="unit-name" style="color:#546e7a;">Greatsword</div>
-                <div class="unit-desc">Heavy cleave. ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">6</span>. 360° spin hits all adjacent, knockback.</div>
+                <div class="unit-desc">Heavy cleave. ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel} steel. Armory <span class="key" style="font-size:9px;">Q</span>. ${Math.round(GAME_CONFIG.combat.greatsword.cleaveDamageMultiplier * 100)}% cleave (${GAME_CONFIG.combat.greatsword.cleaveRadius}-hex), knockback ${GAME_CONFIG.combat.greatsword.knockbackDistance}.</div>
               </div>
             </div>
             <div class="unit-row">
-              <div class="unit-icon" style="background:#4e342e;">👹</div>
+              <img class="unit-icon" data-unit-portrait="${UnitType.OGRE}" alt="Ogre">
               <div>
                 <div class="unit-name" style="color:#4e342e;">Ogre</div>
-                <div class="unit-desc">Reward unit. FREE on base tier-up. Massive HP, ${GAME_CONFIG.combat.ogre.swipeRadius}-hex AOE club smash with knockback. Cannot be trained — earned by upgrading bases.</div>
+                <div class="unit-desc">Reward unit. FREE on base tier-up. Massive HP, ${GAME_CONFIG.combat.ogre.swipeRadius}-hex AOE club smash (${Math.round(GAME_CONFIG.combat.ogre.swipeDamageMultiplier * 100)}% dmg) with knockback. Cannot be trained — earned by upgrading bases.</div>
               </div>
             </div>
           </div>
@@ -2435,6 +2439,17 @@ export class HUD {
 
   showHelp(): void {
     if (this.helpOverlay) {
+      // Lazily render unit portraits on first open
+      if (!this.helpPortraitsLoaded) {
+        this.helpPortraitsLoaded = true;
+        const imgs = this.helpOverlay.querySelectorAll<HTMLImageElement>('img[data-unit-portrait]');
+        imgs.forEach((img) => {
+          const unitType = img.dataset.unitPortrait as UnitType;
+          if (unitType) {
+            img.src = getUnitPortrait(unitType);
+          }
+        });
+      }
       this.helpOverlay.style.display = 'block';
       this.helpVisible = true;
       StrategyCamera.suppressInput = true;
