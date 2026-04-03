@@ -432,12 +432,17 @@ export default class CombatEventHandler {
                 ops.fireWindTornado(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyMageStatusOnImpact);
                 break;
             }
-            // Cycle element to next in sequence
-            const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
-            const cycleIdx = attackerRef._elementCycleIndex ?? 0;
-            const nextIdx = (cycleIdx + 1) % ELEMENT_CYCLE.length;
-            attackerRef._elementCycleIndex = nextIdx;
-            attackerRef.element = ELEMENT_CYCLE[nextIdx];
+            // Cycle element to next in sequence (unless locked to a specific element)
+            if (attackerRef._lockedElement) {
+              // Spell queue active — stay on locked element
+              attackerRef.element = attackerRef._lockedElement;
+            } else {
+              const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+              const cycleIdx = attackerRef._elementCycleIndex ?? 0;
+              const nextIdx = (cycleIdx + 1) % ELEMENT_CYCLE.length;
+              attackerRef._elementCycleIndex = nextIdx;
+              attackerRef.element = ELEMENT_CYCLE[nextIdx];
+            }
           } else if (event.attacker.type === UnitType.BATTLEMAGE) {
             // Battlemage Earth → Arcane, so use purple orb instead of brown
             const orbColor = attackerElement === ElementType.EARTH ? 0x9944ff
@@ -454,12 +459,16 @@ export default class CombatEventHandler {
               }
             });
             ops.playSound('splash_aoe');
-            // Cycle Battlemage element to next in sequence (same cycle as Mage)
-            const BM_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
-            const bmCycleIdx = bmAttacker._elementCycleIndex ?? 0;
-            const bmNextIdx = (bmCycleIdx + 1) % BM_CYCLE.length;
-            bmAttacker._elementCycleIndex = bmNextIdx;
-            bmAttacker.element = BM_CYCLE[bmNextIdx];
+            // Cycle Battlemage element to next in sequence (unless locked)
+            if (bmAttacker._lockedElement) {
+              bmAttacker.element = bmAttacker._lockedElement;
+            } else {
+              const BM_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+              const bmCycleIdx = bmAttacker._elementCycleIndex ?? 0;
+              const bmNextIdx = (bmCycleIdx + 1) % BM_CYCLE.length;
+              bmAttacker._elementCycleIndex = bmNextIdx;
+              bmAttacker.element = BM_CYCLE[bmNextIdx];
+            }
           } else if (event.attacker.type === UnitType.TREBUCHET) {
             ops.fireBoulder(event.attacker.worldPosition, event.defender.worldPosition, applyDamageVisuals);
           } else if (event.attacker.type === UnitType.BERSERKER && event.attacker._axeThrowReady) {

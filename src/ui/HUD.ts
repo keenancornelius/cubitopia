@@ -109,6 +109,15 @@ export class HUD {
   private _onCaptureNearestZone: (() => void) | null = null;
   onCaptureNearestZone(cb: () => void) { this._onCaptureNearestZone = cb; }
 
+  private _onSetSquadObjective: ((objective: 'CAPTURE' | 'ASSAULT' | null) => void) | null = null;
+  onSetSquadObjective(cb: (objective: 'CAPTURE' | 'ASSAULT' | null) => void) { this._onSetSquadObjective = cb; }
+
+  /** Public wrapper for showSelectionCommands — allows external refresh after objective change */
+  showSelectionCommandsPublic(units: Unit[]): void {
+    const hasCombat = units.some(u => HUD.isCombatType(u.type));
+    this.showSelectionCommands(hasCombat, units);
+  }
+
   constructor() {
     this.container = this.createHUDContainer();
     this.elements = this.createElements();
@@ -1744,9 +1753,13 @@ export class HUD {
         const curColor = (isBM ? BM_COLORS : ELEMENT_COLORS)[curEl] || '#fff';
         const curIcon = (isBM ? BM_ICONS : ELEMENT_ICONS)[curEl] || '?';
         const curName = isBM ? (BM_NAMES[curEl] || curEl.toUpperCase()) : curEl.toUpperCase();
+        const lockIndicator = unit._lockedElement
+          ? `<span style="color:${curColor}; font-size:10px;"> 🔒 LOCKED</span>`
+          : `<span style="font-size:10px; color:#666;"> (cycling)</span>`;
         elementHtml = `<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.12); padding-top:5px;">
-          <div style="font-size:11px; color:#ccc; margin-bottom:3px;">Next Spell: <span style="color:${curColor}; font-weight:bold;">${curIcon} ${curName}</span></div>
+          <div style="font-size:11px; color:#ccc; margin-bottom:3px;">Next Spell: <span style="color:${curColor}; font-weight:bold;">${curIcon} ${curName}</span>${lockIndicator}</div>
           <div id="hud-element-cycle" style="display:flex; gap:3px; flex-wrap:wrap;"></div>
+          <div style="font-size:10px; color:#666; margin-top:3px;">Q/W/E/R/T to lock element</div>
         </div>`;
       }
 
@@ -1901,8 +1914,101 @@ export class HUD {
 
       this.elements.selectionInfo.innerHTML = '';
       this.elements.selectionInfo.appendChild(header);
+
+      // Show active objective badge if squad has one
+      const objUnits = units.filter(u => u._playerObjective);
+      if (objUnits.length > 0) {
+        const obj = objUnits[0]._playerObjective;
+        const objDiv = document.createElement('div');
+        const objColor = obj === 'CAPTURE' ? '#27ae60' : '#e74c3c';
+        const objIcon = obj === 'CAPTURE' ? '🏴' : '⚔️';
+        objDiv.style.cssText = `font-size:12px; font-weight:bold; color:${objColor}; margin-bottom:4px; padding:3px 6px; background:rgba(0,0,0,0.4); border:1px solid ${objColor}; border-radius:4px; display:inline-block;`;
+        objDiv.textContent = `${objIcon} ${obj} — Autonomous`;
+        this.elements.selectionInfo.appendChild(objDiv);
+      }
+
       this.elements.selectionInfo.appendChild(badgeContainer);
       this.elements.selectionInfo.appendChild(hint);
+
+      // --- QWERT Spell Queue controls (shown when selection has mages) ---
+      const magesInSelection = units.filter(u => u.type === UnitType.MAGE || u.type === UnitType.BATTLEMAGE);
+      if (magesInSelection.length > 0) {
+        const SPELL_QUEUE_ELEMENTS: { key: string; element: ElementType; icon: string; name: string; color: string }[] = [
+          { key: 'Q', element: ElementType.FIRE, icon: '🔥', name: 'Fire', color: '#ff4400' },
+          { key: 'W', element: ElementType.WATER, icon: '💧', name: 'Water', color: '#4488ff' },
+          { key: 'E', element: ElementType.LIGHTNING, icon: '⚡', name: 'Lightning', color: '#00e5ff' },
+          { key: 'R', element: ElementType.WIND, icon: '🌀', name: 'Wind', color: '#88ff88' },
+          { key: 'T', element: ElementType.EARTH, icon: '🟣', name: 'Arcane', color: '#9944ff' },
+        ];
+
+        const spellQueueDiv = document.createElement('div');
+        spellQueueDiv.style.cssText = 'margin-top:8px; padding-top:6px; border-top:1px solid #444;';
+
+        const sqLabel = document.createElement('div');
+        sqLabel.style.cssText = 'font-size:11px; color:#aaa; margin-bottom:4px; font-weight:bold;';
+        sqLabel.textContent = `SPELL QUEUE (${magesInSelection.length} mage${magesInSelection.length !== 1 ? 's' : ''})`;
+        spellQueueDiv.appendChild(sqLabel);
+
+        const sqRow = document.createElement('div');
+        sqRow.style.cssText = 'display:flex; gap:3px; flex-wrap:wrap;';
+
+        // Determine if all mages share the same locked element
+        const commonLocked = magesInSelection.every(m => m._lockedElement === magesInSelection[0]._lockedElement)
+          ? magesInSelection[0]._lockedElement : undefined;
+
+        for (const sq of SPELL_QUEUE_ELEMENTS) {
+          const isActive = commonLocked === sq.element;
+          const btn = document.createElement('span');
+          btn.style.cssText = `
+            display:inline-block; padding:2px 6px; border-radius:3px; font-size:11px;
+            cursor:pointer; user-select:none; transition:all 0.1s;
+            border: 1px solid ${isActive ? sq.color : '#555'};
+            background: ${isActive ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.3)'};
+            color: ${isActive ? sq.color : '#999'};
+            font-weight: ${isActive ? 'bold' : 'normal'};
+          `;
+          btn.textContent = `[${sq.key}] ${sq.icon} ${sq.name}`;
+          btn.title = isActive ? `Unlock ${sq.name} (click or press ${sq.key})` : `Lock mages to ${sq.name} (${sq.key})`;
+
+          btn.addEventListener('mouseenter', () => {
+            if (!isActive) { btn.style.borderColor = sq.color; btn.style.color = sq.color; }
+          });
+          btn.addEventListener('mouseleave', () => {
+            if (!isActive) { btn.style.borderColor = '#555'; btn.style.color = '#999'; }
+          });
+          btn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (isActive) {
+              // Unlock
+              for (const m of magesInSelection) { m._lockedElement = undefined; }
+            } else {
+              // Lock
+              const EC = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+              for (const m of magesInSelection) {
+                m._lockedElement = sq.element;
+                m.element = sq.element;
+                m._elementCycleIndex = EC.indexOf(sq.element);
+              }
+            }
+            this.updateSelectionInfo(units);
+          });
+
+          sqRow.appendChild(btn);
+        }
+
+        spellQueueDiv.appendChild(sqRow);
+
+        // Show current lock status
+        if (commonLocked) {
+          const lockStatus = document.createElement('div');
+          const lockedInfo = SPELL_QUEUE_ELEMENTS.find(s => s.element === commonLocked);
+          lockStatus.style.cssText = `font-size:10px; color:${lockedInfo?.color || '#fff'}; margin-top:3px;`;
+          lockStatus.textContent = `🔒 Locked: ${lockedInfo?.icon} ${lockedInfo?.name} — press key again to unlock`;
+          spellQueueDiv.appendChild(lockStatus);
+        }
+
+        this.elements.selectionInfo.appendChild(spellQueueDiv);
+      }
     }
   }
 
@@ -2029,16 +2135,42 @@ export class HUD {
       this.selectionCommandPanel.appendChild(formRow);
     }
 
+    // OBJECTIVE section (autonomous squad behavior — combat units only)
+    if (hasCombat) {
+      // Detect current objective from selected units
+      const combatUnits = units.filter(u => HUD.isCombatType(u.type));
+      const currentObj = combatUnits.length > 0 && combatUnits.every(u => u._playerObjective === combatUnits[0]._playerObjective)
+        ? combatUnits[0]._playerObjective ?? null : null;
+
+      this.selectionCommandPanel.appendChild(makeHeader('🏴 Objective'));
+      const objRow = document.createElement('div');
+      objRow.style.cssText = 'display: flex; gap: 3px;';
+
+      const captureBtn = makeSmallBtn('Capture', '#27ae60', currentObj === 'CAPTURE', () => {
+        this._onSetSquadObjective?.(currentObj === 'CAPTURE' ? null : 'CAPTURE');
+      });
+      captureBtn.title = 'CAPTURE — Squad autonomously seeks and captures enemy/neutral bases (defensive stance).';
+      objRow.appendChild(captureBtn);
+
+      const assaultBtn = makeSmallBtn('Assault', '#e74c3c', currentObj === 'ASSAULT', () => {
+        this._onSetSquadObjective?.(currentObj === 'ASSAULT' ? null : 'ASSAULT');
+      });
+      assaultBtn.title = 'ASSAULT — Squad autonomously attacks enemy capital (aggressive stance).';
+      objRow.appendChild(assaultBtn);
+
+      const clearBtn = makeSmallBtn('Manual', '#7f8c8d', currentObj === null, () => {
+        this._onSetSquadObjective?.(null);
+      });
+      clearBtn.title = 'Manual — Clear objective, return to manual control.';
+      objRow.appendChild(clearBtn);
+
+      this.selectionCommandPanel.appendChild(objRow);
+    }
+
     // ACTIONS section (always show for selected units)
     this.selectionCommandPanel.appendChild(makeHeader('⚡ Actions'));
     const actionRow = document.createElement('div');
     actionRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
-    if (hasCombat) {
-      const captureBtn = makeSmallBtn('Capture Zone', '#27ae60', false,
-        () => this._onCaptureNearestZone?.());
-      captureBtn.title = 'Send selected units to capture the nearest non-owned zone (defensive stance).';
-      actionRow.appendChild(captureBtn);
-    }
     const killBtn = makeSmallBtn('Kill', '#e74c3c', false,
       () => this._onRespawnUnits?.());
     killBtn.title = 'Kill the selected units (permanently removes them).';

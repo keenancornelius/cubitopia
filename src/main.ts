@@ -840,13 +840,29 @@ class Cubitopia {
       }
     }
 
-    // --- Right-click on ground: PURE MOVE (no re-aggro) ---
+    // --- Right-click on ground: stance-based movement ---
+    // Aggressive: fight through enemies on the way (no _forceMove)
+    // Defensive: defend if attacked, then resume toward destination (no _forceMove)
+    // Passive: pure move, ignore everything (_forceMove = true)
+    const setupMoveUnit = (unit: Unit, dest: HexCoord) => {
+      unit._playerCommanded = true;
+      unit._focusTarget = undefined;
+      unit._healTarget = undefined;
+      unit._assignedBlueprintId = undefined;
+      unit._moveDestination = dest; // Store destination for post-combat resume
+
+      if (unit.stance === UnitStance.PASSIVE) {
+        unit._forceMove = true;  // Passive: ignore everything
+      } else {
+        unit._forceMove = false; // Aggressive/Defensive: react to enemies en route
+        if (unit.stance === UnitStance.DEFENSIVE) {
+          unit._postPosition = dest; // Defensive: destination becomes the new "post"
+        }
+      }
+    };
+
     if (selected.length === 1) {
-      selected[0]._playerCommanded = true;
-      selected[0]._forceMove = true;
-      selected[0]._focusTarget = undefined;
-      selected[0]._healTarget = undefined;
-      selected[0]._assignedBlueprintId = undefined;
+      setupMoveUnit(selected[0], hexCoord);
       UnitAI.commandMove(selected[0], hexCoord, this.currentMap!, preferUnderground);
     } else {
       const sortedSelected = [...selected].sort((a, b) =>
@@ -855,12 +871,8 @@ class Cubitopia {
       const formationSlots = generateFormation(hexCoord, sortedSelected.length, this.selectedFormation, this.currentMap!.tiles);
       for (let i = 0; i < sortedSelected.length; i++) {
         const unit = sortedSelected[i];
-        unit._playerCommanded = true;
-        unit._forceMove = true;
-        unit._focusTarget = undefined;
-        unit._healTarget = undefined;
-        unit._assignedBlueprintId = undefined;
         const slot = formationSlots[i] || hexCoord;
+        setupMoveUnit(unit, slot);
         UnitAI.commandMove(unit, slot, this.currentMap!, preferUnderground);
       }
     }
@@ -1995,6 +2007,9 @@ class Cubitopia {
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
 
+    // Player squad objectives — autonomous CAPTURE/ASSAULT behavior
+    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta);
+
     // Process combat events (delegated to CombatEventHandler)
     this.combatEventHandler.processEvents(events);
 
@@ -2900,6 +2915,64 @@ class Cubitopia {
     const label = stance === UnitStance.PASSIVE ? 'Passive' :
                   stance === UnitStance.DEFENSIVE ? 'Defensive' : 'Aggressive';
     this.hud.showNotification(`Stance: ${label}`, '#3498db');
+  }
+
+  // ===================== SQUAD OBJECTIVES =====================
+
+  private setSelectedSquadObjective(objective: 'CAPTURE' | 'ASSAULT' | null): void {
+    const selected = this.selectionManager.getSelectedUnits().filter(
+      u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
+    );
+    if (selected.length === 0) {
+      this.hud.showNotification('No combat units selected!', '#e74c3c');
+      return;
+    }
+
+    if (objective === null) {
+      // Clear objective — return to manual control
+      for (const u of selected) {
+        u._playerObjective = undefined;
+        u._playerObjectiveTarget = undefined;
+        u._squadObjective = undefined;
+        // Don't clear _squadId — keep the squad grouping for visual indicators
+      }
+      this.hud.showNotification(`${selected.length} units: Manual control`, '#7f8c8d');
+    } else {
+      // Ensure all selected units have a _squadId so squad indicators render.
+      // Use existing squad ID if units share one, otherwise assign a new one.
+      // Player squad IDs use 100+ to avoid collision with AI squads (0-4).
+      let squadId = selected.find(u => u._squadId != null)?._squadId ?? null;
+      if (squadId == null) {
+        // Find next available player squad ID (100-104 for A/S/D/F/G slots)
+        const usedIds = new Set(this.allUnits.filter(u => u.owner === 0 && u._squadId != null).map(u => u._squadId!));
+        for (let id = 100; id < 110; id++) {
+          if (!usedIds.has(id)) { squadId = id; break; }
+        }
+        if (squadId == null) squadId = 100; // Fallback
+      }
+
+      // Compute march speed (25th percentile like AI commander)
+      const speeds = selected.map(u => u.moveSpeed).sort((a, b) => a - b);
+      const p25Idx = Math.max(0, Math.floor(speeds.length * 0.25));
+      const marchSpeed = speeds[p25Idx] + (speeds[speeds.length - 1] - speeds[p25Idx]) * 0.3;
+
+      const stance = objective === 'CAPTURE' ? UnitStance.DEFENSIVE : UnitStance.AGGRESSIVE;
+      for (const u of selected) {
+        u._playerObjective = objective;
+        u._playerObjectiveTarget = undefined; // Will be assigned on next tick
+        u._squadObjective = objective;
+        u._squadId = squadId;
+        u._squadSpeed = marchSpeed;
+        u.stance = stance;
+        u._playerCommanded = true;
+      }
+      const color = objective === 'CAPTURE' ? '#27ae60' : '#e74c3c';
+      const icon = objective === 'CAPTURE' ? '🏴' : '⚔️';
+      this.hud.showNotification(`${icon} ${selected.length} units: ${objective}`, color);
+    }
+
+    // Refresh the command panel to show the updated state
+    this.hud.showSelectionCommandsPublic(selected);
   }
 
   // ===================== FORMATION SELECTOR =====================

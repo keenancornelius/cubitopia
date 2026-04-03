@@ -530,6 +530,156 @@ export class UnitAI {
   }
 
   /**
+   * Try to resume marching toward the unit's stored _moveDestination after combat ends.
+   * Returns true if the unit resumed movement, false if there was no destination to resume.
+   */
+  static tryResumeMoveDestination(unit: Unit, map?: GameMap): boolean {
+    if (!unit._moveDestination || !map) return false;
+    const dest = unit._moveDestination;
+    // If already at destination, clear and go idle
+    if (Pathfinder.heuristic(unit.position, dest) <= 1) {
+      unit._moveDestination = undefined;
+      return false;
+    }
+    UnitAI.commandMove(unit, dest, map);
+    unit._forceMove = false; // Keep reacting to enemies en route
+    return true;
+  }
+
+  // ========== PLAYER SQUAD OBJECTIVE SYSTEM ==========
+  // Mirrors AI commander logic: player squads with CAPTURE/ASSAULT objectives
+  // act autonomously — find targets, march, re-evaluate on completion.
+
+  /** Timer throttle — only re-evaluate player objectives every 2 seconds */
+  private static _playerObjTimer = 0;
+  private static readonly PLAYER_OBJ_INTERVAL = 2.0; // seconds
+
+  /**
+   * Called every tick from the main game loop. Handles autonomous behavior for
+   * player units with _playerObjective set. Groups units by squad, finds targets,
+   * dispatches idle/stuck members.
+   */
+  static updatePlayerObjectives(allUnits: Unit[], bases: Base[], map: GameMap, delta: number): void {
+    UnitAI._playerObjTimer += delta;
+    if (UnitAI._playerObjTimer < UnitAI.PLAYER_OBJ_INTERVAL) return;
+    UnitAI._playerObjTimer = 0;
+
+    // Collect player units with objectives, grouped by squad
+    const objUnits = allUnits.filter(u => u.owner === 0 && u._playerObjective && !UnitAI.isDead(u));
+    if (objUnits.length === 0) return;
+
+    // Group by squad ID (null squad = individual objective units grouped together)
+    const squads = new Map<number | null, Unit[]>();
+    for (const u of objUnits) {
+      const key = u._squadId ?? null;
+      if (!squads.has(key)) squads.set(key, []);
+      squads.get(key)!.push(u);
+    }
+
+    for (const [, members] of squads) {
+      if (members.length === 0) continue;
+      const objective = members[0]._playerObjective!;
+
+      // Compute squad centroid
+      const avgQ = Math.round(members.reduce((s, u) => s + u.position.q, 0) / members.length);
+      const avgR = Math.round(members.reduce((s, u) => s + u.position.r, 0) / members.length);
+      const centroid: HexCoord = { q: avgQ, r: avgR };
+
+      // Find the best target for this objective
+      const target = UnitAI.findPlayerObjectiveTarget(objective, centroid, bases, allUnits);
+      if (!target) {
+        // No valid target — clear objective
+        for (const u of members) {
+          u._playerObjective = undefined;
+          u._playerObjectiveTarget = undefined;
+          u._squadObjective = undefined;
+        }
+        continue;
+      }
+
+      // Check if we arrived at current target
+      const currentTarget = members[0]._playerObjectiveTarget;
+      const atTarget = currentTarget && Pathfinder.heuristic(centroid, currentTarget) <= 3;
+
+      // Check if current target is still valid
+      let currentValid = false;
+      if (currentTarget) {
+        if (objective === 'CAPTURE') {
+          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== 0 && !b.destroyed);
+        } else if (objective === 'ASSAULT') {
+          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== 0 && !b.destroyed);
+        }
+      }
+
+      // Need new target if: arrived, invalid, or no target yet
+      const needsNewTarget = !currentTarget || atTarget || !currentValid;
+
+      if (needsNewTarget) {
+        // Set new target and dispatch
+        const stance = objective === 'CAPTURE' ? UnitStance.DEFENSIVE : UnitStance.AGGRESSIVE;
+        for (const u of members) {
+          u._playerObjectiveTarget = target.position;
+          u._squadObjective = objective;
+          u.stance = stance;
+          u._playerCommanded = true;
+          u._forceMove = false;
+          u._moveDestination = target.position;
+          UnitAI.commandMove(u, target.position, map);
+        }
+      } else {
+        // Re-kick idle/stuck members toward current target
+        for (const u of members) {
+          const distToObj = Pathfinder.heuristic(u.position, currentTarget!);
+          if (distToObj <= 1) continue; // Already there
+          const isStuck = u.state === UnitState.IDLE ||
+            (u.state === UnitState.MOVING && (!u.targetPosition || !u._path));
+          if (!isStuck) continue;
+          u._squadObjective = objective;
+          u._playerCommanded = true;
+          u._forceMove = false;
+          UnitAI.commandMove(u, currentTarget!, map);
+        }
+      }
+    }
+  }
+
+  /**
+   * Find the best target for a player objective, mirroring AI commander logic.
+   */
+  private static findPlayerObjectiveTarget(
+    objective: 'CAPTURE' | 'ASSAULT',
+    from: HexCoord,
+    bases: Base[],
+    allUnits: Unit[]
+  ): Base | null {
+    if (objective === 'CAPTURE') {
+      // Prioritize: nearest neutral base, then nearest enemy outpost
+      const captureTargets = bases
+        .filter(b => b.owner !== 0 && !b.destroyed)
+        .sort((a, b) => {
+          // Neutral first (owner 2), then by distance
+          const aN = a.owner === 2 ? 0 : 1;
+          const bN = b.owner === 2 ? 0 : 1;
+          if (aN !== bN) return aN - bN;
+          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+        });
+      return captureTargets[0] ?? null;
+    } else {
+      // ASSAULT: target the enemy capital (player 1's main base), or nearest enemy base
+      const enemyBases = bases
+        .filter(b => b.owner !== 0 && b.owner !== 2 && !b.destroyed)
+        .sort((a, b) => {
+          // Capitals first (tier matters), then by distance
+          const aTier = a.tier ?? 0;
+          const bTier = b.tier ?? 0;
+          if (aTier !== bTier) return bTier - aTier; // Higher tier = capital
+          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+        });
+      return enemyBases[0] ?? null;
+    }
+  }
+
+  /**
    * Stop a unit
    */
   static commandStop(unit: Unit): void {
@@ -539,6 +689,9 @@ export class UnitAI {
     unit._path = null;
     unit._pathIndex = 0;
     unit._forceMove = false;
+    unit._moveDestination = undefined;
+    unit._playerObjective = undefined;
+    unit._playerObjectiveTarget = undefined;
   }
 
   // --- State Handlers ---
@@ -2761,6 +2914,7 @@ export class UnitAI {
         unit._path = null;
         unit._isKiting = false;
         unit._forceMove = false;
+        unit._moveDestination = undefined; // Arrived — clear resume destination
         // Squad units that arrived at their objective stay formed — KEEP squad ID.
         // The commander will reassign them on the next tick if needed.
         if (!UnitAI.tryResumeSquadMarch(unit, map)) {
@@ -2925,10 +3079,12 @@ export class UnitAI {
         UnitAI.commandAttack(unit, nextEnemy.position, nextEnemy.id, map);
         return;
       }
-      // Squad units resume marching instead of going idle
+      // No more enemies — try to resume movement toward stored destination
       if (!UnitAI.tryResumeSquadMarch(unit, map)) {
-        unit.state = UnitState.IDLE;
-        unit.command = null;
+        if (!UnitAI.tryResumeMoveDestination(unit, map)) {
+          unit.state = UnitState.IDLE;
+          unit.command = null;
+        }
       }
       return;
     }
@@ -2991,14 +3147,18 @@ export class UnitAI {
         }
         if (!result.defenderSurvived) {
           if (!UnitAI.tryResumeSquadMarch(unit, map)) {
-            unit.state = UnitState.IDLE;
+            if (!UnitAI.tryResumeMoveDestination(unit, map)) {
+              unit.state = UnitState.IDLE;
+            }
           }
           unit.command = null;
           return;
         }
       }
-      // Now kite away from the melee threat
-      const fleeTile = UnitAI.findKiteTile(unit, meleeThreatAtk, map!);
+      // Now kite away from the melee threat (defensive units kite toward destination)
+      const fleeTile = (unit.stance === UnitStance.DEFENSIVE && unit._moveDestination)
+        ? UnitAI.findDefensiveKiteTile(unit, meleeThreatAtk, unit._moveDestination, map!)
+        : UnitAI.findKiteTile(unit, meleeThreatAtk, map!);
       if (fleeTile) {
         CombatLog.logKite(unit, meleeThreatAtk, true, unit.position.q, unit.position.r, fleeTile.q, fleeTile.r);
         UnitAI.commandMove(unit, fleeTile, map!);
@@ -3055,7 +3215,9 @@ export class UnitAI {
           CombatLog.logKill(unit, target);
           events.push({ type: 'unit:killed', unit: target, killer: unit });
           if (!UnitAI.tryResumeSquadMarch(unit, map)) {
-            unit.state = UnitState.IDLE;
+            if (!UnitAI.tryResumeMoveDestination(unit, map)) {
+              unit.state = UnitState.IDLE;
+            }
           }
           unit.command = null;
         }
@@ -3065,6 +3227,20 @@ export class UnitAI {
           target.kills = (target.kills ?? 0) + 1;
           CombatLog.logKill(target, unit);
           events.push({ type: 'unit:killed', unit, killer: target });
+        }
+
+        // Defensive kite-toward-destination: after attacking, step toward _moveDestination
+        // Both melee and ranged defensive units retreat toward their goal while fighting
+        if (result.attackerSurvived && result.defenderSurvived &&
+            unit.stance === UnitStance.DEFENSIVE && unit._moveDestination && map) {
+          const kiteTile = UnitAI.findDefensiveKiteTile(unit, target, unit._moveDestination, map);
+          if (kiteTile) {
+            UnitAI.commandMove(unit, kiteTile, map);
+            unit._isKiting = true;
+            // Keep the attack command so we re-engage after the kite step
+            unit.command = { type: CommandType.ATTACK, targetPosition: target.position, targetUnitId: target.id };
+            return;
+          }
         }
       }
     } else {
@@ -3312,13 +3488,27 @@ export class UnitAI {
         }
       }
 
-      const score = dist + focusPenalty - hpBonus - peelBonus - kiterBonus;
+      // Click-point proximity bonus: when A-click was used, bias toward enemies
+      // closest to where the player actually clicked (not where the unit is)
+      let clickPointBonus = 0;
+      if (unit._attackMoveClickPoint) {
+        const distToClick = Pathfinder.heuristic(other.position, unit._attackMoveClickPoint);
+        // Strong bonus (up to 8) for enemies near the click point; falls off with distance
+        clickPointBonus = Math.max(0, 8 - distToClick * 1.5);
+      }
+
+      const score = dist + focusPenalty - hpBonus - peelBonus - kiterBonus - clickPointBonus;
 
       if (score < bestScore) {
         bestScore = score;
         bestEnemy = other;
       }
     }
+    // Clear click-point bias once we've found a target (one-shot influence)
+    if (bestEnemy && unit._attackMoveClickPoint) {
+      unit._attackMoveClickPoint = undefined;
+    }
+
     // Log targeting decision
     if (bestEnemy && CombatLog.isEnabled()) {
       const dist = Pathfinder.heuristic(unit.position, bestEnemy.position);
@@ -3439,6 +3629,49 @@ export class UnitAI {
             bestScore = score;
             bestTile = { q, r };
           }
+        }
+      }
+    }
+    return bestTile;
+  }
+
+  /**
+   * Find a kite tile for defensive units retreating toward their _moveDestination.
+   * Prioritizes tiles closer to destination while maintaining distance from threat.
+   * Works for both melee and ranged units.
+   */
+  private static findDefensiveKiteTile(unit: Unit, threat: Unit, destination: HexCoord, map: GameMap): HexCoord | null {
+    const moveRange = unit.stats.movement + 1;
+    let bestTile: HexCoord | null = null;
+    let bestScore = -Infinity;
+
+    for (let aq = -moveRange; aq <= moveRange; aq++) {
+      for (let ar = -moveRange; ar <= moveRange; ar++) {
+        const q = unit.position.q + aq;
+        const r = unit.position.r + ar;
+        const key = `${q},${r}`;
+        const tile = map.tiles.get(key);
+        if (!tile || tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.MOUNTAIN
+            || tile.terrain === TerrainType.FOREST || Pathfinder.blockedTiles.has(key)) continue;
+
+        const distFromUs = Pathfinder.heuristic(unit.position, { q, r });
+        if (distFromUs > moveRange || distFromUs === 0) continue;
+
+        const distFromThreat = Pathfinder.heuristic({ q, r }, threat.position);
+        const distToDest = Pathfinder.heuristic({ q, r }, destination);
+        const currentDistToDest = Pathfinder.heuristic(unit.position, destination);
+
+        // Must move closer to destination (or at least not further)
+        const destProgress = currentDistToDest - distToDest;
+        // Bonus for maintaining distance from threat
+        const threatDist = Math.min(distFromThreat, 4); // Cap to avoid over-weighting
+
+        // Score: heavily favor progress toward destination, moderately favor distance from threat
+        const score = destProgress * 4 + threatDist * 1.5 - distFromUs * 0.5;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestTile = { q, r };
         }
       }
     }

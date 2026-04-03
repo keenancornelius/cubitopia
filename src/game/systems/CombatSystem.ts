@@ -132,11 +132,9 @@ export class CombatSystem {
       defenderDamage = Math.max(1, Math.round(defenderDamage * GAME_CONFIG.combat.deflect.damageMultiplier)); // 80% reduction, min 1
     }
 
-    // Counter-attack: defender can only retaliate if attacker is within defender's range.
-    // Ranged units attacking from outside melee range take zero counter-damage.
-    const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
-    const canCounter = dist <= defender.stats.range;
-    const attackerDamage = canCounter ? Math.round(defenderRatio * defStat * GAME_CONFIG.combat.damage.counterMultiplier) : 0;
+    // Counter-attacks removed — damage only flows from attacker to defender.
+    // Combat is purely about who attacks first, attack speed, and positioning.
+    const attackerDamage = 0;
 
     const attackerHealth = attacker.currentHealth - attackerDamage;
     const defenderHealth = defender.currentHealth - defenderDamage;

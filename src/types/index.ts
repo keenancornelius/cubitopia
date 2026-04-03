@@ -238,6 +238,19 @@ export interface Unit {
   _cycloneCooldown?: number;        // Battlemage cyclone pull cooldown
   _synergyCooldown?: number;        // Mage group synergy cooldown
 
+  // --- Movement destination (for stance-based resume after combat) ---
+  _moveDestination?: HexCoord;      // Original right-click/A-click destination — used to resume march after combat
+
+  // --- Player squad objective (autonomous behavior like AI commander) ---
+  _playerObjective?: 'CAPTURE' | 'ASSAULT'; // If set, unit acts autonomously toward this objective type
+  _playerObjectiveTarget?: HexCoord;        // Current target position for the objective
+
+  // --- Attack-move click-point targeting ---
+  _attackMoveClickPoint?: HexCoord; // Where the A-click was aimed — findBestTarget biases toward this point
+
+  // --- Spell queue (locked element) ---
+  _lockedElement?: ElementType;     // If set, mage/battlemage uses this element instead of cycling
+
   // --- Berserker axe throw ---
   _axeThrowReady?: boolean;        // true = berserker has ranged axe throw available (range 7, resets to melee after use)
   _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)

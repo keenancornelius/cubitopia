@@ -12,7 +12,7 @@ import { SelectionManager } from './systems/SelectionManager';
 import { UnitAI } from './systems/UnitAI';
 import { Pathfinder } from './systems/Pathfinder';
 import { StrategyCamera } from '../engine/Camera';
-import { EngineConfig, HexCoord, TerrainType, UnitStance, FormationType, MapType, PlacedBuilding, Base } from '../types';
+import { EngineConfig, HexCoord, TerrainType, UnitStance, FormationType, MapType, PlacedBuilding, Base, ElementType, UnitType, Unit } from '../types';
 import WallSystem from './systems/WallSystem';
 
 // The Cubitopia main game class — imported as a type to avoid circular deps
@@ -88,6 +88,7 @@ export class InputManager {
     );
     this.hud.onRespawnUnits(() => this.game.debugController.killSelected());
     this.hud.onCaptureNearestZone(() => this.game.captureNearestZoneWithSelected());
+    this.hud.onSetSquadObjective((objective) => this.game.setSelectedSquadObjective(objective));
 
     // Squad type toggle: when user clicks a unit type badge in the tooltip, filter the selection
     this.hud.onSelectionFiltered((filtered) => {
@@ -265,6 +266,9 @@ export class InputManager {
           unit._playerCommanded = true;
           unit._forceMove = false; // Attack-move must NOT force-move — units need to react to enemies
           unit._focusTarget = undefined;
+          unit.stance = UnitStance.AGGRESSIVE; // A-click auto-sets aggressive stance
+          unit._attackMoveClickPoint = hexCoord; // Store click point for targeting bias
+          unit._moveDestination = hexCoord; // Store destination for post-combat resume
           UnitAI.commandAttack(
             unit,
             hexCoord,
@@ -408,6 +412,63 @@ export class InputManager {
             '#ff9800'
           );
           return;
+        }
+      }
+
+      // ── QWERT Spell Queue: lock mages to a specific element ──
+      // Only active when menu is closed and selection contains mages/battlemages
+      if (this.game.menuCategory === 0 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const SPELL_KEYS: Record<string, ElementType | null> = {
+          'Q': ElementType.FIRE,
+          'W': ElementType.WATER,
+          'E': ElementType.LIGHTNING,
+          'R': ElementType.WIND,
+          'T': ElementType.EARTH,
+        };
+        const keyUp = e.key.toUpperCase();
+        if (keyUp in SPELL_KEYS) {
+          const selected = this.game.selectionManager.getSelectedUnits();
+          const mages = selected.filter((u: Unit) => u.type === UnitType.MAGE || u.type === UnitType.BATTLEMAGE);
+          if (mages.length > 0) {
+            const targetElement = SPELL_KEYS[keyUp]!;
+            // Toggle: if all mages are already locked to this element, unlock them
+            const allLocked = mages.every((m: Unit) => m._lockedElement === targetElement);
+            if (allLocked) {
+              for (const m of mages) {
+                m._lockedElement = undefined;
+                // Restore cycle index so they resume natural rotation
+              }
+              const ELEMENT_NAMES: Record<string, string> = {
+                fire: 'FIRE', water: 'WATER', lightning: 'LIGHTNING', wind: 'WIND', earth: 'EARTH'
+              };
+              this.hud.showNotification(
+                `${ELEMENT_NAMES[targetElement]} unlocked — cycling`,
+                '#aaaaaa'
+              );
+            } else {
+              for (const m of mages) {
+                m._lockedElement = targetElement;
+                m.element = targetElement;
+                // Set cycle index to match so HUD display is correct
+                const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+                m._elementCycleIndex = ELEMENT_CYCLE.indexOf(targetElement);
+              }
+              const ELEMENT_COLORS: Record<string, string> = {
+                fire: '#ff4400', water: '#4488ff', lightning: '#00e5ff', wind: '#88ff88', earth: '#9944ff'
+              };
+              const ELEMENT_NAMES: Record<string, string> = {
+                fire: 'FIRE', water: 'WATER', lightning: 'LIGHTNING', wind: 'WIND', earth: 'EARTH'
+              };
+              this.hud.showNotification(
+                `${mages.length} mage${mages.length !== 1 ? 's' : ''} locked to ${ELEMENT_NAMES[targetElement]}`,
+                ELEMENT_COLORS[targetElement] || '#ffffff'
+              );
+            }
+            // Refresh HUD selection display
+            this.hud.updateSelectionInfo(selected);
+            e.preventDefault();
+            return;
+          }
         }
       }
 
