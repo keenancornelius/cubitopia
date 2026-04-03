@@ -843,10 +843,10 @@ export class TerrainDecorator {
     group.add(wall);
     this.waterMeshes.push(wall);
 
-    const streakCount = 3 + Math.floor(Math.random() * 2);
+    const streakCount = 1 + Math.floor(Math.random() * 2);
     for (let s = 0; s < streakCount; s++) {
-      const sw = 0.06 + Math.random() * 0.12;
-      const sh = curtainH * (0.4 + Math.random() * 0.5);
+      const sw = 0.1 + Math.random() * 0.15;
+      const sh = curtainH * (0.5 + Math.random() * 0.4);
       const streakGeo = new THREE.PlaneGeometry(sw, sh);
       const streakMat = new THREE.MeshPhongMaterial({
         color: 0xffffff,
@@ -940,15 +940,16 @@ export class TerrainDecorator {
       group.add(wall);
       this.waterMeshes.push(wall);
 
-      const streakCount = 4 + Math.floor(Math.random() * 3);
+      // 2 streaks per face (down from 4-6) — wider to compensate
+      const streakCount = 2;
       for (let s = 0; s < streakCount; s++) {
-        const sw = 0.08 + Math.random() * 0.16;
-        const sh = curtainH * (0.5 + Math.random() * 0.5);
+        const sw = 0.14 + Math.random() * 0.2;
+        const sh = curtainH * (0.6 + Math.random() * 0.4);
         const streakGeo = new THREE.PlaneGeometry(sw, sh);
         const streakMat = new THREE.MeshPhongMaterial({
           color: 0xffffff,
           transparent: true,
-          opacity: 0.45 + Math.random() * 0.35,
+          opacity: 0.5 + Math.random() * 0.3,
           shininess: 80,
           emissive: 0xffffff,
           emissiveIntensity: 0.1,
@@ -968,13 +969,14 @@ export class TerrainDecorator {
     }
 
     const cloudSpread = tileWidth * 1.8;
-    for (let i = 0; i < 12; i++) {
-      const radius = 0.3 + Math.random() * 0.6;
-      const mistGeo = new THREE.SphereGeometry(radius, 8, 6);
+    // 4 mist clouds (down from 12) — larger to compensate
+    for (let i = 0; i < 4; i++) {
+      const radius = 0.5 + Math.random() * 0.8;
+      const mistGeo = new THREE.SphereGeometry(radius, 6, 4);
       const mistMat = new THREE.MeshPhongMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.08 + Math.random() * 0.14,
+        opacity: 0.1 + Math.random() * 0.15,
         shininess: 5,
         side: THREE.DoubleSide,
       });
@@ -987,9 +989,9 @@ export class TerrainDecorator {
         Math.sin(angle) * dist
       );
       mist.scale.set(
-        1.0 + Math.random() * 0.8,
-        0.3 + Math.random() * 0.4,
-        1.0 + Math.random() * 0.8
+        1.2 + Math.random() * 1.0,
+        0.3 + Math.random() * 0.5,
+        1.2 + Math.random() * 1.0
       );
       mist.userData.spinSpeed = (Math.random() - 0.5) * 1.5;
       mist.userData.bobSpeed = 0.5 + Math.random() * 1.0;
@@ -1001,16 +1003,17 @@ export class TerrainDecorator {
       this.waterMeshes.push(mist);
     }
 
-    for (let i = 0; i < 15; i++) {
-      const sparkleGeo = new THREE.SphereGeometry(0.015 + Math.random() * 0.025, 4, 4);
+    // 4 sparkles (down from 15) — brighter to compensate
+    for (let i = 0; i < 4; i++) {
+      const sparkleGeo = new THREE.SphereGeometry(0.02 + Math.random() * 0.03, 4, 4);
       const sparkleMat = new THREE.MeshPhongMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.4 + Math.random() * 0.6,
+        opacity: 0.5 + Math.random() * 0.5,
         shininess: 200,
         specular: 0xffffff,
         emissive: 0xffffff,
-        emissiveIntensity: 0.4 + Math.random() * 0.5,
+        emissiveIntensity: 0.5 + Math.random() * 0.5,
       });
       const sparkle = new THREE.Mesh(sparkleGeo, sparkleMat);
       const sAngle = Math.random() * Math.PI * 2;
@@ -1025,14 +1028,15 @@ export class TerrainDecorator {
       this.waterMeshes.push(sparkle);
     }
 
-    const sprayCount = 18;
+    // 6 spray meshes (down from 18) — larger to compensate
+    const sprayCount = 6;
     for (let i = 0; i < sprayCount; i++) {
-      const r = 0.12 + Math.random() * 0.28;
-      const sprayGeo = new THREE.SphereGeometry(r, 6, 5);
+      const r = 0.18 + Math.random() * 0.35;
+      const sprayGeo = new THREE.SphereGeometry(r, 5, 4);
       const sprayMat = new THREE.MeshPhongMaterial({
         color: 0xffffff,
         transparent: true,
-        opacity: 0.15 + Math.random() * 0.25,
+        opacity: 0.18 + Math.random() * 0.25,
         shininess: 10,
         emissive: 0xffffff,
         emissiveIntensity: 0.06,
@@ -1047,9 +1051,9 @@ export class TerrainDecorator {
         Math.sin(angle) * dist
       );
       spray.scale.set(
-        0.8 + Math.random() * 0.6,
-        0.4 + Math.random() * 0.3,
-        0.8 + Math.random() * 0.6
+        1.0 + Math.random() * 0.8,
+        0.4 + Math.random() * 0.4,
+        1.0 + Math.random() * 0.8
       );
       spray.userData.isMistCloud = true;
       spray.userData.spinSpeed = (Math.random() - 0.5) * 2.0;
@@ -1061,17 +1065,18 @@ export class TerrainDecorator {
       this.waterMeshes.push(spray);
     }
 
-    const rainbowColors = [0xff0000, 0xff8800, 0xffff00, 0x00cc00, 0x0066ff, 0x4400aa, 0x8800ff];
+    // 4 rainbow bands (down from 7) — ROYGBIV compressed
+    const rainbowColors = [0xff0000, 0xffff00, 0x00cc00, 0x4400aa];
     for (let i = 0; i < rainbowColors.length; i++) {
       const angle = (i / (rainbowColors.length - 1)) * Math.PI * 0.6 + Math.PI * 0.2;
-      const arcR = fallHeight * 0.5 + i * 0.05;
-      const bandGeo = new THREE.PlaneGeometry(0.05, fallHeight * 0.5);
+      const arcR = fallHeight * 0.5 + i * 0.08;
+      const bandGeo = new THREE.PlaneGeometry(0.07, fallHeight * 0.5);
       const bandMat = new THREE.MeshPhongMaterial({
         color: rainbowColors[i],
         transparent: true,
-        opacity: 0.1,
+        opacity: 0.12,
         emissive: rainbowColors[i],
-        emissiveIntensity: 0.12,
+        emissiveIntensity: 0.15,
         side: THREE.DoubleSide,
       });
       const band = new THREE.Mesh(bandGeo, bandMat);
