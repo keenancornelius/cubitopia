@@ -1304,6 +1304,7 @@ class Cubitopia {
         }
       },
       showXPText: (wp, xp) => this.unitRenderer.showXPText(wp, xp),
+      showCritText: (wp, combo, dmg, color) => this.unitRenderer.showCritText(wp, combo, dmg, color),
       showLevelUpEffect: (id, wp, lvl) => this.unitRenderer.showLevelUpEffect(id, wp, lvl),
       playSound: (name, vol) => this.sound.play(name as any, vol),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
@@ -2435,7 +2436,6 @@ class Cubitopia {
             { key: 'W', label: `Archer (${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g)`, action: `spawn:barracks:ARCHER:${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}` },
             { key: 'E', label: `Rider (${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g)`, action: `spawn:barracks:RIDER:${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}` },
             { key: 'R', label: `Scout (${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g)`, action: `spawn:barracks:SCOUT:${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}` },
-            { key: 'T', label: `Paladin (${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g)`, action: `spawn:barracks:PALADIN:${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}` },
           ],
         },
         {
@@ -2453,6 +2453,7 @@ class Cubitopia {
             { key: 'Q', label: `Mage (${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c)`, action: `spawn:wizard_tower:MAGE:${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}:${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}` },
             { key: 'W', label: `Battlemage (${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c)`, action: `spawn:wizard_tower:BATTLEMAGE:${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}:${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}` },
             { key: 'E', label: `Healer (${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c)`, action: `spawn:wizard_tower:HEALER:${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}:${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}` },
+            { key: 'R', label: `Paladin (${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}c)`, action: `spawn:wizard_tower:PALADIN:${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}:${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}` },
           ],
         },
       ],

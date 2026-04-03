@@ -426,8 +426,7 @@ export default class SpawnQueueSystem {
     switch (buildingKind) {
       case 'barracks': {
         const type = unitType === 'archer' ? UnitType.ARCHER :
-                     unitType === 'rider' ? UnitType.RIDER :
-                     unitType === 'paladin' ? UnitType.PALADIN : UnitType.WARRIOR;
+                     unitType === 'rider' ? UnitType.RIDER : UnitType.WARRIOR;
         const cost = GAME_CONFIG.units[type].costs.tooltipQueue.gold;
         this.doSpawnQueueGeneric('barracks', type, cost, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase());
         break;
@@ -451,6 +450,26 @@ export default class SpawnQueueSystem {
       case 'workshop': {
         const type = UnitType.TREBUCHET;
         this.doSpawnQueueWorkshop(type, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase());
+        break;
+      }
+      case 'armory': {
+        const typeMap: Record<string, UnitType> = {
+          greatsword: UnitType.GREATSWORD, assassin: UnitType.ASSASSIN,
+          berserker: UnitType.BERSERKER, shieldbearer: UnitType.SHIELDBEARER,
+        };
+        const type = typeMap[unitType] || UnitType.GREATSWORD;
+        const cfg = (GAME_CONFIG.units[type].costs as any).menu as { gold: number; steel: number };
+        this.doSpawnQueueArmory(type, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase(), cfg.gold, cfg.steel);
+        break;
+      }
+      case 'wizard_tower': {
+        const typeMap: Record<string, UnitType> = {
+          mage: UnitType.MAGE, battlemage: UnitType.BATTLEMAGE,
+          healer: UnitType.HEALER, paladin: UnitType.PALADIN,
+        };
+        const type = typeMap[unitType] || UnitType.MAGE;
+        const cfg = (GAME_CONFIG.units[type].costs as any).menu as { gold: number; crystal: number };
+        this.doSpawnQueueWizardTower(type, unitType.charAt(0).toUpperCase() + unitType.slice(1).toLowerCase(), cfg.gold, cfg.crystal);
         break;
       }
     }

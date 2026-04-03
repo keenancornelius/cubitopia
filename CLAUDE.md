@@ -313,17 +313,52 @@ Called from main.ts only for AI players. Makes strategic decisions:
 | Catapult | CATAPULT | Siege, medium range | Damages walls |
 | Trebuchet | TREBUCHET | Siege, long range | Damages walls |
 | Scout | SCOUT | Fast recon | Curved scimitar |
-| Mage | MAGE | Ranged magic | Blue projectiles |
+| Mage | MAGE | Ranged combo caster | Cycles 5 elements. Water→Wet, Fire→Ablaze. Combos: Wet+Lightning→Electrocute Crit (chain), Ablaze+Wind→Inferno (spread), Arcane+Lightning→Kamehameha (laser). Water+Ablaze→Soothe (anti-synergy heal) |
 | Builder | BUILDER | Worker | Mines stone/clay, builds walls |
 | Lumberjack | LUMBERJACK | Worker | Chops trees, carries wood |
 | Villager | VILLAGER | Worker | Farms, harvests grass |
-| Healer | HEALER | Support | Auto-heals allies in range 2 (2 HP/1.5s) |
+| Healer | HEALER | Support mage | Auto-heals allies in range 2 (2 HP/1.5s). Cleanse: removes all debuffs + speed boost + status immunity. Counts as mage for Arcane Convergence |
 | Assassin | ASSASSIN | Burst DPS | +3 attack from full HP, oversized poison daggers |
 | Shieldbearer | SHIELDBEARER | Tank/Peeler | Heater shield bash + knockback, +2 defense aura, peels for squishies |
 | Berserker | BERSERKER | Melee DPS | Oversized war axes, up to +4 attack at low HP, ranged axe throw (range 7) once per unique target (slows + chase boost), deflected by shields |
-| Battlemage | BATTLEMAGE | AoE Ranged | Splash damage to enemies within 1 hex of target |
+| Battlemage | BATTLEMAGE | AoE setup caster | Low-damage splash within 1 hex. Cyclone pull (2-hex, 8s CD). Water AoE→Wet, Wind AoE→Knockup CC, Lightning AoE→Arcane (purple orbs), Fire AoE→Ablaze. Best paired with Mage for devastating combos |
 | Greatsword | GREATSWORD | Cleave melee | Massive claymore, 360° spin hits all adjacent, knockback |
 | Ogre | OGRE | Reward tank | FREE on base tier-up. 50 HP, 8 ATK, 2-hex AOE club smash + knockback. Cannot be trained. 1.4x scale, isSiege |
+
+### Magic System — Elemental Status Effects & Combos
+
+**Balance philosophy:** Base spells are weak — only combos chunk. A full combo should ~90% a squishy (8 HP) and ~50% a tank (18 HP). Ablaze burn is negligible alone (1.2 total). Battlemage splash damage is intentionally low (40% multiplier) since he's a setup caster, not DPS.
+
+All magic units (Mage, Battlemage, Healer) cycle through 5 elements: `[FIRE, WATER, LIGHTNING, WIND, EARTH]`. `_elementCycleIndex` on Unit tracks position. Some elements leave status effects that interact with follow-up spells for combo attacks.
+
+**Mage — Single-Target Combo Caster:**
+- **Water → Wet** (5s) — drenches target. Sets up Lightning combo.
+- **Fire → Ablaze** (4s, 0.3 DPS burn) — weak burn (~1.2 total HP). Just a marker for Wind combo. Base spells are weak!
+- **Earth** — raw damage, no status. Safe hit.
+- **Wet + Lightning → Electrocute Crit** — consumes Wet, chain lightning arcs to 3 enemies within 3 hex dealing 0.8× attack per chain. THE combo payoff.
+- **Ablaze + Wind → Inferno** — consumes Ablaze, 4 burst damage + spreads Ablaze to 3 nearby enemies. combat(~4) + burst(4) = ~8 total = near-kill on squishy.
+- **Water + Ablaze → Soothe** (anti-synergy!) — consumes Ablaze, HEALS enemy 3 HP. Accident if you Water a burning target.
+
+**Battlemage — AoE Setup (low damage, big combos):**
+- **Water AoE → Wet** — splashes whole group with Wet. Low damage (15% multiplier). Sets up Mage Electrocute on all of them.
+- **Wind AoE → Knockup** (1.2s CC) — launches enemies airborne. They can't move or attack. Pure crowd control.
+- **Lightning AoE → Arcane** (6s) — purple orbs mark enemies. No damage. But when a Mage's Lightning hits an Arcane target...
+- **Arcane + Mage Lightning → Kamehameha** — Mage fires a piercing laser beam through target and up to 4 enemies in a line, dealing 1× attack per pierce. combat(~4) + laser(5) = ~9 total = kills squishy, halves tank. The big cross-class payoff.
+- **Fire AoE → Ablaze** — same burn as Mage Fire. Wind follow-up triggers Inferno.
+- **Earth AoE** — raw damage, no status.
+
+**Healer — Support Mage:**
+- **Heal** — auto-targets most injured ally in range 2, fires healing orb (2 HP per cast).
+- **Cleanse** (8s CD) — when no healing needed, removes ALL debuffs from most-debuffed ally. Gives speed boost (1.5×, 2.5s) with golden trail + status immunity (3s "Cleanse Linger"). Whoosh sound + golden VFX.
+- Counts as a mage for Arcane Convergence group synergy.
+
+**Cleanse Linger:** After being cleansed, a unit is immune to all status effect applications for the linger duration. Prevents re-application of Wet/Ablaze/Arcane/Knockup.
+
+**Implementation files:**
+- `src/game/systems/StatusEffectSystem.ts` — core framework: applyMageElement, applyBattlemageElement, processHealerCleanse, tickStatusEffects, isKnockedUp, getSpeedMultiplier
+- Status fields on Unit type: `_statusWet`, `_statusAblaze`, `_ablazeDPS`, `_ablazeSource`, `_statusArcane`, `_knockupUntil`, `_cleanseLinger`, `_cleanseCooldown`, `_speedBoostUntil`, `_speedBoostFactor`
+- Config: `GAME_CONFIG.combat.statusEffects.*` — wet, ablaze, electrocuteCrit, inferno, soothe, knockup, arcane, kamehameha, cleanse
+- Wired into: CombatEventHandler (projectile impact VFX), CombatSystem.resolve (reserved modifiers), UnitAI.update (burn ticks, knockup skip, cleanse, speed boost)
 
 ### Base Tier System
 Bases upgrade through 3 tiers based on population count + unique building diversity in the capture zone (5-hex radius):

@@ -6,6 +6,7 @@
 import { Unit, UnitType, UnitState, UnitStance, CommandType, HexCoord, GameMap, TerrainType, ResourceType, BlockType, Player, Base, PlacedBuilding, ENABLE_UNDERGROUND } from '../../types';
 import { Pathfinder, tileKey } from './Pathfinder';
 import { CombatSystem } from './CombatSystem';
+import { StatusEffectSystem } from './StatusEffectSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { TacticalGroupManager, TacticalGroup, getTacticalRole, TacticalRole, isAlive } from './TacticalGroup';
 import { GAME_CONFIG } from '../GameConfig';
@@ -193,6 +194,8 @@ export class UnitAI {
         unit.attackCooldown = Math.max(0, unit.attackCooldown - delta);
         unit.gatherCooldown = Math.max(0, unit.gatherCooldown - delta);
         if ((unit as any)._fleeCooldown > 0) (unit as any)._fleeCooldown -= delta;
+        if ((unit as any)._cycloneCooldown > 0) (unit as any)._cycloneCooldown = Math.max(0, (unit as any)._cycloneCooldown - delta);
+        if ((unit as any)._synergyCooldown > 0) (unit as any)._synergyCooldown = Math.max(0, (unit as any)._synergyCooldown - delta);
 
         // Healer caster: pick most-injured ally in range, fire heal projectile
         if (unit.type === UnitType.HEALER) {
@@ -203,7 +206,27 @@ export class UnitAI {
             setTimeout(() => { if (unit.state === UnitState.ATTACKING) unit.state = UnitState.IDLE; }, GAME_CONFIG.gather.healerCastDelay);
           }
           for (const hid of healed) events.push({ type: 'heal', healerId: unit.id, targetId: hid } as any);
+
+          // Healer Cleanse: if not healing, try to cleanse a debuffed ally
+          if (healed.length === 0) {
+            const cleanseEvts = StatusEffectSystem.processHealerCleanse(unit, allUnits, delta);
+            if (cleanseEvts.length > 0 && CombatLog.isEnabled()) {
+              // Log the cleanse event with all effects that were removed
+              const targetId = cleanseEvts[0]?.unitId;
+              const target = allUnits.find(u => u.id === targetId);
+              if (target) {
+                const effects = cleanseEvts.filter(e => e.effect !== 'cleanse').map(e => e.effect);
+                CombatLog.logCleanse(unit, target, effects.length > 0 ? effects : ['debuffs']);
+              }
+            }
+            for (const ce of cleanseEvts) {
+              events.push({ type: 'status:cleanse', unitId: ce.unitId, effect: ce.effect, casterId: ce.casterId } as any);
+            }
+          }
         }
+
+        // Knockup CC: if unit is airborne, skip all actions this frame
+        if (StatusEffectSystem.isKnockedUp(unit)) continue;
 
         switch (unit.state) {
           case UnitState.IDLE:
@@ -233,6 +256,29 @@ export class UnitAI {
             UnitAI.handleReturning(unit, map, delta, events);
             break;
         }
+      }
+    }
+
+    // ─── Status Effect Tick: burn damage, expiry ───
+    const statusTicks = StatusEffectSystem.tickStatusEffects(allUnits, delta);
+    for (const se of statusTicks) {
+      if (se.type === 'status:tick') {
+        events.push({ type: 'status:tick', unitId: se.unitId, effect: se.effect, damage: se.damage } as any);
+      }
+    }
+    // Check for status-tick kills
+    for (const unit of allUnits) {
+      if (unit.currentHealth <= 0 && unit.state !== UnitState.DEAD) {
+        unit.state = UnitState.DEAD;
+        events.push({ type: 'unit:killed', unit, killer: undefined });
+      }
+    }
+
+    // ─── Mage Group Synergy: Arcane Convergence ───
+    const synergyResults = CombatSystem.checkMageSynergy(allUnits);
+    for (const sr of synergyResults) {
+      for (const did of sr.damagedIds) {
+        events.push({ type: 'combat:synergy', unitId: did, centerQ: sr.centerQ, centerR: sr.centerR, owner: sr.owner } as any);
       }
     }
 
@@ -1614,7 +1660,10 @@ export class UnitAI {
         unit._path = null;
       }
     } else {
-      const speed = unit.moveSpeed * delta;
+      let speed = unit.moveSpeed * delta;
+      // Apply cleanse speed boost
+      const clSpeedMult = StatusEffectSystem.getSpeedMultiplier(unit);
+      if (clSpeedMult > 1.0) speed *= clSpeedMult;
       const moveX = (dx / dist) * Math.min(speed, dist);
       const moveZ = (dz / dist) * Math.min(speed, dist);
       unit.worldPosition.x += moveX;
@@ -2733,6 +2782,11 @@ export class UnitAI {
       if (unit._chaseBoostUntil && nowMs < unit._chaseBoostUntil) {
         effectiveSpeed *= 1.6;
       }
+      // Healer cleanse speed boost — golden trail speed boost
+      const cleanseSpeedMult = StatusEffectSystem.getSpeedMultiplier(unit);
+      if (cleanseSpeedMult > 1.0) {
+        effectiveSpeed *= cleanseSpeedMult;
+      }
 
       // ── Squad leash: fast units ahead of centroid slow down to stay tight ──
       // Skip for joining units — they're catching up at their own speed.
@@ -2896,13 +2950,17 @@ export class UnitAI {
         if (applyInfo.leveledUp) events.push({ type: 'combat:levelup', unitId: unit.id, newLevel: applyInfo.newLevel } as any);
         // Battlemage AoE splash
         const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
-        for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
+        for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid, attackerId: unit.id, element: unit.element } as any);
         // Greatsword cleave + knockback
         const isTileBlocked = (q: number, r: number) => {
           const k = tileKey(q, r);
           if (Pathfinder.blockedTiles.has(k)) return true;
           return Pathfinder.occupiedTiles.has(k);
         };
+        // Battlemage cyclone pull — sucks nearby enemies toward target
+        const cycloneResult = CombatSystem.applyBattlemageCyclone(unit, target, allUnits, isTileBlocked);
+        for (const pid of cycloneResult.damaged) events.push({ type: 'combat:splash', unitId: pid } as any);
+        for (const pr of cycloneResult.pulled) events.push({ type: 'combat:cyclone', unitId: pr.unitId, knockQ: pr.knockQ, knockR: pr.knockR } as any);
         const cleaveResults = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked);
         for (const cr of cleaveResults) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
         // Ogre club swipe — 2-hex AOE knockback
@@ -2965,14 +3023,18 @@ export class UnitAI {
         if (applyInfo2.xpGained > 0) events.push({ type: 'combat:xp', unitId: unit.id, xp: applyInfo2.xpGained } as any);
         if (applyInfo2.leveledUp) events.push({ type: 'combat:levelup', unitId: unit.id, newLevel: applyInfo2.newLevel } as any);
         // Battlemage AoE splash
-        const splashed = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
-        for (const sid of splashed) events.push({ type: 'combat:splash', unitId: sid } as any);
+        const splashed2 = CombatSystem.applyBattlemageAoE(unit, target, allUnits);
+        for (const sid of splashed2) events.push({ type: 'combat:splash', unitId: sid, attackerId: unit.id, element: unit.element } as any);
         // Greatsword cleave + knockback
         const isTileBlocked2 = (q: number, r: number) => {
           const k = tileKey(q, r);
           if (Pathfinder.blockedTiles.has(k)) return true;
           return Pathfinder.occupiedTiles.has(k);
         };
+        // Battlemage cyclone pull
+        const cycloneResult2 = CombatSystem.applyBattlemageCyclone(unit, target, allUnits, isTileBlocked2);
+        for (const pid of cycloneResult2.damaged) events.push({ type: 'combat:splash', unitId: pid } as any);
+        for (const pr of cycloneResult2.pulled) events.push({ type: 'combat:cyclone', unitId: pr.unitId, knockQ: pr.knockQ, knockR: pr.knockR } as any);
         const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
         for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
         // Ogre club swipe — 2-hex AOE knockback

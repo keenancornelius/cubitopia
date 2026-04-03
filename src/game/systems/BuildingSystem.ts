@@ -309,7 +309,6 @@ class BuildingSystem {
         { type: 'warrior', label: 'Warrior', costLabel: `${GAME_CONFIG.units[UnitType.WARRIOR].costs.tooltipQueue.gold}g` },
         { type: 'archer', label: 'Archer', costLabel: `${GAME_CONFIG.units[UnitType.ARCHER].costs.tooltipQueue.gold}g` },
         { type: 'rider', label: 'Rider', costLabel: `${GAME_CONFIG.units[UnitType.RIDER].costs.tooltipQueue.gold}g` },
-        { type: 'paladin', label: 'Paladin', costLabel: `${GAME_CONFIG.units[UnitType.PALADIN].costs.tooltipQueue.gold}g` },
       ];
       case 'forestry': return [
         { type: 'lumberjack', label: 'Lumberjack', costLabel: `${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.tooltipQueue.wood}w` },
@@ -327,6 +326,18 @@ class BuildingSystem {
           label: 'Trebuchet',
           costLabel: `${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.rope}r+${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.stone}s+${GAME_CONFIG.units[UnitType.TREBUCHET].costs.tooltipQueue.wood}w`,
         },
+      ];
+      case 'armory': return [
+        { type: 'greatsword', label: 'Greatsword', costLabel: `${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s` },
+        { type: 'assassin', label: 'Assassin', costLabel: `${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s` },
+        { type: 'berserker', label: 'Berserker', costLabel: `${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s` },
+        { type: 'shieldbearer', label: 'Shieldbearer', costLabel: `${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s` },
+      ];
+      case 'wizard_tower': return [
+        { type: 'mage', label: 'Mage', costLabel: `${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c` },
+        { type: 'battlemage', label: 'Battlemage', costLabel: `${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c` },
+        { type: 'healer', label: 'Healer', costLabel: `${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c` },
+        { type: 'paladin', label: 'Paladin', costLabel: `${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}c` },
       ];
       case 'silo': return [];
       default: return [];

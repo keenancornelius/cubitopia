@@ -2,7 +2,8 @@
 // CUBITOPIA - RTS HUD / UI Overlay
 // ============================================
 
-import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType, ENABLE_UNDERGROUND } from '../types';
+import { Unit, Player, Base, Tile, TerrainType, ResourceType, BlockType, UnitStance, UnitType, FormationType, ElementType, ENABLE_UNDERGROUND } from '../types';
+import { StatusEffectSystem } from '../game/systems/StatusEffectSystem';
 import { StrategyCamera } from '../engine/Camera';
 import { GAME_CONFIG } from '../game/GameConfig';
 import { getUnitPortrait } from '../engine/UnitPortraits';
@@ -671,30 +672,14 @@ export class HUD {
       if (!this.earthGroupVisible) this.earthGroupBtn!.style.background = 'none';
     });
 
-    /** Close all resource dropdowns */
-    const closeAllDropdowns = () => {
+    const toggleEarthGroup = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
       if (this.earthGroupVisible) {
         this.earthGroupDropdown!.style.display = 'none';
         this.earthGroupVisible = false;
         this.earthGroupBtn!.style.background = 'none';
-      }
-      if (this.craftedGroupVisible) {
-        this.craftedGroupDropdown!.style.display = 'none';
-        this.craftedGroupVisible = false;
-        this.craftedGroupBtn!.style.background = 'none';
-      }
-      if (this.unitDropdownVisible) {
-        this.hideUnitDropdown();
-        unitBtn.style.background = 'none';
-      }
-    };
-
-    const toggleEarthGroup = (e: Event) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const wasVisible = this.earthGroupVisible;
-      closeAllDropdowns();
-      if (!wasVisible) {
+      } else {
         this.earthGroupDropdown!.style.display = 'block';
         this.earthGroupVisible = true;
         this.earthGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
@@ -716,9 +701,11 @@ export class HUD {
     const toggleCraftedGroup = (e: Event) => {
       e.stopPropagation();
       e.preventDefault();
-      const wasVisible = this.craftedGroupVisible;
-      closeAllDropdowns();
-      if (!wasVisible) {
+      if (this.craftedGroupVisible) {
+        this.craftedGroupDropdown!.style.display = 'none';
+        this.craftedGroupVisible = false;
+        this.craftedGroupBtn!.style.background = 'none';
+      } else {
         this.craftedGroupDropdown!.style.display = 'block';
         this.craftedGroupVisible = true;
         this.craftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)';
@@ -740,9 +727,10 @@ export class HUD {
     const toggleUnitDropdown = (e: Event) => {
       e.stopPropagation();
       e.preventDefault();
-      const wasVisible = this.unitDropdownVisible;
-      closeAllDropdowns();
-      if (!wasVisible) {
+      if (this.unitDropdownVisible) {
+        this.hideUnitDropdown();
+        unitBtn.style.background = 'none';
+      } else {
         this.refreshDropdownContent();
         dropdown.style.display = 'block';
         this.unitDropdownVisible = true;
@@ -753,12 +741,7 @@ export class HUD {
     unitBtn.addEventListener('click', toggleUnitDropdown);
     unitBtn.addEventListener('contextmenu', toggleUnitDropdown);
 
-    // Close dropdowns when clicking anywhere else
-    document.addEventListener('click', () => {
-      closeAllDropdowns();
-    });
-
-    // Prevent clicks inside dropdowns from closing them
+    // Prevent clicks inside dropdowns from bubbling
     dropdown.addEventListener('click', (e) => e.stopPropagation());
   }
 
@@ -934,47 +917,27 @@ export class HUD {
 
     bar.appendChild(row);
 
-    // ===== EVENT LISTENERS =====
-    const closeAllEnemy = () => {
-      if (this.enemyEarthGroupVisible) {
-        this.enemyEarthGroupDropdown!.style.display = 'none';
-        this.enemyEarthGroupVisible = false;
-        this.enemyEarthGroupBtn!.style.background = 'none';
-      }
-      if (this.enemyCraftedGroupVisible) {
-        this.enemyCraftedGroupDropdown!.style.display = 'none';
-        this.enemyCraftedGroupVisible = false;
-        this.enemyCraftedGroupBtn!.style.background = 'none';
-      }
-      if (this.enemyUnitDropdownVisible) {
-        this.enemyUnitDropdown!.style.display = 'none';
-        this.enemyUnitDropdownVisible = false;
-        unitBtn.style.background = 'none';
-      }
-    };
-
+    // ===== EVENT LISTENERS (independent toggles) =====
     this.enemyEarthGroupBtn.addEventListener('mouseenter', () => { this.enemyEarthGroupBtn!.style.background = 'rgba(255,255,255,0.1)'; });
     this.enemyEarthGroupBtn.addEventListener('mouseleave', () => { if (!this.enemyEarthGroupVisible) this.enemyEarthGroupBtn!.style.background = 'none'; });
-    const toggleEnemyEarth = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyEarthGroupVisible; closeAllEnemy(); if (!was) { this.enemyEarthGroupDropdown!.style.display = 'block'; this.enemyEarthGroupVisible = true; this.enemyEarthGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
+    const toggleEnemyEarth = (e: Event) => { e.stopPropagation(); e.preventDefault(); if (this.enemyEarthGroupVisible) { this.enemyEarthGroupDropdown!.style.display = 'none'; this.enemyEarthGroupVisible = false; this.enemyEarthGroupBtn!.style.background = 'none'; } else { this.enemyEarthGroupDropdown!.style.display = 'block'; this.enemyEarthGroupVisible = true; this.enemyEarthGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
     this.enemyEarthGroupBtn.addEventListener('click', toggleEnemyEarth);
     this.enemyEarthGroupBtn.addEventListener('contextmenu', toggleEnemyEarth);
     earthDropdown.addEventListener('click', (e) => e.stopPropagation());
 
     this.enemyCraftedGroupBtn.addEventListener('mouseenter', () => { this.enemyCraftedGroupBtn!.style.background = 'rgba(255,255,255,0.1)'; });
     this.enemyCraftedGroupBtn.addEventListener('mouseleave', () => { if (!this.enemyCraftedGroupVisible) this.enemyCraftedGroupBtn!.style.background = 'none'; });
-    const toggleEnemyCrafted = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyCraftedGroupVisible; closeAllEnemy(); if (!was) { this.enemyCraftedGroupDropdown!.style.display = 'block'; this.enemyCraftedGroupVisible = true; this.enemyCraftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
+    const toggleEnemyCrafted = (e: Event) => { e.stopPropagation(); e.preventDefault(); if (this.enemyCraftedGroupVisible) { this.enemyCraftedGroupDropdown!.style.display = 'none'; this.enemyCraftedGroupVisible = false; this.enemyCraftedGroupBtn!.style.background = 'none'; } else { this.enemyCraftedGroupDropdown!.style.display = 'block'; this.enemyCraftedGroupVisible = true; this.enemyCraftedGroupBtn!.style.background = 'rgba(255,255,255,0.15)'; } };
     this.enemyCraftedGroupBtn.addEventListener('click', toggleEnemyCrafted);
     this.enemyCraftedGroupBtn.addEventListener('contextmenu', toggleEnemyCrafted);
     craftedDropdown.addEventListener('click', (e) => e.stopPropagation());
 
     unitBtn.addEventListener('mouseenter', () => { unitBtn.style.background = 'rgba(255,255,255,0.1)'; });
     unitBtn.addEventListener('mouseleave', () => { if (!this.enemyUnitDropdownVisible) unitBtn.style.background = 'none'; });
-    const toggleEnemyUnits = (e: Event) => { e.stopPropagation(); e.preventDefault(); const was = this.enemyUnitDropdownVisible; closeAllEnemy(); if (!was) { this.refreshEnemyDropdownContent(); this.enemyUnitDropdown!.style.display = 'block'; this.enemyUnitDropdownVisible = true; unitBtn.style.background = 'rgba(255,255,255,0.15)'; } };
+    const toggleEnemyUnits = (e: Event) => { e.stopPropagation(); e.preventDefault(); if (this.enemyUnitDropdownVisible) { this.enemyUnitDropdown!.style.display = 'none'; this.enemyUnitDropdownVisible = false; unitBtn.style.background = 'none'; } else { this.refreshEnemyDropdownContent(); this.enemyUnitDropdown!.style.display = 'block'; this.enemyUnitDropdownVisible = true; unitBtn.style.background = 'rgba(255,255,255,0.15)'; } };
     unitBtn.addEventListener('click', toggleEnemyUnits);
     unitBtn.addEventListener('contextmenu', toggleEnemyUnits);
     dropdown.addEventListener('click', (e) => e.stopPropagation());
-
-    document.addEventListener('click', () => { closeAllEnemy(); });
   }
 
   private refreshEnemyDropdownContent(): void {
@@ -1755,6 +1718,61 @@ export class HUD {
         passiveHtml += `</div>`;
       }
 
+      // --- Element cycle display for Mage / Battlemage ---
+      const ELEMENT_CYCLE: ElementType[] = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+      const ELEMENT_COLORS: Record<string, string> = {
+        fire: '#ff4422', water: '#4488ff', lightning: '#ffee44', wind: '#88ffcc', earth: '#aa7744',
+      };
+      const ELEMENT_ICONS: Record<string, string> = {
+        fire: '🔥', water: '💧', lightning: '⚡', wind: '🌪', earth: '🪨',
+      };
+      // Battlemage overrides: Earth → Arcane (purple), Lightning → High Voltage (cyan)
+      const BM_COLORS: Record<string, string> = {
+        fire: '#ff4422', water: '#4488ff', lightning: '#44eeff', wind: '#88ffcc', earth: '#aa44ff',
+      };
+      const BM_ICONS: Record<string, string> = {
+        fire: '🔥', water: '💧', lightning: '⚡', wind: '🌪', earth: '🔮',
+      };
+      const BM_NAMES: Record<string, string> = {
+        fire: 'ABLAZE', water: 'WET', lightning: 'HIGH VOLTAGE', wind: 'KNOCKUP', earth: 'ARCANE',
+      };
+      const isMageType = unit.type === UnitType.MAGE || unit.type === UnitType.BATTLEMAGE;
+      const isBM = unit.type === UnitType.BATTLEMAGE;
+      let elementHtml = '';
+      if (isMageType && unit.element) {
+        const curEl = unit.element;
+        const curColor = (isBM ? BM_COLORS : ELEMENT_COLORS)[curEl] || '#fff';
+        const curIcon = (isBM ? BM_ICONS : ELEMENT_ICONS)[curEl] || '?';
+        const curName = isBM ? (BM_NAMES[curEl] || curEl.toUpperCase()) : curEl.toUpperCase();
+        elementHtml = `<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.12); padding-top:5px;">
+          <div style="font-size:11px; color:#ccc; margin-bottom:3px;">Next Spell: <span style="color:${curColor}; font-weight:bold;">${curIcon} ${curName}</span></div>
+          <div id="hud-element-cycle" style="display:flex; gap:3px; flex-wrap:wrap;"></div>
+        </div>`;
+      }
+
+      // --- Status effects display (any unit) ---
+      const activeStatuses = StatusEffectSystem.getActiveStatuses(unit);
+      const STATUS_DISPLAY: Record<string, { color: string; label: string; icon: string }> = {
+        wet:            { color: '#4488ff', label: 'Wet',      icon: '💧' },
+        ablaze:         { color: '#ff4422', label: 'Ablaze',   icon: '🔥' },
+        arcane:         { color: '#aa44ff', label: 'Arcane',   icon: '🔮' },
+        high_voltage:   { color: '#44eeff', label: 'High Voltage', icon: '⚡' },
+        knockup:        { color: '#88ffcc', label: 'Airborne', icon: '🌪' },
+        cleanse_linger: { color: '#ffd700', label: 'Immune',   icon: '✨' },
+        speed_boost:    { color: '#ffd700', label: 'Haste',    icon: '💨' },
+      };
+      let statusHtml = '';
+      if (activeStatuses.length > 0) {
+        const badges = activeStatuses.map(s => {
+          const d = STATUS_DISPLAY[s] || { color: '#ccc', label: s, icon: '●' };
+          return `<span style="display:inline-block; padding:2px 6px; margin:1px 2px; border-radius:3px; font-size:10px; font-weight:bold; background:rgba(0,0,0,0.4); border:1px solid ${d.color}; color:${d.color};">${d.icon} ${d.label}</span>`;
+        }).join('');
+        statusHtml = `<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.12); padding-top:5px;">
+          <div style="font-size:10px; color:#888; margin-bottom:2px;">STATUS EFFECTS</div>
+          <div style="display:flex; flex-wrap:wrap;">${badges}</div>
+        </div>`;
+      }
+
       this.elements.selectionInfo.innerHTML = `
         <div style="font-size:16px; font-weight:bold; text-transform:uppercase; margin-bottom:2px;">
           ${unit.type}${lvlInfo} <span style="font-size:12px; color:#aaa">(${unit.state})</span>
@@ -1769,7 +1787,48 @@ export class HUD {
         <div>ATK: ${unit.stats.attack} · DEF: ${unit.stats.defense} · RNG: ${unit.stats.range} · SPD: ${unit.moveSpeed.toFixed(1)}</div>
         <div style="margin-top:4px; color:#ccc; font-size:11px;">Stance: ${stanceLabel} · Move: ${unit.stats.movement}</div>
         ${passiveHtml}
+        ${elementHtml}
+        ${statusHtml}
       `;
+
+      // --- Wire up clickable element cycle buttons (debug override) ---
+      if (isMageType && unit.element) {
+        const cycleContainer = this.elements.selectionInfo.querySelector('#hud-element-cycle');
+        if (cycleContainer) {
+          const cycleIdx = unit._elementCycleIndex ?? 0;
+          ELEMENT_CYCLE.forEach((el, i) => {
+            const btn = document.createElement('span');
+            const isActive = i === cycleIdx;
+            const elColor = (isBM ? BM_COLORS : ELEMENT_COLORS)[el] || '#fff';
+            const elIcon = (isBM ? BM_ICONS : ELEMENT_ICONS)[el] || '?';
+            const elName = isBM ? (BM_NAMES[el] || el.toUpperCase()) : (el.charAt(0).toUpperCase() + el.slice(1));
+            btn.textContent = `${elIcon} ${elName}`;
+            btn.style.cssText = `
+              display:inline-block; padding:2px 6px; margin:1px; border-radius:3px; font-size:10px;
+              cursor:pointer; user-select:none; transition: all 0.1s;
+              border: 1px solid ${isActive ? elColor : '#555'};
+              background: ${isActive ? `rgba(255,255,255,0.15)` : 'rgba(0,0,0,0.3)'};
+              color: ${isActive ? elColor : '#888'};
+              font-weight: ${isActive ? 'bold' : 'normal'};
+            `;
+            btn.title = `Set next spell to ${elName} (debug)`;
+            btn.addEventListener('mouseenter', () => {
+              if (!isActive) { btn.style.borderColor = elColor; btn.style.color = elColor; }
+            });
+            btn.addEventListener('mouseleave', () => {
+              if (!isActive) { btn.style.borderColor = '#555'; btn.style.color = '#888'; }
+            });
+            btn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              unit.element = el;
+              unit._elementCycleIndex = i;
+              // Refresh the tooltip immediately
+              this.updateSelectionInfo(units);
+            });
+            cycleContainer.appendChild(btn);
+          });
+        }
+      }
     } else {
       // Multiple units selected — show clickable type badges for squad filtering
       // _fullSelection and _excludedTypes are managed by updateSelection(), not here
@@ -2211,21 +2270,21 @@ export class HUD {
               <img class="unit-icon" data-unit-portrait="${UnitType.PALADIN}" alt="Paladin">
               <div>
                 <div class="unit-name" style="color:#3498db;">Paladin</div>
-                <div class="unit-desc">Holy knight. ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold} gold. Barracks <span class="key" style="font-size:9px;">T</span>. High HP &amp; defense. +${GAME_CONFIG.combat.paladin.auraDefenseBonus} defense aura (${GAME_CONFIG.combat.paladin.auraRange} hex) to nearby allies.</div>
+                <div class="unit-desc">Holy knight. ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">R</span>. High HP &amp; defense. +${GAME_CONFIG.combat.paladin.auraDefenseBonus} defense aura (${GAME_CONFIG.combat.paladin.auraRange} hex) to nearby allies.</div>
               </div>
             </div>
             <div class="unit-row">
               <img class="unit-icon" data-unit-portrait="${UnitType.MAGE}" alt="Mage">
               <div>
                 <div class="unit-name" style="color:#2980b9;">Mage</div>
-                <div class="unit-desc">Ranged caster. ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">Q</span>. Range 3, magic orbs.</div>
+                <div class="unit-desc">Combo caster. ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">Q</span>. Range 3. Cycles 5 elements. Water makes targets Wet, Fire sets them Ablaze. Lightning on a Wet enemy = Electrocute chain. Wind on a Burning enemy = Inferno spread. See Magic section below.</div>
               </div>
             </div>
             <div class="unit-row">
               <img class="unit-icon" data-unit-portrait="${UnitType.HEALER}" alt="Healer">
               <div>
                 <div class="unit-name" style="color:#27ae60;">Healer</div>
-                <div class="unit-desc">Support. ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">E</span>. Heals ${GAME_CONFIG.combat.healer.healAmount} HP every ${GAME_CONFIG.combat.healer.projectileCooldown}s within 2 hex.</div>
+                <div class="unit-desc">Support mage. ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">E</span>. Heals ${GAME_CONFIG.combat.healer.healAmount} HP every ${GAME_CONFIG.combat.healer.projectileCooldown}s. Cleanse: removes all debuffs + speed boost + status immunity. Counts as a mage for Arcane Convergence.</div>
               </div>
             </div>
             <div class="unit-row">
@@ -2253,7 +2312,7 @@ export class HUD {
               <img class="unit-icon" data-unit-portrait="${UnitType.BATTLEMAGE}" alt="Battlemage">
               <div>
                 <div class="unit-name" style="color:#8e44ad;">Battlemage</div>
-                <div class="unit-desc">AoE caster. ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">W</span>. Splash ${Math.round(GAME_CONFIG.combat.battlemage.splashDamageMultiplier * 100)}% damage (${GAME_CONFIG.combat.battlemage.splashRadius}-hex radius) to all adjacent enemies.</div>
+                <div class="unit-desc">AoE setup caster. ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g + ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal} crystal. Wizard Tower <span class="key" style="font-size:9px;">W</span>. Low damage splash (${GAME_CONFIG.combat.battlemage.splashRadius}-hex). Cyclone pull every ${GAME_CONFIG.combat.battlemage.cycloneCooldown}s. Water AoE = Wet (sets up Electrocute). Wind AoE = Knockup CC. Lightning AoE = Arcane (sets up Kamehameha laser). Best paired with a Mage.</div>
               </div>
             </div>
             <div class="unit-row">
@@ -2294,9 +2353,9 @@ export class HUD {
           <div style="font-weight: bold; font-size: 12px; color: #c0392b; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">1</span> COMBAT BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (${GAME_CONFIG.buildings.barracks.cost.player.wood}w) — Q: Warrior ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g · W: Archer ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g · E: Rider ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g · R: Scout ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g · T: Paladin ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (${GAME_CONFIG.buildings.barracks.cost.player.wood}w) — Q: Warrior ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g · W: Archer ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g · E: Rider ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g · R: Scout ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><strong style="color:#708090;">Armory</strong> (${GAME_CONFIG.buildings.armory.cost.player.wood}w+${GAME_CONFIG.buildings.armory.cost.player.stone}s+${GAME_CONFIG.buildings.armory.cost.player.steel} steel) — Q: Greatsword ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s · W: Assassin ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s · E: Berserker ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s · R: Shieldbearer ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (${GAME_CONFIG.buildings.wizard_tower.cost.player.wood}w+${GAME_CONFIG.buildings.wizard_tower.cost.player.stone}s+${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) — Q: Mage ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c · W: Battlemage ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c · E: Healer ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (${GAME_CONFIG.buildings.wizard_tower.cost.player.wood}w+${GAME_CONFIG.buildings.wizard_tower.cost.player.stone}s+${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) — Q: Mage ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c · W: Battlemage ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c · E: Healer ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c · R: Paladin ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}c</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">2</span> ECONOMY BUILDINGS
@@ -2375,6 +2434,48 @@ export class HUD {
 
         <!-- TIPS -->
         <div class="section">
+          <div class="section-title" style="color: #9b59b6;">✨ How Magic Works</div>
+          <div style="font-size: 12px; color: #ccc; margin-bottom: 8px;">
+            Magic units (Mage, Battlemage, Healer) all cast elemental spells. Every attack cycles through 5 elements: Fire, Water, Lightning, Wind, Earth. Some elements leave a <strong>status effect</strong> on the enemy — and when the RIGHT follow-up element hits a unit that already has a status, it triggers a powerful <strong>combo</strong>.
+          </div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #2980b9; margin-bottom: 4px;">🧙 MAGE — Single-Target Spells</div>
+          <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
+            The Mage is your combo starter. His spells hit one enemy at a time, but the status effects they leave behind are what make him dangerous. Here's how it works:
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#3498db;">💧</span> <span><strong>Water spell</strong> — Drenches the target, making them <strong style="color:#3498db;">Wet</strong> for ${GAME_CONFIG.combat.statusEffects.wet.duration} seconds. By itself it does normal damage. But if the NEXT spell that hits a Wet enemy is Lightning...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;">⚡</span> <span><strong>Lightning + Wet = ELECTROCUTE CRIT</strong> — The Wet status gets consumed and the target explodes with chain lightning that arcs to ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.chainCount} nearby enemies, dealing ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.damageMultiplier}× damage each. Emperor Palpatine style. This is the Mage's only way to do big AoE damage.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">🔥</span> <span><strong>Fire spell</strong> — Sets the target <strong style="color:#e74c3c;">Ablaze</strong> for ${GAME_CONFIG.combat.statusEffects.ablaze.duration} seconds. They take ${GAME_CONFIG.combat.statusEffects.ablaze.dps} burn damage per second while on fire. But if a Wind spell hits them while they're burning...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">🌪️</span> <span><strong>Wind + Ablaze = INFERNO</strong> — The fire gets consumed and erupts into a firestorm that deals ${GAME_CONFIG.combat.statusEffects.inferno.burstDamage} burst damage and spreads Ablaze to ${GAME_CONFIG.combat.statusEffects.inferno.spreadCount} nearby enemies. Now THEY'RE on fire too.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#1abc9c;">💚</span> <span><strong>Water + Ablaze = SOOTHE (oops!)</strong> — If your Water spell hits an enemy that's already Ablaze, the fire goes out and they get HEALED for ${GAME_CONFIG.combat.statusEffects.soothe.healAmount} HP. This is the anti-synergy — you accidentally helped the enemy. Watch your element cycle!</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b6914;">🪨</span> <span><strong>Earth spell</strong> — Straight damage, no status effect. A safe hit that won't mess up any combos.</span></div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #8e44ad; margin-top: 10px; margin-bottom: 4px;">🔮 BATTLEMAGE — AoE Setup Spells</div>
+          <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
+            The Battlemage hits groups of enemies with low-damage AoE, but his real job is to <strong>set up combos for the Mage</strong>. Alone he's mediocre — paired with a Mage he's devastating.
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#3498db;">💧</span> <span><strong>Water AoE</strong> — Splashes a whole group, making them all <strong style="color:#3498db;">Wet</strong>. Low damage on its own, but now a single Mage Lightning spell triggers Electrocute on any of them. That's the dream combo.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#78909c;">🌬️</span> <span><strong>Wind AoE = KNOCKUP</strong> — Launches enemies into the air for ${GAME_CONFIG.combat.statusEffects.knockup.duration}s. They can't move or attack while airborne. Pure crowd control — use it to lock down a group, then follow up with Water or Fire.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">🟣</span> <span><strong>Lightning AoE = ARCANE</strong> — Marks enemies with purple <strong style="color:#9b59b6;">Arcane</strong> orbs for ${GAME_CONFIG.combat.statusEffects.arcane.duration}s. On its own this does nothing. But when a Mage's Lightning hits an Arcane-marked target...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💜</span> <span><strong>Lightning + Arcane = KAMEHAMEHA</strong> — The Mage fires a massive piercing laser beam straight through the target and up to ${GAME_CONFIG.combat.statusEffects.kamehameha.pierceCount} enemies behind it in a line, dealing ${GAME_CONFIG.combat.statusEffects.kamehameha.damageMultiplier}× damage to everything it hits. The ultimate cross-class combo.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">🔥</span> <span><strong>Fire AoE</strong> — Sets the whole group Ablaze, same burn as the Mage's Fire. A Mage's Wind spell on any of them triggers Inferno and spreads fire everywhere.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b6914;">🪨</span> <span><strong>Earth AoE</strong> — Straight AoE damage. No status, no combo — just hits.</span></div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-top: 10px; margin-bottom: 4px;">💚 HEALER — Support Spells</div>
+          <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
+            The Healer keeps your team alive and clean. She counts as a mage for group synergies.
+          </div>
+          <div class="tip"><span class="tip-bullet" style="color:#27ae60;">✚</span> <span><strong>Heal</strong> — Auto-targets the most injured ally in range and fires a healing orb. ${GAME_CONFIG.combat.healer.healAmount} HP per cast.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ffd700;">✦</span> <span><strong>Cleanse</strong> — When no one needs healing, the Healer cleanses the most debuffed nearby ally. Removes ALL status effects (Wet, Ablaze, Knockup, slows, everything). The cleansed unit gets a <strong style="color:#ffd700;">speed boost</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.speedBoostDuration}s with a golden trail, and is <strong>immune to status effects</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.lingerDuration}s after. Cooldown: ${GAME_CONFIG.combat.statusEffects.cleanse.cooldown}s.</span></div>
+
+          <div style="font-weight: bold; font-size: 12px; color: #e91e63; margin-top: 10px; margin-bottom: 4px;">🎯 THE KEY COMBOS (cheat sheet)</div>
+          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;">1.</span> <span>Battlemage Water AoE (wets the group) → Mage Lightning (Electrocute Crit chains through all of them)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">2.</span> <span>Battlemage Fire AoE (ablaze the group) → Mage Wind (Inferno burst + fire spreads further)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">3.</span> <span>Battlemage Lightning AoE (Arcane marks) → Mage Lightning (Kamehameha laser beam pierces the line)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#78909c;">4.</span> <span>Battlemage Wind AoE (Knockup CC) → follow with any other spell while they're helpless in the air</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">⚠</span> <span><strong>Watch out:</strong> Mage Water + enemy Ablaze = Soothe (heals them). Don't Water a burning enemy by accident!</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">★</span> <span><strong>Group your casters!</strong> ${GAME_CONFIG.combat.mageSynergy.minMages}+ mages within ${GAME_CONFIG.combat.mageSynergy.proximityRange} hex trigger <strong>Arcane Convergence</strong> — a free AoE burst every ${GAME_CONFIG.combat.mageSynergy.cooldown}s dealing ${GAME_CONFIG.combat.mageSynergy.damagePerMage} damage per mage in the cluster.</span></div>
+
           <div class="section-title" style="color: #3498db;">💡 Tips</div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Workers auto-harvest nearby resources when idle — no micro needed!</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span>Crafting chain: mine iron → craft charcoal (3→Smelter→W) → smelt steel (3→Smelter→Q) → build Armory units (1→Armory)!</span></div>
@@ -2396,6 +2497,7 @@ export class HUD {
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Unit Stats <span class="key" style="font-size:9px;">I</span>:</strong> Press I to toggle a live unit stats panel showing both teams' alive units with kill counts, levels, HP, and current state.</span></div>
+          <!-- Arcane Convergence covered in Magic System section above -->
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>AI Squads:</strong> AI commanders group units into formation squads that march together at a shared speed. Tanks lead, ranged units stay behind, siege follows. This creates cohesive army movements instead of scattered charges.</span></div>
           <div class="tip"><span class="tip-bullet">★</span> <span><strong>Surface Bases:</strong> Standard maps feature neutral desert outposts and mountain forts. Mountain forts perch on peaks with walkable paths — capture them for high ground advantage!</span></div>
         </div>
@@ -2737,15 +2839,15 @@ export class HUD {
       case UnitType.PALADIN: return 'Holy knight. Aura buffs nearby allies with bonus defense.';
       case UnitType.TREBUCHET: return 'Siege engine. Devastating ranged damage, extremely slow.';
       case UnitType.SCOUT: return 'Recon specialist. Fastest unit, huge vision range.';
-      case UnitType.MAGE: return 'Elemental caster. Cycles through 5 elements with each attack.';
+      case UnitType.MAGE: return 'Combo caster. Cycles elements to apply and consume statuses for big damage.';
       case UnitType.BUILDER: return 'Engineer. Constructs buildings and walls. High carry capacity.';
       case UnitType.LUMBERJACK: return 'Woodcutter. Harvests trees for wood resources.';
       case UnitType.VILLAGER: return 'Farmer. Harvests farms and wild grass for food.';
-      case UnitType.HEALER: return 'Combat medic. Heals the most injured ally in range.';
+      case UnitType.HEALER: return 'Support mage. Heals allies and cleanses debuffs with speed boost.';
       case UnitType.ASSASSIN: return 'Stealth striker. Massive damage from full HP, unblockable.';
       case UnitType.SHIELDBEARER: return 'Heavy tank. Absorbs ranged fire and blocks melee hits.';
       case UnitType.BERSERKER: return 'Rage fighter. Grows stronger as health drops. Throws axes.';
-      case UnitType.BATTLEMAGE: return 'AOE caster. Splash damage to all enemies near the target.';
+      case UnitType.BATTLEMAGE: return 'AoE setup caster. Weak splash damage but applies status effects for Mage combos.';
       case UnitType.GREATSWORD: return 'Cleave warrior. Hits all adjacent enemies with knockback.';
       case UnitType.OGRE: return 'Reward brute. Massive HP, club swipe hits all in 2-hex radius.';
       default: return '';
@@ -2758,7 +2860,7 @@ export class HUD {
       case UnitType.ARCHER: return [];
       case UnitType.RIDER: return ['High mobility (4 move, 3.0 speed)'];
       case UnitType.PALADIN: return [
-        'Holy Aura: +2 DEF to allies within 2 hexes',
+        'Holy Aura: +2 DEF to all allies within 2 hexes (stacks with other Paladins)',
         'Can block melee attacks (+15% bonus)',
       ];
       case UnitType.TREBUCHET: return [
@@ -2771,7 +2873,8 @@ export class HUD {
       ];
       case UnitType.MAGE: return [
         'Elemental Cycle: Fire → Water → Lightning → Wind → Earth',
-        'Ranged magic at 4 hexes',
+        'Single-target ranged magic at 4 hexes',
+        'Combos: Wet+⚡=Electrocute, Ablaze+🌪=Inferno, Arcane+⚡=Kamehameha',
       ];
       case UnitType.BUILDER: return [
         'Builds structures and walls',
@@ -2788,6 +2891,7 @@ export class HUD {
       case UnitType.HEALER: return [
         'Auto-heals most injured ally within 3 hexes',
         'Heals 3 HP per cast (2s cooldown)',
+        `Cleanse: Removes all debuffs, grants ${GAME_CONFIG.combat.statusEffects.cleanse.speedBoostDuration}s speed boost + ${GAME_CONFIG.combat.statusEffects.cleanse.lingerDuration}s status immunity`,
         'Cannot attack enemies',
       ];
       case UnitType.ASSASSIN: return [
@@ -2804,8 +2908,10 @@ export class HUD {
         'Axe Throw: 1 ranged opener per target (range 7, 40% ATK)',
       ];
       case UnitType.BATTLEMAGE: return [
-        'AOE Splash: 75% ATK to enemies within 1 hex of target',
-        'Elemental Cycle: rotates through 5 elements',
+        `AoE Splash: ${Math.round(GAME_CONFIG.combat.battlemage.splashDamageMultiplier * 100)}% ATK to enemies within 1 hex of target`,
+        'Cycle: Ablaze → Wet → High Voltage → Knockup → Arcane',
+        'High Voltage: Electrocute chains trigger arc cascade + stun (120% crit)',
+        'Arcane: consumed by Mage Lightning for Kamehameha laser',
       ];
       case UnitType.GREATSWORD: return [
         'Cleave: Hits all enemies in 1-hex radius (60% ATK)',

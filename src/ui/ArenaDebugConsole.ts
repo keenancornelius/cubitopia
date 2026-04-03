@@ -17,6 +17,9 @@ export enum DebugEventType {
   HEAL = 'HEAL',
   SPLASH = 'SPLASH',
   MOVE = 'MOVE',
+  STATUS = 'STATUS',
+  COMBO = 'COMBO',
+  CLEANSE = 'CLEANSE',
 }
 
 export interface DebugEvent {
@@ -162,6 +165,37 @@ export class CombatLog {
       DebugEventType.SPLASH, source.owner,
       `${CombatLog.typeName(source.type)} SPLASH hits ${CombatLog.typeName(victimType)}`,
       source.type, source.id
+    );
+  }
+
+  static logStatusApplied(target: Unit, effect: string, casterType?: UnitType): void {
+    const src = casterType ? `${CombatLog.typeName(casterType)}` : 'unknown';
+    CombatLog.log(
+      DebugEventType.STATUS, target.owner,
+      `${CombatLog.typeName(target.type)}${CombatLog.shortId(target)} ← ${effect.toUpperCase()} (from ${src})`,
+      target.type, target.id
+    );
+  }
+
+  static logStatusConsumed(target: Unit, consumed: string, triggeredBy: string): void {
+    CombatLog.log(
+      DebugEventType.STATUS, target.owner,
+      `${CombatLog.typeName(target.type)}${CombatLog.shortId(target)}: ${consumed.toUpperCase()} consumed by ${triggeredBy.toUpperCase()}`,
+      target.type, target.id
+    );
+  }
+
+  static logCombo(caster: Unit, target: Unit, combo: string, damage?: number): void {
+    let msg = `${CombatLog.typeName(caster.type)}${CombatLog.shortId(caster)} → ${combo.toUpperCase()} on ${CombatLog.typeName(target.type)}${CombatLog.shortId(target)}`;
+    if (damage !== undefined) msg += ` (${damage.toFixed(1)} dmg)`;
+    CombatLog.log(DebugEventType.COMBO, caster.owner, msg, caster.type, caster.id);
+  }
+
+  static logCleanse(healer: Unit, target: Unit, effectsRemoved: string[]): void {
+    CombatLog.log(
+      DebugEventType.CLEANSE, healer.owner,
+      `${CombatLog.typeName(healer.type)}${CombatLog.shortId(healer)} CLEANSE ${CombatLog.typeName(target.type)}${CombatLog.shortId(target)} [${effectsRemoved.join(', ')}]`,
+      healer.type, healer.id
     );
   }
 

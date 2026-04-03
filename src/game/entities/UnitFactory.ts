@@ -33,7 +33,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 4, isSiege: false,
   },
   [UnitType.PALADIN]: {
-    stats: { maxHealth: 15, attack: 1, defense: 5, movement: 1, range: 1 },
+    stats: { maxHealth: 35, attack: 1, defense: 5, movement: 1, range: 1 },  // Beefy holy tank — slow but massive HP
     moveSpeed: 0.8, attackSpeed: 0.6, color: 0x7f8c8d,
     carryCapacity: 4, isSiege: false,
   },
@@ -49,7 +49,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
   },
   [UnitType.MAGE]: {
     stats: { maxHealth: 8, attack: 5, defense: 1, movement: 2, range: 4 },
-    moveSpeed: 1.2, attackSpeed: 0.8, color: 0x2980b9,
+    moveSpeed: 1.5, attackSpeed: 0.8, color: 0x2980b9,
     carryCapacity: 4, isSiege: false,
   },
   [UnitType.BUILDER]: {
@@ -89,7 +89,7 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 0, isSiege: false,
   },
   [UnitType.BATTLEMAGE]: {
-    stats: { maxHealth: 9, attack: 6, defense: 1, movement: 2, range: 4 },
+    stats: { maxHealth: 9, attack: 3, defense: 1, movement: 2, range: 4 },  // ATK 3: setup caster, value is in status effects not raw damage
     moveSpeed: 1.0, attackSpeed: 0.5, color: 0x7c4dff,
     carryCapacity: 0, isSiege: false,
   },

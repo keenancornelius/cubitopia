@@ -882,6 +882,90 @@ export class UnitVFX {
   }
 
   /**
+   * Show floating CRIT text for combo/status-consumption damage.
+   * Much larger and more dynamic than normal damage — scales with damage, punchy animation.
+   * @param combo  e.g. 'ELECTROCUTE', 'INFERNO', 'KAMEHAMEHA', 'SOOTHE'
+   * @param damage numeric damage dealt (or heal amount for soothe)
+   * @param color  hex color string e.g. '#ffee44'
+   */
+  showCritText(worldPos: { x: number; y: number; z: number }, combo: string, damage: number, color: string): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+
+    // Dynamic font size: bigger for bigger damage (32-64px range)
+    const fontSize = Math.min(64, Math.max(36, 28 + damage * 2));
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Line 1: combo name
+    const label = combo.toUpperCase();
+    // Line 2: damage number
+    const dmgStr = damage > 0 ? `${Math.round(damage)}` : '';
+
+    // Black outline for readability
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 5;
+    ctx.strokeText(label, 256, 38);
+    if (dmgStr) {
+      ctx.font = `bold ${Math.round(fontSize * 1.3)}px monospace`;
+      ctx.strokeText(dmgStr, 256, 90);
+    }
+
+    // Colored fill
+    ctx.fillStyle = color;
+    ctx.font = `bold ${fontSize}px monospace`;
+    ctx.fillText(label, 256, 38);
+    if (dmgStr) {
+      ctx.font = `bold ${Math.round(fontSize * 1.3)}px monospace`;
+      ctx.fillText(dmgStr, 256, 90);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+
+    // Start scale — big, then grows slightly and fades (punch-in effect)
+    const baseScale = 1.2 + damage * 0.04; // larger text for bigger damage
+    sprite.scale.set(baseScale, baseScale * 0.3, 1);
+    sprite.position.set(
+      worldPos.x + (Math.random() - 0.5) * 0.3,
+      worldPos.y + 1.0,
+      worldPos.z + (Math.random() - 0.5) * 0.3
+    );
+    this.scene.add(sprite);
+
+    let elapsed = 0;
+    const duration = 1.4;
+    const animate = () => {
+      elapsed += 0.016;
+      const t = elapsed / duration;
+
+      // Punch-in: quick scale up then settle
+      const scaleMult = t < 0.1 ? 1 + (1 - t / 0.1) * 0.4 : 1.0; // 1.4x → 1.0x in first 0.1s
+      sprite.scale.set(baseScale * scaleMult, baseScale * 0.3 * scaleMult, 1);
+
+      // Float upward, accelerating slightly
+      sprite.position.y += (0.6 + elapsed * 0.4) * 0.016;
+
+      // Fade out in the last 40%
+      mat.opacity = t < 0.6 ? 1.0 : Math.max(0, 1 - (t - 0.6) / 0.4);
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(sprite);
+        texture.dispose();
+        mat.dispose();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
    * Show level-up effect — golden particle burst + "LEVEL UP!" text + brief golden glow on unit
    */
   showLevelUpEffect(unitId: string, worldPos: { x: number; y: number; z: number }, newLevel: number): void {

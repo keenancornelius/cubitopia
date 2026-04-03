@@ -361,14 +361,6 @@ export default class AIController {
         cost: GAME_CONFIG.units[UnitType.SCOUT].costs.ai.gold,
         weight: GAME_CONFIG.units[UnitType.SCOUT].aiWeight,
       });
-      if (steel >= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.steel
-          && gold >= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.gold) {
-        roster.push({
-          type: UnitType.PALADIN,
-          cost: GAME_CONFIG.units[UnitType.PALADIN].costs.ai.gold,
-          weight: GAME_CONFIG.units[UnitType.PALADIN].aiWeight,
-        });
-      }
 
       // --- Armory units (require steel) ---
       if (st.armory && steel >= GAME_CONFIG.units[UnitType.GREATSWORD].costs.ai.steel) {
@@ -396,6 +388,9 @@ export default class AIController {
         }
         if (gold >= GAME_CONFIG.units[UnitType.HEALER].costs.ai.gold) {
           roster.push({ type: UnitType.HEALER, cost: GAME_CONFIG.units[UnitType.HEALER].costs.ai.gold, weight: GAME_CONFIG.units[UnitType.HEALER].aiWeight });
+        }
+        if (gold >= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.gold && crystal >= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.crystal) {
+          roster.push({ type: UnitType.PALADIN, cost: GAME_CONFIG.units[UnitType.PALADIN].costs.ai.gold, weight: GAME_CONFIG.units[UnitType.PALADIN].aiWeight });
         }
       }
 
@@ -472,7 +467,6 @@ export default class AIController {
         case UnitType.BERSERKER:    return GAME_CONFIG.units[UnitType.BERSERKER].costs.ai.steel;
         case UnitType.SHIELDBEARER: return GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.ai.steel;
         case UnitType.ASSASSIN:     return GAME_CONFIG.units[UnitType.ASSASSIN].costs.ai.steel;
-        case UnitType.PALADIN:      return GAME_CONFIG.units[UnitType.PALADIN].costs.ai.steel;
         default:                    return 0;
       }
     };
@@ -482,6 +476,7 @@ export default class AIController {
         case UnitType.MAGE:       return GAME_CONFIG.units[UnitType.MAGE].costs.ai.crystal;
         case UnitType.BATTLEMAGE: return GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.ai.crystal;
         case UnitType.HEALER:     return GAME_CONFIG.units[UnitType.HEALER].costs.ai.crystal;
+        case UnitType.PALADIN:    return GAME_CONFIG.units[UnitType.PALADIN].costs.ai.crystal;
         default:                  return 0;
       }
     };
@@ -503,7 +498,7 @@ export default class AIController {
         }
 
         // Wizard tower units require crystal
-        const wizardUnits = [UnitType.MAGE, UnitType.BATTLEMAGE, UnitType.HEALER];
+        const wizardUnits = [UnitType.MAGE, UnitType.BATTLEMAGE, UnitType.HEALER, UnitType.PALADIN];
         if (canSpawn && wizardUnits.includes(next.type)) {
           canSpawn = player.resources.crystal >= getAICrystalCost(next.type);
         }
@@ -514,11 +509,6 @@ export default class AIController {
           canSpawn = true; // Trebuchet has no rope requirement
         }
 
-        // Paladin requires steel
-        if (canSpawn && next.type === UnitType.PALADIN) {
-          canSpawn = this.ctx.steelStockpile[ownerId] >= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.steel;
-        }
-
         if (canSpawn) {
           this.ctx.goldStockpile[ownerId] -= next.cost;
           player.resources.gold -= next.cost;
@@ -527,12 +517,6 @@ export default class AIController {
           if (armoryUnits.includes(next.type)) {
             this.ctx.steelStockpile[ownerId] -= getAISteelCost(next.type);
             player.resources.steel -= getAISteelCost(next.type);
-          }
-
-          // Deduct steel for paladin
-          if (next.type === UnitType.PALADIN) {
-            this.ctx.steelStockpile[ownerId] -= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.steel;
-            player.resources.steel -= GAME_CONFIG.units[UnitType.PALADIN].costs.ai.steel;
           }
 
           // Deduct crystal for wizard tower units

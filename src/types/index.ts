@@ -223,6 +223,21 @@ export interface Unit {
   _slowUntil?: number;              // Timestamp (performance.now ms) until which unit is slowed
   _slowFactor?: number;             // Movement speed multiplier while slowed (e.g., 0.4 = 40% speed)
 
+  // --- Elemental status effects (mage combat interactions) ---
+  _statusWet?: number;              // Timestamp until which unit has Wet status (from Water/Battlemage Water AoE)
+  _statusAblaze?: number;           // Timestamp until which unit has Ablaze status (from Fire spell, burn tick)
+  _ablazeDPS?: number;              // Burn damage per second while Ablaze
+  _ablazeSource?: string;           // Unit ID of the mage that applied Ablaze (for kill credit)
+  _statusArcane?: number;           // Timestamp until which unit has Arcane status (Battlemage Earth AoE — purple orbs)
+  _statusHighVoltage?: number;      // Timestamp until which unit has High Voltage (Battlemage Lightning AoE — chain cascade on Electrocute hit)
+  _knockupUntil?: number;           // Timestamp until which unit is knocked up / airborne (Battlemage Wind AoE CC)
+  _cleanseLinger?: number;          // Timestamp until which unit is immune to status effects (after Healer cleanse)
+  _cleanseCooldown?: number;        // Healer cleanse ability cooldown
+  _speedBoostUntil?: number;        // Timestamp until which unit has cleanse speed boost
+  _speedBoostFactor?: number;       // Speed multiplier during boost (e.g. 1.5 = 50% faster)
+  _cycloneCooldown?: number;        // Battlemage cyclone pull cooldown
+  _synergyCooldown?: number;        // Mage group synergy cooldown
+
   // --- Berserker axe throw ---
   _axeThrowReady?: boolean;        // true = berserker has ranged axe throw available (range 7, resets to melee after use)
   _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)

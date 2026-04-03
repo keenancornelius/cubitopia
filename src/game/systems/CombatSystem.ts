@@ -6,6 +6,7 @@
 import { Unit, UnitType, GameMap } from '../../types';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { GAME_CONFIG } from '../GameConfig';
+import { StatusEffectSystem } from './StatusEffectSystem';
 
 export interface CombatResult {
   attackerDamage: number;
@@ -65,19 +66,26 @@ export class CombatSystem {
       atkStat += GAME_CONFIG.combat.assassin.fullHealthAttackBonus; // Ambush bonus
     }
 
-    // --- Paladin Holy Aura: adjacent allies get +2 defense ---
-    if (allUnits && defender.type !== UnitType.PALADIN) {
+    // --- Paladin Holy Aura: adjacent allies get +2 defense per Paladin (stacks) ---
+    if (allUnits) {
       for (const ally of allUnits) {
         if (ally.type === UnitType.PALADIN && ally.owner === defender.owner &&
             ally.currentHealth > 0 && ally !== defender) {
           const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
           if (dist <= GAME_CONFIG.combat.paladin.auraRange) {
             defStat += GAME_CONFIG.combat.paladin.auraDefenseBonus;
-            break; // Only one aura stacks
+            // No break — auras stack from multiple Paladins
           }
         }
       }
     }
+
+    // --- Status Effect Modifiers (reserved for future stat debuffs) ---
+    atkStat += StatusEffectSystem.getAttackModifier(attacker);
+    defStat += StatusEffectSystem.getDefenseModifier(defender);
+    // Floor at 1 to prevent division weirdness
+    atkStat = Math.max(1, atkStat);
+    defStat = Math.max(1, defStat);
 
     const attackForce = atkStat * (attacker.currentHealth / attacker.stats.maxHealth);
     const defenseForce = defStat * (defender.currentHealth / defender.stats.maxHealth);
@@ -87,6 +95,12 @@ export class CombatSystem {
     const defenderRatio = defenseForce / totalForce;
 
     let defenderDamage = Math.round(attackerRatio * atkStat * GAME_CONFIG.combat.damage.attackerMultiplier);
+
+    // Status effect damage amplification (reserved for future effects)
+    const damageAmp = StatusEffectSystem.getDamageAmplification(defender);
+    if (damageAmp > 1.0) {
+      defenderDamage = Math.round(defenderDamage * damageAmp);
+    }
 
     // --- Shared flags ---
     const isRangedAttacker = attacker.stats.range > 1;
@@ -227,6 +241,65 @@ export class CombatSystem {
       }
     }
     return splashed;
+  }
+
+  /**
+   * Battlemage Cyclone — pulls all enemies within 2 hex toward the target,
+   * dealing 30% attack damage. On cooldown (8s). Makes the AoE splash devastating
+   * because enemies get clustered before the next volley.
+   * Returns array of { unitId, knockQ, knockR } for pulled units + damaged IDs.
+   */
+  static applyBattlemageCyclone(
+    attacker: Unit, target: Unit, allUnits: Unit[],
+    isTileBlocked: (q: number, r: number) => boolean
+  ): { pulled: { unitId: string; knockQ: number; knockR: number }[]; damaged: string[] } {
+    if (attacker.type !== UnitType.BATTLEMAGE) return { pulled: [], damaged: [] };
+
+    // Check cooldown — stored on the unit as _cycloneCooldown
+    const cd = (attacker as any)._cycloneCooldown ?? 0;
+    if (cd > 0) return { pulled: [], damaged: [] };
+
+    // Set cooldown
+    (attacker as any)._cycloneCooldown = GAME_CONFIG.combat.battlemage.cycloneCooldown;
+
+    const pullRadius = GAME_CONFIG.combat.battlemage.cyclonePullRadius;
+    const cycloneDamage = Math.max(1, Math.round(attacker.stats.attack * GAME_CONFIG.combat.battlemage.cyclonePullDamageMultiplier));
+    const pulled: { unitId: string; knockQ: number; knockR: number }[] = [];
+    const damaged: string[] = [];
+
+    // Center of cyclone is the target's position
+    const cq = target.position.q;
+    const cr = target.position.r;
+
+    for (const unit of allUnits) {
+      if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
+      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, cq, cr);
+      if (dist > 0 && dist <= pullRadius) {
+        // Apply cyclone damage
+        unit.currentHealth = Math.max(0, unit.currentHealth - cycloneDamage);
+        damaged.push(unit.id);
+
+        if (unit.currentHealth <= 0) continue;
+
+        // Pull 1 hex TOWARD the center (reverse of knockback)
+        const dq = cq - unit.position.q;
+        const dr = cr - unit.position.r;
+        let kq = 0, kr = 0;
+        if (Math.abs(dq) >= Math.abs(dr)) {
+          kq = dq > 0 ? 1 : (dq < 0 ? -1 : 0);
+        } else {
+          kr = dr > 0 ? 1 : (dr < 0 ? -1 : 0);
+        }
+        if (kq === 0 && kr === 0) continue; // already at center
+
+        const newQ = unit.position.q + kq;
+        const newR = unit.position.r + kr;
+        if (!isTileBlocked(newQ, newR)) {
+          pulled.push({ unitId: unit.id, knockQ: newQ, knockR: newR });
+        }
+      }
+    }
+    return { pulled, damaged };
   }
 
   /**
@@ -371,5 +444,83 @@ export class CombatSystem {
   static canAttack(attacker: Unit, defender: Unit): boolean {
     const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
     return dist <= attacker.stats.range;
+  }
+
+  /** Mage types that contribute to synergy clusters */
+  private static readonly MAGE_TYPES: Set<UnitType> = new Set([
+    UnitType.MAGE, UnitType.BATTLEMAGE, UnitType.HEALER,
+  ]);
+
+  /**
+   * Arcane Convergence — when 2+ friendly mages are clustered within 3 hex,
+   * a chain arcane blast hits all enemies in a 2-hex radius around the cluster center.
+   * Damage scales with number of mages in the group. On a shared cooldown.
+   * Returns { centerQ, centerR, damagedIds } for VFX, or null if not triggered.
+   */
+  static checkMageSynergy(
+    allUnits: Unit[]
+  ): { owner: number; centerQ: number; centerR: number; damagedIds: string[] }[] {
+    const cfg = GAME_CONFIG.combat.mageSynergy;
+    const results: { owner: number; centerQ: number; centerR: number; damagedIds: string[] }[] = [];
+
+    // Check per-team
+    for (const teamId of [0, 1]) {
+      // Gather alive mage-type units for this team
+      const mages = allUnits.filter(u =>
+        u.owner === teamId &&
+        u.currentHealth > 0 &&
+        CombatSystem.MAGE_TYPES.has(u.type)
+      );
+      if (mages.length < cfg.minMages) continue;
+
+      // Find clusters of mages within proximity
+      const used = new Set<string>();
+      for (const mage of mages) {
+        if (used.has(mage.id)) continue;
+
+        // Check if cooldown is ready (ticked down in UnitAI.update)
+        const cd = (mage as any)._synergyCooldown ?? 0;
+        if (cd > 0) continue;
+
+        // Find all nearby mages
+        const cluster = [mage];
+        for (const other of mages) {
+          if (other === mage || used.has(other.id)) continue;
+          const dist = CombatSystem.hexDist(mage.position.q, mage.position.r, other.position.q, other.position.r);
+          if (dist <= cfg.proximityRange) {
+            cluster.push(other);
+          }
+        }
+
+        if (cluster.length < cfg.minMages) continue;
+
+        // Mark all in cluster as used and set their cooldown
+        for (const m of cluster) {
+          used.add(m.id);
+          (m as any)._synergyCooldown = cfg.cooldown;
+        }
+
+        // Cluster center = average position
+        const cq = Math.round(cluster.reduce((s, m) => s + m.position.q, 0) / cluster.length);
+        const cr = Math.round(cluster.reduce((s, m) => s + m.position.r, 0) / cluster.length);
+
+        // Damage all enemies within effectRadius of center
+        const damage = cfg.damagePerMage * cluster.length;
+        const damagedIds: string[] = [];
+        for (const enemy of allUnits) {
+          if (enemy.owner === teamId || enemy.currentHealth <= 0) continue;
+          const dist = CombatSystem.hexDist(enemy.position.q, enemy.position.r, cq, cr);
+          if (dist <= cfg.effectRadius) {
+            enemy.currentHealth = Math.max(0, enemy.currentHealth - damage);
+            damagedIds.push(enemy.id);
+          }
+        }
+
+        if (damagedIds.length > 0) {
+          results.push({ owner: teamId, centerQ: cq, centerR: cr, damagedIds });
+        }
+      }
+    }
+    return results;
   }
 }

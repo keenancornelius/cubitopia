@@ -456,6 +456,10 @@ export class UnitRenderer {
     this.vfx.showXPText(worldPos, xp);
   }
 
+  showCritText(worldPos: { x: number; y: number; z: number }, combo: string, damage: number, color: string): void {
+    this.vfx.showCritText(worldPos, combo, damage, color);
+  }
+
   showLevelUpEffect(unitId: string, worldPos: { x: number; y: number; z: number }, newLevel: number): void {
     this.vfx.showLevelUpEffect(unitId, worldPos, newLevel);
   }

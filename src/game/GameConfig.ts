@@ -47,9 +47,9 @@ export const GAME_CONFIG = {
     },
     [UnitType.PALADIN]: {
       costs: {
-        menu: { gold: 12 },
-        tooltipQueue: { gold: 6 },
-        ai: { gold: 12, steel: 1 },
+        menu: { gold: 12, crystal: 2 },
+        tooltipQueue: { gold: 6, crystal: 1 },
+        ai: { gold: 12, crystal: 1 },
       },
       aiWeight: 8,
     },
@@ -305,7 +305,84 @@ export const GAME_CONFIG = {
     },
     battlemage: {
       splashRadius: 1,
-      splashDamageMultiplier: 0.75,
+      splashDamageMultiplier: 0.4,   // Low AoE damage — battlemage is a setup caster, not a DPS
+      cyclonePullRadius: 2,
+      cyclonePullDamageMultiplier: 0.15, // Cyclone pull is for CC not damage
+      cycloneCooldown: 8,
+    },
+    mageSynergy: {
+      proximityRange: 3,
+      minMages: 2,
+      cooldown: 12,
+      damagePerMage: 4,
+      effectRadius: 2,
+    },
+    statusEffects: {
+      // ── BALANCE TARGETS ──
+      // Base spells = weak. Only combos chunk.
+      // Full combo on squishy (8 HP) ≈ 90% = ~7 HP total.
+      // Full combo on tank (18 HP) ≈ 50% = ~9 HP total.
+      // Mage base attack = 5. After CombatSystem.resolve vs squishy, base hit ≈ 3-4.
+      // So combo bonus needs to add ~3-5 more on top of base hit.
+
+      // --- Mage status effects ---
+      wet: {
+        duration: 5,                  // seconds the Wet status lasts — just a marker, no damage
+      },
+      ablaze: {
+        duration: 4,                  // seconds (down from 6) — shorter burn window
+        dps: 0.3,                     // burn DPS (down from 1.5) — total burn ≈ 1.2 HP. Negligible alone.
+      },
+
+      // --- Mage combo interactions ---
+      // Wet + Lightning → Electrocute Crit: chain lightning to nearby enemies
+      electrocuteCrit: {
+        chainRadius: 3,               // hex radius for chain spread (up from 2 for better group hits)
+        chainCount: 3,                // max chain targets
+        damageMultiplier: 0.8,        // 0.8× Mage ATK = 4 per chain. Primary gets normal combat damage only.
+      },
+      // Ablaze + Wind → Inferno: consumes burn, big burst + fire spread
+      inferno: {
+        spreadRadius: 2,              // hex radius to spread Ablaze
+        spreadCount: 3,               // max targets to spread to
+        burstDamage: 4,               // burst on primary. Total = combat(~4) + burst(4) = ~8 = near-kill on squishy.
+      },
+      // Water + Ablaze → Soothe (anti-synergy): consumes Ablaze, heals enemy
+      soothe: {
+        healAmount: 3,                // HP restored (down from 4)
+      },
+
+      // --- Battlemage AoE status effects ---
+      battlemageWetSplashDamageMultiplier: 0.15, // Water AoE = almost no damage, just applies Wet to group
+      knockup: {
+        duration: 1.2,                // seconds airborne — brief CC, can't move or attack
+      },
+      arcane: {
+        duration: 6,                  // seconds the purple Arcane orbs persist (from BM Earth AoE)
+      },
+      highVoltage: {
+        duration: 6,                  // seconds High Voltage persists (from BM Lightning AoE)
+        cascadeDamageMultiplier: 1.2, // 120% crit damage on arc cascade
+        cascadeChainCount: 3,         // how many enemies the cascade arcs to
+        cascadeChainRadius: 3,        // hex radius for cascade chain targets
+        stunDuration: 1.0,            // seconds of stun (knockup) from cascade
+      },
+
+      // --- Cross-class combos ---
+      // Arcane (Battlemage Earth) + Lightning (Mage) → Kamehameha piercing laser
+      kamehameha: {
+        damageMultiplier: 1.0,        // 1.0× Mage ATK = 5 per pierce. Primary = combat(~4)+laser(5) = ~9. Kills squishy, halves tank.
+        pierceCount: 4,               // max enemies the beam can pierce through
+        beamRange: 5,                 // hex range of the laser beam
+      },
+
+      // --- Healer Cleanse ---
+      cleanse: {
+        cooldown: 8,                  // seconds between cleanse casts
+        speedBoostDuration: 2.5,      // seconds the speed boost lasts after cleanse
+        speedBoostFactor: 1.5,        // 50% faster movement during boost
+        lingerDuration: 3,            // seconds of status immunity after cleanse
+      },
     },
     greatsword: {
       cleaveRadius: 1,

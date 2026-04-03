@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { Unit, UnitType, UnitState, ElementType } from '../types';
 import { CombatLog, DebugEventType, DebugEvent } from './ArenaDebugConsole';
 import { UNIT_CONFIG } from '../game/entities/UnitFactory';
+import { GAME_CONFIG } from '../game/GameConfig';
 import { UnitRenderer } from '../engine/UnitRenderer';
 
 // ---- Army Composition Types ----
@@ -39,8 +40,8 @@ function defaultComposition(): { type: UnitType; count: number }[] {
   return COMBAT_UNIT_DEFS.map(d => ({ type: d.type, count: 1 }));
 }
 
-// ---- Preset Army Compositions ----
-const ARMY_PRESETS: { name: string; label: string; comp: () => { type: UnitType; count: number }[] }[] = [
+// ---- Preset Army Compositions (mutable — user can save custom presets) ----
+const ARMY_PRESETS: { name: string; label: string; comp: () => { type: UnitType; count: number }[]; custom?: boolean }[] = [
   { name: 'default', label: '1 Each', comp: defaultComposition },
   { name: 'ranged', label: 'Ranged Heavy', comp: () => [
     { type: UnitType.ARCHER, count: 4 },
@@ -84,7 +85,7 @@ const ARMY_PRESETS: { name: string; label: string; comp: () => { type: UnitType;
 export class DebugPanel {
   private panel: HTMLElement | null = null;
   private visible = false;
-  private activeTab: 'tools' | 'army' | 'combat' | 'units' = 'tools';
+  private activeTab: 'tools' | 'army' | 'combat' | 'units' | 'tuning' = 'tools';
 
   // Units tab state
   private selectedUnitType: UnitType = UnitType.WARRIOR;
@@ -128,6 +129,9 @@ export class DebugPanel {
     [DebugEventType.HEAL]: true,
     [DebugEventType.SPLASH]: true,
     [DebugEventType.MOVE]: false,
+    [DebugEventType.STATUS]: true,
+    [DebugEventType.COMBO]: true,
+    [DebugEventType.CLEANSE]: true,
   };
 
   // Callbacks (wired by main.ts)
@@ -147,7 +151,7 @@ export class DebugPanel {
     }
   }
 
-  switchTab(tab: 'tools' | 'army' | 'combat' | 'units'): void {
+  switchTab(tab: 'tools' | 'army' | 'combat' | 'units' | 'tuning'): void {
     this.activeTab = tab;
     this.lastEventCount = 0; // Reset so combat tab rebuilds fully
     this.logContainer = null;
@@ -203,9 +207,10 @@ export class DebugPanel {
     tabBar.style.cssText = `
       display: flex; border-bottom: 2px solid rgba(255,50,50,0.3);
     `;
-    const tabs: { id: 'tools' | 'army' | 'combat' | 'units'; label: string; icon: string; color: string }[] = [
+    const tabs: { id: 'tools' | 'army' | 'combat' | 'units' | 'tuning'; label: string; icon: string; color: string }[] = [
       { id: 'tools', label: 'TOOLS', icon: '🐛', color: '#ff4444' },
       { id: 'army', label: 'ARMY', icon: '⚔', color: '#00d4ff' },
+      { id: 'tuning', label: 'TUNING', icon: '🎛', color: '#e040fb' },
       { id: 'combat', label: 'COMBAT', icon: '📊', color: '#ff9800' },
       { id: 'units', label: 'UNITS', icon: '🎮', color: '#76ff03' },
     ];
@@ -243,6 +248,7 @@ export class DebugPanel {
     switch (this.activeTab) {
       case 'tools': this.buildToolsTab(content); break;
       case 'army': this.buildArmyTab(content); break;
+      case 'tuning': this.buildTuningTab(content); break;
       case 'combat': this.buildCombatTab(content); break;
       case 'units': this.buildUnitsTab(content); break;
     }
@@ -553,6 +559,43 @@ export class DebugPanel {
     `;
     container.appendChild(totalRow);
 
+    // Save as Preset button
+    const saveRow = document.createElement('div');
+    saveRow.style.cssText = 'display:flex;gap:4px;margin-top:6px;align-items:center;';
+    const saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'background:#333;color:#ff9800;border:1px solid #ff980044;padding:3px 8px;font-size:10px;font-family:monospace;border-radius:3px;cursor:pointer;flex-shrink:0;';
+    saveBtn.textContent = '+ Save Preset';
+    saveBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const name = `Custom ${ARMY_PRESETS.filter(p => p.custom).length + 1}`;
+      const snapshot = this.armyComp.blue.filter(d => d.count > 0).map(d => ({ ...d }));
+      ARMY_PRESETS.splice(ARMY_PRESETS.length - 1, 0, {
+        name: name.toLowerCase().replace(/\s/g, '_'),
+        label: name,
+        comp: () => snapshot.map(d => ({ ...d })),
+        custom: true,
+      });
+      this.rebuildContent();
+    });
+    saveRow.appendChild(saveBtn);
+
+    // Delete custom presets
+    const customCount = ARMY_PRESETS.filter(p => p.custom).length;
+    if (customCount > 0) {
+      const clearCustom = document.createElement('button');
+      clearCustom.style.cssText = 'background:#333;color:#888;border:1px solid #55555544;padding:3px 8px;font-size:9px;font-family:monospace;border-radius:3px;cursor:pointer;';
+      clearCustom.textContent = `Clear ${customCount} custom`;
+      clearCustom.addEventListener('click', (e) => {
+        e.stopPropagation();
+        for (let i = ARMY_PRESETS.length - 1; i >= 0; i--) {
+          if (ARMY_PRESETS[i].custom) ARMY_PRESETS.splice(i, 1);
+        }
+        this.rebuildContent();
+      });
+      saveRow.appendChild(clearCustom);
+    }
+    container.appendChild(saveRow);
+
     // Apply note
     const applyNote = document.createElement('div');
     applyNote.style.cssText = 'color:#888;font-size:9px;text-align:center;margin-top:4px;';
@@ -638,6 +681,222 @@ export class DebugPanel {
     }
   }
 
+  // ==== TUNING TAB — live damage / status config sliders ====
+  private buildTuningTab(container: HTMLElement): void {
+    const cfg = GAME_CONFIG.combat;
+
+    const mkSection = (title: string, color: string) => {
+      const s = document.createElement('div');
+      s.style.cssText = `font-size:10px;color:${color};text-transform:uppercase;letter-spacing:1px;margin-top:10px;margin-bottom:4px;font-weight:bold;border-bottom:1px solid ${color}33;padding-bottom:2px;`;
+      s.textContent = title;
+      container.appendChild(s);
+    };
+
+    // Helper: slider row that reads/writes a config value
+    const mkSlider = (label: string, obj: any, key: string, min: number, max: number, step: number, color: string, suffix: string = '') => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
+
+      const lbl = document.createElement('span');
+      lbl.style.cssText = `color:#aaa;font-size:10px;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`;
+      lbl.textContent = label;
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = String(min);
+      slider.max = String(max);
+      slider.step = String(step);
+      slider.value = String(obj[key]);
+      slider.style.cssText = `flex:1;height:4px;accent-color:${color};cursor:pointer;`;
+
+      const val = document.createElement('span');
+      val.style.cssText = `color:${color};font-size:11px;font-weight:bold;min-width:40px;text-align:right;font-family:'Courier New',monospace;`;
+      val.textContent = `${Number(obj[key]).toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0)}${suffix}`;
+
+      slider.addEventListener('input', () => {
+        const v = Number(slider.value);
+        obj[key] = v;
+        val.textContent = `${v.toFixed(step < 1 ? (step < 0.1 ? 2 : 1) : 0)}${suffix}`;
+      });
+
+      row.appendChild(lbl);
+      row.appendChild(slider);
+      row.appendChild(val);
+      container.appendChild(row);
+    };
+
+    // ---------- GLOBAL DAMAGE ----------
+    mkSection('Global Damage', '#ff9800');
+    mkSlider('ATK Multiplier', cfg.damage, 'attackerMultiplier', 1, 10, 0.5, '#ff9800', 'x');
+    mkSlider('Counter Multiplier', cfg.damage, 'counterMultiplier', 0, 8, 0.5, '#ff9800', 'x');
+
+    // ---------- BATTLEMAGE ----------
+    mkSection('Battlemage', '#7c4dff');
+    mkSlider('Splash DMG %', cfg.battlemage, 'splashDamageMultiplier', 0, 1, 0.05, '#7c4dff');
+    mkSlider('Cyclone DMG %', cfg.battlemage, 'cyclonePullDamageMultiplier', 0, 1, 0.05, '#7c4dff');
+    mkSlider('Cyclone Cooldown', cfg.battlemage, 'cycloneCooldown', 1, 20, 1, '#7c4dff', 's');
+
+    // ---------- STATUS EFFECTS ----------
+    mkSection('Ablaze (Burn)', '#ff4422');
+    mkSlider('Duration', cfg.statusEffects.ablaze, 'duration', 1, 10, 0.5, '#ff4422', 's');
+    mkSlider('DPS', cfg.statusEffects.ablaze, 'dps', 0.1, 3, 0.1, '#ff4422');
+
+    mkSection('Electrocute (Wet+Lightning)', '#ffee44');
+    mkSlider('Chain Count', cfg.statusEffects.electrocuteCrit, 'chainCount', 0, 8, 1, '#ffee44');
+    mkSlider('Chain Radius', cfg.statusEffects.electrocuteCrit, 'chainRadius', 1, 6, 1, '#ffee44');
+    mkSlider('DMG Multiplier', cfg.statusEffects.electrocuteCrit, 'damageMultiplier', 0.1, 3, 0.1, '#ffee44', 'x');
+
+    mkSection('Inferno (Ablaze+Wind)', '#ff6622');
+    mkSlider('Burst Damage', cfg.statusEffects.inferno, 'burstDamage', 1, 15, 1, '#ff6622');
+    mkSlider('Spread Count', cfg.statusEffects.inferno, 'spreadCount', 0, 6, 1, '#ff6622');
+    mkSlider('Spread Radius', cfg.statusEffects.inferno, 'spreadRadius', 1, 5, 1, '#ff6622');
+
+    mkSection('Kamehameha (Arcane+Lightning)', '#aa44ff');
+    mkSlider('DMG Multiplier', cfg.statusEffects.kamehameha, 'damageMultiplier', 0.1, 3, 0.1, '#aa44ff', 'x');
+    mkSlider('Pierce Count', cfg.statusEffects.kamehameha, 'pierceCount', 1, 8, 1, '#aa44ff');
+    mkSlider('Beam Range', cfg.statusEffects.kamehameha, 'beamRange', 2, 10, 1, '#aa44ff');
+
+    mkSection('High Voltage (BM Lightning)', '#44eeff');
+    mkSlider('Duration', cfg.statusEffects.highVoltage, 'duration', 1, 12, 1, '#44eeff', 's');
+    mkSlider('Cascade DMG %', cfg.statusEffects.highVoltage, 'cascadeDamageMultiplier', 0.5, 3, 0.1, '#44eeff', 'x');
+    mkSlider('Cascade Chains', cfg.statusEffects.highVoltage, 'cascadeChainCount', 1, 6, 1, '#44eeff');
+    mkSlider('Cascade Radius', cfg.statusEffects.highVoltage, 'cascadeChainRadius', 1, 6, 1, '#44eeff');
+    mkSlider('Stun Duration', cfg.statusEffects.highVoltage, 'stunDuration', 0.3, 3, 0.1, '#44eeff', 's');
+
+    mkSection('Knockup (Wind AoE)', '#88ffcc');
+    mkSlider('Duration', cfg.statusEffects.knockup, 'duration', 0.3, 4, 0.1, '#88ffcc', 's');
+
+    mkSection('Soothe (Water+Ablaze)', '#44ddff');
+    mkSlider('Heal Amount', cfg.statusEffects.soothe, 'healAmount', 1, 10, 1, '#44ddff');
+
+    mkSection('Cleanse (Healer)', '#ffd700');
+    mkSlider('Cooldown', cfg.statusEffects.cleanse, 'cooldown', 1, 20, 1, '#ffd700', 's');
+    mkSlider('Speed Boost Duration', cfg.statusEffects.cleanse, 'speedBoostDuration', 0.5, 6, 0.5, '#ffd700', 's');
+    mkSlider('Speed Boost Factor', cfg.statusEffects.cleanse, 'speedBoostFactor', 1, 3, 0.1, '#ffd700', 'x');
+    mkSlider('Linger Immunity', cfg.statusEffects.cleanse, 'lingerDuration', 1, 8, 0.5, '#ffd700', 's');
+
+    // ---------- BM WET SPLASH ----------
+    mkSection('BM Water AoE Damage', '#4488ff');
+    mkSlider('Wet Splash DMG %', cfg.statusEffects as any, 'battlemageWetSplashDamageMultiplier', 0, 0.5, 0.05, '#4488ff');
+
+    // ---------- UNIT STATS (live edit) ----------
+    mkSection('Unit Stats Override', '#76ff03');
+    const unitSelect = document.createElement('select');
+    unitSelect.style.cssText = 'background:#222;color:#ccc;border:1px solid #555;padding:3px 6px;font-size:10px;font-family:monospace;border-radius:3px;margin-bottom:6px;width:100%;';
+    const combatTypes = COMBAT_UNIT_DEFS.map(d => d.type);
+    for (const t of combatTypes) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+      unitSelect.appendChild(opt);
+    }
+    container.appendChild(unitSelect);
+
+    const statsDiv = document.createElement('div');
+    statsDiv.id = 'tuning-unit-stats';
+    container.appendChild(statsDiv);
+
+    const renderUnitStats = () => {
+      statsDiv.innerHTML = '';
+      const unitType = unitSelect.value as UnitType;
+      const uc = UNIT_CONFIG[unitType];
+      if (!uc) return;
+      const s = uc.stats;
+
+      const mkUnitSlider = (label: string, key: string, min: number, max: number, step: number, color: string) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
+
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:#aaa;font-size:10px;min-width:80px;`;
+        lbl.textContent = label;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String((s as any)[key]);
+        slider.style.cssText = `flex:1;height:4px;accent-color:${color};cursor:pointer;`;
+
+        const val = document.createElement('span');
+        val.style.cssText = `color:${color};font-size:11px;font-weight:bold;min-width:30px;text-align:right;font-family:monospace;`;
+        val.textContent = String((s as any)[key]);
+
+        slider.addEventListener('input', () => {
+          const v = Number(slider.value);
+          (s as any)[key] = v;
+          val.textContent = step < 1 ? v.toFixed(1) : String(v);
+        });
+
+        row.appendChild(lbl);
+        row.appendChild(slider);
+        row.appendChild(val);
+        statsDiv.appendChild(row);
+      };
+
+      mkUnitSlider('Max HP', 'maxHealth', 1, 60, 1, '#2ecc71');
+      mkUnitSlider('Attack', 'attack', 0, 15, 1, '#e74c3c');
+      mkUnitSlider('Defense', 'defense', 0, 15, 1, '#3498db');
+      mkUnitSlider('Range', 'range', 1, 8, 1, '#f39c12');
+      mkUnitSlider('Movement', 'movement', 1, 6, 1, '#9b59b6');
+
+      // Speed sliders (on UNIT_CONFIG directly, not stats)
+      const mkSpeedSlider = (label: string, key: string, min: number, max: number, step: number, color: string) => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
+
+        const lbl = document.createElement('span');
+        lbl.style.cssText = `color:#aaa;font-size:10px;min-width:80px;`;
+        lbl.textContent = label;
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = String(min);
+        slider.max = String(max);
+        slider.step = String(step);
+        slider.value = String((uc as any)[key]);
+        slider.style.cssText = `flex:1;height:4px;accent-color:${color};cursor:pointer;`;
+
+        const val = document.createElement('span');
+        val.style.cssText = `color:${color};font-size:11px;font-weight:bold;min-width:30px;text-align:right;font-family:monospace;`;
+        val.textContent = Number((uc as any)[key]).toFixed(1);
+
+        slider.addEventListener('input', () => {
+          const v = Number(slider.value);
+          (uc as any)[key] = v;
+          val.textContent = v.toFixed(1);
+        });
+
+        row.appendChild(lbl);
+        row.appendChild(slider);
+        row.appendChild(val);
+        statsDiv.appendChild(row);
+      };
+
+      mkSpeedSlider('Move Spd', 'moveSpeed', 0.2, 5, 0.1, '#1abc9c');
+      mkSpeedSlider('Atk Spd', 'attackSpeed', 0.1, 3, 0.1, '#e67e22');
+
+      const note = document.createElement('div');
+      note.style.cssText = 'color:#666;font-size:9px;margin-top:4px;font-style:italic;';
+      note.textContent = 'Changes apply to newly spawned units. Existing units keep old stats.';
+      statsDiv.appendChild(note);
+    };
+
+    unitSelect.addEventListener('change', renderUnitStats);
+    renderUnitStats();
+
+    // Reset all button
+    const resetNote = document.createElement('div');
+    resetNote.style.cssText = 'margin-top:12px;text-align:center;';
+    const resetBtn = document.createElement('button');
+    resetBtn.style.cssText = 'background:#333;color:#ff4444;border:1px solid #ff444444;padding:4px 12px;font-size:10px;font-family:monospace;border-radius:3px;cursor:pointer;';
+    resetBtn.textContent = 'Values reset on page reload';
+    resetBtn.disabled = true;
+    resetNote.appendChild(resetBtn);
+    container.appendChild(resetNote);
+  }
+
   // ==== COMBAT TAB ====
   private buildCombatTab(container: HTMLElement): void {
     // Stats bar
@@ -665,6 +924,9 @@ export class DebugPanel {
       [DebugEventType.HEAL]: '#66bb6a',
       [DebugEventType.SPLASH]: '#ff5722',
       [DebugEventType.MOVE]: '#607d8b',
+      [DebugEventType.STATUS]: '#7c4dff',
+      [DebugEventType.COMBO]: '#ff4081',
+      [DebugEventType.CLEANSE]: '#ffd740',
     };
     for (const evType of Object.values(DebugEventType)) {
       const btn = document.createElement('button');
@@ -751,6 +1013,9 @@ export class DebugPanel {
       [DebugEventType.HEAL]: '#81c784',
       [DebugEventType.SPLASH]: '#ff7043',
       [DebugEventType.MOVE]: '#607d8b',
+      [DebugEventType.STATUS]: '#b388ff',
+      [DebugEventType.COMBO]: '#ff80ab',
+      [DebugEventType.CLEANSE]: '#ffe57f',
     };
     row.innerHTML = `<span style="color:#555">${timeStr}s</span> `
       + `<span style="color:${teamColor};font-weight:bold">[${teamLabel}]</span> `
