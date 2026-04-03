@@ -1740,19 +1740,33 @@ export class HUD {
       const healthColor = healthPct > 50 ? '#2ecc71' : healthPct > 25 ? '#f39c12' : '#e74c3c';
       const stanceLabel = unit.stance === UnitStance.PASSIVE ? '🛡 Passive' :
                           unit.stance === UnitStance.DEFENSIVE ? '⚔ Defensive' : '🔥 Aggressive';
+      const desc = this.getUnitDescription(unit.type);
+      const passives = this.getUnitPassives(unit.type);
+      const lvlInfo = unit.level > 1 ? ` Lv.${unit.level}` : '';
+
+      let passiveHtml = '';
+      if (passives.length > 0) {
+        passiveHtml = `<div style="margin-top:5px; border-top:1px solid rgba(255,255,255,0.12); padding-top:5px;">`;
+        for (const p of passives) {
+          passiveHtml += `<div style="font-size:11px; color:#a8d8ea; margin-bottom:2px;">⬥ ${p}</div>`;
+        }
+        passiveHtml += `</div>`;
+      }
 
       this.elements.selectionInfo.innerHTML = `
-        <div style="font-size:16px; font-weight:bold; text-transform:uppercase; margin-bottom:6px;">
-          ${unit.type} <span style="font-size:12px; color:#aaa">(${unit.state})</span>
+        <div style="font-size:16px; font-weight:bold; text-transform:uppercase; margin-bottom:2px;">
+          ${unit.type}${lvlInfo} <span style="font-size:12px; color:#aaa">(${unit.state})</span>
         </div>
+        <div style="font-size:11px; color:#aaa; margin-bottom:6px; font-style:italic;">${desc}</div>
         <div style="margin-bottom:4px;">
           HP: <span style="color:${healthColor}">${unit.currentHealth}/${unit.stats.maxHealth}</span>
         </div>
         <div style="background:#333; border-radius:4px; height:6px; margin-bottom:6px;">
           <div style="background:${healthColor}; height:100%; width:${healthPct}%; border-radius:4px;"></div>
         </div>
-        <div>ATK: ${unit.stats.attack} · DEF: ${unit.stats.defense} · SPD: ${unit.moveSpeed.toFixed(1)}</div>
-        <div style="margin-top:4px; color:#ccc; font-size:11px;">Stance: ${stanceLabel}</div>
+        <div>ATK: ${unit.stats.attack} · DEF: ${unit.stats.defense} · RNG: ${unit.stats.range} · SPD: ${unit.moveSpeed.toFixed(1)}</div>
+        <div style="margin-top:4px; color:#ccc; font-size:11px;">Stance: ${stanceLabel} · Move: ${unit.stats.movement}</div>
+        ${passiveHtml}
       `;
     } else {
       // Multiple units selected — show clickable type badges for squad filtering
@@ -2485,29 +2499,59 @@ export class HUD {
     const moveCost = this.getMoveCost(tile.terrain);
     const defBonus = this.getDefenseBonus(tile.terrain);
     const atkBonus = this.getAttackBonus(tile.terrain);
-    const resourceStr = tile.resource ? this.getResourceName(tile.resource) : 'None';
+    const hasResource = !!tile.resource;
+    const resourceStr = hasResource ? this.getResourceName(tile.resource!) : '';
     const elevStr = tile.elevation;
 
     let modifiers = '';
-    if (moveCost > 1) modifiers += `<div style="color:#e74c3c;">⚠ Movement cost: ${moveCost}x</div>`;
-    if (moveCost === 1) modifiers += `<div style="color:#2ecc71;">✓ Normal movement</div>`;
+
+    // ── Movement info ──
+    if (tile.terrain === TerrainType.WATER) {
+      modifiers += `<div style="color:#e74c3c;">✗ Impassable (deep water)</div>`;
+    } else if (tile.terrain === TerrainType.RIVER) {
+      modifiers += `<div style="color:#e74c3c;">✗ Impassable (river current)</div>`;
+    } else if (tile.terrain === TerrainType.LAKE) {
+      modifiers += `<div style="color:#e74c3c;">✗ Impassable (deep lake)</div>`;
+    } else if (tile.terrain === TerrainType.WATERFALL) {
+      modifiers += `<div style="color:#e74c3c;">✗ Impassable (waterfall)</div>`;
+    } else if (moveCost > 1) {
+      modifiers += `<div style="color:#f39c12;">⚠ Slow movement (${moveCost}x cost)</div>`;
+    } else {
+      modifiers += `<div style="color:#2ecc71;">✓ Normal movement</div>`;
+    }
+
+    // ── Combat bonuses ──
     if (defBonus > 0) modifiers += `<div style="color:#3498db;">🛡 Defense bonus: +${defBonus}</div>`;
-    if (atkBonus !== 0) modifiers += `<div style="color:#e67e22;">⚔ Attack modifier: ${atkBonus > 0 ? '+' : ''}${atkBonus}</div>`;
-    if (tile.terrain === TerrainType.WATER) modifiers += `<div style="color:#e74c3c;">✗ Impassable</div>`;
-    if (tile.terrain === TerrainType.FOREST) modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
-    if (tile.terrain === TerrainType.MOUNTAIN && tile.resource === ResourceType.IRON) {
-      modifiers += `<div style="color:#c0652a;">⛏ Iron ore deposits</div>`;
+    if (defBonus < 0) modifiers += `<div style="color:#e74c3c;">🛡 Defense penalty: ${defBonus}</div>`;
+    if (atkBonus > 0) modifiers += `<div style="color:#e67e22;">⚔ Attack bonus: +${atkBonus} (high ground)</div>`;
+    if (atkBonus < 0) modifiers += `<div style="color:#e74c3c;">⚔ Attack penalty: ${atkBonus}</div>`;
+
+    // ── Terrain-specific resource info (one line per terrain, no duplicates) ──
+    if (tile.terrain === TerrainType.PLAINS) {
+      modifiers += `<div style="color:#8bc34a;">🌾 Farmable (food from grass)</div>`;
+    } else if (tile.terrain === TerrainType.FOREST) {
+      modifiers += `<div style="color:#27ae60;">🌲 Harvestable (wood)</div>`;
     } else if (tile.terrain === TerrainType.MOUNTAIN) {
-      modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone, iron)</div>`;
+      if (tile.resource === ResourceType.IRON) {
+        modifiers += `<div style="color:#c0652a;">⛏ Rich iron ore deposits</div>`;
+      } else if (tile.resource === ResourceType.CRYSTAL) {
+        modifiers += `<div style="color:#9b59b6;">💎 Crystal deposits</div>`;
+      } else {
+        modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone, iron veins)</div>`;
+      }
     } else if (tile.terrain === TerrainType.SNOW) {
       modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
+    } else if (tile.terrain === TerrainType.DESERT) {
+      if (tile.resource === ResourceType.GOLD) {
+        modifiers += `<div style="color:#f0c040;">💰 Gold deposits</div>`;
+      } else {
+        modifiers += `<div style="color:#f0c040;">⛏ Mineable (clay, stone)</div>`;
+      }
+    } else if (tile.terrain === TerrainType.JUNGLE) {
+      modifiers += `<div style="color:#2d6b30;">🌲 Harvestable (wood — lumberjacks)</div>`;
+    } else if (tile.terrain === TerrainType.WATERFALL) {
+      modifiers += `<div style="color:#42a5f5;">💧 Cascading water</div>`;
     }
-    if (tile.terrain === TerrainType.DESERT) modifiers += `<div style="color:#f0c040;">⛏ Mineable (sand→clay, stone)</div>`;
-    if (tile.terrain === TerrainType.JUNGLE) modifiers += `<div style="color:#2d6b30;">🌿 Dense jungle (wood)</div>`;
-    if (tile.terrain === TerrainType.RIVER) modifiers += `<div style="color:#1e88e5;">🏊 Swimmable river</div>`;
-    if (tile.terrain === TerrainType.LAKE) modifiers += `<div style="color:#1565c0;">🏊 Swimmable lake</div>`;
-    if (tile.terrain === TerrainType.WATERFALL) modifiers += `<div style="color:#42a5f5;">💧 Waterfall</div>`;
-    if (tile.elevation >= 4 && tile.terrain !== TerrainType.MOUNTAIN && tile.terrain !== TerrainType.SNOW && tile.terrain !== TerrainType.DESERT && tile.terrain !== TerrainType.JUNGLE) modifiers += `<div style="color:#95a5a6;">⛏ Mineable (stone)</div>`;
 
     // Tunnel info with block breakdown
     if (tile.hasTunnel) {
@@ -2533,8 +2577,8 @@ export class HUD {
     this.terrainInfoPanel.innerHTML = `
       <div style="font-weight:bold; font-size:15px; color:${terrainColor}; margin-bottom:6px;">${terrainName}</div>
       <div style="margin-bottom:4px;">📍 Tile (${tile.position.q}, ${tile.position.r})</div>
-      <div style="margin-bottom:4px;">📐 Elevation: ${elevStr}</div>
-      <div style="margin-bottom:6px;">💎 Resource: ${resourceStr}</div>
+      <div style="margin-bottom:${hasResource ? '4' : '6'}px;">📐 Elevation: ${elevStr}</div>
+      ${hasResource ? `<div style="margin-bottom:6px;">💎 Resource: ${resourceStr}</div>` : ''}
       <div style="border-top:1px solid rgba(255,255,255,0.15); padding-top:6px;">
         ${modifiers || '<div style="color:#888;">No special modifiers</div>'}
       </div>
@@ -2622,7 +2666,7 @@ export class HUD {
       case TerrainType.PLAINS: return 1;
       case TerrainType.FOREST: return 3;
       case TerrainType.DESERT: return 1.5;
-      case TerrainType.JUNGLE: return -1;
+      case TerrainType.JUNGLE: return 2.5;
       case TerrainType.SNOW: return 2;
       case TerrainType.MOUNTAIN: return 1;
       case TerrainType.RIVER: return -2;
@@ -2667,6 +2711,98 @@ export class HUD {
       case ResourceType.CLAY: return '🧱 Clay';
       case ResourceType.ROPE: return '🪢 Rope';
       default: return 'Unknown';
+    }
+  }
+
+  private getUnitDescription(type: string): string {
+    switch (type) {
+      case UnitType.WARRIOR: return 'Frontline infantry. Balanced stats for general combat.';
+      case UnitType.ARCHER: return 'Ranged attacker. Fragile but strikes from 4 hexes away.';
+      case UnitType.RIDER: return 'Fast cavalry. High mobility for flanking and raiding.';
+      case UnitType.PALADIN: return 'Holy knight. Aura buffs nearby allies with bonus defense.';
+      case UnitType.TREBUCHET: return 'Siege engine. Devastating ranged damage, extremely slow.';
+      case UnitType.SCOUT: return 'Recon specialist. Fastest unit, huge vision range.';
+      case UnitType.MAGE: return 'Elemental caster. Cycles through 5 elements with each attack.';
+      case UnitType.BUILDER: return 'Engineer. Constructs buildings and walls. High carry capacity.';
+      case UnitType.LUMBERJACK: return 'Woodcutter. Harvests trees for wood resources.';
+      case UnitType.VILLAGER: return 'Farmer. Harvests farms and wild grass for food.';
+      case UnitType.HEALER: return 'Combat medic. Heals the most injured ally in range.';
+      case UnitType.ASSASSIN: return 'Stealth striker. Massive damage from full HP, unblockable.';
+      case UnitType.SHIELDBEARER: return 'Heavy tank. Absorbs ranged fire and blocks melee hits.';
+      case UnitType.BERSERKER: return 'Rage fighter. Grows stronger as health drops. Throws axes.';
+      case UnitType.BATTLEMAGE: return 'AOE caster. Splash damage to all enemies near the target.';
+      case UnitType.GREATSWORD: return 'Cleave warrior. Hits all adjacent enemies with knockback.';
+      case UnitType.OGRE: return 'Reward brute. Massive HP, club swipe hits all in 2-hex radius.';
+      default: return '';
+    }
+  }
+
+  private getUnitPassives(type: string): string[] {
+    switch (type) {
+      case UnitType.WARRIOR: return [];
+      case UnitType.ARCHER: return [];
+      case UnitType.RIDER: return ['High mobility (4 move, 3.0 speed)'];
+      case UnitType.PALADIN: return [
+        'Holy Aura: +2 DEF to allies within 2 hexes',
+        'Can block melee attacks (+15% bonus)',
+      ];
+      case UnitType.TREBUCHET: return [
+        'Siege: Damages walls and buildings',
+        'Range 6, but 0 DEF and very slow',
+      ];
+      case UnitType.SCOUT: return [
+        'Detection range: 7 hexes (highest)',
+        '5 movement, 3.5 speed (fastest unit)',
+      ];
+      case UnitType.MAGE: return [
+        'Elemental Cycle: Fire → Water → Lightning → Wind → Earth',
+        'Ranged magic at 4 hexes',
+      ];
+      case UnitType.BUILDER: return [
+        'Builds structures and walls',
+        'Carry capacity: 8 (highest)',
+      ];
+      case UnitType.LUMBERJACK: return [
+        'Chops trees for wood (3s cooldown)',
+        'Carry capacity: 6',
+      ];
+      case UnitType.VILLAGER: return [
+        'Farms food from farms (4s) and wild grass (2.5s)',
+        'Carry capacity: 5',
+      ];
+      case UnitType.HEALER: return [
+        'Auto-heals most injured ally within 3 hexes',
+        'Heals 3 HP per cast (2s cooldown)',
+        'Cannot attack enemies',
+      ];
+      case UnitType.ASSASSIN: return [
+        'Ambush: +3 ATK when striking from full HP',
+        'Attacks cannot be blocked',
+      ];
+      case UnitType.SHIELDBEARER: return [
+        'Deflect: 80% reduced ranged damage',
+        'Shield Block: +15% melee block chance',
+        'Shield Bash: Knocks target back 1 hex',
+      ];
+      case UnitType.BERSERKER: return [
+        'Rage: Up to +4 ATK as health drops',
+        'Axe Throw: 1 ranged opener per target (range 7, 40% ATK)',
+      ];
+      case UnitType.BATTLEMAGE: return [
+        'AOE Splash: 75% ATK to enemies within 1 hex of target',
+        'Elemental Cycle: rotates through 5 elements',
+      ];
+      case UnitType.GREATSWORD: return [
+        'Cleave: Hits all enemies in 1-hex radius (60% ATK)',
+        'Knockback: All hit enemies pushed back 1 hex',
+      ];
+      case UnitType.OGRE: return [
+        'Club Swipe: AOE hits all in 2-hex radius (70% ATK)',
+        'Knockback on all hit enemies',
+        'Siege: Damages walls and buildings',
+        'Cannot be trained — spawns at base tier-up',
+      ];
+      default: return [];
     }
   }
 

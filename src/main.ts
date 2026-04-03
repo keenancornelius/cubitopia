@@ -2586,9 +2586,9 @@ class Cubitopia {
     if (!this.currentMap) return;
     const key = `${treePos.q},${treePos.r}`;
     const tile = this.currentMap.tiles.get(key);
-    if (!tile || tile.terrain !== TerrainType.FOREST) return;
+    if (!tile || (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE)) return;
 
-    // Convert forest to plains (tree chopped)
+    // Convert forest/jungle to plains (tree chopped)
     tile.terrain = TerrainType.PLAINS;
 
     // Remove tree decorations visually

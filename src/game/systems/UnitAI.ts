@@ -1447,7 +1447,7 @@ export class UnitAI {
     // LUMBERJACK: chop trees only
     const tile = map.tiles.get(`${target.q},${target.r}`);
 
-    if (tile && tile.terrain === TerrainType.FOREST) {
+    if (tile && (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.JUNGLE)) {
       unit.gatherCooldown = GAME_CONFIG.gather.lumberjackChopCooldown;
       // Release claim since tree is being chopped
       UnitAI.releaseTreeClaim(unit.id);
@@ -1995,7 +1995,7 @@ export class UnitAI {
 
     for (const key of UnitAI.playerHarvestBlueprint) {
       const tile = map.tiles.get(key);
-      if (!tile || tile.terrain !== TerrainType.FOREST) {
+      if (!tile || (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE)) {
         UnitAI.playerHarvestBlueprint.delete(key);
         continue;
       }
@@ -2069,7 +2069,7 @@ export class UnitAI {
     let nearestDist = Infinity;
 
     map.tiles.forEach((tile, key) => {
-      if (tile.terrain !== TerrainType.FOREST) return;
+      if (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE) return;
       const [q, r] = key.split(',').map(Number);
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
@@ -2092,7 +2092,7 @@ export class UnitAI {
     if (!basePos) return UnitAI.findNearestForest(unit, map);
 
     map.tiles.forEach((tile, key) => {
-      if (tile.terrain !== TerrainType.FOREST) return;
+      if (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE) return;
       // Skip trees claimed by other lumberjacks
       const claimer = UnitAI.claimedTrees.get(key);
       if (claimer && claimer !== unit.id) return;

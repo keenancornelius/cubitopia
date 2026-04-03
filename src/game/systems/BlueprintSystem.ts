@@ -142,7 +142,7 @@ export default class BlueprintSystem {
     const key = `${coord.q},${coord.r}`;
     const tile = this.ctx.currentMap.tiles.get(key);
     if (!tile) return;
-    if (tile.terrain !== TerrainType.FOREST) return;
+    if (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE) return;
 
     const added = UnitAI.addHarvestBlueprint(coord);
     if (added) {
@@ -156,7 +156,7 @@ export default class BlueprintSystem {
     if (!this.ctx.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.ctx.currentMap.tiles.get(key);
-    if (!tile || tile.terrain !== TerrainType.FOREST) return;
+    if (!tile || (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE)) return;
     if (UnitAI.playerHarvestBlueprint.has(key)) return;
     UnitAI.playerHarvestBlueprint.add(key);
     this.addHarvestMarker(coord);
