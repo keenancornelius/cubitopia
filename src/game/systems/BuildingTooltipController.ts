@@ -349,6 +349,7 @@ export default class BuildingTooltipController {
       </div>`;
     } else {
       html += `<div>
+        <span id="btt-base-rally" style="${btnStyle} background:#2980b9;">Set Rally</span>
         <span id="btt-rally-to" style="${btnStyle} background:#2980b9;">🚩 Rally Here</span>
       </div>`;
     }
@@ -366,6 +367,10 @@ export default class BuildingTooltipController {
     el.querySelector('#btt-capture')?.addEventListener('click', () => {
       this.ops.captureZone(base.position);
       this.hideTooltip();
+    });
+    el.querySelector('#btt-base-rally')?.addEventListener('click', () => {
+      this.hideTooltip();
+      this.ops.enterRallyPointMode('base');
     });
     el.querySelector('#btt-rally-to')?.addEventListener('click', () => {
       this.ops.setRallyToPosition(base.position);

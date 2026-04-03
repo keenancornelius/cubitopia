@@ -22,6 +22,7 @@ export interface LifecycleOps {
   setPlayerUnits(allUnits: Unit[], pid: number): void;
   playSound(name: string, volume: number): void;
   showNotification(msg: string, color: string): void;
+  getRallyFormationSlot(buildingKey: string, unit: Unit): HexCoord | null;
 
   // Population disband
   findExcessUnits(pid: number): string[];
@@ -87,6 +88,12 @@ export default class LifecycleUpdater {
           if (pid === 0) {
             this.ops.showNotification('👹 An Ogre has joined your army!', '#4e342e');
             this.ops.setPlayerUnits(allUnits, 0);
+          }
+          // Send ogre to base rally point if one is set
+          const rallySlot = this.ops.getRallyFormationSlot('base', ogre);
+          if (rallySlot) {
+            ogre._path = null;
+            ogre._postPosition = rallySlot;
           }
           Logger.info('BaseUpgrade', `Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
         }

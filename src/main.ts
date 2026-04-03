@@ -245,6 +245,7 @@ class Cubitopia {
       setPlayerUnits: (units, pid) => this.selectionManager.setPlayerUnits(units, pid),
       playSound: (name, vol) => this.sound.play(name as any, vol),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
+      getRallyFormationSlot: (key, unit) => this.rallyPointSystem.getRallyFormationSlot(key, unit),
       findExcessUnits: (pid) => this.populationSystem ? this.populationSystem.findExcessUnits(pid) : [],
       getUnitById: (id) => this._unitById?.get(id),
       removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
@@ -1239,6 +1240,7 @@ class Cubitopia {
       removeFromScene: (mesh) => this.renderer.scene.remove(mesh),
       getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
       getPlacedBuildings: () => this.buildingSystem.placedBuildings,
+      getBasePosition: (owner) => this.bases[owner]?.position ?? null,
       hexToWorld: (pos) => this.hexToWorld(pos),
       getElevation: (pos) => this.getElevation(pos),
       getCurrentMap: () => this.currentMap,
@@ -2365,7 +2367,7 @@ class Cubitopia {
     this.tileHighlighter.showAttackIndicator(position, elev);
   }
 
-  /** Set rally point for all combat buildings to a target position (from tooltip) */
+  /** Set rally point for all combat buildings + base to a target position (from tooltip) */
   private setRallyToPositionFromTooltip(position: HexCoord): void {
     // Set rally for all player combat buildings (barracks, armory, wizard_tower)
     const combatKinds: BuildingKind[] = ['barracks', 'armory', 'wizard_tower'];
@@ -2376,6 +2378,9 @@ class Cubitopia {
         count++;
       }
     }
+    // Also set rally for the player's base (ogre spawns)
+    this.rallyPointSystem.setRallyPoint('base', position);
+    count++;
     if (count > 0) {
       this.hud.showNotification(`Rally point set for ${count} buildings`, '#2980b9');
     } else {
@@ -2907,6 +2912,11 @@ class Cubitopia {
   private enterRallyPointModeForBuilding(buildingKey: string): void {
     this.interaction.enter({ kind: 'rally_point', buildingKey });
     this.hud.showNotification(`Set ${buildingKey} rally point — click a tile · [ESC] cancel`, '#f0c040');
+  }
+
+  /** Set rally point for a building (called from InputManager after tile click in rally mode) */
+  public setRallyPoint(buildingKey: string, target: HexCoord): void {
+    this.rallyPointSystem.setRallyPoint(buildingKey, target);
   }
 
   // ===================== PLANT CROPS SYSTEM =====================

@@ -29,6 +29,7 @@ export interface RallyPointOps {
   // Building queries
   getFirstBuilding(kind: BuildingKind, owner: number): { position: HexCoord } | null;
   getPlacedBuildings(): Array<{ kind: BuildingKind; owner: number }>;
+  getBasePosition(owner: number): HexCoord | null;
 
   // World helpers
   hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
@@ -48,6 +49,7 @@ const FLAG_COLORS: Record<string, number> = {
   forestry: 0x27ae60,
   masonry: 0x808080,
   wizard_tower: 0xdaa520,
+  base: 0x3498db,
 };
 
 const DEFAULT_FLAG_COLOR = 0xdaa520;
@@ -85,9 +87,14 @@ export default class RallyPointSystem {
     this.rallyPoints.set(buildingKey, target);
 
     // Get building position for the line
-    const bld = this.ops.getFirstBuilding(buildingKey as BuildingKind, 0);
-    if (!bld) return;
-    const buildingPos = bld.position;
+    let buildingPos: HexCoord | null = null;
+    if (buildingKey === 'base') {
+      buildingPos = this.ops.getBasePosition(0);
+    } else {
+      const bld = this.ops.getFirstBuilding(buildingKey as BuildingKind, 0);
+      if (bld) buildingPos = bld.position;
+    }
+    if (!buildingPos) return;
 
     // Remove old visuals
     this._removeRallyVisuals(buildingKey);
