@@ -166,8 +166,8 @@ export default class MenuController {
     overlay.appendChild(mapGrid);
     overlay.appendChild(descEl);
 
-    // --- Music Genre Selector ---
-    overlay.appendChild(sectionLabel('MUSIC'));
+    // --- Tribe Selector (maps to music genre) ---
+    overlay.appendChild(sectionLabel('TRIBE'));
 
     const genreRow = document.createElement('div');
     genreRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:12px; max-width:600px;';

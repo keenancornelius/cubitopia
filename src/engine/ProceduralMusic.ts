@@ -34,90 +34,90 @@ export interface MusicGenre {
 export const MUSIC_GENRES: MusicGenre[] = [
   {
     id: 'fantasy',
-    label: 'Fantasy',
-    description: 'Orchestral medieval — flutes, strings, and war drums',
-    color: '#9b59b6',
-    icon: '\u2694',  // ⚔
+    label: 'Stoneguard',
+    description: 'Defensive builders — fortify, walls, and shieldbearers',
+    color: '#7f8c8d',
+    icon: '\uD83D\uDEE1\uFE0F',  // 🛡️
     folder: 'fantasy',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
+    id: 'metal',
+    label: 'Wildborne',
+    description: 'Aggressive nature tribe — berserkers and beast dens',
+    color: '#e74c3c',
+    icon: '\uD83D\uDC3A',  // 🐺
+    folder: 'metal',
+    peacefulCount: 8,
+    combatCount: 6,
+  },
+  {
     id: 'orchestral',
-    label: 'Orchestral',
-    description: 'Epic cinematic scores — brass, choir, full orchestra',
-    color: '#e67e22',
-    icon: '\u266B',  // ♫
+    label: 'Arcanists',
+    description: 'Ranged magic wielders — battlemages and mana wells',
+    color: '#9b59b6',
+    icon: '\uD83D\uDD2E',  // 🔮
     folder: 'orchestral',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
-    id: 'lofi',
-    label: 'Lo-Fi',
-    description: 'Chill lo-fi beats — relaxed vibes even during battle',
-    color: '#1abc9c',
-    icon: '\u266A',  // ♪
-    folder: 'lofi',
-    peacefulCount: 8,
-    combatCount: 6,
-  },
-  {
     id: 'celtic',
-    label: 'Celtic',
-    description: 'Celtic folk — tin whistle, bodhr\u00E1n, fiddle',
-    color: '#27ae60',
-    icon: '\u2618',  // ☘
+    label: 'Tidecallers',
+    description: 'Naval traders — sea raiders and coastal dominance',
+    color: '#3498db',
+    icon: '\uD83C\uDF0A',  // 🌊
     folder: 'celtic',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
     id: 'electronic',
-    label: 'Electronic',
-    description: 'Synth-driven — ambient pads and driving bass',
-    color: '#3498db',
-    icon: '\u26A1',  // ⚡
+    label: 'Tribe V',
+    description: 'To be announced',
+    color: '#1abc9c',
+    icon: '\u2694',  // ⚔
     folder: 'electronic',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
-    id: 'metal',
-    label: 'Metal',
-    description: 'Heavy riffs and blast beats — for aggressive play',
-    color: '#e74c3c',
-    icon: '\uD83E\uDD18',  // 🤘
-    folder: 'metal',
-    peacefulCount: 8,
-    combatCount: 6,
-  },
-  {
     id: 'hiphop',
-    label: 'Hip Hop',
-    description: 'Boom-bap beats and heavy 808s — conquer with swagger',
+    label: 'Tribe VI',
+    description: 'To be announced',
     color: '#f1c40f',
-    icon: '\uD83C\uDFA4',  // 🎤
+    icon: '\u2694',  // ⚔
     folder: 'hiphop',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
+    id: 'lofi',
+    label: 'Tribe VII',
+    description: 'To be announced',
+    color: '#e67e22',
+    icon: '\u2694',  // ⚔
+    folder: 'lofi',
+    peacefulCount: 8,
+    combatCount: 6,
+  },
+  {
     id: 'oldies',
-    label: 'Oldies',
-    description: 'Classic rock and golden-era vibes — timeless warfare',
+    label: 'Tribe VIII',
+    description: 'To be announced',
     color: '#d4a373',
-    icon: '\uD83C\uDFB6',  // 🎶
+    icon: '\u2694',  // ⚔
     folder: 'oldies',
     peacefulCount: 8,
     combatCount: 6,
   },
   {
     id: 'alternative',
-    label: 'Alternative',
-    description: 'Indie and alt-rock — raw guitars and atmospheric builds',
+    label: 'Tribe IX',
+    description: 'To be announced',
     color: '#8e7cc3',
-    icon: '\uD83C\uDFB8',  // 🎸
+    icon: '\u2694',  // ⚔
     folder: 'alternative',
     peacefulCount: 8,
     combatCount: 6,
