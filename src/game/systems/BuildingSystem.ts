@@ -8,6 +8,7 @@ import {
   buildSmelterMesh, buildArmoryMesh, buildWizardTowerMesh
 } from './BuildingMeshFactory';
 import { GAME_CONFIG } from '../GameConfig';
+import { mergeAllMeshes } from '../../engine/MeshMergeUtils';
 
 let nextBuildingId = 0;
 
@@ -103,6 +104,8 @@ class BuildingSystem {
     // advanceConstruction() when construction completes.
     if (!startAsBlueprint) {
       Pathfinder.blockedTiles.add(key);
+      // Merge all meshes in completed buildings to reduce draw calls
+      mergeAllMeshes(mesh);
     }
 
     // Blueprint visual: make mesh semi-transparent + add wireframe overlay
@@ -156,6 +159,8 @@ class BuildingSystem {
       pb.isBlueprint = false;
       pb.assignedBuilderId = null;
       this.clearBlueprintVisual(pb.mesh);
+      // Merge all meshes now that construction is complete (safe to use cached materials)
+      mergeAllMeshes(pb.mesh);
       // Now that construction is complete, block the tile for pathfinding
       const key = `${pb.position.q},${pb.position.r}`;
       Pathfinder.blockedTiles.add(key);
@@ -240,11 +245,7 @@ class BuildingSystem {
     pb.mesh.traverse((child: THREE.Object3D) => {
       if (child instanceof THREE.Mesh) {
         child.geometry.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach((m: THREE.Material) => m.dispose());
-        } else {
-          (child.material as THREE.Material).dispose();
-        }
+        // Don't dispose materials — they may be shared via the global material cache
       }
     });
 
@@ -263,6 +264,10 @@ class BuildingSystem {
     const builder = meshBuilders[pb.kind];
     if (builder) {
       pb.mesh = builder(pb.position, pb.owner);
+      // Merge meshes for completed buildings
+      if (!pb.isBlueprint) {
+        mergeAllMeshes(pb.mesh);
+      }
     }
   }
 
