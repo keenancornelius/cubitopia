@@ -3146,7 +3146,7 @@ export class HUD {
     }
   }
 
-  updateUnitStatsPanel(allUnits: Unit[]): void {
+  updateUnitStatsPanel(allUnits: Unit[], deadUnitKills?: [number, number]): void {
     if (!this.unitStatsPanelVisible) return;
 
     if (!this.unitStatsPanel) {
@@ -3164,8 +3164,8 @@ export class HUD {
 
     // Build team data
     const teams: { [owner: number]: { alive: Unit[]; dead: Unit[]; totalKills: number } } = {
-      0: { alive: [], dead: [], totalKills: 0 },
-      1: { alive: [], dead: [], totalKills: 0 },
+      0: { alive: [], dead: [], totalKills: deadUnitKills?.[0] ?? 0 },
+      1: { alive: [], dead: [], totalKills: deadUnitKills?.[1] ?? 0 },
     };
 
     for (const u of allUnits) {

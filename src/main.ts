@@ -154,6 +154,8 @@ class Cubitopia {
   private _unitById: Map<string, Unit> | null = null;
   private _enemyResCache: any = null;
   private _aggroList: Array<{ attackerId: string; targetId: string }> | null = null;
+  /** Accumulated kills from dead units — so team totals don't drop when a unit with kills dies */
+  private _deadUnitKills: [number, number] = [0, 0];
   private _unitStatsPanelTimer = 0;
   private _selInfoTimer = 0;
   private _spawnQueueHudTimer = 0;
@@ -1689,6 +1691,7 @@ class Cubitopia {
 
     this.currentMap = map;
     this.bases = bases;
+    this._deadUnitKills = [0, 0];
 
     // Apply arena decoration mode if needed
     if (isArena) {
@@ -2135,7 +2138,7 @@ class Cubitopia {
     this._unitStatsPanelTimer += delta;
     if (this._unitStatsPanelTimer >= 0.5) {
       this._unitStatsPanelTimer = 0;
-      this.hud.updateUnitStatsPanel(this.allUnits);
+      this.hud.updateUnitStatsPanel(this.allUnits, this._deadUnitKills);
     }
 
     // Update selection info — throttled to every 0.3s
@@ -2851,6 +2854,10 @@ class Cubitopia {
 
   private removeUnitFromGame(unit: Unit, killer?: Unit): void {
     Logger.debug('Combat', `${unit.type}(${unit.id}) owner=${unit.owner} hp=${unit.currentHealth}/${unit.stats.maxHealth}${killer ? ` killer=${killer.type}(${killer.id})` : ''}`);
+    // Preserve this unit's kills in the team accumulator before removal
+    if ((unit.kills ?? 0) > 0 && (unit.owner === 0 || unit.owner === 1)) {
+      this._deadUnitKills[unit.owner] += unit.kills;
+    }
     for (const player of this.players) {
       const idx = player.units.indexOf(unit);
       if (idx !== -1) {
