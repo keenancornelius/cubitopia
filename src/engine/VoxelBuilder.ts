@@ -32,6 +32,22 @@ const BLOCK_COLORS: Record<BlockType, number> = {
   [BlockType.GEM_EMERALD]:  0x2a5a3a,
   [BlockType.GEM_SAPPHIRE]: 0x2a3a6b,
   [BlockType.GEM_AMETHYST]: 0x4a2a6b,
+  // Skyland pastel palette
+  [BlockType.CLOUD]:          0xf0f0ff,  // soft white-blue cloud
+  [BlockType.PASTEL_GRASS]:   0x98fb98,  // pale green (mint)
+  [BlockType.RAINBOW_BRIDGE]: 0xffb6c1,  // base pink (overridden with position-based rainbow)
+  [BlockType.CREAM_STONE]:    0xffefd5,  // warm cream papaya whip
+  // Volcanic palette
+  [BlockType.BASALT]:         0x2a2a2e,  // very dark charcoal grey
+  [BlockType.OBSIDIAN]:       0x0d0d12,  // near-black with purple tint
+  [BlockType.ASH]:            0x6b6b6b,  // medium grey ash
+  [BlockType.LAVA]:           0xff4400,  // bright orange-red molten
+  [BlockType.MAGMA]:          0x3a1a0a,  // dark brown-red with glow
+  [BlockType.SCORCHED_EARTH]: 0x5a3020,  // burnt reddish-brown
+  // Archipelago palette
+  [BlockType.CORAL]:           0xff6b8a,  // vibrant coral pink
+  [BlockType.TROPICAL_GRASS]:  0x3cb043,  // bright tropical green
+  [BlockType.PALM_WOOD]:       0xc4956a,  // warm tan wood
 };
 
 /** Gem types get special bright sparkle colors overlaid on their dark stone base */
@@ -59,7 +75,7 @@ const GEM_TYPES = new Set<BlockType>([
 ]);
 
 function blockCategory(type: BlockType): MatCategory {
-  if (type === BlockType.WATER) return 'water';
+  if (type === BlockType.WATER || type === BlockType.LAVA) return 'water';
   if (GEM_TYPES.has(type)) return 'gem';
   return 'opaque';
 }
@@ -149,6 +165,86 @@ function computeBlockColor(type: BlockType, position: GridPosition): THREE.Color
       hueShift = (hash - 0.5) * 0.06;
       satShift = (hash2 - 0.5) * 0.15;
       lightShift = (hash - 0.5) * 0.12;
+      break;
+    case BlockType.RAINBOW_BRIDGE: {
+      // Position-based rainbow: hue cycles across world XZ position
+      const rainbowHue = ((position.x + position.z) * 0.15 + hash * 0.08) % 1.0;
+      base.setHSL(rainbowHue, 0.65, 0.72 + hash * 0.08);
+      return base; // skip normal HSL offset
+    }
+    case BlockType.PASTEL_GRASS:
+      // Soft pastel variation: green-pink-lavender
+      hueShift = (hash - 0.5) * 0.15;  // wider hue range for pastel variety
+      satShift = (hash2 - 0.5) * 0.1;
+      lightShift = (hash - 0.5) * 0.08;
+      break;
+    case BlockType.CLOUD:
+      // Very subtle white-pink-blue shimmer
+      hueShift = (hash - 0.5) * 0.06;
+      satShift = -0.02 + hash2 * 0.06;
+      lightShift = (hash - 0.5) * 0.04;
+      break;
+    case BlockType.CREAM_STONE:
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.08;
+      lightShift = (hash - 0.5) * 0.06;
+      break;
+    case BlockType.BASALT:
+      // Dark volcanic rock with subtle blue-grey variation
+      hueShift = (hash - 0.5) * 0.03;
+      satShift = (hash2 - 0.5) * 0.06;
+      lightShift = (hash - 0.5) * 0.08;
+      break;
+    case BlockType.OBSIDIAN:
+      // Near-black with faint purple/blue shimmer
+      hueShift = (hash - 0.5) * 0.06;
+      satShift = hash2 * 0.15;
+      lightShift = hash * 0.04;
+      break;
+    case BlockType.ASH:
+      // Grey ash with slight warm/cool variation
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.05;
+      lightShift = (hash - 0.5) * 0.12;
+      break;
+    case BlockType.LAVA: {
+      // Pulsing orange-red-yellow molten effect
+      const lavaHue = 0.03 + hash * 0.06; // orange to red range
+      base.setHSL(lavaHue, 0.95, 0.45 + hash2 * 0.15);
+      return base;
+    }
+    case BlockType.MAGMA:
+      // Dark rock with random bright orange cracks
+      if (hash < 0.3) {
+        base.set(0xff6600); // glowing crack
+        lightShift = hash2 * 0.1;
+      } else {
+        hueShift = (hash - 0.5) * 0.02;
+        lightShift = (hash - 0.5) * 0.06;
+      }
+      break;
+    case BlockType.SCORCHED_EARTH:
+      // Burnt terrain with red-brown variation
+      hueShift = (hash - 0.5) * 0.06;
+      satShift = (hash2 - 0.5) * 0.1;
+      lightShift = (hash - 0.5) * 0.12;
+      break;
+    case BlockType.CORAL: {
+      // Vibrant coral — wide hue shift between pink, orange, purple
+      const coralHue = 0.92 + hash * 0.16; // wraps from pink to orange
+      base.setHSL(coralHue % 1.0, 0.7 + hash2 * 0.2, 0.55 + hash * 0.1);
+      return base;
+    }
+    case BlockType.TROPICAL_GRASS:
+      // Rich bright green with warm-cool variation
+      hueShift = (hash - 0.5) * 0.08;
+      satShift = (hash2 - 0.5) * 0.12;
+      lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.PALM_WOOD:
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.08;
+      lightShift = (hash - 0.5) * 0.1;
       break;
     default: {
       const sparkleColors = GEM_SPARKLE_COLORS[type];

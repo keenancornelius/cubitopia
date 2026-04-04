@@ -62,12 +62,22 @@ export default class AIController {
   private buildOps: AIBuildingOps;
   private garrisonOps: AIGarrisonOps | null = null;
   private tacticalGroupManager: TacticalGroupManager | null = null;
-  aiState: [AIBuildState, AIBuildState] = [createAIBuildState(), createAIBuildState()];
+  aiState: AIBuildState[] = [createAIBuildState(), createAIBuildState()];
   // Squad IDs are now managed per-team via PersistentSquad in AIBuildState (1-4)
 
   constructor(ctx: GameContext, buildOps: AIBuildingOps) {
     this.ctx = ctx;
     this.buildOps = buildOps;
+  }
+
+  /** Ensure aiState and per-player timers have entries for all players */
+  ensurePlayerCount(count: number): void {
+    while (this.aiState.length < count) {
+      this.aiState.push(createAIBuildState());
+    }
+    while (this._stratTimer.length < count) {
+      this._stratTimer.push(0);
+    }
   }
 
   /** Wire garrison ops after construction (avoids circular init order) */
@@ -80,11 +90,76 @@ export default class AIController {
     this.tacticalGroupManager = mgr;
   }
 
+  // ===================== OUTPOST BUILDING (on capture) =====================
+
+  /**
+   * Called when the AI captures a neutral outpost. Builds a forward-operating
+   * base: barracks (spawn units), farmhouse (food for pop cap), forestry (wood).
+   * Buildings are placed around the captured base, not the home base.
+   * Only spends resources if the AI can afford it; skips otherwise.
+   */
+  onBaseCapture(ownerId: number, basePosition: HexCoord): void {
+    const player = this.ctx.players[ownerId];
+    if (!player) return;
+    const st = this.aiState[ownerId];
+    if (!st) return;
+
+    // Direction: build toward map center from the outpost
+    const mapSize = this.ctx.currentMap?.width || 50;
+    const midQ = Math.floor(mapSize / 2);
+    const toward = basePosition.q < midQ ? 2 : -2;
+
+    // Forward outpost build order: barracks → farmhouse → forestry
+    // These are the minimum needed to spawn units and sustain economy from a forward position.
+    const outpostBuilds: { kind: BuildingKind; configKey: string; offset: [number, number];
+      buildMesh: (pos: HexCoord, owner: number) => THREE.Group; maxHealth?: number }[] = [
+      {
+        kind: 'barracks', configKey: 'barracks', offset: [toward, 0],
+        buildMesh: (p, o) => this.buildOps.buildBarracksMesh(p, o),
+        maxHealth: GAME_CONFIG.defenses.barracks.maxHealth,
+      },
+      {
+        kind: 'farmhouse', configKey: 'farmhouse', offset: [0, toward],
+        buildMesh: (p, o) => this.buildOps.buildFarmhouseMesh(p, o),
+      },
+      {
+        kind: 'forestry', configKey: 'forestry', offset: [-toward, 0],
+        buildMesh: (p, o) => this.buildOps.buildForestryMesh(p, o),
+      },
+    ];
+
+    for (const build of outpostBuilds) {
+      const cfg = (GAME_CONFIG.buildings as any)[build.configKey]?.cost?.ai;
+      if (!cfg) continue;
+      // Check resources
+      const woodCost = cfg.wood || 0;
+      const stoneCost = cfg.stone || 0;
+      if (this.ctx.woodStockpile[ownerId] < woodCost) continue;
+      if (this.ctx.stoneStockpile[ownerId] < stoneCost) continue;
+
+      const pos = this.buildOps.aiFindBuildTile(basePosition.q, basePosition.r, build.offset[0], build.offset[1]);
+      if (!pos) continue;
+
+      // Deduct resources
+      this.ctx.woodStockpile[ownerId] -= woodCost;
+      player.resources.wood -= woodCost;
+      if (stoneCost > 0) {
+        this.ctx.stoneStockpile[ownerId] -= stoneCost;
+        player.resources.stone -= stoneCost;
+      }
+
+      const mesh = build.buildMesh(pos, ownerId);
+      this.buildOps.registerBuilding(build.kind, ownerId, pos, mesh, build.maxHealth);
+      st.meshes.push(mesh);
+    }
+  }
+
   // ===================== AI ECONOMY =====================
 
   updateSmartAIEconomy(ownerId: number, delta: number): void {
     if (!this.ctx.currentMap) return;
     const st = this.aiState[ownerId];
+    if (!st) return;
     st.econTimer += delta;
     if (st.econTimer < GAME_CONFIG.timers.ai.economyTick) return;
     st.econTimer = 0;
@@ -97,7 +172,10 @@ export default class AIController {
     const wood = this.ctx.woodStockpile[ownerId];
     const stone = this.ctx.stoneStockpile[ownerId];
     const gold = player.resources.gold;
-    const toward = ownerId === 0 ? 3 : -3;
+    // Direction toward map center (works for any player position)
+    const mapSize = this.ctx.currentMap!.width || 50;
+    const midQ = Math.floor(mapSize / 2);
+    const toward = base.position.q < midQ ? 3 : -3;
 
     const lumberjacks = player.units.filter(u => u.type === UnitType.LUMBERJACK).length;
     const builders = player.units.filter(u => u.type === UnitType.BUILDER).length;
@@ -459,6 +537,7 @@ export default class AIController {
   updateSmartAISpawnQueue(ownerId: number, delta: number): void {
     if (!this.ctx.currentMap) return;
     const st = this.aiState[ownerId];
+    if (!st) return;
     const player = this.ctx.players[ownerId];
     if (!player) return;
 
@@ -581,6 +660,7 @@ export default class AIController {
     const centerQ = Math.floor(MAP_SIZE / 2);
     const centerR = Math.floor(MAP_SIZE / 2);
     const st = this.aiState[ownerId];
+    if (!st) return; // Guard: aiState not yet expanded for this player
 
     st.autoMarchTimer += delta;
     if (!st.battleStarted && st.autoMarchTimer >= GAME_CONFIG.timers.ai.autoMarchStart) st.battleStarted = true;
@@ -598,10 +678,15 @@ export default class AIController {
     if (!ownBase) return;
 
     const ownOutposts = this.ctx.bases.filter(b => b.owner === ownerId && !b.destroyed && b !== ownBase);
-    const neutralBases = this.ctx.bases.filter(b => b.owner === 2 && !b.destroyed);
-    const enemyCapitalId = ownerId === 0 ? 'base_1' : 'base_0';
-    const enemyCapital = this.ctx.bases.find(b => b.id === enemyCapitalId && !b.destroyed);
-    const enemyOutposts = this.ctx.bases.filter(b => b.owner !== ownerId && b.owner !== 2 && !b.destroyed && b.id !== enemyCapitalId);
+    const neutralBases = this.ctx.bases.filter(b => b.owner >= this.ctx.players.length && !b.destroyed);
+    // Find enemy capitals — any base owned by an enemy player (not neutral, not self)
+    const neutralOwner = this.ctx.players.length; // Neutral is always playerCount
+    const enemyCapitals = this.ctx.bases.filter(b => b.owner !== ownerId && b.owner < this.ctx.players.length && !b.destroyed && b.id.startsWith('base_'));
+    const enemyCapital = enemyCapitals.length > 0
+      ? enemyCapitals.reduce((closest, b) => Pathfinder.heuristic(ownBase.position, b.position) < Pathfinder.heuristic(ownBase.position, closest.position) ? b : closest)
+      : null;
+    const enemyCapitalId = enemyCapital?.id ?? '';
+    const enemyOutposts = this.ctx.bases.filter(b => b.owner !== ownerId && b.owner < this.ctx.players.length && !b.destroyed && b.id !== enemyCapitalId);
 
     // All capture targets sorted by distance from own base
     const captureTargets = [...neutralBases, ...enemyOutposts].sort((a, b) =>
@@ -647,8 +732,8 @@ export default class AIController {
     const objectives: { pos: HexCoord; label: string; stance: UnitStance; priority: number }[] = [];
 
     // Detect enemy units near our bases for DEFEND objectives
-    const enemyId = ownerId === 0 ? 1 : 0;
-    const enemyUnits = this.ctx.players[enemyId]?.units.filter(u => !UnitAI.isDead(u)) ?? [];
+    // Gather all enemy units (all players that aren't us)
+    const enemyUnits = this.ctx.allUnits.filter(u => u.owner !== ownerId && !UnitAI.isDead(u));
 
     // DEFEND — own bases being contested (enemy units within 5 hex) — HIGHEST priority
     // Require 2+ enemies for outposts, 1+ for capital to avoid over-reacting to scouts
@@ -671,7 +756,7 @@ export default class AIController {
     // CAPTURE — all non-owned bases (neutral and enemy outposts)
     // Enemy outposts get slightly higher priority than neutrals
     for (const target of captureTargets) {
-      const isEnemyOutpost = target.owner !== 2; // Not neutral = enemy-held
+      const isEnemyOutpost = target.owner < this.ctx.players.length; // Player-owned = enemy-held
       objectives.push({
         pos: target.position,
         label: 'CAPTURE',
@@ -1023,8 +1108,8 @@ export default class AIController {
     if (targets.length === 0) return null;
     // Sort: neutral first (easier to capture), then by distance
     targets.sort((a, b) => {
-      const aNeutral = a.owner === 2 ? 0 : 1;
-      const bNeutral = b.owner === 2 ? 0 : 1;
+      const aNeutral = a.owner >= this.ctx.players.length ? 0 : 1;
+      const bNeutral = b.owner >= this.ctx.players.length ? 0 : 1;
       if (aNeutral !== bNeutral) return aNeutral - bNeutral;
       return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
     });

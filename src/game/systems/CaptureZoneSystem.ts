@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { Base, HexCoord, Unit, UnitState } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { GAME_CONFIG } from '../GameConfig';
+import { getPlayerHex } from '../PlayerConfig';
 
 /** How long (seconds) full-majority capture takes */
 const CAPTURE_DURATION = GAME_CONFIG.captureZone.captureDuration;
@@ -15,8 +16,8 @@ const CAPTURE_DURATION = GAME_CONFIG.captureZone.captureDuration;
 const ZONE_RADIUS = GAME_CONFIG.captureZone.zoneRadius;
 /** Minimum unit advantage to make progress (prevents 1-unit trickle captures) */
 const MIN_ADVANTAGE = GAME_CONFIG.captureZone.minAdvantage;
-/** Player IDs */
-const NEUTRAL_OWNER = 2;
+/** Neutral gold color for unowned bases */
+const NEUTRAL_COLOR = 0xd4af37;
 
 export interface CaptureZoneState {
   base: Base;
@@ -46,19 +47,20 @@ export interface CaptureZoneState {
   progressBarContested: THREE.Mesh | null;
 }
 
-/** Team colors for zone visuals */
-const TEAM_COLORS: Record<number, number> = {
-  0: 0x3498db, // Blue
-  1: 0xe74c3c, // Red
-  2: 0xd4af37, // Gold (neutral)
-};
+/** Get color for a player/owner — falls back to neutral gold for non-player owners */
+function getOwnerColor(owner: number, playerCount: number): number {
+  if (owner >= 0 && owner < playerCount) return getPlayerHex(owner);
+  return NEUTRAL_COLOR;
+}
 
 export class CaptureZoneSystem {
   private scene: THREE.Scene;
   private zones: CaptureZoneState[] = [];
+  private playerCount: number;
 
-  constructor(scene: THREE.Scene) {
+  constructor(scene: THREE.Scene, playerCount: number = 2) {
     this.scene = scene;
+    this.playerCount = playerCount;
   }
 
   /** Register a base as a capture zone */
@@ -71,7 +73,7 @@ export class CaptureZoneSystem {
       controller: base.owner,
       capturer: -1,
       progress: 0,
-      unitCounts: [0, 0, 0],
+      unitCounts: new Array(this.playerCount).fill(0),
       contested: false,
       isMainBase,
       isUnderground,
@@ -117,12 +119,12 @@ export class CaptureZoneSystem {
       if (zone.base.destroyed) continue;
 
       // Count units per team in the zone
-      zone.unitCounts = [0, 0, 0];
+      zone.unitCounts = new Array(this.playerCount).fill(0);
       const baseY = zone.base.worldPosition.y;
       for (const unit of allUnits) {
         if (unit.state === UnitState.DEAD || unit._pendingRangedDeath) continue;
         if (unit._garrisoned) continue; // Garrisoned units don't count for zone capture
-        if (unit.owner > 1) continue; // Only player 0 and 1
+        if (unit.owner >= this.playerCount) continue; // Only real players
 
         // Layer check: unit must be on the same vertical layer as the base.
         // Underground bases sit well below surface — require Y within 3 units
@@ -136,14 +138,26 @@ export class CaptureZoneSystem {
         }
       }
 
-      const p0 = zone.unitCounts[0];
-      const p1 = zone.unitCounts[1];
-      const bothPresent = p0 > 0 && p1 > 0;
-      zone.contested = bothPresent;
+      // Determine majority: find team with most units, check if contested
+      let bestTeam = -1;
+      let bestCount = 0;
+      let secondBest = 0;
+      let teamsPresent = 0;
+      for (let i = 0; i < this.playerCount; i++) {
+        if (zone.unitCounts[i] > 0) teamsPresent++;
+        if (zone.unitCounts[i] > bestCount) {
+          secondBest = bestCount;
+          bestCount = zone.unitCounts[i];
+          bestTeam = i;
+        } else if (zone.unitCounts[i] > secondBest) {
+          secondBest = zone.unitCounts[i];
+        }
+      }
+      zone.contested = teamsPresent > 1;
 
-      // Determine who has majority
-      const advantage = Math.abs(p0 - p1);
-      const majorityTeam = p0 > p1 ? 0 : p1 > p0 ? 1 : -1;
+      // Advantage is lead over second-best team
+      const advantage = bestCount - secondBest;
+      const majorityTeam = bestCount > 0 ? bestTeam : -1;
 
       if (majorityTeam === -1 || advantage < MIN_ADVANTAGE) {
         // Stalemate — no progress either way
@@ -192,7 +206,7 @@ export class CaptureZoneSystem {
 
   private createZoneVisuals(zone: CaptureZoneState): void {
     const basePos = zone.base.worldPosition;
-    const color = TEAM_COLORS[zone.controller] ?? 0xd4af37;
+    const color = getOwnerColor(zone.controller, this.playerCount);
 
     // Zone boundary ring — a flat ring at the zone radius
     // Approximate hex radius in world units: each hex is ~1.5 apart
@@ -279,8 +293,8 @@ export class CaptureZoneSystem {
   }
 
   private updateZoneVisuals(zone: CaptureZoneState): void {
-    const controlColor = TEAM_COLORS[zone.controller] ?? 0xd4af37;
-    const capturerColor = zone.capturer >= 0 ? (TEAM_COLORS[zone.capturer] ?? 0xd4af37) : controlColor;
+    const controlColor = getOwnerColor(zone.controller, this.playerCount);
+    const capturerColor = zone.capturer >= 0 ? getOwnerColor(zone.capturer, this.playerCount) : controlColor;
 
     // Update zone ring color — blend toward capturer color during capture
     if (zone.zoneMesh) {
@@ -300,7 +314,7 @@ export class CaptureZoneSystem {
     // Update light column color and intensity
     if (zone.lightColumn) {
       const mat = zone.lightColumn.material as THREE.MeshBasicMaterial;
-      const anyUnits = zone.unitCounts[0] > 0 || zone.unitCounts[1] > 0;
+      const anyUnits = zone.unitCounts.some(c => c > 0);
 
       if (anyUnits) {
         // Show column when zone is occupied

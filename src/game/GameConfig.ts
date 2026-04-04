@@ -2,8 +2,9 @@ import { UnitType } from '../types';
 
 export const GAME_CONFIG = {
   population: {
-    foodPerCombatUnit: 3,
-    startingFood: 30,
+    foodPerCombatUnit: 2,   // 2 food per combat unit (was 3 — lets early armies feel larger)
+    startingFood: 10,       // Starting food — enough for 5 combat units
+    baseFoodBonus: 4,       // Bonus food from base tier (Camp=0, Fort=4, Castle=8)
   },
 
   defenses: {
@@ -474,6 +475,11 @@ export const GAME_CONFIG = {
       combatRewards: {
         unitKillGold: 3,
         siegeKillGold: 5,
+      },
+      tradeRoute: {
+        goldPerDelivery: 2,       // bonus gold when worker deposits at a non-home base
+        proximityRadius: 3,       // hex distance to count as "near" a base
+        minBases: 2,              // player must own at least this many bases for trade to activate
       },
     },
     recipes: {

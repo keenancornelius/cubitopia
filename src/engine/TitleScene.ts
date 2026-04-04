@@ -668,7 +668,8 @@ export class TitleScene {
     unit.attackCooldown = Math.max(baseCd, MIN_ATTACK_COOLDOWN[unit.type] ?? 0.4);
 
     // ── Dispatch VFX ──
-    const isRangedAttack = unit.stats.range > 1;
+    // Ogre has range 2 for reach but attacks as melee (club slam, not projectile)
+    const isRangedAttack = unit.stats.range > 1 && unit.type !== UnitType.OGRE;
     const isDeflected = !!result.deflected;
     const isBlocked = !!result.blocked;
 
@@ -866,9 +867,24 @@ export class TitleScene {
       });
     }
 
-    // ── Ogre club swipe knockback ──
+    // ── Ogre club swipe knockback + ground pound ──
+    // Animation now starts from cycle 0 via resetAttackAnim; tremor ends at cycle 0.65 = 1083ms
     if (attacker.type === UnitType.OGRE) {
-      this.unitRenderer.queueDeferredEffect(strikeDelay + 50, () => {
+      this.unitRenderer.resetAttackAnim(attacker.id);
+      // VFX at end of tremor phase (1083ms)
+      this.unitRenderer.queueDeferredEffect(1083, () => {
+        // Offset burst slightly in front of the ogre (toward target)
+        const dx = defender.worldPosition.x - attacker.worldPosition.x;
+        const dz = defender.worldPosition.z - attacker.worldPosition.z;
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        this.unitRenderer.spawnOgreGroundPound({
+          x: attacker.worldPosition.x + (dx / len) * 1.0,
+          y: attacker.worldPosition.y,
+          z: attacker.worldPosition.z + (dz / len) * 1.0,
+        });
+      });
+      // Knockback at 1233ms (shockwave propagation delay after VFX)
+      this.unitRenderer.queueDeferredEffect(1233, () => {
         this._applyKnockback(defender, attacker);
         // Swipe splash within 2 hex of attacker
         const splash = allAlive

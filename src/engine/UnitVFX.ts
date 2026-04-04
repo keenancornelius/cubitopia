@@ -735,43 +735,56 @@ export class UnitVFX {
   }
 
   showDamageEffect(worldPos: { x: number; y: number; z: number }): void {
-    const particleCount = 3 + Math.floor(Math.random() * 3); // 3-5 particles
     const sharedGeo = UnitVFX.getDamageGeo();
 
+    // === Layer 1: Blood/damage spray particles (6-9) — varied red shades ===
+    const particleCount = 6 + Math.floor(Math.random() * 4);
+    const redShades = [0xff0000, 0xcc2200, 0xff3333, 0xdd1111, 0xaa0000, 0xff4422];
+
     for (let i = 0; i < particleCount; i++) {
+      const colorIdx = Math.floor(Math.random() * redShades.length);
       const particleMat = new THREE.MeshBasicMaterial({
-        color: 0xff0000, // red
+        color: redShades[colorIdx],
         transparent: true,
         opacity: 1.0,
       });
       const particle = new THREE.Mesh(sharedGeo, particleMat);
+      // Randomize size slightly
+      const scale = 0.7 + Math.random() * 0.8;
+      particle.scale.setScalar(scale);
 
       particle.position.set(
         worldPos.x + (Math.random() - 0.5) * 0.3,
         worldPos.y + 0.5 + (Math.random() - 0.5) * 0.3,
-        worldPos.z + (Math.random() - 0.5) * 0.3
+        worldPos.z + (Math.random() - 0.5) * 0.3,
       );
 
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 3;
       const velocity = {
-        x: (Math.random() - 0.5) * 3,
-        y: 1 + Math.random() * 2,
-        z: (Math.random() - 0.5) * 3,
+        x: Math.cos(angle) * speed,
+        y: 1.5 + Math.random() * 2.5,
+        z: Math.sin(angle) * speed,
       };
 
       this.scene.add(particle);
 
-      // Animate particle
+      const lifetime = 0.4 + Math.random() * 0.25;
       let elapsed = 0;
       const animate = () => {
         elapsed += 0.016;
         particle.position.x += velocity.x * 0.016;
         particle.position.y += velocity.y * 0.016;
         particle.position.z += velocity.z * 0.016;
-        velocity.y -= 5 * 0.016; // gravity
+        velocity.y -= 7 * 0.016; // gravity
+        velocity.x *= 0.97; // drag
+        velocity.z *= 0.97;
 
-        particleMat.opacity = Math.max(0, 1 - elapsed / 0.5);
+        const t = elapsed / lifetime;
+        particleMat.opacity = Math.max(0, 1 - t * t); // ease-out fade
+        particle.scale.setScalar(scale * (1 - t * 0.4)); // shrink slightly
 
-        if (elapsed < 0.5) {
+        if (elapsed < lifetime) {
           requestAnimationFrame(animate);
         } else {
           this.scene.remove(particle);
@@ -780,6 +793,31 @@ export class UnitVFX {
       };
       requestAnimationFrame(animate);
     }
+
+    // === Layer 2: Quick white hit flash at impact point ===
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.7,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), flashMat);
+    flash.position.set(worldPos.x, worldPos.y + 0.5, worldPos.z);
+    this.scene.add(flash);
+
+    let flashElapsed = 0;
+    const animateFlash = () => {
+      flashElapsed += 0.016;
+      const ft = flashElapsed / 0.15;
+      flash.scale.setScalar(1 + ft * 2);
+      flashMat.opacity = 0.7 * Math.max(0, 1 - ft);
+      if (flashElapsed < 0.15) {
+        requestAnimationFrame(animateFlash);
+      } else {
+        this.scene.remove(flash);
+        flashMat.dispose();
+        flash.geometry.dispose();
+      }
+    };
+    requestAnimationFrame(animateFlash);
   }
 
   /**

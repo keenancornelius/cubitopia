@@ -261,7 +261,9 @@ class ResourceManager {
     const baseWorldZ = base.position.r * 1.5 + (base.position.q % 2 === 1 ? 0.75 : 0);
     const baseY = this.ctx.getElevation(base.position);
 
-    const offsetX = owner === 0 ? -2.5 : 2.5;
+    // Offset stockpile visual toward map center from base
+    const centerQ = (this.ctx.bases.reduce((s, b) => s + b.position.q, 0) / Math.max(1, this.ctx.bases.length));
+    const offsetX = base.position.q < centerQ ? 2.5 : -2.5;
     group.position.set(baseWorldX + offsetX, baseY + 0.5, baseWorldZ);
 
     // Compact grid: 2 columns, rows spaced along Z axis

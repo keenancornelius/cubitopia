@@ -33,7 +33,8 @@ import {
   VoxelBlock,
   ENABLE_UNDERGROUND,
 } from '../types';
-import { getPreset, generateArenaMap, generateDesertTunnelsMap, ArenaMap, DesertTunnelsMap } from './MapPresets';
+import { getPreset, generateArenaMap, generateDesertTunnelsMap, generateSkylandMap, generateVolcanicMap, generateArchipelagoMap, ArenaMap, DesertTunnelsMap, SkylandMap, VolcanicMap, ArchipelagoMap, MAP_GEN_PARAMS } from './MapPresets';
+import { NEUTRAL_OWNER } from './PlayerConfig';
 
 /**
  * Slim interface — only what MapInitializer needs from the outside.
@@ -160,47 +161,75 @@ export default class MapInitializer {
    */
   public setupMap(
     mapType: MapType,
-    gameMode: 'pvai' | 'aivai',
+    gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2',
     isArena: boolean,
+    playerCount: number = 2,
   ): {
     map: GameMap;
     bases: Base[];
+    /** Base coordinates for each player (index = player ID) */
+    baseCoords: HexCoord[];
+    /** @deprecated Use baseCoords[0] */
     p1BaseCoord: HexCoord;
+    /** @deprecated Use baseCoords[1] */
     p2BaseCoord: HexCoord;
     baseInset: number;
     mapSize: number;
   } {
     // Step 1: Generate map
-    const map = this.generateMap(mapType);
+    const map = this.generateMap(mapType, playerCount);
     const preset = getPreset(mapType);
     const MAP_SIZE = preset.size;
     const BASE_INSET = mapType === MapType.ARENA ? 3 : 5;
 
-    // Step 2: Calculate base positions
-    const P1_Q = BASE_INSET;
-    const P1_R = MAP_SIZE - 1 - BASE_INSET;
-    const P2_Q = MAP_SIZE - 1 - BASE_INSET;
-    const P2_R = BASE_INSET;
+    // Step 2: Calculate base positions for N players
     const arenaCenter = Math.floor(MAP_SIZE / 2);
+    const basePositions: { q: number; r: number }[] = [];
 
-    // Step 3: Smooth terrain around bases (skip for arena)
-    if (mapType !== MapType.ARENA) {
-      this.smoothBaseArea(map, P1_Q, P1_R, 3, 4, 3, TerrainType.PLAINS);
-      this.smoothBaseArea(map, P2_Q, P2_R, 3, 4, 3, TerrainType.PLAINS);
-      this.seedBaseForest(map, P1_Q, P1_R);
-      this.seedBaseForest(map, P2_Q, P2_R);
+    if (isArena) {
+      // Arena: evenly spaced around center at equal distance for perfect symmetry.
+      // Angle starts at π so P0 lands on West (matching historical convention),
+      // then distributes remaining players evenly around the circle.
+      const arenaOffset = Math.floor(MAP_SIZE / 2) - 7; // stay inside floor radius
+      for (let i = 0; i < playerCount; i++) {
+        const angle = Math.PI + (Math.PI * 2 * i) / playerCount;
+        basePositions.push({
+          q: arenaCenter + Math.round(Math.cos(angle) * arenaOffset),
+          r: arenaCenter + Math.round(Math.sin(angle) * arenaOffset),
+        });
+      }
+    } else {
+      // Standard maps: position players based on count
+      if (playerCount <= 2) {
+        // Classic 2-player: opposite corners
+        basePositions.push({ q: BASE_INSET, r: MAP_SIZE - 1 - BASE_INSET });         // P0: bottom-left
+        basePositions.push({ q: MAP_SIZE - 1 - BASE_INSET, r: BASE_INSET });         // P1: top-right
+      } else {
+        // 4-player: four corners
+        basePositions.push({ q: BASE_INSET, r: MAP_SIZE - 1 - BASE_INSET });         // P0: bottom-left
+        basePositions.push({ q: MAP_SIZE - 1 - BASE_INSET, r: BASE_INSET });         // P1: top-right
+        basePositions.push({ q: BASE_INSET, r: BASE_INSET });                         // P2: top-left
+        basePositions.push({ q: MAP_SIZE - 1 - BASE_INSET, r: MAP_SIZE - 1 - BASE_INSET }); // P3: bottom-right
+      }
+    }
+
+    // Step 3: Smooth terrain around ALL player bases (skip for arena)
+    if (mapType !== MapType.ARENA && mapType !== MapType.SKYLAND) {
+      for (const bp of basePositions) {
+        this.smoothBaseArea(map, bp.q, bp.r, 3, 4, 3, TerrainType.PLAINS);
+        this.seedBaseForest(map, bp.q, bp.r);
+      }
 
       // Smooth neutral surface bases
       if (map.surfaceBases) {
         const MIN_DIST = 12;
-        const p1 = { q: P1_Q, r: P1_R };
-        const p2 = { q: P2_Q, r: P2_R };
         const hexDist = (a: HexCoord, b: HexCoord) =>
           (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs((-a.q - a.r) - (-b.q - b.r))) / 2;
         const placed: HexCoord[] = [];
         for (const sb of map.surfaceBases) {
           const c = sb.center;
-          if (hexDist(c, p1) < MIN_DIST || hexDist(c, p2) < MIN_DIST) continue;
+          // Skip if too close to ANY player base
+          if (basePositions.some(bp => hexDist(c, bp) < MIN_DIST)) continue;
           if (placed.some(p => hexDist(c, p) < MIN_DIST)) continue;
           placed.push(c);
           Logger.debug('BaseSmooth', `Smoothing neutral ${sb.terrain} base at (${c.q},${c.r})`);
@@ -219,62 +248,48 @@ export default class MapInitializer {
     this.ops.initializeGrassTracking();
     this.ops.initializeForestTracking();
 
-    // Step 7: Create bases
+    // Step 7: Create bases for ALL players
     const BASE_MAX_HEALTH = 500;
+    const bases: Base[] = [];
+    const baseCoords: HexCoord[] = [];
 
-    const b1Q = isArena ? arenaCenter - 8 : P1_Q;
-    const b1R = isArena ? arenaCenter : P1_R;
-    const b2Q = isArena ? arenaCenter + 8 : P2_Q;
-    const b2R = isArena ? arenaCenter : P2_R;
+    for (let i = 0; i < playerCount; i++) {
+      const bp = basePositions[i];
+      const coord = isArena ? { q: bp.q, r: bp.r } : this.ops.findSpawnTile(map, bp.q, bp.r);
+      const wp = this.ops.hexToWorld(coord);
+      const base: Base = {
+        id: `base_${i}`,
+        owner: i,
+        position: coord,
+        worldPosition: wp,
+        health: BASE_MAX_HEALTH,
+        maxHealth: BASE_MAX_HEALTH,
+        destroyed: false,
+        tier: BaseTier.CAMP,
+        ogresSpawned: 0,
+      };
+      bases.push(base);
+      baseCoords.push(coord);
+    }
 
-    const p1BaseCoord = isArena ? { q: b1Q, r: b1R } : this.ops.findSpawnTile(map, b1Q, b1R);
-    const p1BaseWP = this.ops.hexToWorld(p1BaseCoord);
-    const p1Base: Base = {
-      id: 'base_0',
-      owner: 0,
-      position: p1BaseCoord,
-      worldPosition: p1BaseWP,
-      health: BASE_MAX_HEALTH,
-      maxHealth: BASE_MAX_HEALTH,
-      destroyed: false,
-      tier: BaseTier.CAMP,
-      ogresSpawned: 0,
-    };
-
-    const p2BaseCoord = isArena ? { q: b2Q, r: b2R } : this.ops.findSpawnTile(map, b2Q, b2R);
-    const p2BaseWP = this.ops.hexToWorld(p2BaseCoord);
-    const p2Base: Base = {
-      id: 'base_1',
-      owner: 1,
-      position: p2BaseCoord,
-      worldPosition: p2BaseWP,
-      health: BASE_MAX_HEALTH,
-      maxHealth: BASE_MAX_HEALTH,
-      destroyed: false,
-      tier: BaseTier.CAMP,
-      ogresSpawned: 0,
-    };
-
-    const bases: Base[] = [p1Base, p2Base];
-
-    // Step 8: Add bases to renderer (read elevation directly from map — this.currentMap not set yet)
-    const p1Tile = map.tiles.get(`${p1BaseCoord.q},${p1BaseCoord.r}`);
-    const p2Tile = map.tiles.get(`${p2BaseCoord.q},${p2BaseCoord.r}`);
-    const p1Elev = p1Tile ? p1Tile.elevation * 0.5 : 1;
-    const p2Elev = p2Tile ? p2Tile.elevation * 0.5 : 1;
-    this.ops.addBase(p1Base, p1Elev);
-    this.ops.addBase(p2Base, p2Elev);
+    // Step 8: Add ALL bases to renderer
+    for (const base of bases) {
+      const tile = map.tiles.get(`${base.position.q},${base.position.r}`);
+      const elev = tile ? tile.elevation * 0.5 : 1;
+      this.ops.addBase(base, elev);
+    }
 
     // Step 9: Add underground/neutral bases
     this.addUndergroundBases(map, bases);
-    this.addSurfaceBases(map, bases, p1BaseCoord, p2BaseCoord);
+    this.addSurfaceBases(map, bases, baseCoords[0], baseCoords[1] ?? baseCoords[0]);
 
     // Step 10: Setup capture zones
     this.ops.disposeCaptureSystems();
-    this.ops.addCaptureZone(p1Base, true, false);
-    this.ops.addCaptureZone(p2Base, true, false);
+    const playerBaseIds = new Set(bases.filter(b => b.owner < playerCount).map(b => b.id));
     for (const b of bases) {
-      if (b.id !== 'base_0' && b.id !== 'base_1') {
+      if (playerBaseIds.has(b.id)) {
+        this.ops.addCaptureZone(b, true, false);
+      } else {
         const bTile = map.tiles.get(`${b.position.q},${b.position.r}`);
         const bUnderground = !!bTile?.hasTunnel && b.worldPosition.y < (bTile.elevation ?? 0) * 0.5;
         this.ops.addCaptureZone(b, false, bUnderground);
@@ -305,15 +320,17 @@ export default class MapInitializer {
     const midR = Math.floor(MAP_SIZE / 2);
     this.ops.focusCameraOnCenter(centerQ * 1.5, midR * 1.5);
 
-    // Step 13: Update stockpile visuals
-    this.ops.updateStockpileVisual(0);
-    this.ops.updateStockpileVisual(1);
+    // Step 13: Update stockpile visuals for all players
+    for (let i = 0; i < playerCount; i++) {
+      this.ops.updateStockpileVisual(i);
+    }
 
     return {
       map,
       bases,
-      p1BaseCoord,
-      p2BaseCoord,
+      baseCoords,
+      p1BaseCoord: baseCoords[0],
+      p2BaseCoord: baseCoords[1] ?? baseCoords[0],
       baseInset: BASE_INSET,
       mapSize: MAP_SIZE,
     };
@@ -322,7 +339,7 @@ export default class MapInitializer {
   /**
    * Generate map from preset or map generator.
    */
-  private generateMap(mapType: MapType): GameMap {
+  private generateMap(mapType: MapType, playerCount: number = 2): GameMap {
     const preset = getPreset(mapType);
     const MAP_SIZE = preset.size;
 
@@ -330,9 +347,18 @@ export default class MapInitializer {
       return generateArenaMap(MAP_SIZE);
     } else if (ENABLE_UNDERGROUND && mapType === MapType.DESERT_TUNNELS) {
       return generateDesertTunnelsMap(MAP_SIZE);
+    } else if (mapType === MapType.SKYLAND) {
+      return generateSkylandMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.VOLCANIC) {
+      return generateVolcanicMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.ARCHIPELAGO) {
+      return generateArchipelagoMap(MAP_SIZE, undefined, playerCount);
     } else {
-      const mapGen = new MapGenerator();
-      return mapGen.generate(MAP_SIZE, MAP_SIZE);
+      const params = MAP_GEN_PARAMS[mapType];
+      const mapGen = new MapGenerator(undefined, params);
+      const gameMap = mapGen.generate(MAP_SIZE, MAP_SIZE);
+      gameMap.mapType = mapType;
+      return gameMap;
     }
   }
 
@@ -715,7 +741,7 @@ export default class MapInitializer {
         const neutralY = (dtMap.cavernFloorY ?? -16) * 0.5;
         const neutralBase: Base = {
           id: 'base_neutral',
-          owner: 2,
+          owner: NEUTRAL_OWNER,
           position: neutralCoord,
           worldPosition: {
             x: neutralCoord.q * 1.5,
@@ -741,7 +767,7 @@ export default class MapInitializer {
           const yLevel = cavern.floorY * 0.5;
           const extraBase: Base = {
             id: `base_neutral_${i + 2}`,
-            owner: 2,
+            owner: NEUTRAL_OWNER,
             position: { ...coord },
             worldPosition: {
               x: coord.q * 1.5,
@@ -769,7 +795,7 @@ export default class MapInitializer {
         const yLevel = cavern.floorY * 0.5;
         const ugBase: Base = {
           id: `base_neutral_ug_${i}`,
-          owner: 2,
+          owner: NEUTRAL_OWNER,
           position: { q: coord.q, r: coord.r },
           worldPosition: {
             x: coord.q * 1.5,
@@ -818,7 +844,7 @@ export default class MapInitializer {
 
       // Also skip if too close to any existing neutral base
       const tooCloseToOther = bases.some((b) => {
-        if (b.owner !== 2) return false;
+        if (b.owner !== NEUTRAL_OWNER) return false;
         const d =
           (Math.abs(coord.q - b.position.q) +
             Math.abs(coord.r - b.position.r) +
@@ -836,7 +862,7 @@ export default class MapInitializer {
       const surfY = baseTile ? baseTile.elevation * 0.5 : this.ops.getElevation({ q: coord.q, r: coord.r });
       const surfBase: Base = {
         id: `base_neutral_surf_${i}`,
-        owner: 2,
+        owner: NEUTRAL_OWNER,
         position: { q: coord.q, r: coord.r },
         worldPosition: {
           x: coord.q * 1.5,

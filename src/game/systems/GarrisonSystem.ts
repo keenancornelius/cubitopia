@@ -1,17 +1,21 @@
 /**
- * GarrisonSystem — Manages unit garrisoning in buildings, gates, and walls.
+ * GarrisonSystem — Manages unit garrisoning in buildings and gates.
  *
- * Features:
- * - Units can garrison inside friendly buildings (cap 10), gates (cap 5), walls (cap 2)
+ * Design:
+ * - Units can garrison inside friendly buildings (cap 10) and gates (cap 5)
+ * - Walls are NOT garrisonable — they serve as fast-travel connectors
  * - Garrisoned units are hidden and gain ranged fire from the structure
- * - Walls form connected networks: units can ungarrison at any building/gate
- *   connected by a chain of walls to the structure they entered
- * - Buildings/gates are "exit points" — walls are connectors only
+ * - Wall network: all gates/buildings connected by walls form a single pool.
+ *   Clicking any gate in the network shows ALL garrisoned units across
+ *   the entire connected set, and you can send any of them to any exit.
+ * - Ungarrison supports type filtering via pill toggles
  *
  * Integration:
  * - GarrisonSystem.update() called each frame for ranged fire cooldowns
  * - GarrisonSystem.garrison(units, structureKey) to enter
- * - GarrisonSystem.ungarrison(structureKey, exitKey?) to release
+ * - GarrisonSystem.getNetworkInfo(structureKey) for UI — returns ALL units in connected network
+ * - GarrisonSystem.ungarrisonNetwork(structureKey, exitKey?) to release all from network
+ * - GarrisonSystem.ungarrisonNetworkFiltered(structureKey, types, exitKey) for selective release
  */
 
 import { Unit, HexCoord, UnitType, UnitState, CommandType, PlacedBuilding } from '../../types';
@@ -34,6 +38,20 @@ export interface GarrisonSlot {
   capacity: number;
   /** Ranged fire cooldown (seconds remaining) */
   fireCooldown: number;
+}
+
+/** Network-wide garrison info for UI display */
+export interface NetworkGarrisonInfo {
+  /** All units garrisoned across the entire connected network */
+  units: Unit[];
+  /** Total units in network */
+  current: number;
+  /** Total capacity across all garrisonable structures in network */
+  totalCapacity: number;
+  /** All reachable exit points (gates + buildings) in the network */
+  reachableExits: HexCoord[];
+  /** Number of garrisonable structures (gates/buildings) in the network */
+  structureCount: number;
 }
 
 /** Slim interface — only what GarrisonSystem needs from the outside */
@@ -70,7 +88,6 @@ export interface GarrisonOps {
 
 const BUILDING_CAPACITY = 10;
 const GATE_CAPACITY = 5;
-const WALL_CAPACITY = 2;
 
 /** Seconds between garrison ranged attacks */
 const GARRISON_FIRE_INTERVAL = 2.0;
@@ -96,14 +113,28 @@ export default class GarrisonSystem {
   /** Cached set of exit-point keys (buildings + gates, NOT walls) */
   private exitPoints: Set<string> = new Set();
 
+  /** Dirty flag — set true when walls/gates change to trigger network rebuild */
+  private _networkDirty = true;
+
   constructor(ops: GarrisonOps) {
     this.ops = ops;
   }
 
+  /** Mark the wall network as needing rebuild (call when walls/gates are built or destroyed) */
+  markNetworkDirty(): void {
+    this._networkDirty = true;
+  }
+
   // ===== Public API =====
 
-  /** Garrison units into a structure. Returns the units that were actually garrisoned. */
+  /**
+   * Garrison units into a structure. Only buildings and gates are garrisonable.
+   * Returns the units that were actually garrisoned.
+   */
   garrison(units: Unit[], structureKey: string): Unit[] {
+    const type = this.getStructureType(structureKey);
+    if (!type || type === 'wall') return [];
+
     const slot = this.getOrCreateSlot(structureKey);
     if (!slot) return [];
 
@@ -137,23 +168,113 @@ export default class GarrisonSystem {
   }
 
   /**
-   * Ungarrison all units from a structure.
-   * If exitKey is provided and reachable via wall network, units appear there.
-   * Otherwise units appear at the structure itself.
-   * Returns the ungarrisoned units.
+   * Get network-wide garrison info for UI display.
+   * Returns ALL garrisoned units across every gate/building connected
+   * to the given structure via walls.
    */
+  getNetworkInfo(structureKey: string): NetworkGarrisonInfo {
+    this.ensureNetwork();
+
+    const networkKeys = this.getConnectedStructures(structureKey);
+    const allUnits: Unit[] = [];
+    let totalCapacity = 0;
+    let structureCount = 0;
+
+    for (const key of networkKeys) {
+      const slot = this.slots.get(key);
+      if (slot) {
+        allUnits.push(...slot.units);
+      }
+      // Count capacity even if no slot exists yet
+      const type = this.getStructureType(key);
+      if (type === 'building') { totalCapacity += BUILDING_CAPACITY; structureCount++; }
+      else if (type === 'gate') { totalCapacity += GATE_CAPACITY; structureCount++; }
+      // walls don't count
+    }
+
+    const exits = this.getReachableExits(structureKey);
+
+    return {
+      units: allUnits,
+      current: allUnits.length,
+      totalCapacity,
+      reachableExits: exits,
+      structureCount,
+    };
+  }
+
+  /**
+   * Ungarrison ALL units from the connected network, releasing them at exitKey
+   * (or at the clicked structure if no exitKey).
+   */
+  ungarrisonNetwork(structureKey: string, exitKey?: string): Unit[] {
+    this.ensureNetwork();
+    const networkKeys = this.getConnectedStructures(structureKey);
+
+    // Determine exit position
+    let exitPos = this.keyToCoord(exitKey ?? structureKey);
+    if (exitKey && exitKey !== structureKey && !this.isConnected(structureKey, exitKey)) {
+      exitPos = this.keyToCoord(structureKey);
+    }
+
+    const released: Unit[] = [];
+    for (const key of networkKeys) {
+      const slot = this.slots.get(key);
+      if (!slot || slot.units.length === 0) continue;
+      const units = [...slot.units];
+      for (const unit of units) {
+        this.releaseUnit(unit, exitPos);
+        released.push(unit);
+      }
+      slot.units = [];
+    }
+
+    return released;
+  }
+
+  /**
+   * Ungarrison only units matching specific types from the entire connected network,
+   * sending them to an exit point. This powers the pill-filter workflow.
+   */
+  ungarrisonNetworkFiltered(structureKey: string, unitTypes: Set<UnitType>, exitKey?: string): Unit[] {
+    this.ensureNetwork();
+    const networkKeys = this.getConnectedStructures(structureKey);
+
+    let exitPos = this.keyToCoord(exitKey ?? structureKey);
+    if (exitKey && exitKey !== structureKey && !this.isConnected(structureKey, exitKey)) {
+      exitPos = this.keyToCoord(structureKey);
+    }
+
+    const released: Unit[] = [];
+    for (const key of networkKeys) {
+      const slot = this.slots.get(key);
+      if (!slot || slot.units.length === 0) continue;
+
+      const toKeep: Unit[] = [];
+      for (const unit of slot.units) {
+        if (unitTypes.has(unit.type)) {
+          this.releaseUnit(unit, exitPos);
+          released.push(unit);
+        } else {
+          toKeep.push(unit);
+        }
+      }
+      slot.units = toKeep;
+    }
+
+    return released;
+  }
+
+  // --- Legacy single-slot methods (still used for building tooltips) ---
+
+  /** Ungarrison all units from a single structure slot */
   ungarrison(structureKey: string, exitKey?: string): Unit[] {
     const slot = this.slots.get(structureKey);
     if (!slot || slot.units.length === 0) return [];
 
-    // Determine exit position
     let exitPos = slot.position;
-    if (exitKey && exitKey !== structureKey) {
-      // Verify exitKey is reachable via wall network
-      if (this.isConnected(structureKey, exitKey)) {
-        const [eq, er] = exitKey.split(',').map(Number);
-        exitPos = { q: eq, r: er };
-      }
+    if (exitKey && exitKey !== structureKey && this.isConnected(structureKey, exitKey)) {
+      exitPos = this.keyToCoord(exitKey);
     }
 
     const units = [...slot.units];
@@ -161,22 +282,29 @@ export default class GarrisonSystem {
       this.releaseUnit(unit, exitPos);
     }
     slot.units = [];
-
     return units;
   }
 
-  /** Ungarrison a specific number of units from a structure */
-  ungarrisonCount(structureKey: string, count: number, exitKey?: string): Unit[] {
+  /** Ungarrison only matching types from a single slot */
+  ungarrisonFiltered(structureKey: string, unitTypes: Set<UnitType>, exitKey?: string): Unit[] {
     const slot = this.slots.get(structureKey);
     if (!slot || slot.units.length === 0) return [];
 
     let exitPos = slot.position;
     if (exitKey && exitKey !== structureKey && this.isConnected(structureKey, exitKey)) {
-      const [eq, er] = exitKey.split(',').map(Number);
-      exitPos = { q: eq, r: er };
+      exitPos = this.keyToCoord(exitKey);
     }
 
-    const toRelease = slot.units.splice(0, count);
+    const toRelease: Unit[] = [];
+    const toKeep: Unit[] = [];
+    for (const unit of slot.units) {
+      if (unitTypes.has(unit.type)) {
+        toRelease.push(unit);
+      } else {
+        toKeep.push(unit);
+      }
+    }
+    slot.units = toKeep;
     for (const unit of toRelease) {
       this.releaseUnit(unit, exitPos);
     }
@@ -230,18 +358,24 @@ export default class GarrisonSystem {
     return result;
   }
 
-  /** Get capacity info for a structure */
+  /** Can this structure be garrisoned? (buildings + gates only, not walls) */
+  canGarrison(structureKey: string): boolean {
+    const type = this.getStructureType(structureKey);
+    return type === 'building' || type === 'gate';
+  }
+
+  /** Get capacity info for a single structure. Returns null for walls. */
   getCapacity(structureKey: string): { current: number; max: number } | null {
     const type = this.getStructureType(structureKey);
-    if (!type) return null;
+    if (!type || type === 'wall') return null;
     const slot = this.slots.get(structureKey);
-    const max = type === 'building' ? BUILDING_CAPACITY : type === 'gate' ? GATE_CAPACITY : WALL_CAPACITY;
+    const max = type === 'building' ? BUILDING_CAPACITY : GATE_CAPACITY;
     return { current: slot?.units.length ?? 0, max };
   }
 
   /** Get all exit points reachable from a structure via the wall network */
   getReachableExits(structureKey: string): HexCoord[] {
-    this.rebuildWallNetwork();
+    this.ensureNetwork();
     const visited = new Set<string>();
     const exits: HexCoord[] = [];
     const queue = [structureKey];
@@ -249,12 +383,9 @@ export default class GarrisonSystem {
 
     while (queue.length > 0) {
       const current = queue.shift()!;
-      // Check if this is an exit point (building or gate)
       if (current !== structureKey && this.exitPoints.has(current)) {
-        const [q, r] = current.split(',').map(Number);
-        exits.push({ q, r });
+        exits.push(this.keyToCoord(current));
       }
-      // Traverse connected structures
       const neighbors = this.wallNetwork.get(current);
       if (neighbors) {
         for (const n of neighbors) {
@@ -277,7 +408,6 @@ export default class GarrisonSystem {
     const ejected = [...slot.units];
     for (const unit of ejected) {
       this.releaseUnit(unit, slot.position);
-      // Ejected units take some damage from the collapse
       const collapseDmg = Math.floor(unit.stats.maxHealth * 0.2);
       unit.currentHealth = Math.max(1, unit.currentHealth - collapseDmg);
       this.ops.updateHealthBar(unit);
@@ -285,12 +415,12 @@ export default class GarrisonSystem {
     slot.units = [];
     this.slots.delete(structureKey);
 
+    this._networkDirty = true;
     return ejected;
   }
 
   /** Clean up on game reset */
   cleanup(): void {
-    // Show all hidden units before clearing
     for (const slot of this.slots.values()) {
       for (const unit of slot.units) {
         unit._garrisoned = false;
@@ -302,9 +432,45 @@ export default class GarrisonSystem {
     this.unitToStructure.clear();
     this.wallNetwork.clear();
     this.exitPoints.clear();
+    this._networkDirty = true;
   }
 
   // ===== Wall Network Graph =====
+
+  private ensureNetwork(): void {
+    if (this._networkDirty) {
+      this.rebuildWallNetwork();
+      this._networkDirty = false;
+    }
+  }
+
+  /** Get all structure keys (gates+buildings, NOT walls) connected to a given key */
+  private getConnectedStructures(structureKey: string): string[] {
+    this.ensureNetwork();
+    const visited = new Set<string>();
+    const garrisonable: string[] = [];
+    const queue = [structureKey];
+    visited.add(structureKey);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      // Include this key if it's a garrisonable structure (gate or building)
+      if (this.exitPoints.has(current)) {
+        garrisonable.push(current);
+      }
+      const neighbors = this.wallNetwork.get(current);
+      if (neighbors) {
+        for (const n of neighbors) {
+          if (!visited.has(n)) {
+            visited.add(n);
+            queue.push(n);
+          }
+        }
+      }
+    }
+
+    return garrisonable;
+  }
 
   /** Rebuild the wall connectivity graph from current wall/gate/building state */
   rebuildWallNetwork(): void {
@@ -314,17 +480,14 @@ export default class GarrisonSystem {
     const walls = this.ops.getWallsBuilt();
     const gates = this.ops.getGatesBuilt();
 
-    // Collect all "connectable" structure keys
     const allStructures = new Set<string>();
     for (const key of walls) allStructures.add(key);
     for (const key of gates) {
       allStructures.add(key);
-      this.exitPoints.add(key); // Gates are exit points
+      this.exitPoints.add(key);
     }
 
-    // Add buildings that are in the wallConnectable set (barracks, etc.)
-    // Buildings are identified by checking if there's a PlacedBuilding at a position
-    // that's adjacent to any wall/gate
+    // Add buildings adjacent to any wall/gate
     for (const key of allStructures) {
       const [q, r] = key.split(',').map(Number);
       const neighbors = Pathfinder.getHexNeighbors({ q, r });
@@ -333,7 +496,7 @@ export default class GarrisonSystem {
         const building = this.ops.getBuildingAt(n);
         if (building) {
           allStructures.add(nKey);
-          this.exitPoints.add(nKey); // Buildings are exit points
+          this.exitPoints.add(nKey);
         }
       }
     }
@@ -354,7 +517,7 @@ export default class GarrisonSystem {
 
   /** Check if two structures are connected via the wall network */
   isConnected(fromKey: string, toKey: string): boolean {
-    this.rebuildWallNetwork();
+    this.ensureNetwork();
     if (fromKey === toKey) return true;
 
     const visited = new Set<string>();
@@ -379,26 +542,22 @@ export default class GarrisonSystem {
 
   // ===== Private Methods =====
 
-  /** Get or create a garrison slot for a structure */
   private getOrCreateSlot(key: string): GarrisonSlot | null {
     if (this.slots.has(key)) return this.slots.get(key)!;
 
     const type = this.getStructureType(key);
-    if (!type) return null;
+    if (!type || type === 'wall') return null;
 
     const owner = this.getStructureOwner(key, type);
     if (owner < 0) return null;
 
-    const [q, r] = key.split(',').map(Number);
-    const capacity = type === 'building' ? BUILDING_CAPACITY
-      : type === 'gate' ? GATE_CAPACITY
-      : WALL_CAPACITY;
+    const capacity = type === 'building' ? BUILDING_CAPACITY : GATE_CAPACITY;
 
     const slot: GarrisonSlot = {
       structureKey: key,
       structureType: type,
       owner,
-      position: { q, r },
+      position: this.keyToCoord(key),
       units: [],
       capacity,
       fireCooldown: 0,
@@ -408,21 +567,19 @@ export default class GarrisonSystem {
     return slot;
   }
 
-  /** Determine what kind of structure is at a hex key */
   private getStructureType(key: string): StructureType | null {
-    const [q, r] = key.split(',').map(Number);
-    const building = this.ops.getBuildingAt({ q, r });
+    const coord = this.keyToCoord(key);
+    const building = this.ops.getBuildingAt(coord);
     if (building) return 'building';
     if (this.ops.getGatesBuilt().has(key)) return 'gate';
     if (this.ops.getWallsBuilt().has(key)) return 'wall';
     return null;
   }
 
-  /** Get the owner of a structure */
   private getStructureOwner(key: string, type: StructureType): number {
-    const [q, r] = key.split(',').map(Number);
+    const coord = this.keyToCoord(key);
     if (type === 'building') {
-      const building = this.ops.getBuildingAt({ q, r });
+      const building = this.ops.getBuildingAt(coord);
       return building ? building.owner : -1;
     }
     if (type === 'gate') return this.ops.getGateOwner(key);
@@ -430,29 +587,24 @@ export default class GarrisonSystem {
     return -1;
   }
 
-  /** Release a single unit from garrison */
   private releaseUnit(unit: Unit, exitPos: HexCoord): void {
     unit._garrisoned = false;
     unit._garrisonKey = undefined;
     this.unitToStructure.delete(unit.id);
 
-    // Find an open tile near the exit position
     const spawnPos = this.findNearestOpenTile(exitPos);
     unit.position = spawnPos;
     const world = this.ops.hexToWorld(spawnPos);
     const elev = this.ops.getElevation(spawnPos);
     unit.worldPosition = { x: world.x, y: elev, z: world.z };
 
-    // Show unit visually
     this.ops.showUnit(unit);
   }
 
-  /** Find the nearest open (non-blocked, non-occupied) tile to a position */
   private findNearestOpenTile(pos: HexCoord): HexCoord {
     const key = `${pos.q},${pos.r}`;
     if (!Pathfinder.blockedTiles.has(key)) return pos;
 
-    // BFS for nearest open tile
     const visited = new Set<string>();
     const queue: HexCoord[] = [pos];
     visited.add(key);
@@ -469,10 +621,9 @@ export default class GarrisonSystem {
       }
     }
 
-    return pos; // Fallback
+    return pos;
   }
 
-  /** Remove a unit from whatever slot it's in */
   private removeUnitFromSlot(unit: Unit): void {
     const key = this.unitToStructure.get(unit.id);
     if (!key) return;
@@ -484,7 +635,6 @@ export default class GarrisonSystem {
     this.unitToStructure.delete(unit.id);
   }
 
-  /** Find the best enemy target within garrison fire range */
   private findFireTarget(slot: GarrisonSlot, allUnits: Unit[]): Unit | null {
     let bestTarget: Unit | null = null;
     let bestDist = Infinity;
@@ -504,21 +654,17 @@ export default class GarrisonSystem {
     return bestTarget;
   }
 
-  /** Execute a ranged attack from garrisoned units */
   private executeGarrisonFire(slot: GarrisonSlot, target: Unit): void {
-    // Calculate total damage from all garrisoned units
     const numArchers = slot.units.filter(u =>
       u.type === UnitType.ARCHER || u.type === UnitType.MAGE ||
       u.type === UnitType.BATTLEMAGE).length;
     const numOther = slot.units.length - numArchers;
 
-    // Archers/mages do full damage, others do reduced
     const totalDamage = Math.max(1,
       numArchers * GARRISON_FIRE_DAMAGE +
       Math.floor(numOther * GARRISON_FIRE_DAMAGE * 0.5)
     );
 
-    // Calculate world positions for the arrow
     const structWorld = this.ops.hexToWorld(slot.position);
     const structElev = this.ops.getElevation(slot.position);
     const from = {
@@ -527,13 +673,17 @@ export default class GarrisonSystem {
       z: structWorld.z,
     };
 
-    // Fire visual projectile
     this.ops.fireArrow(from, target.worldPosition, target.id, () => {
-      // Apply damage on impact
       this.ops.applyDamage(target, totalDamage, slot.units[0] ?? null);
       this.ops.updateHealthBar(target);
     });
 
     this.ops.playSound('arrow', 0.3);
+  }
+
+  /** Convert a "q,r" key to HexCoord */
+  private keyToCoord(key: string): HexCoord {
+    const [q, r] = key.split(',').map(Number);
+    return { q, r };
   }
 }

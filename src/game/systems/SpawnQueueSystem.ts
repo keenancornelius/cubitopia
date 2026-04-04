@@ -71,6 +71,14 @@ export interface SpawnQueueOps {
   // Food access — deducted when combat units spawn
   getFoodStockpile(owner: number): number;
   setFoodStockpile(owner: number, v: number): void;
+
+  // Optional: how much food needed for next combat unit
+  getFoodNeededForNext?(owner: number): number;
+
+  // Squad auto-assignment: returns the squad slot for a building (by hex key), or null
+  getBuildingSquadAssignment?(buildingHexKey: string): number | null;
+  // Assign a freshly spawned unit to a squad slot
+  assignUnitToSquad?(unit: Unit, squadSlot: number): void;
 }
 
 const isCombatType = (t: UnitType) =>
@@ -127,7 +135,8 @@ export default class SpawnQueueSystem {
     if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
       const info = ops.getCombatPopInfo(0);
       ops.playSound('queue_error', 0.4);
-      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
     if (!debugFlags.freeBuild && cfg.getResource() < cost) {
@@ -154,7 +163,8 @@ export default class SpawnQueueSystem {
     if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
       const info = ops.getCombatPopInfo(0);
       ops.playSound('queue_error', 0.4);
-      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
     if (!debugFlags.freeBuild) {
@@ -193,7 +203,8 @@ export default class SpawnQueueSystem {
     if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
       const info = ops.getCombatPopInfo(0);
       ops.playSound('queue_error', 0.4);
-      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
     if (!debugFlags.freeBuild) {
@@ -227,7 +238,8 @@ export default class SpawnQueueSystem {
     if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
       const info = ops.getCombatPopInfo(0);
       ops.playSound('queue_error', 0.4);
-      ops.showNotification(`Population cap reached! (${info.current}/${info.cap}) — build more farms`, '#e67e22');
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
     if (!debugFlags.freeBuild) {
@@ -365,6 +377,14 @@ export default class SpawnQueueSystem {
           const rallySlot = ops.getRallyFormationSlot(cfg.kind as any, unit);
           if (rallySlot) UnitAI.commandMove(unit, rallySlot, map);
           if (isCombatType(unit.type)) unit.stance = UnitStance.AGGRESSIVE;
+          // Auto-join squad if this building has a squad assignment (combat units only)
+          if (isCombatType(unit.type)) {
+            const bKey = `${building.position.q},${building.position.r}`;
+            const squadSlot = ops.getBuildingSquadAssignment?.(bKey);
+            if (squadSlot != null) {
+              ops.assignUnitToSquad?.(unit, squadSlot);
+            }
+          }
         }
       } else {
         cfg.setTimer(timer);

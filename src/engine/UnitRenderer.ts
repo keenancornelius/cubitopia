@@ -3,6 +3,7 @@ import { ElementType, HexCoord, Unit, UnitType } from '../types';
 import { UnitAnimations } from './UnitAnimations';
 import { UnitModels } from './UnitModels';
 import { ProjectileSystem } from './ProjectileSystem';
+import { getPlayerHex } from '../game/PlayerConfig';
 import { UnitVFX } from './UnitVFX';
 
 export interface UnitMeshGroup {
@@ -22,13 +23,30 @@ export interface UnitMeshGroup {
   trebOnImpact?: () => void;
   attackAnimStart: number;
   _knockbackUntil: number;
+
+  // ── Organic movement state ──
+  /** Smoothed Y velocity — low-pass filtered dy to detect sustained elevation change */
+  _elevSpeed: number;
+  /** Total accumulated elevation delta for current transition */
+  _elevDelta: number;
+  /** Hop/climb procedural Y offset (added on top of world Y) */
+  _hopOffset: number;
+  /** Landing squash timer — counts down from ~0.3 to 0 after an elevation drop */
+  _landSquash: number;
+  /** Movement start timer — counts down from ~0.2 to 0 for anticipation lean */
+  _moveStartTime: number;
+  /** Was the unit moving last frame? (for detecting start-of-movement) */
+  _wasMoving: boolean;
+  /** Stable Y before the current elevation transition began */
+  _stableY: number;
 }
 
+// Use PlayerConfig for consistent team colors
 const PLAYER_COLORS = [
-  0x3498db,
-  0xe74c3c,
-  0x2ecc71,
-  0xf1c40f,
+  getPlayerHex(0),
+  getPlayerHex(1),
+  getPlayerHex(2),
+  getPlayerHex(3),
 ];
 
 export class UnitRenderer {
@@ -101,6 +119,13 @@ export class UnitRenderer {
       trebPendingTarget: null,
       attackAnimStart: 0,
       _knockbackUntil: 0,
+      _elevSpeed: 0,
+      _elevDelta: 0,
+      _hopOffset: 0,
+      _landSquash: 0,
+      _moveStartTime: 0,
+      _wasMoving: false,
+      _stableY: pos.y,
     });
     this.scene.add(group);
   }
@@ -206,7 +231,10 @@ export class UnitRenderer {
     this.vfx.updateHealthBar(unit);
   }
 
-  setWorldPosition(unitId: string, x: number, y: number, z: number): void {
+  setWorldPosition(
+    unitId: string, x: number, y: number, z: number,
+    elevActive?: boolean, elevGoingUp?: boolean, elevProgress?: number
+  ): void {
     const entry = this.unitMeshes.get(unitId);
     if (!entry) return;
 
@@ -217,35 +245,107 @@ export class UnitRenderer {
 
     // Compute direction of movement (allocation-free)
     const dx = x - oldPos.x;
-    const dy = y - oldPos.y;
     const dz = z - oldPos.z;
-    const lenSq = dx * dx + dy * dy + dz * dz;
+    const lenSq = dx * dx + dz * dz; // XZ only for movement detection
+    const isMoving = lenSq > 0.000025;
 
     // Only rotate if there's meaningful movement (0.005² = 0.000025)
-    if (lenSq > 0.000025) {
-      // Calculate target facing angle (Y-axis rotation)
+    if (isMoving) {
       const targetAngle = Math.atan2(dx, dz);
-
-      // Smooth lerp the rotation angle — faster for small units, slower for siege
       const angleDiff = targetAngle - entry.facingAngle;
-      // Handle wrapping around pi/-pi
       const normalizedDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-      // Lerp factor: higher = snappier rotation
-      const lerpFactor = (entry.unitType === UnitType.TREBUCHET)
-        ? 0.12 : 0.18;
+      const lerpFactor = (entry.unitType === UnitType.TREBUCHET) ? 0.12 : 0.18;
       entry.facingAngle += normalizedDiff * lerpFactor;
-
       entry.group.rotation.y = entry.facingAngle;
     }
 
-    // ── Step-climb body tilt: lean forward/back when stepping up/down ──
-    if (Math.abs(dy) > 0.03 && lenSq > 0.000025) {
-      // Tilt forward (negative X rotation) when climbing up, back when stepping down
-      const tiltTarget = dy > 0 ? -0.12 : 0.08;
-      entry.group.rotation.x += (tiltTarget - entry.group.rotation.x) * 0.15;
+    // ═══ ORGANIC MOVEMENT: hop arc, landing squash, anticipation lean ═══
+    // Uses DIRECT elevation state from UnitAI (elevActive/elevGoingUp/elevProgress)
+    // instead of trying to detect dy between frames.
+
+    const DT = 0.016; // ~60fps
+    const wasInElev = entry._elevDelta !== 0; // were we in an elevation transition last frame?
+
+    // ── 1. Hop arc during elevation transitions ──
+    if (elevActive && elevProgress != null && elevProgress > 0 && elevProgress < 1) {
+      // Mark that we're in an elevation transition
+      entry._elevDelta = elevGoingUp ? 1 : -1; // just direction flag, not actual delta
+      entry._elevSpeed = elevProgress;
+
+      // Parabolic arc: peaks at progress=0.5, returns to 0 at progress=1.0
+      const arc = 4 * elevProgress * (1 - elevProgress); // 0→1→0 parabola
+
+      if (elevGoingUp) {
+        // CLIMBING: hop upward — body springs above the interpolated Y
+        entry._hopOffset = arc * 0.22;
+      } else {
+        // DESCENDING: dip below — body drops past the interpolated Y briefly
+        entry._hopOffset = -arc * 0.15;
+      }
+    } else {
+      // Not in an elevation transition
+      if (wasInElev && entry._landSquash <= 0) {
+        // Just finished an elevation change — trigger landing squash
+        entry._landSquash = 0.30;
+      }
+      entry._elevDelta = 0;
+      entry._elevSpeed = 0;
+
+      // Decay hop offset back to 0 (fast spring) when not squashing
+      if (entry._landSquash <= 0) {
+        entry._hopOffset *= 0.70;
+        if (Math.abs(entry._hopOffset) < 0.003) entry._hopOffset = 0;
+      }
     }
 
-    entry.group.position.set(x, y, z);
+    // ── 2. Landing squash — compress on touchdown, bounce back ──
+    if (entry._landSquash > 0) {
+      entry._landSquash -= DT;
+      if (entry._landSquash < 0) entry._landSquash = 0;
+      const t = entry._landSquash / 0.30; // 1.0 → 0.0
+      if (t > 0.55) {
+        // Impact compress — squish down
+        const ct = (t - 0.55) / 0.45;
+        entry._hopOffset = -0.12 * ct;
+        entry.group.scale.set(1.0 + 0.08 * ct, 1.0 - 0.15 * ct, 1.0 + 0.08 * ct);
+      } else if (t > 0.2) {
+        // Overshoot bounce — spring back up
+        const bt = (t - 0.2) / 0.35;
+        const bounce = Math.sin((1 - bt) * Math.PI);
+        entry._hopOffset = 0.05 * bounce;
+        entry.group.scale.set(1.0 - 0.04 * bounce, 1.0 + 0.06 * bounce, 1.0 - 0.04 * bounce);
+      } else {
+        // Settle back to normal
+        const st = t / 0.2;
+        entry._hopOffset = 0.02 * st;
+        entry.group.scale.set(1.0, 1.0, 1.0);
+      }
+    } else {
+      // Ensure scale is normal when not squashing
+      if (entry.group.scale.x !== 1.0) entry.group.scale.set(1.0, 1.0, 1.0);
+    }
+
+    // ── 3. Anticipation lean — forward tilt when starting to move ──
+    if (isMoving && !entry._wasMoving) {
+      entry._moveStartTime = 0.22;
+    }
+    entry._wasMoving = isMoving;
+
+    if (entry._moveStartTime > 0) {
+      entry._moveStartTime -= DT;
+      if (entry._moveStartTime < 0) entry._moveStartTime = 0;
+      const leanT = entry._moveStartTime / 0.22;
+      entry.group.rotation.x = -(leanT * leanT * 0.12);
+    }
+
+    // ── 4. Step-climb body tilt ──
+    if (elevActive && elevProgress != null && elevProgress > 0) {
+      const tiltTarget = elevGoingUp ? -0.20 : 0.16;
+      entry.group.rotation.x += (tiltTarget - entry.group.rotation.x) * 0.25;
+    }
+
+    // Apply final position with hop offset
+    entry.group.position.set(x, y + entry._hopOffset, z);
     oldPos.set(x, y, z);
   }
   setSelected(unitId: string, selected: boolean, attackRange?: number): void {
@@ -344,6 +444,10 @@ export class UnitRenderer {
     this.animations.animateUnit(unitId, state, time, unitType);
   }
 
+  resetAttackAnim(unitId: string): void {
+    this.animations.resetAttackAnim(unitId);
+  }
+
   spawnBlockSparks(worldPos: { x: number; y: number; z: number }): void {
     this.vfx.spawnBlockSparks(worldPos);
   }
@@ -372,6 +476,10 @@ export class UnitRenderer {
     this.projectileSystem.spawnDeflectedAxe(impactPos);
   }
 
+  spawnOgreGroundPound(centerPos: { x: number; y: number; z: number }): void {
+    this.projectileSystem.spawnOgreGroundPound(centerPos);
+  }
+
   fireMagicOrb(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, color: number, targetUnitId?: string, isAoE = false, onImpact?: () => void): void {
     this.projectileSystem.fireMagicOrb(fromPos, toPos, color, targetUnitId, isAoE, onImpact);
   }
@@ -382,6 +490,10 @@ export class UnitRenderer {
 
   fireLightningChain(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string): void {
     this.projectileSystem.fireLightningChain(fromPos, toPos, targetUnitId);
+  }
+
+  fireKamehamehaBeam(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, piercedPositions: { x: number; y: number; z: number }[]): void {
+    this.projectileSystem.fireKamehamehaBeam(fromPos, toPos, piercedPositions);
   }
 
   spawnElectrocuteEffect(unitId: string): void {
@@ -619,8 +731,10 @@ export class UnitRenderer {
    */
   /** Team colors for squad member lines */
   private static TEAM_COLORS_HEX: Record<number, number> = {
-    0: 0x3498db, // Blue
-    1: 0xe74c3c, // Red
+    0: getPlayerHex(0),
+    1: getPlayerHex(1),
+    2: getPlayerHex(2),
+    3: getPlayerHex(3),
   };
 
   updateSquadIndicators(
@@ -766,7 +880,7 @@ export class UnitRenderer {
       }
 
       // ── Team-colored lines from label to each squad member ──
-      const teamColor = UnitRenderer.TEAM_COLORS_HEX[squad.teamId ?? 0] ?? 0x3498db;
+      const teamColor = UnitRenderer.TEAM_COLORS_HEX[squad.teamId ?? 0] ?? getPlayerHex(0);
       const unitPositions = squad.unitPositions || [];
       const numUnits = unitPositions.length;
       let memberLines = this.squadMemberLines.get(squad.squadId);

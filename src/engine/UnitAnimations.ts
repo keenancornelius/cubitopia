@@ -115,6 +115,15 @@ export class UnitAnimations {
     this.spawnSwingTrail(unitId, trailType, time);
   }
   /**
+   * Reset a unit's attack animation start time so the next swing begins from phase 0.
+   * Called when a new attack fires to keep animation and VFX timing in sync.
+   */
+  resetAttackAnim(unitId: string): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (entry) entry.attackAnimStart = 0;
+  }
+
+  /**
    * Animate a unit based on its state and type — per-unit-type realistic animations.
    * Body stays stable; only arms, legs, and slight leans animate.
    */
@@ -1004,8 +1013,10 @@ export class UnitAnimations {
       case UnitType.OGRE: {
         // MASSIVE OVERHEAD CLUB SMASH — wind up high, slam down with ground-shaking impact.
         // Slowest, heaviest attack in the game. AOE knockback on impact.
+        // Uses attackAnimStart-relative timing so VFX delays sync exactly to animation phases.
         const speed = 0.6; // very slow — sell the massive weight
-        const cycle = (time * speed) % 1;
+        const elapsed = entry.attackAnimStart > 0 ? (time - entry.attackAnimStart) : 0;
+        const cycle = Math.min((elapsed * speed) % 1, 0.9999); // clamp to single swing
 
         if (cycle < 0.35) {
           // Phase 1: Wind-up — club rises overhead, body leans way back
@@ -2141,9 +2152,16 @@ export class UnitAnimations {
         trebPendingTarget: null,
         attackAnimStart: 0,
       _knockbackUntil: 0,
+      _elevSpeed: 0,
+      _elevDelta: 0,
+      _hopOffset: 0,
+      _landSquash: 0,
+      _moveStartTime: 0,
+      _wasMoving: false,
+      _stableY: 0,
       };
     }
-    const entry = this._previewEntry;
+    const entry = this._previewEntry!;
     entry.unitType = unitType;
 
     const armLeft = group.getObjectByName('arm-left');
@@ -2157,19 +2175,19 @@ export class UnitAnimations {
 
     if (state === 'attacking') {
       if (entry.attackAnimStart === 0) entry.attackAnimStart = time;
-      this.animateAttacking(entry, unitType, armLeft, armRight, legLeft, legRight, time, '__preview__');
+      this.animateAttacking(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time, '__preview__');
     } else if (state === 'moving') {
       entry.attackAnimStart = 0;
-      this.animateMoving(entry, unitType, armLeft, armRight, legLeft, legRight, time);
+      this.animateMoving(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time);
     } else if (state === 'hit') {
       entry.attackAnimStart = 0;
-      this.animateHit(entry, unitType, armLeft, armRight, legLeft, legRight, time);
+      this.animateHit(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time);
     } else if (state === 'block') {
       entry.attackAnimStart = 0;
-      this.animateBlock(entry, unitType, armLeft, armRight, legLeft, legRight, time);
+      this.animateBlock(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time);
     } else {
       entry.attackAnimStart = 0;
-      this.animateIdle(entry, unitType, armLeft, armRight, legLeft, legRight, time);
+      this.animateIdle(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time);
     }
   }
 }

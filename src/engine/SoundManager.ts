@@ -23,7 +23,8 @@ type SoundName =
   | 'ui_click' | 'ui_hover'
   | 'battle_start' | 'level_up'
   | 'queue_confirm' | 'queue_error' | 'craft_confirm'
-  | 'unit_spawn' | 'shield_deflect' | 'heal_cast';
+  | 'unit_spawn' | 'shield_deflect' | 'heal_cast'
+  | 'ogre_whomp';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -101,6 +102,7 @@ export default class SoundManager {
       case 'unit_spawn':    this.synthUnitSpawn(vol); break;
       case 'shield_deflect': this.synthShieldDeflect(vol); break;
       case 'heal_cast': this.synthHealCast(vol); break;
+      case 'ogre_whomp': this.synthOgreWhomp(vol); break;
     }
   }
 
@@ -374,6 +376,42 @@ export default class SoundManager {
     });
     // Noise transient (impact crunch)
     this.filteredNoise('lowpass', 1200, 1, vol * 0.3, 0.002, 0.07);
+  }
+
+  /** Ogre ground-pound WHOMP — massive sub-bass shockwave + earth rumble + debris rattle */
+  private synthOgreWhomp(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Layer 1: Sub-bass shockwave — very deep chest-thumping pulse (30-50 Hz)
+    this.envTone(this.vary(48), 'sine', vol * 0.7, 0.005, 0.5, {
+      freqEnd: 25,
+    });
+    // Layer 2: Mid-bass body — gives the "whomp" its punch (80-120 Hz)
+    this.envTone(this.vary(100), 'sine', vol * 0.5, 0.003, 0.35, {
+      freqEnd: 55,
+    });
+    // Layer 3: Earth rumble — low triangle wave wobble
+    this.envTone(this.vary(38), 'triangle', vol * 0.3, 0.01, 0.6, {
+      freqEnd: 20,
+    });
+    // Layer 4: Debris scatter — high-freq noise burst (rocks + dirt flying)
+    this.filteredNoise('bandpass', 2500, 3, vol * 0.25, 0.01, 0.15);
+    // Layer 5: Air displacement — low filtered noise whoosh
+    this.filteredNoise('lowpass', 400, 2, vol * 0.35, 0.005, 0.4);
+    // Layer 6: Delayed secondary rumble — ground settling (slight reverb feel)
+    const delay = 0.12;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(this.vary(35), t + delay);
+    osc.frequency.exponentialRampToValueAtTime(18, t + delay + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.setValueAtTime(0.001, t + delay);
+    g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.5);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t + delay);
+    osc.stop(t + delay + 0.55);
   }
 
   /** Death: sharp body-drop thud + bone crack + fading groan */

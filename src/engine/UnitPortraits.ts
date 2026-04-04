@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { UnitType } from '../types';
 import { UnitModels } from './UnitModels';
 
-const PORTRAIT_SIZE = 56; // rendered at 2× for retina, displayed at 28×28
+const PORTRAIT_SIZE = 128; // rendered at 2× for retina, displayed at 64×64
 
 // Cached data URLs keyed by unit type
 const portraitCache: Map<string, string> = new Map();

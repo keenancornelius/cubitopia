@@ -15,7 +15,7 @@ import { Logger } from '../engine/Logger';
 const ALL_MAP_PRESETS: MapPreset[] = [
   {
     type: MapType.STANDARD,
-    label: 'STANDARD',
+    label: 'CRYSTIRON RIDGE',
     description: 'Balanced terrain with mountains, rivers, and forests',
     size: 50,
     color: '#3498db',
@@ -54,6 +54,27 @@ const ALL_MAP_PRESETS: MapPreset[] = [
     description: 'Arid desert with plateaus, canyons, and sprawling underground tunnel networks',
     size: 50,
     color: '#d4a056',
+  },
+  {
+    type: MapType.VOLCANIC,
+    label: 'VOLCANIC PASS',
+    description: 'Narrow chokepoints between towering peaks and lava lakes — control the passes or die',
+    size: 50,
+    color: '#c0392b',
+  },
+  {
+    type: MapType.TUNDRA,
+    label: 'FROZEN WASTE',
+    description: 'Barren frozen tundra with scarce resources — every crystal and tree is worth fighting over',
+    size: 50,
+    color: '#95a5a6',
+  },
+  {
+    type: MapType.SKYLAND,
+    label: 'SKYLAND',
+    description: 'Floating cloud islands connected by rainbow bridges — control the bridges, control the sky',
+    size: 40,
+    color: '#FFB6C1',
   },
 ];
 
@@ -224,6 +245,22 @@ export const MAP_GEN_PARAMS: Partial<Record<MapType, MapGenParams>> = {
     valleyWeight: [0.05, 0.10],
     mountainClusters: [0, 1],
     riverCount: [2, 4],
+  },
+  [MapType.VOLCANIC]: {
+    elevScale: [0.10, 0.16],
+    mountainWeight: [0.35, 0.55],
+    valleyWeight: [0.25, 0.40],
+    waterLevel: 0.30,
+    mountainClusters: [6, 10],
+    riverCount: [0, 1],
+  },
+  [MapType.TUNDRA]: {
+    elevScale: [0.06, 0.10],
+    mountainWeight: [0.10, 0.20],
+    valleyWeight: [0.08, 0.15],
+    waterLevel: 0.25,
+    mountainClusters: [2, 4],
+    riverCount: [1, 2],
   },
 };
 
@@ -630,6 +667,526 @@ function carveDesertTunnels(
   return { cavernCenter, cavernFloorY: CAVERN_FLOOR_Y, extraCaverns };
 }
 
+// ============================================
+// SKYLAND MAP GENERATOR
+// Floating cloud islands connected by rainbow bridges
+// ============================================
+
+interface SkyIsland {
+  center: { q: number; r: number };
+  radius: number;
+  elevation: number;      // base surface elevation (varies per island)
+  role: 'home' | 'central' | 'outpost';
+  resources: ResourceType[];
+}
+
+export interface SkylandMap extends GameMap {
+  islands: SkyIsland[];
+  bridges: Array<{ from: number; to: number; tiles: HexCoord[] }>;
+}
+
+class SkyRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 16807 + 0) % 2147483647;
+    return (this.state & 0xffffff) / 0xffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class SkyNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 0) % 2147483647;
+      this.perm.push(s);
+    }
+  }
+  noise2d(x: number, y: number): number {
+    const ix = Math.floor(x) & 255;
+    const iy = Math.floor(y) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
+    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
+           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp; amp *= 0.5; freq *= 2;
+    }
+    return val / max;
+  }
+}
+
+export function generateSkylandMap(size: number, seed?: number, playerCount: number = 2): SkylandMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new SkyRng(actualSeed);
+  const noise = new SkyNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+
+  // ── Step 1: Place islands ──
+  const GOLDEN_ANGLE = Math.PI * 2 * (1 - 1 / ((1 + Math.sqrt(5)) / 2));
+  const center = Math.floor(size / 2);
+  const islands: SkyIsland[] = [];
+  const BASE_INSET = 6;
+
+  // Home islands — one per player, matching MapInitializer's base positions
+  // 2-player: opposite corners (BL, TR)
+  // 4-player: all four corners (BL, TR, TL, BR)
+  const homePositions = [
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },             // P0: bottom-left
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },             // P1: top-right
+    { q: BASE_INSET, r: BASE_INSET },                         // P2: top-left
+    { q: size - 1 - BASE_INSET, r: size - 1 - BASE_INSET },  // P3: bottom-right
+  ];
+  const numHomes = Math.min(playerCount, 4);
+  for (let i = 0; i < numHomes; i++) {
+    islands.push({
+      center: homePositions[i],
+      radius: 7, elevation: 3, role: 'home',
+      resources: [ResourceType.WOOD, ResourceType.STONE, ResourceType.FOOD],
+    });
+  }
+
+  // Central contested island
+  islands.push({
+    center: { q: center, r: center },
+    radius: rng.range(6, 8), elevation: 4, role: 'central',
+    resources: [ResourceType.CRYSTAL, ResourceType.IRON, ResourceType.GOLD],
+  });
+
+  // Outpost islands: more for FFA to give more strategic points
+  // 2-player: 4-6 outposts, 4-player: 5-8 outposts
+  const numOutposts = playerCount <= 2 ? rng.range(4, 6) : rng.range(5, 8);
+  const maxSpread = size * 0.38;
+  const angleOffset = rng.next() * Math.PI * 2;
+  const outpostResources: ResourceType[][] = [
+    [ResourceType.WOOD, ResourceType.FOOD],
+    [ResourceType.STONE, ResourceType.IRON],
+    [ResourceType.IRON, ResourceType.GOLD],
+    [ResourceType.CRYSTAL],
+    [ResourceType.WOOD, ResourceType.STONE],
+    [ResourceType.GOLD, ResourceType.FOOD],
+    [ResourceType.STONE, ResourceType.CRYSTAL],
+    [ResourceType.WOOD, ResourceType.IRON],
+  ];
+
+  for (let i = 0; i < numOutposts + 3; i++) { // attempt more than needed, skip collisions
+    if (islands.filter(isl => isl.role === 'outpost').length >= numOutposts) break;
+
+    const angle = angleOffset + (i + numHomes + 1) * GOLDEN_ANGLE;
+    const dist = maxSpread * (0.4 + rng.next() * 0.6);
+    let iq = Math.round(center + Math.cos(angle) * dist);
+    let ir = Math.round(center + Math.sin(angle) * dist);
+    // Clamp to safe zone
+    iq = Math.max(4, Math.min(size - 5, iq));
+    ir = Math.max(4, Math.min(size - 5, ir));
+
+    // Ensure minimum distance from existing islands
+    const tooClose = islands.some(isl => {
+      const d = Math.sqrt((iq - isl.center.q) ** 2 + (ir - isl.center.r) ** 2);
+      return d < isl.radius + 4;
+    });
+    if (tooClose) continue;
+
+    islands.push({
+      center: { q: iq, r: ir },
+      radius: rng.range(3, 5),
+      elevation: rng.range(2, 4),
+      role: 'outpost',
+      resources: outpostResources[i % outpostResources.length],
+    });
+  }
+
+  Logger.info('Skyland', `Placed ${islands.length} islands`);
+
+  // ── Step 2: Generate all tiles — void by default ──
+  // First, fill everything as void (impassable sky)
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const key = `${q},${r}`;
+      tiles.set(key, {
+        position: { q, r },
+        terrain: TerrainType.WATER, // WATER terrain = void (cloud plane below)
+        elevation: -3,
+        walkableFloor: -3,
+        resource: null,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks: [], destructible: false, heightMap: [[-3]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 3: Stamp islands onto the tile grid with terrain variety ──
+  // Each island gets internal terrain zones driven by noise:
+  //   Cloud Peaks  (MOUNTAIN) — high ridges with stone, iron, crystal veins
+  //   Cloud Valleys (DESERT)  — sandy dips with gold, clay deposits
+  //   Meadows      (PLAINS)   — default pastel grass, food
+  //   Groves       (FOREST)   — wood-rich tree zones
+  for (const island of islands) {
+    const { center: ic, radius, elevation } = island;
+
+    for (let dq = -radius - 1; dq <= radius + 1; dq++) {
+      for (let dr = -radius - 1; dr <= radius + 1; dr++) {
+        const q = ic.q + dq;
+        const r = ic.r + dr;
+        if (q < 0 || r < 0 || q >= size || r >= size) continue;
+
+        const dist = Math.sqrt(dq * dq + dr * dr);
+        // Noise-distorted edge for organic shape
+        const edgeNoise = noise.fbm(q * 0.3 + 100, r * 0.3 + 100, 2);
+        const effectiveRadius = radius * (0.8 + edgeNoise * 0.4);
+
+        if (dist > effectiveRadius) continue;
+
+        const key = `${q},${r}`;
+        const edgeFactor = dist / effectiveRadius;
+
+        // ── Terrain zone noise ──
+        const hillNoise = noise.fbm(q * 0.15, r * 0.15, 3);          // elevation variation
+        const zoneNoise = noise.fbm(q * 0.25 + 200, r * 0.25 + 200, 2); // terrain zone selector
+        const forestNoise = noise.fbm(q * 0.2 + 50, r * 0.2 + 50, 2);   // forest patches
+
+        // ── Elevation: peaks rise, valleys dip ──
+        let tileElev = elevation + Math.round(hillNoise * 2 - 0.5);
+        // Wider thresholds → ~30% peak, ~30% valley, rest meadow/forest
+        const isPeak = zoneNoise > 0.52 && edgeFactor < 0.75;
+        const isValley = zoneNoise < 0.38 && edgeFactor < 0.70;
+        if (isPeak) tileElev += 3;    // dramatic peaks rise high
+        if (isValley) tileElev -= 2;  // deep valleys dip down
+        // Edge tiles slope down for cliff effect
+        if (edgeFactor > 0.7) {
+          tileElev = Math.max(elevation - 1, tileElev - Math.round((edgeFactor - 0.7) * 5));
+        }
+        tileElev = Math.max(1, tileElev);
+
+        // ── Determine terrain type, surface block, and resource ──
+        let terrain = TerrainType.PLAINS;
+        let topBlock = BlockType.PASTEL_GRASS;
+        let subBlock = BlockType.CREAM_STONE;
+        let resource: ResourceType | null = null;
+
+        if (isPeak) {
+          // ── Cloud Peak: exposed stone mountain with ore veins ──
+          terrain = TerrainType.MOUNTAIN;
+          topBlock = BlockType.STONE;
+          subBlock = BlockType.STONE;
+          // Resource assignment for peaks
+          if (island.resources.includes(ResourceType.CRYSTAL) && rng.next() < 0.12) {
+            resource = ResourceType.CRYSTAL;
+          } else if (island.resources.includes(ResourceType.IRON) && rng.next() < 0.15) {
+            resource = ResourceType.IRON;
+          } else if (rng.next() < 0.10) {
+            resource = ResourceType.STONE;
+          }
+        } else if (isValley) {
+          // ── Cloud Valley: sandy lowland with gold and clay ──
+          terrain = TerrainType.DESERT;
+          topBlock = BlockType.SAND;
+          subBlock = BlockType.SAND;
+          // Resource assignment for valleys
+          if (island.resources.includes(ResourceType.GOLD) && rng.next() < 0.12) {
+            resource = ResourceType.GOLD;
+          } else if (rng.next() < 0.15) {
+            resource = ResourceType.CLAY;
+          }
+        } else if (forestNoise > 0.55 && edgeFactor < 0.6 && island.resources.includes(ResourceType.WOOD)) {
+          // ── Forest grove ──
+          terrain = TerrainType.FOREST;
+          topBlock = BlockType.PASTEL_GRASS;
+          resource = ResourceType.WOOD;
+        } else {
+          // ── Meadow: default pastel plains ──
+          // Scatter remaining resources
+          if (edgeFactor < 0.7) {
+            const RESOURCE_RATES: Partial<Record<ResourceType, number>> = {
+              [ResourceType.FOOD]: 0.10,
+              [ResourceType.STONE]: 0.06,
+              [ResourceType.IRON]: 0.04,
+              [ResourceType.CRYSTAL]: 0.03,
+              [ResourceType.GOLD]: 0.03,
+            };
+            for (const res of island.resources) {
+              if (res === ResourceType.WOOD) continue;
+              const rate = RESOURCE_RATES[res] ?? 0.05;
+              if (rng.next() < rate) { resource = res; break; }
+            }
+          }
+        }
+
+        // ── Build voxel column with 3x3 sub-voxel offsets ──
+        const ISLAND_DEPTH = -5;
+        const blocks: VoxelBlock[] = [];
+        const offsets = [-0.5, 0, 0.5];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = ISLAND_DEPTH; y < tileElev; y++) {
+              let blockType: BlockType;
+              if (y === tileElev - 1) blockType = topBlock;           // surface
+              else if (y >= tileElev - 3) blockType = subBlock;       // sub-surface
+              else blockType = BlockType.CLOUD;                       // deep = cloud
+              blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: blockType, health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+
+        // ── Inject ore veins into subsurface blocks ──
+        if (resource === ResourceType.IRON && terrain === TerrainType.MOUNTAIN) {
+          for (const b of blocks) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tileElev - 2 && rng.next() < 0.30) {
+              b.type = BlockType.IRON;
+            }
+          }
+        }
+        if (resource === ResourceType.GOLD && terrain === TerrainType.DESERT) {
+          for (const b of blocks) {
+            if (b.type === BlockType.SAND && b.localPosition.y < tileElev - 2 && rng.next() < 0.20) {
+              b.type = BlockType.GOLD;
+            }
+          }
+        }
+        if (resource === ResourceType.CRYSTAL) {
+          for (const b of blocks) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tileElev - 1 && rng.next() < 0.25) {
+              b.type = BlockType.CRYSTAL;
+            }
+          }
+        }
+        if (resource === ResourceType.CLAY) {
+          for (const b of blocks) {
+            if (b.type === BlockType.SAND && b.localPosition.y < tileElev - 1 && rng.next() < 0.25) {
+              b.type = BlockType.CLAY;
+            }
+          }
+        }
+
+        tiles.set(key, {
+          position: { q, r },
+          terrain,
+          elevation: tileElev,
+          walkableFloor: tileElev,
+          resource,
+          improvement: null,
+          unit: null,
+          owner: null,
+          voxelData: { blocks, destructible: true, heightMap: [[tileElev]] },
+          visible: true,
+          explored: true,
+        });
+      }
+    }
+  }
+
+  // ── Step 4: Connect islands with rainbow bridges ──
+  // Build minimum spanning tree via Prim's algorithm for guaranteed connectivity
+  const bridgeData: Array<{ from: number; to: number; tiles: HexCoord[] }> = [];
+  const connected = new Set<number>([0]); // start from first home island
+  const edgeCandidates: Array<{ from: number; to: number; dist: number }> = [];
+
+  // Seed initial edges from island 0
+  const islandDist = (a: SkyIsland, b: SkyIsland) =>
+    Math.sqrt((a.center.q - b.center.q) ** 2 + (a.center.r - b.center.r) ** 2);
+
+  for (let j = 1; j < islands.length; j++) {
+    edgeCandidates.push({ from: 0, to: j, dist: islandDist(islands[0], islands[j]) });
+  }
+
+  while (connected.size < islands.length && edgeCandidates.length > 0) {
+    // Sort by distance, pick shortest that connects a new island
+    edgeCandidates.sort((a, b) => a.dist - b.dist);
+    let picked = -1;
+    for (let i = 0; i < edgeCandidates.length; i++) {
+      if (!connected.has(edgeCandidates[i].to)) {
+        picked = i;
+        break;
+      }
+    }
+    if (picked < 0) break;
+
+    const edge = edgeCandidates.splice(picked, 1)[0];
+    connected.add(edge.to);
+
+    // Add edges from newly connected island
+    for (let j = 0; j < islands.length; j++) {
+      if (!connected.has(j)) {
+        edgeCandidates.push({ from: edge.to, to: j, dist: islandDist(islands[edge.to], islands[j]) });
+      }
+    }
+
+    // Trace bridge tiles between nearest edges of the two islands
+    const bridgeTiles = traceBridgePath(
+      islands[edge.from], islands[edge.to], tiles, size, rng
+    );
+    bridgeData.push({ from: edge.from, to: edge.to, tiles: bridgeTiles });
+  }
+
+  // Add 1-2 extra bridge connections for alternate routes
+  const extraBridges = rng.range(1, 2);
+  for (let e = 0; e < extraBridges; e++) {
+    const a = rng.range(0, islands.length - 1);
+    let b = rng.range(0, islands.length - 1);
+    if (a === b) b = (a + 1) % islands.length;
+    // Don't duplicate existing bridges
+    const exists = bridgeData.some(br =>
+      (br.from === a && br.to === b) || (br.from === b && br.to === a)
+    );
+    if (exists) continue;
+
+    const bridgeTiles = traceBridgePath(islands[a], islands[b], tiles, size, rng);
+    bridgeData.push({ from: a, to: b, tiles: bridgeTiles });
+  }
+
+  Logger.info('Skyland', `Built ${bridgeData.length} bridges`);
+
+  // ── Step 5: Mark neutral outpost islands as surface bases for capture zones ──
+  const surfaceBases: Array<{ center: { q: number; r: number }; terrain: string }> = [];
+  for (const island of islands) {
+    if (island.role === 'outpost' || island.role === 'central') {
+      surfaceBases.push({ center: island.center, terrain: 'skyland' });
+    }
+  }
+
+  // ── Step 6: Shell blocks for solid terrain ──
+  const skyMap: SkylandMap = {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.SKYLAND,
+    islands,
+    bridges: bridgeData,
+    surfaceBases,
+  };
+  const shellGen = new MapGenerator(actualSeed);
+  shellGen.computeShellBlocks(skyMap, size, size);
+
+  return skyMap;
+}
+
+/** Trace a 1-hex-wide rainbow bridge path between two islands */
+function traceBridgePath(
+  fromIsland: SkyIsland, toIsland: SkyIsland,
+  tiles: Map<string, Tile>, size: number, rng: SkyRng
+): HexCoord[] {
+  const fc = fromIsland.center;
+  const tc = toIsland.center;
+
+  // Find closest edge points (from center toward the other island)
+  const angle = Math.atan2(tc.r - fc.r, tc.q - fc.q);
+  const fromEdge = {
+    q: Math.round(fc.q + Math.cos(angle) * (fromIsland.radius - 1)),
+    r: Math.round(fc.r + Math.sin(angle) * (fromIsland.radius - 1)),
+  };
+  const backAngle = angle + Math.PI;
+  const toEdge = {
+    q: Math.round(tc.q + Math.cos(backAngle) * (toIsland.radius - 1)),
+    r: Math.round(tc.r + Math.sin(backAngle) * (toIsland.radius - 1)),
+  };
+
+  // Interpolate along the line with slight arc (bridge curves up in the middle)
+  const bridgeTiles: HexCoord[] = [];
+  const dist = Math.sqrt((toEdge.q - fromEdge.q) ** 2 + (toEdge.r - fromEdge.r) ** 2);
+  const steps = Math.max(3, Math.ceil(dist));
+
+  // Get elevations at endpoints for smooth ramp
+  const fromTile = tiles.get(`${fromEdge.q},${fromEdge.r}`);
+  const toTile = tiles.get(`${toEdge.q},${toEdge.r}`);
+  const fromElev = fromTile && fromTile.elevation > 0 ? fromTile.elevation : fromIsland.elevation;
+  const toElev = toTile && toTile.elevation > 0 ? toTile.elevation : toIsland.elevation;
+
+  // Compute perpendicular direction for bridge width
+  const dx = toEdge.q - fromEdge.q;
+  const dz = toEdge.r - fromEdge.r;
+  const len = Math.sqrt(dx * dx + dz * dz) || 1;
+  // Perpendicular unit vector (rotated 90°)
+  const perpQ = -dz / len;
+  const perpR = dx / len;
+
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const centerQ = fromEdge.q + (toEdge.q - fromEdge.q) * t;
+    const centerR = fromEdge.r + (toEdge.r - fromEdge.r) * t;
+
+    // Bridge elevation: lerp endpoints with a gentle upward arc in the middle
+    const arcHeight = Math.sin(t * Math.PI) * 1.5; // subtle arc
+    const bridgeElev = Math.round(fromElev + (toElev - fromElev) * t + arcHeight);
+    const elev = Math.max(1, bridgeElev);
+
+    // Place 3-wide bridge: center walkway + cloud rail on each side
+    const offsets = [
+      { oq: 0, or: 0, isCenter: true },
+      { oq: Math.round(perpQ), or: Math.round(perpR), isCenter: false },
+      { oq: Math.round(-perpQ), or: Math.round(-perpR), isCenter: false },
+    ];
+
+    for (const off of offsets) {
+      const bq = Math.round(centerQ) + off.oq;
+      const br = Math.round(centerR) + off.or;
+      if (bq < 0 || br < 0 || bq >= size || br >= size) continue;
+
+      const key = `${bq},${br}`;
+      const existing = tiles.get(key);
+      // Don't overwrite island tiles or previously placed bridge tiles
+      if (existing && existing.elevation > 0) continue;
+
+      // Center tiles are rainbow walkway, side tiles are cloud rails (slightly taller)
+      const tileElev = off.isCenter ? elev : elev + 1;
+      const topBlock = off.isCenter ? BlockType.RAINBOW_BRIDGE : BlockType.CLOUD;
+
+      // Build bridge voxel column with 3x3 sub-voxel offsets for solid rendering
+      const blocks: VoxelBlock[] = [];
+      const bOffsets = [-0.5, 0, 0.5];
+      for (const lx of bOffsets) {
+        for (const lz of bOffsets) {
+          for (let y = elev - 2; y < tileElev; y++) {
+            blocks.push({
+              localPosition: { x: lx, y, z: lz },
+              type: y === tileElev - 1 ? topBlock : BlockType.CLOUD,
+              health: 100, maxHealth: 100,
+            });
+          }
+        }
+      }
+
+      tiles.set(key, {
+        position: { q: bq, r: br },
+        terrain: TerrainType.PLAINS, // walkable
+        elevation: tileElev,
+        walkableFloor: off.isCenter ? elev : tileElev, // units walk on center level
+        resource: null,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: false, heightMap: [[tileElev]] },
+        visible: true,
+        explored: true,
+        isBridge: true,
+      } as Tile);
+
+      if (off.isCenter) {
+        bridgeTiles.push({ q: bq, r: br });
+      }
+    }
+  }
+
+  return bridgeTiles;
+}
+
+// ============================================
+
 function makeTile(q: number, r: number, terrain: TerrainType, elevation: number, topBlock: BlockType, resource: ResourceType | null): Tile {
   const blocks: VoxelBlock[] = [];
   for (let y = -1; y <= elevation; y++) {
@@ -661,5 +1218,835 @@ function makeTile(q: number, r: number, terrain: TerrainType, elevation: number,
     voxelData: { blocks, destructible: true, heightMap: [[elevation]] },
     visible: true,
     explored: true,
+  };
+}
+
+// ============================================
+// VOLCANIC PASS MAP GENERATOR
+// Volcanic wasteland with towering basalt peaks, lava rivers,
+// obsidian formations, ash plains, and narrow passes.
+// ============================================
+
+export interface VolcanicMap extends GameMap {
+  volcanoes: Array<{ q: number; r: number; radius: number; height: number }>;
+  lavaRivers: Array<HexCoord[]>;
+}
+
+class VolcRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 16807 + 0) % 2147483647;
+    return (this.state & 0xffffff) / 0xffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class VolcNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 0) % 2147483647;
+      this.perm.push(s);
+    }
+  }
+  noise2d(x: number, y: number): number {
+    const ix = Math.floor(x) & 255;
+    const iy = Math.floor(y) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
+    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
+           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp; amp *= 0.5; freq *= 2;
+    }
+    return val / max;
+  }
+}
+
+export function generateVolcanicMap(size: number, seed?: number, playerCount: number = 2): VolcanicMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new VolcRng(actualSeed);
+  const noise = new VolcNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+  const offsets = [-0.5, 0, 0.5]; // 3x3 sub-voxel for solid rendering
+
+  // ── Step 1: Place volcanic peaks ──
+  // Central ridge runs diagonally with additional scattered volcanic cones
+  const volcanoes: Array<{ q: number; r: number; radius: number; height: number }> = [];
+  const center = Math.floor(size / 2);
+
+  // Central mega-volcano
+  volcanoes.push({ q: center, r: center, radius: 7, height: 12 });
+
+  // Ridge volcanoes along diagonal
+  const ridgeCount = rng.range(3, 5);
+  for (let i = 0; i < ridgeCount; i++) {
+    const t = (i + 1) / (ridgeCount + 1);
+    const rq = Math.floor(size * 0.15 + t * size * 0.7) + rng.range(-3, 3);
+    const rr = Math.floor(size * 0.85 - t * size * 0.7) + rng.range(-3, 3);
+    volcanoes.push({ q: rq, r: rr, radius: rng.range(4, 6), height: rng.range(8, 11) });
+  }
+
+  // Scattered smaller volcanic cones
+  const coneCount = rng.range(4, 7);
+  for (let i = 0; i < coneCount; i++) {
+    const cq = rng.range(4, size - 5);
+    const cr = rng.range(4, size - 5);
+    // Don't overlap with existing volcanoes too much
+    const tooClose = volcanoes.some(v => Math.sqrt((cq - v.q) ** 2 + (cr - v.r) ** 2) < v.radius + 3);
+    if (!tooClose) {
+      volcanoes.push({ q: cq, r: cr, radius: rng.range(2, 4), height: rng.range(5, 8) });
+    }
+  }
+
+  // ── Step 2: Generate base terrain for all tiles ──
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const key = `${q},${r}`;
+
+      // Base elevation from noise
+      const baseNoise = noise.fbm(q * 0.08, r * 0.08, 3);
+      let elev = 2 + Math.round(baseNoise * 3);
+
+      // Volcanic influence — peaks raise nearby terrain
+      let volcInfluence = 0;
+      let closestVolcDist = Infinity;
+      let closestVolc: typeof volcanoes[0] | null = null;
+      for (const v of volcanoes) {
+        const dist = Math.sqrt((q - v.q) ** 2 + (r - v.r) ** 2);
+        if (dist < closestVolcDist) {
+          closestVolcDist = dist;
+          closestVolc = v;
+        }
+        if (dist < v.radius * 2) {
+          const factor = 1 - dist / (v.radius * 2);
+          volcInfluence = Math.max(volcInfluence, factor);
+        }
+      }
+
+      // Terrain zone noise
+      const zoneNoise = noise.fbm(q * 0.12 + 100, r * 0.12 + 100, 2);
+      const lavaNoiseVal = noise.fbm(q * 0.2 + 300, r * 0.2 + 300, 3);
+
+      // Determine terrain type and blocks
+      let terrain = TerrainType.MOUNTAIN;
+      let topBlock = BlockType.BASALT;
+      let subBlock = BlockType.BASALT;
+      let resource: ResourceType | null = null;
+
+      // Inside volcano cone — steep peak
+      if (closestVolc && closestVolcDist < closestVolc.radius) {
+        const peakFactor = 1 - closestVolcDist / closestVolc.radius;
+        elev = closestVolc.height - 2 + Math.round(peakFactor * 4);
+        // Very center of volcano = crater (lower)
+        if (closestVolcDist < 1.5) {
+          elev = closestVolc.height - 3;
+          topBlock = BlockType.MAGMA;
+          subBlock = BlockType.OBSIDIAN;
+          terrain = TerrainType.MOUNTAIN;
+        } else {
+          topBlock = BlockType.OBSIDIAN;
+          subBlock = BlockType.BASALT;
+          terrain = TerrainType.MOUNTAIN;
+          if (rng.next() < 0.12) resource = ResourceType.CRYSTAL;
+          else if (rng.next() < 0.10) resource = ResourceType.IRON;
+        }
+      }
+      // Lava rivers/pools — low areas between volcanoes
+      else if (lavaNoiseVal > 0.62 && volcInfluence > 0.15 && volcInfluence < 0.7) {
+        elev = 1;
+        topBlock = BlockType.LAVA;
+        subBlock = BlockType.MAGMA;
+        terrain = TerrainType.WATER; // pathfinding: impassable
+      }
+      // Volcanic slopes — near volcanoes
+      else if (volcInfluence > 0.3) {
+        elev += Math.round(volcInfluence * 4);
+        topBlock = BlockType.BASALT;
+        subBlock = BlockType.BASALT;
+        terrain = TerrainType.MOUNTAIN;
+        if (rng.next() < 0.08) resource = ResourceType.IRON;
+        else if (rng.next() < 0.06) resource = ResourceType.STONE;
+      }
+      // Ash plains — medium distance from volcanoes
+      else if (zoneNoise < 0.4 && volcInfluence < 0.3) {
+        terrain = TerrainType.PLAINS;
+        topBlock = BlockType.ASH;
+        subBlock = BlockType.SCORCHED_EARTH;
+        if (rng.next() < 0.08) resource = ResourceType.FOOD;
+        else if (rng.next() < 0.04) resource = ResourceType.STONE;
+      }
+      // Scorched forest — some areas have charred trees
+      else if (zoneNoise > 0.55 && volcInfluence < 0.25) {
+        terrain = TerrainType.FOREST;
+        topBlock = BlockType.SCORCHED_EARTH;
+        subBlock = BlockType.BASALT;
+        elev = Math.max(2, elev);
+        if (rng.next() < 0.15) resource = ResourceType.WOOD;
+        else if (rng.next() < 0.05) resource = ResourceType.STONE;
+      }
+      // Default scorched terrain
+      else {
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = BlockType.SCORCHED_EARTH;
+        subBlock = BlockType.BASALT;
+        if (rng.next() < 0.06) resource = ResourceType.STONE;
+        else if (rng.next() < 0.04) resource = ResourceType.GOLD;
+      }
+
+      elev = Math.max(1, Math.min(elev, 14));
+
+      // ── Build voxel column with 3x3 sub-voxel offsets ──
+      const blocks: VoxelBlock[] = [];
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          for (let y = -1; y < elev; y++) {
+            let blockType: BlockType;
+            if (y === elev - 1) blockType = topBlock;
+            else if (y >= elev - 3) blockType = subBlock;
+            else blockType = BlockType.BASALT; // deep = basalt
+            blocks.push({
+              localPosition: { x: lx, y, z: lz },
+              type: blockType, health: 100, maxHealth: 100,
+            });
+          }
+        }
+      }
+
+      // ── Inject ore veins ──
+      if (resource === ResourceType.IRON) {
+        for (const b of blocks) {
+          if (b.type === BlockType.BASALT && b.localPosition.y < elev - 2 && rng.next() < 0.25) {
+            b.type = BlockType.IRON;
+          }
+        }
+      }
+      if (resource === ResourceType.CRYSTAL) {
+        for (const b of blocks) {
+          if ((b.type === BlockType.OBSIDIAN || b.type === BlockType.BASALT) && b.localPosition.y < elev - 1 && rng.next() < 0.20) {
+            b.type = BlockType.CRYSTAL;
+          }
+        }
+      }
+      if (resource === ResourceType.GOLD) {
+        for (const b of blocks) {
+          if (b.type === BlockType.BASALT && b.localPosition.y < elev - 1 && rng.next() < 0.15) {
+            b.type = BlockType.GOLD;
+          }
+        }
+      }
+
+      tiles.set(key, {
+        position: { q, r },
+        terrain,
+        elevation: elev,
+        walkableFloor: elev,
+        resource,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: true, heightMap: [[elev]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 3: Carve lava rivers from volcano craters downhill ──
+  const lavaRivers: Array<HexCoord[]> = [];
+  for (const v of volcanoes) {
+    if (v.radius < 4) continue; // only big volcanoes get rivers
+    const riverCount = rng.range(1, 3);
+    for (let ri = 0; ri < riverCount; ri++) {
+      const angle = rng.next() * Math.PI * 2;
+      const river: HexCoord[] = [];
+      let rq = v.q + Math.round(Math.cos(angle) * 1.5);
+      let rr = v.r + Math.round(Math.sin(angle) * 1.5);
+      const dirQ = Math.cos(angle + (rng.next() - 0.5) * 0.5);
+      const dirR = Math.sin(angle + (rng.next() - 0.5) * 0.5);
+
+      for (let step = 0; step < 15; step++) {
+        if (rq < 1 || rr < 1 || rq >= size - 1 || rr >= size - 1) break;
+        const key = `${rq},${rr}`;
+        const tile = tiles.get(key);
+        if (tile && tile.terrain !== TerrainType.WATER) {
+          // Convert to lava river
+          tile.terrain = TerrainType.WATER;
+          tile.elevation = Math.max(1, tile.elevation - 2);
+          tile.walkableFloor = tile.elevation;
+          tile.voxelData.heightMap = [[tile.elevation]];
+          // Rebuild blocks as lava
+          tile.voxelData.blocks = [];
+          for (const lx of offsets) {
+            for (const lz of offsets) {
+              for (let y = -1; y < tile.elevation; y++) {
+                let blockType: BlockType;
+                if (y === tile.elevation - 1) blockType = BlockType.LAVA;
+                else blockType = BlockType.MAGMA;
+                tile.voxelData.blocks.push({
+                  localPosition: { x: lx, y, z: lz },
+                  type: blockType, health: 100, maxHealth: 100,
+                });
+              }
+            }
+          }
+          river.push({ q: rq, r: rr });
+          // Also widen the river — set adjacent tiles
+          const adj = [
+            { q: rq + 1, r: rr }, { q: rq - 1, r: rr },
+            { q: rq, r: rr + 1 }, { q: rq, r: rr - 1 },
+          ];
+          for (const a of adj) {
+            if (rng.next() < 0.35) {
+              const aKey = `${a.q},${a.r}`;
+              const at = tiles.get(aKey);
+              if (at && at.terrain !== TerrainType.WATER) {
+                at.terrain = TerrainType.WATER;
+                at.elevation = Math.max(1, at.elevation - 2);
+                at.walkableFloor = at.elevation;
+                at.voxelData.heightMap = [[at.elevation]];
+                at.voxelData.blocks = [];
+                for (const lx of offsets) {
+                  for (const lz of offsets) {
+                    for (let y = -1; y < at.elevation; y++) {
+                      at.voxelData.blocks.push({
+                        localPosition: { x: lx, y, z: lz },
+                        type: y === at.elevation - 1 ? BlockType.LAVA : BlockType.MAGMA,
+                        health: 100, maxHealth: 100,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        // Meander downhill
+        rq += Math.round(dirQ + (rng.next() - 0.5) * 0.8);
+        rr += Math.round(dirR + (rng.next() - 0.5) * 0.8);
+      }
+      if (river.length > 0) lavaRivers.push(river);
+    }
+  }
+
+  // ── Step 4: Clear safe zones around player bases ──
+  const BASE_INSET = 6;
+  const homePositions = [
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },           // P0: bottom-left
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },           // P1: top-right
+    { q: BASE_INSET, r: BASE_INSET },                       // P2: top-left
+    { q: size - 1 - BASE_INSET, r: size - 1 - BASE_INSET }, // P3: bottom-right
+  ];
+  const usedHomes = homePositions.slice(0, playerCount);
+
+  for (const home of usedHomes) {
+    // Clear a safe area around each base — ash plains with resources
+    for (let dq = -4; dq <= 4; dq++) {
+      for (let dr = -4; dr <= 4; dr++) {
+        const tq = home.q + dq;
+        const tr = home.r + dr;
+        if (tq < 0 || tr < 0 || tq >= size || tr >= size) continue;
+        const dist = Math.sqrt(dq * dq + dr * dr);
+        if (dist > 4.5) continue;
+
+        const key = `${tq},${tr}`;
+        const tile = tiles.get(key);
+        if (!tile) continue;
+
+        // Flatten and make habitable
+        tile.terrain = dist < 2 ? TerrainType.PLAINS : TerrainType.FOREST;
+        tile.elevation = 3;
+        tile.walkableFloor = 3;
+        tile.voxelData.heightMap = [[3]];
+
+        const sBlock = dist < 2 ? BlockType.SCORCHED_EARTH : BlockType.ASH;
+        const dBlock = BlockType.BASALT;
+        tile.voxelData.blocks = [];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = -1; y < 3; y++) {
+              tile.voxelData.blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: y === 2 ? sBlock : dBlock,
+                health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+
+        // Scatter resources around base
+        if (dist > 1.5 && dist < 4) {
+          if (rng.next() < 0.15) tile.resource = ResourceType.WOOD;
+          else if (rng.next() < 0.12) tile.resource = ResourceType.FOOD;
+          else if (rng.next() < 0.10) tile.resource = ResourceType.STONE;
+          else if (rng.next() < 0.06) tile.resource = ResourceType.IRON;
+        }
+      }
+    }
+  }
+
+  return {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.VOLCANIC,
+    volcanoes, lavaRivers,
+  };
+}
+
+// ============================================
+// ARCHIPELAGO MAP GENERATOR
+// Tropical island chain: scattered islands in bright turquoise ocean,
+// sandy beaches, dense jungles, coral reefs, and mountain peaks.
+// ============================================
+
+interface ArchIsland {
+  center: { q: number; r: number };
+  radius: number;
+  elevation: number;
+  type: 'home' | 'large' | 'medium' | 'small' | 'reef';
+  resources: ResourceType[];
+}
+
+export interface ArchipelagoMap extends GameMap {
+  islands: ArchIsland[];
+}
+
+class ArchRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 16807 + 0) % 2147483647;
+    return (this.state & 0xffffff) / 0xffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class ArchNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 0) % 2147483647;
+      this.perm.push(s);
+    }
+  }
+  noise2d(x: number, y: number): number {
+    const ix = Math.floor(x) & 255;
+    const iy = Math.floor(y) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
+    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
+           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp; amp *= 0.5; freq *= 2;
+    }
+    return val / max;
+  }
+}
+
+export function generateArchipelagoMap(size: number, seed?: number, playerCount: number = 2): ArchipelagoMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new ArchRng(actualSeed);
+  const noise = new ArchNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+  const offsets = [-0.5, 0, 0.5];
+
+  // ── Step 1: Place islands ──
+  const islands: ArchIsland[] = [];
+  const BASE_INSET = 6;
+
+  // Home islands at corners
+  const homePositions = [
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },
+    { q: BASE_INSET, r: BASE_INSET },
+    { q: size - 1 - BASE_INSET, r: size - 1 - BASE_INSET },
+  ];
+  for (let i = 0; i < playerCount; i++) {
+    islands.push({
+      center: homePositions[i],
+      radius: rng.range(6, 8),
+      elevation: 4,
+      type: 'home',
+      resources: [ResourceType.WOOD, ResourceType.FOOD, ResourceType.STONE],
+    });
+  }
+
+  // Large resource islands — placed between players with good separation
+  const center = Math.floor(size / 2);
+  const largeCount = rng.range(2, 3);
+  for (let i = 0; i < largeCount; i++) {
+    const angle = (i / largeCount) * Math.PI * 2 + rng.next() * 0.5;
+    const dist = size * 0.18 + rng.next() * size * 0.1;
+    const lq = center + Math.round(Math.cos(angle) * dist);
+    const lr = center + Math.round(Math.sin(angle) * dist);
+    if (lq < 3 || lr < 3 || lq >= size - 3 || lr >= size - 3) continue;
+    islands.push({
+      center: { q: lq, r: lr },
+      radius: rng.range(5, 7),
+      elevation: rng.range(4, 6),
+      type: 'large',
+      resources: [ResourceType.IRON, ResourceType.CRYSTAL, ResourceType.STONE, ResourceType.WOOD],
+    });
+  }
+
+  // Medium islands scattered around
+  const medCount = rng.range(5, 8);
+  for (let i = 0; i < medCount; i++) {
+    const mq = rng.range(5, size - 6);
+    const mr = rng.range(5, size - 6);
+    const tooClose = islands.some(isl => {
+      const d = Math.sqrt((mq - isl.center.q) ** 2 + (mr - isl.center.r) ** 2);
+      return d < isl.radius + 5;
+    });
+    if (tooClose) continue;
+    const resPool: ResourceType[][] = [
+      [ResourceType.WOOD, ResourceType.FOOD],
+      [ResourceType.GOLD, ResourceType.STONE],
+      [ResourceType.IRON, ResourceType.WOOD],
+      [ResourceType.CRYSTAL, ResourceType.STONE],
+      [ResourceType.FOOD, ResourceType.GOLD],
+    ];
+    islands.push({
+      center: { q: mq, r: mr },
+      radius: rng.range(3, 5),
+      elevation: rng.range(3, 5),
+      type: 'medium',
+      resources: resPool[i % resPool.length],
+    });
+  }
+
+  // Small islands and reef clusters
+  const smallCount = rng.range(6, 10);
+  for (let i = 0; i < smallCount; i++) {
+    const sq = rng.range(3, size - 4);
+    const sr = rng.range(3, size - 4);
+    const tooClose = islands.some(isl => {
+      const d = Math.sqrt((sq - isl.center.q) ** 2 + (sr - isl.center.r) ** 2);
+      return d < isl.radius + 3;
+    });
+    if (tooClose) continue;
+    const isReef = rng.next() < 0.3;
+    islands.push({
+      center: { q: sq, r: sr },
+      radius: isReef ? rng.range(2, 3) : rng.range(1, 3),
+      elevation: isReef ? 1 : rng.range(2, 3),
+      type: isReef ? 'reef' : 'small',
+      resources: isReef ? [ResourceType.GOLD] : [ResourceType.FOOD, ResourceType.STONE],
+    });
+  }
+
+  // ── Step 2: Fill ocean tiles ──
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const key = `${q},${r}`;
+      // Ocean: water tile with blue water blocks
+      const blocks: VoxelBlock[] = [];
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          blocks.push({
+            localPosition: { x: lx, y: 0, z: lz },
+            type: BlockType.WATER,
+            health: 100, maxHealth: 100,
+          });
+        }
+      }
+      tiles.set(key, {
+        position: { q, r },
+        terrain: TerrainType.WATER,
+        elevation: 1,
+        walkableFloor: 1,
+        resource: null,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: false, heightMap: [[1]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 3: Stamp islands onto ocean ──
+  for (const island of islands) {
+    const { center: ic, radius, elevation } = island;
+
+    for (let dq = -radius - 2; dq <= radius + 2; dq++) {
+      for (let dr = -radius - 2; dr <= radius + 2; dr++) {
+        const q = ic.q + dq;
+        const r = ic.r + dr;
+        if (q < 0 || r < 0 || q >= size || r >= size) continue;
+
+        const dist = Math.sqrt(dq * dq + dr * dr);
+        const edgeNoise = noise.fbm(q * 0.3 + 50, r * 0.3 + 50, 2);
+        const effectiveRadius = radius * (0.8 + edgeNoise * 0.4);
+
+        if (dist > effectiveRadius + 1.5) continue; // beyond reef zone
+
+        const key = `${q},${r}`;
+        const edgeFactor = dist / effectiveRadius;
+
+        // Terrain zone noise
+        const hillNoise = noise.fbm(q * 0.15, r * 0.15, 3);
+        const jungleNoise = noise.fbm(q * 0.2 + 100, r * 0.2 + 100, 2);
+
+        let tileElev = elevation + Math.round(hillNoise * 2 - 0.5);
+        let terrain = TerrainType.JUNGLE;
+        let topBlock = BlockType.TROPICAL_GRASS;
+        let subBlock = BlockType.DIRT;
+        let resource: ResourceType | null = null;
+
+        if (island.type === 'reef' || (dist > effectiveRadius && dist <= effectiveRadius + 1.5)) {
+          // ── Coral reef: shallow water with coral blocks ──
+          terrain = TerrainType.WATER;
+          tileElev = 1;
+          topBlock = BlockType.CORAL;
+          subBlock = BlockType.SAND;
+          if (rng.next() < 0.15) resource = ResourceType.GOLD;
+        } else if (edgeFactor > 0.7) {
+          // ── Beach ring: sandy shoreline ──
+          terrain = TerrainType.DESERT;
+          tileElev = Math.max(2, elevation - 1);
+          topBlock = BlockType.SAND;
+          subBlock = BlockType.SAND;
+          if (rng.next() < 0.06) resource = ResourceType.GOLD;
+          if (rng.next() < 0.05) resource = ResourceType.FOOD;
+        } else if (hillNoise > 0.65 && edgeFactor < 0.5 && island.type !== 'small') {
+          // ── Mountain peak: rocky interior ──
+          terrain = TerrainType.MOUNTAIN;
+          tileElev = elevation + 2 + Math.round(hillNoise * 2);
+          topBlock = BlockType.STONE;
+          subBlock = BlockType.STONE;
+          if (island.resources.includes(ResourceType.CRYSTAL) && rng.next() < 0.12) {
+            resource = ResourceType.CRYSTAL;
+          } else if (island.resources.includes(ResourceType.IRON) && rng.next() < 0.15) {
+            resource = ResourceType.IRON;
+          } else if (rng.next() < 0.08) {
+            resource = ResourceType.STONE;
+          }
+        } else if (jungleNoise > 0.45 && edgeFactor < 0.65) {
+          // ── Dense jungle: tall trees, wood ──
+          terrain = TerrainType.JUNGLE;
+          topBlock = BlockType.TROPICAL_GRASS;
+          subBlock = BlockType.DIRT;
+          if (island.resources.includes(ResourceType.WOOD) && rng.next() < 0.15) {
+            resource = ResourceType.WOOD;
+          }
+        } else {
+          // ── Tropical clearing: grass plains ──
+          terrain = TerrainType.PLAINS;
+          topBlock = BlockType.TROPICAL_GRASS;
+          subBlock = BlockType.DIRT;
+          if (island.resources.includes(ResourceType.FOOD) && rng.next() < 0.12) {
+            resource = ResourceType.FOOD;
+          }
+        }
+
+        tileElev = Math.max(1, Math.min(tileElev, 12));
+
+        // ── Build voxel column ──
+        const blocks: VoxelBlock[] = [];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = 0; y < tileElev; y++) {
+              let blockType: BlockType;
+              if (terrain === TerrainType.WATER) {
+                // Reef: coral on top, sand below
+                blockType = y === tileElev - 1 ? topBlock : subBlock;
+              } else if (y === tileElev - 1) {
+                blockType = topBlock;
+              } else if (y >= tileElev - 3) {
+                blockType = subBlock;
+              } else {
+                blockType = BlockType.STONE;
+              }
+              blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: blockType, health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+
+        // ── Inject ore veins ──
+        if (resource === ResourceType.IRON) {
+          for (const b of blocks) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tileElev - 2 && rng.next() < 0.25) {
+              b.type = BlockType.IRON;
+            }
+          }
+        }
+        if (resource === ResourceType.CRYSTAL) {
+          for (const b of blocks) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tileElev - 1 && rng.next() < 0.20) {
+              b.type = BlockType.CRYSTAL;
+            }
+          }
+        }
+
+        tiles.set(key, {
+          position: { q, r },
+          terrain,
+          elevation: tileElev,
+          walkableFloor: tileElev,
+          resource,
+          improvement: null,
+          unit: null,
+          owner: null,
+          voxelData: { blocks, destructible: terrain !== TerrainType.WATER, heightMap: [[tileElev]] },
+          visible: true,
+          explored: true,
+        });
+      }
+    }
+  }
+
+  // ── Step 4: Sand bar bridges so units can traverse between islands ──
+  // Connect each home island to its nearest non-home island,
+  // then connect large/medium islands to each other to form a traversable network.
+  const bridged = new Set<string>();
+
+  function bridgeKey(a: number, b: number): string {
+    return a < b ? `${a}-${b}` : `${b}-${a}`;
+  }
+
+  function stampBridge(fromIsland: ArchIsland, toIsland: ArchIsland): void {
+    const fq = fromIsland.center.q;
+    const fr = fromIsland.center.r;
+    const tq = toIsland.center.q;
+    const tr = toIsland.center.r;
+    const dist = Math.sqrt((tq - fq) ** 2 + (tr - fr) ** 2);
+    const steps = Math.ceil(dist);
+
+    for (let s = 0; s <= steps; s++) {
+      const t = s / steps;
+      const bq = Math.round(fq + (tq - fq) * t);
+      const br = Math.round(fr + (tr - fr) * t);
+      if (bq < 0 || br < 0 || bq >= size || br >= size) continue;
+
+      // Wobble the path slightly for natural look
+      const wobble = Math.sin(s * 0.7 + actualSeed * 0.01) * 0.8;
+      const perpQ = -(tr - fr) / dist;
+      const perpR = (tq - fq) / dist;
+      const wq = Math.round(bq + perpQ * wobble);
+      const wr = Math.round(br + perpR * wobble);
+
+      // Stamp a 1-2 tile wide sand bar at this position
+      for (const [dq, dr] of [[0, 0], [1, 0], [0, 1], [-1, 0], [0, -1]] as [number, number][]) {
+        const sq = (dq === 0 && dr === 0) ? wq : wq + dq;
+        const sr = (dq === 0 && dr === 0) ? wr : wr + dr;
+        if (sq < 0 || sr < 0 || sq >= size || sr >= size) continue;
+
+        // Only place bridge on water tiles (don't overwrite island terrain)
+        const key = `${sq},${sr}`;
+        const existing = tiles.get(key);
+        if (!existing || existing.terrain !== TerrainType.WATER) continue;
+
+        // Skip outer ring of the path to keep it narrow (only center + cardinal neighbors at 50% chance)
+        if (dq !== 0 || dr !== 0) {
+          if (rng.next() > 0.5) continue;
+        }
+
+        const bridgeElev = 2;
+        const blocks: VoxelBlock[] = [];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = 0; y < bridgeElev; y++) {
+              blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: BlockType.SAND,
+                health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+        tiles.set(key, {
+          position: { q: sq, r: sr },
+          terrain: TerrainType.DESERT, // walkable sand
+          elevation: bridgeElev,
+          walkableFloor: bridgeElev,
+          resource: null,
+          improvement: null,
+          unit: null,
+          owner: null,
+          voxelData: { blocks, destructible: true, heightMap: [[bridgeElev]] },
+          visible: true,
+          explored: true,
+        });
+      }
+    }
+  }
+
+  // Connect each home island to its nearest non-home island
+  for (let i = 0; i < islands.length; i++) {
+    if (islands[i].type !== 'home') continue;
+    let bestDist = Infinity;
+    let bestIdx = -1;
+    for (let j = 0; j < islands.length; j++) {
+      if (i === j) continue;
+      if (islands[j].type === 'reef') continue; // don't bridge to tiny reefs
+      const d = Math.sqrt(
+        (islands[i].center.q - islands[j].center.q) ** 2 +
+        (islands[i].center.r - islands[j].center.r) ** 2
+      );
+      if (d < bestDist) { bestDist = d; bestIdx = j; }
+    }
+    if (bestIdx >= 0) {
+      const bk = bridgeKey(i, bestIdx);
+      if (!bridged.has(bk)) {
+        stampBridge(islands[i], islands[bestIdx]);
+        bridged.add(bk);
+      }
+    }
+  }
+
+  // Connect large/medium islands to their nearest neighbor for a traversable network
+  for (let i = 0; i < islands.length; i++) {
+    if (islands[i].type !== 'large' && islands[i].type !== 'medium') continue;
+    let bestDist = Infinity;
+    let bestIdx = -1;
+    for (let j = 0; j < islands.length; j++) {
+      if (i === j) continue;
+      if (islands[j].type === 'reef' || islands[j].type === 'small') continue;
+      const bk = bridgeKey(i, j);
+      if (bridged.has(bk)) continue;
+      const d = Math.sqrt(
+        (islands[i].center.q - islands[j].center.q) ** 2 +
+        (islands[i].center.r - islands[j].center.r) ** 2
+      );
+      if (d < bestDist) { bestDist = d; bestIdx = j; }
+    }
+    if (bestIdx >= 0 && bestDist < size * 0.6) {
+      const bk = bridgeKey(i, bestIdx);
+      if (!bridged.has(bk)) {
+        stampBridge(islands[i], islands[bestIdx]);
+        bridged.add(bk);
+      }
+    }
+  }
+
+  return {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.ARCHIPELAGO,
+    islands,
   };
 }

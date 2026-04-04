@@ -41,6 +41,8 @@ export interface Tile {
   tunnelFloorY?: number;
   /** Y level of the tunnel ceiling (only set if hasTunnel) */
   tunnelCeilingY?: number;
+  /** True if this tile is a rainbow bridge (Skyland map) */
+  isBridge?: boolean;
 }
 
 export interface VoxelData {
@@ -104,6 +106,22 @@ export enum BlockType {
   GEM_EMERALD = 'gem_emerald',
   GEM_SAPPHIRE = 'gem_sapphire',
   GEM_AMETHYST = 'gem_amethyst',
+  // Skyland-specific blocks
+  CLOUD = 'cloud',              // Soft white cloud block (island base filler)
+  PASTEL_GRASS = 'pastel_grass', // Soft pastel green surface
+  RAINBOW_BRIDGE = 'rainbow_bridge', // Prismatic bridge block
+  CREAM_STONE = 'cream_stone',  // Warm cream sub-surface
+  // Volcanic-specific blocks
+  BASALT = 'basalt',            // Dark volcanic rock (primary surface)
+  OBSIDIAN = 'obsidian',        // Glossy black volcanic glass
+  ASH = 'ash',                  // Grey volcanic ash surface
+  LAVA = 'lava',                // Molten lava (rivers/pools)
+  MAGMA = 'magma',              // Dark rock with glowing cracks
+  SCORCHED_EARTH = 'scorched_earth', // Burnt reddish-brown terrain
+  // Archipelago-specific blocks
+  CORAL = 'coral',              // Colourful reef block (shallow water)
+  TROPICAL_GRASS = 'tropical_grass', // Vibrant bright green island surface
+  PALM_WOOD = 'palm_wood',      // Warm tan palm tree wood
 }
 
 export enum ImprovementType {
@@ -255,6 +273,11 @@ export interface Unit {
   _axeThrowReady?: boolean;        // true = berserker has ranged axe throw available (range 7, resets to melee after use)
   _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)
   _chaseBoostUntil?: number;       // Timestamp until which berserker has chase speed boost
+
+  // --- Elevation transition state (set by UnitAI, read by renderer for organic movement) ---
+  _elevActive?: boolean;           // True while unit is in an elevation transition (Y is changing)
+  _elevGoingUp?: boolean;          // True = climbing, False = descending
+  _elevProgress?: number;          // 0→1 progress through the elevation transition window
 }
 
 export enum UnitType {
@@ -413,6 +436,9 @@ export enum MapType {
   ARCHIPELAGO = 'archipelago',
   FLATLAND = 'flatland',
   DESERT_TUNNELS = 'desert_tunnels',
+  VOLCANIC = 'volcanic',
+  TUNDRA = 'tundra',
+  SKYLAND = 'skyland',
 }
 
 export interface MapPreset {

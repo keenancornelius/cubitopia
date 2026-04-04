@@ -934,6 +934,8 @@ export class InputManager {
     // --- Terrain info: click on any tile when not in a special mode to see info ---
     this.container.addEventListener('click', (e) => {
       if (this.game.interaction.inModal || !this.game.currentMap) return;
+      // Skip if a box-select drag just finished — the click event fires after mouseup
+      if (SelectionManager.wasBoxSelecting) return;
 
       // Raycast against building meshes to detect building clicks
       const rect = this.container.getBoundingClientRect();
@@ -1082,6 +1084,17 @@ export class InputManager {
             }
           }
         }
+      }
+
+      // Check for any unit under cursor — show PIP unit tooltip (friendly + enemy)
+      const clickedUnit = this.game.selectionManager.findUnitUnderCursor(e, false);
+      if (clickedUnit) {
+        this.game.tooltipController.showUnitTooltip(clickedUnit, e.clientX, e.clientY);
+        // Hide the simpler HUD selection panel for single-unit clicks — the PIP tooltip is richer
+        if (clickedUnit.owner === 0) {
+          this.hud.hideSelectionInfo();
+        }
+        return;
       }
 
       const hex = this.mouseToHex(e);

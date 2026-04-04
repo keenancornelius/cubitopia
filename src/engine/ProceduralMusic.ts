@@ -34,8 +34,8 @@ export interface MusicGenre {
 export const MUSIC_GENRES: MusicGenre[] = [
   {
     id: 'fantasy',
-    label: 'Stoneguard',
-    description: 'Defensive builders — fortify, walls, and shieldbearers',
+    label: 'Ironveil',
+    description: 'Tanks, mages, and healers — outlast through steel and sorcery',
     color: '#7f8c8d',
     icon: '\uD83D\uDEE1\uFE0F',  // 🛡️
     folder: 'fantasy',

@@ -22,6 +22,8 @@ export class SelectionManager {
   static suppressNextClear = false;
   /** Suppress one left-click selection (used by attack-move) */
   static suppressNextClick = false;
+  /** True briefly after a box-select drag finishes — suppresses the click event that follows mouseup */
+  static wasBoxSelecting = false;
 
   // ── Control group / squad system ──
   // 5 squad slots mapped to A/S/D/F/G keys (indices 0-4)
@@ -134,6 +136,16 @@ export class SelectionManager {
     return !!ids && ids.length > 0;
   }
 
+  /** Append a unit to an existing control group without changing the current selection.
+   *  Creates the group if it doesn't exist. */
+  appendToControlGroup(slot: number, unit: Unit): void {
+    const ids = this.controlGroups.get(slot) ?? [];
+    if (!ids.includes(unit.id)) {
+      ids.push(unit.id);
+      this.controlGroups.set(slot, ids);
+    }
+  }
+
   private setupListeners(): void {
     let mouseDownTime = 0;
     let mouseDownPos = { x: 0, y: 0 };
@@ -186,6 +198,9 @@ export class SelectionManager {
           // Skip selection — attack-move consumed this click
         } else if (this.isBoxSelecting) {
           this.finishBoxSelect();
+          // Flag so the click event (which fires after mouseup) knows to skip tooltips
+          SelectionManager.wasBoxSelecting = true;
+          requestAnimationFrame(() => { SelectionManager.wasBoxSelecting = false; });
         } else {
           // Single click selection — pass the suppress-clear flag through
           if (!wasSupprClear) {
@@ -228,6 +243,11 @@ export class SelectionManager {
 
   /** Find the player unit closest to the mouse cursor */
   private unitUnderCursor(e: MouseEvent): Unit | null {
+    return this.findUnitUnderCursor(e, true);
+  }
+
+  /** Find any unit under cursor. If friendlyOnly=true, only player units. */
+  findUnitUnderCursor(e: MouseEvent, friendlyOnly = false): Unit | null {
     const raycaster = new THREE.Raycaster();
     const rect = this.canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -240,7 +260,8 @@ export class SelectionManager {
     let closestDist = 2.5;
 
     for (const unit of this.allUnits) {
-      if (unit.owner !== this.playerId) continue;
+      if (friendlyOnly && unit.owner !== this.playerId) continue;
+      if (unit.state === 'dead') continue;
       const unitWorldPos = new THREE.Vector3(
         unit.worldPosition.x,
         unit.worldPosition.y,

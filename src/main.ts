@@ -11,6 +11,7 @@ import { VoxelBuilder } from './engine/VoxelBuilder';
 import { UnitRenderer } from './engine/UnitRenderer';
 import { TileHighlighter } from './engine/TileHighlighter';
 import { TerrainDecorator } from './engine/TerrainDecorator';
+import { SkyCloudSystem } from './engine/SkyCloudSystem';
 import { MapGenerator } from './game/MapGenerator';
 import MapInitializer, { MapInitOps } from './game/MapInitializer';
 import { UnitFactory } from './game/entities/UnitFactory';
@@ -18,6 +19,7 @@ import { SelectionManager } from './game/systems/SelectionManager';
 import { UnitAI } from './game/systems/UnitAI';
 import { Pathfinder, tileKey } from './game/systems/Pathfinder';
 import { HUD } from './ui/HUD';
+import { injectUIThemeCSS, loadSavedSkin, setSkin } from './ui/UITheme';
 import { BaseRenderer } from './engine/BaseRenderer';
 import { CaptureZoneSystem } from './game/systems/CaptureZoneSystem';
 import type { CaptureEvent } from './game/systems/CaptureZoneSystem';
@@ -41,7 +43,7 @@ import { BaseUpgradeSystem } from './game/systems/BaseUpgradeSystem';
 import { PopulationSystem, FOOD_PER_COMBAT_UNIT, STARTING_FOOD } from './game/systems/PopulationSystem';
 import GarrisonSystem, { GarrisonOps } from './game/systems/GarrisonSystem';
 import RallyPointSystem, { RallyPointOps } from './game/systems/RallyPointSystem';
-import MenuController from './ui/MenuController';
+import MenuController, { type GameOverStats } from './ui/MenuController';
 import DebugController from './game/systems/DebugController';
 import SoundManager from './engine/SoundManager';
 import { ProceduralMusic, MusicMood } from './engine/ProceduralMusic';
@@ -55,6 +57,9 @@ import { InputManager } from './game/InputManager';
 import { InteractionStateMachine, InteractionState, InteractionCallbacks } from './game/InteractionStateMachine';
 import { GAME_CONFIG } from './game/GameConfig';
 import { GameRNG } from './game/SeededRandom';
+import { getPlayerColor, getPlayerHex, getPlayerCSS, PLAYER_COLORS, NEUTRAL_OWNER } from './game/PlayerConfig';
+import { MultiplayerController } from './network';
+import { MultiplayerUI } from './ui/MultiplayerUI';
 import {
   EngineConfig,
   CameraConfig,
@@ -120,6 +125,7 @@ class Cubitopia {
   private unitRenderer: UnitRenderer;
   private tileHighlighter: TileHighlighter;
   private terrainDecorator: TerrainDecorator;
+  private skyCloudSystem: SkyCloudSystem | null = null;
   // Torches removed for performance
   private selectionManager: SelectionManager;
   private hud: HUD;
@@ -134,8 +140,9 @@ class Cubitopia {
   private gameOver = false;
   // gameOverOverlay and mainMenuOverlay moved to MenuController
   private gameSpeed = 1;
-  private gameMode: 'pvai' | 'aivai' = 'pvai';
+  private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' = 'pvai';
   private mapType: MapType = MapType.STANDARD;
+  private playerCount: number = 2;
   // debugOverlayContainer + debugOverlayLabels moved to DebugOverlayRenderer
   private resourceManager!: ResourceManager;
   private buildingSystem!: BuildingSystem;
@@ -156,7 +163,7 @@ class Cubitopia {
   private _enemyResCache: any = null;
   private _aggroList: Array<{ attackerId: string; targetId: string }> | null = null;
   /** Accumulated kills from dead units — so team totals don't drop when a unit with kills dies */
-  private _deadUnitKills: [number, number] = [0, 0];
+  private _deadUnitKills: number[] = [0, 0];
   private _unitStatsPanelTimer = 0;
   private _selInfoTimer = 0;
   private _spawnQueueHudTimer = 0;
@@ -168,6 +175,8 @@ class Cubitopia {
   private _fpsDisplay = 0;
   // _deadCleanupTimer moved to LifecycleUpdater
   private garrisonSystem!: GarrisonSystem;
+  /** Per-building squad assignment: building hex key → squad slot (0-4) */
+  private buildingSquadAssignment: Map<string, number> = new Map();
   private rallyPointSystem!: RallyPointSystem;
   private menuController!: MenuController;
   private debugController!: DebugController;
@@ -175,6 +184,9 @@ class Cubitopia {
   private sound: SoundManager;
   private music: ProceduralMusic;
   private titleScene: TitleScene | null = null;
+  /** Phase 5B: Multiplayer controller (Firebase + WebRTC + matchmaking) */
+  readonly multiplayer = new MultiplayerController();
+  private multiplayerUI: MultiplayerUI | null = null;
   // _musicInitialized + _musicIntensityTimer moved into ProceduralMusic.updateFromGameState()
   private _buildingMeshScratch: THREE.Object3D[] | null = null;
   private _baseMeshScratch: THREE.Object3D[] | null = null;
@@ -185,6 +197,10 @@ class Cubitopia {
   private mapInitializer!: MapInitializer;
 
   constructor() {
+    injectUIThemeCSS();
+    // Apply saved UI skin preference
+    const savedSkin = loadSavedSkin();
+    if (savedSkin !== 'modern') setSkin(savedSkin);
     this.renderer = new Renderer(ENGINE_CONFIG);
     this.camera = new StrategyCamera(
       CAMERA_CONFIG,
@@ -193,7 +209,7 @@ class Cubitopia {
     this.voxelBuilder = new VoxelBuilder(this.renderer.scene);
     this.unitRenderer = new UnitRenderer(this.renderer.scene);
     this.baseRenderer = new BaseRenderer(this.renderer.scene);
-    this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene);
+    this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene, this.playerCount);
     this.tileHighlighter = new TileHighlighter(this.renderer.scene);
     this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
 
@@ -216,7 +232,7 @@ class Cubitopia {
       renderSquadIndicators: (squads, gameTime) => this.unitRenderer.updateSquadIndicators(squads, gameTime),
     });
     this.menuController = new MenuController({
-      onStartGame: (mode, mapType) => {
+      onStartGame: (mode: 'pvai' | 'aivai' | 'ffa' | '2v2', mapType: MapType) => {
         this.music.stopTitleMusic();
         this.music.resumeGameplay();
         this._stopTitleScene();
@@ -228,6 +244,13 @@ class Cubitopia {
       onPlayAgain: () => this.regenerateMap(),
       onGenreChanged: (genreId) => this.music.setGenre(genreId),
       onMenuShown: () => { this.hud.setVisible(false); this.music.playTitleMusic(); this._startTitleScene(); },
+      onMultiplayer: () => {
+        this.music.stopTitleMusic();
+        this._stopTitleScene();
+        this.initMultiplayerUI();
+        this.multiplayerUI!.showRegistration();
+      },
+      onSkinChanged: () => this.hud.refreshTheme(),
     });
 
     // Tutorial music — plays Tutorial.mp3 while help overlay is open
@@ -337,10 +360,11 @@ class Cubitopia {
       setFoodForPlayer: (pid, v) => { this.foodStockpile[pid] = v; },
       setPlayerFoodResource: (pid, v) => { this.players[pid].resources.food = v; },
       rebuildAllUnits: () => {
-        this.allUnits = [...this.players[0].units, ...this.players[1].units];
+        this.allUnits = this.players.flatMap(p => p.units);
         this.selectionManager.setPlayerUnits(this.allUnits, 0);
       },
       getArmyComposition: () => this.debugPanel.getArmyComposition(),
+      getPlayerCount: () => this.playerCount,
     };
     this.debugController = new DebugController(debugOps);
   }
@@ -1097,6 +1121,26 @@ class Cubitopia {
     };
   }
 
+  /** Initialize multiplayer UI (lazy — created on first use) */
+  private initMultiplayerUI(): void {
+    if (this.multiplayerUI) return;
+    this.multiplayerUI = new MultiplayerUI(this.multiplayer, {
+      onBackToMenu: () => {
+        this.menuController.showMainMenu();
+      },
+      onStartMultiplayerGame: (mapSeed, mapType, isGhost, opponentName, ghostDifficulty) => {
+        // TODO Phase 5D: Wire seed into map generator, start multiplayer match
+        this.hud.setVisible(true);
+        this.mapType = mapType;
+        this.gameMode = 'pvai'; // Multiplayer uses PvAI mode with networked/ghost AI
+        this.startNewGame();
+      },
+      onReturnToLobby: () => {
+        this.multiplayerUI!.showLobby();
+      },
+    });
+  }
+
   /** Rebuild systems after state reset (e.g. regenerateMap) */
   private initSystems(): void {
     const ctx = this.buildGameContext();
@@ -1163,20 +1207,23 @@ class Cubitopia {
       getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
       captureZone: (position) => this.captureZoneFromTooltip(position),
       attackTarget: (position) => this.attackTargetFromTooltip(position),
+      focusAttackUnit: (unitId, position) => this.focusAttackUnitFromTooltip(unitId, position),
       setRallyToPosition: (position) => this.setRallyToPositionFromTooltip(position),
       getGarrisonInfo: (structureKey) => {
-        const slot = this.garrisonSystem.getSlot(structureKey);
-        const cap = this.garrisonSystem.getCapacity(structureKey);
-        if (!cap) return null;
+        // Use network-wide pooling for gates (shows all garrisoned units
+        // across every connected gate/building in the wall network)
+        const netInfo = this.garrisonSystem.getNetworkInfo(structureKey);
+        if (netInfo.totalCapacity === 0 && netInfo.current === 0) return null;
         return {
-          units: slot?.units ?? [],
-          current: cap.current,
-          max: cap.max,
-          reachableExits: this.garrisonSystem.getReachableExits(structureKey),
+          units: netInfo.units,
+          current: netInfo.current,
+          max: netInfo.totalCapacity,
+          reachableExits: netInfo.reachableExits,
+          structureCount: netInfo.structureCount,
         };
       },
       ungarrisonStructure: (structureKey, exitKey?) => {
-        const released = this.garrisonSystem.ungarrison(structureKey, exitKey);
+        const released = this.garrisonSystem.ungarrisonNetwork(structureKey, exitKey);
         if (released.length > 0) {
           this.hud.showNotification(`🏰 ${released.length} unit(s) ungarrisoned`, '#e67e22');
         }
@@ -1198,6 +1245,111 @@ class Cubitopia {
       enterExitPickMode: (structureKey) => {
         this.interaction.enter({ kind: 'exit_pick', sourceKey: structureKey });
         this.hud.showNotification('Click a connected building or gate to choose exit point', '#8e44ad');
+      },
+      ungarrisonFiltered: (structureKey, unitTypes, exitKey?) => {
+        const released = this.garrisonSystem.ungarrisonNetworkFiltered(structureKey, unitTypes, exitKey);
+        if (released.length > 0) {
+          const typeStr = Array.from(new Set(released.map(u => u.type))).join(', ');
+          this.hud.showNotification(`🏰 ${released.length} ${typeStr} ungarrisoned`, '#e67e22');
+        }
+      },
+      demolishWall: (coord) => {
+        const key = `${coord.q},${coord.r}`;
+        if (!this.wallSystem.wallsBuilt.has(key)) return;
+        // Eject any garrison (shouldn't have any now, but safety)
+        this.garrisonSystem.onStructureDestroyed(key);
+        // Refund stone
+        const refund = GAME_CONFIG.defenses.wall.cost.stone;
+        this.stoneStockpile[0] += refund;
+        this.players[0].resources.stone += refund;
+        // Remove the wall
+        this.wallSystem.damageWall(coord, 9999);
+        this.garrisonSystem.markNetworkDirty();
+        this.hud.showNotification(`Wall demolished (+${refund} stone)`, '#c0392b');
+        this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+      },
+      demolishGate: (coord) => {
+        const key = `${coord.q},${coord.r}`;
+        if (!this.wallSystem.gatesBuilt.has(key)) return;
+        // Eject garrisoned units first
+        const ejected = this.garrisonSystem.onStructureDestroyed(key);
+        if (ejected.length > 0) {
+          this.hud.showNotification(`${ejected.length} unit(s) ejected from gate`, '#e67e22');
+        }
+        // Refund stone
+        const refund = GAME_CONFIG.defenses.gate.cost.stone;
+        this.stoneStockpile[0] += refund;
+        this.players[0].resources.stone += refund;
+        // Remove the gate
+        this.wallSystem.damageGate(coord, 9999);
+        this.garrisonSystem.markNetworkDirty();
+        this.hud.showNotification(`Gate demolished (+${refund} stone)`, '#c0392b');
+        this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+      },
+      getScene: () => this.renderer.scene,
+      setUnitStance: (unitId, stance) => {
+        const unit = this.allUnits.find(u => u.id === unitId);
+        if (unit) {
+          unit.stance = stance;
+          const label = stance === UnitStance.PASSIVE ? 'Passive' :
+                        stance === UnitStance.DEFENSIVE ? 'Defensive' : 'Aggressive';
+          this.hud.showNotification(`${unit.type} → ${label}`, '#3498db');
+        }
+      },
+      killUnit: (unitId) => {
+        const unit = this.allUnits.find(u => u.id === unitId);
+        if (unit) {
+          unit.state = UnitState.DEAD;
+          unit.currentHealth = 0;
+          this.removeUnitFromGame(unit);
+          this.hud.showNotification(`Killed ${unit.type}`, '#8e44ad');
+        }
+      },
+      // ── Squad assignment ops ──
+      getSquadSlots: () => {
+        const SQUAD_LABELS = ['A', 'S', 'D', 'F', 'G'];
+        const result = new Map<number, { label: string; unitCount: number }>();
+        for (let slot = 0; slot < 5; slot++) {
+          if (this.selectionManager.hasControlGroup(slot)) {
+            // Count living units in this squad
+            const units = this.allUnits.filter(u =>
+              u.owner === 0 && u._squadId === slot && u.currentHealth > 0
+            );
+            result.set(slot, {
+              label: SQUAD_LABELS[slot],
+              unitCount: units.length,
+            });
+          }
+        }
+        return result;
+      },
+      getBuildingSquadAssignment: (buildingHexKey) => {
+        return this.buildingSquadAssignment.get(buildingHexKey) ?? null;
+      },
+      assignBuildingToSquad: (buildingHexKey, squadSlot) => {
+        if (squadSlot == null) {
+          this.buildingSquadAssignment.delete(buildingHexKey);
+          this.hud.showNotification('Squad assignment cleared', '#888');
+        } else {
+          this.buildingSquadAssignment.set(buildingHexKey, squadSlot);
+          const label = ['A', 'S', 'D', 'F', 'G'][squadSlot] ?? `${squadSlot}`;
+          this.hud.showNotification(`Building → Squad ${label}`, '#4fc3f7');
+        }
+      },
+      createSquadForBuilding: (buildingHexKey) => {
+        // Find the first unused squad slot (0-4)
+        for (let slot = 0; slot < 5; slot++) {
+          if (!this.selectionManager.hasControlGroup(slot)) {
+            // Create an empty control group — it'll be populated as units spawn
+            this.selectionManager.assignControlGroup(slot, [], false);
+            this.buildingSquadAssignment.set(buildingHexKey, slot);
+            const label = ['A', 'S', 'D', 'F', 'G'][slot];
+            this.hud.showNotification(`Squad ${label} created — building assigned`, '#4fc3f7');
+            return slot;
+          }
+        }
+        this.hud.showNotification('All 5 squad slots are in use!', '#e74c3c');
+        return null;
       },
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
@@ -1275,6 +1427,9 @@ class Cubitopia {
     // Wire tactical group manager to AI controller
     this.aiController.setTacticalGroupManager(this.tacticalGroupManager);
 
+    // Ensure AI has state entries for all players
+    this.aiController.ensurePlayerCount(this.playerCount);
+
     // Combat event handler
     this.combatEventHandler = new CombatEventHandler({
       getPlayers: () => this.players,
@@ -1289,11 +1444,13 @@ class Cubitopia {
       showDamageEffect: (wp) => this.unitRenderer.showDamageEffect(wp),
       flashUnit: (id, dur) => this.unitRenderer.flashUnit(id, dur),
       queueDeferredEffect: (delay, cb) => this.unitRenderer.queueDeferredEffect(delay, cb),
+      resetAttackAnim: (id) => this.unitRenderer.resetAttackAnim(id),
       fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
       fireDeflectedArrow: (from, to, id, cb) => this.unitRenderer.fireDeflectedArrow(from, to, id, cb),
       fireMagicOrb: (from, to, color, id, splash, cb) => this.unitRenderer.fireMagicOrb(from, to, color, id, splash, cb),
       fireLightningBolt: (from, to, id, cb) => this.unitRenderer.fireLightningBolt(from, to, id, cb),
       fireLightningChain: (from, to, id) => this.unitRenderer.fireLightningChain(from, to, id),
+      fireKamehamehaBeam: (from, to, piercedPositions) => this.unitRenderer.fireKamehamehaBeam(from, to, piercedPositions),
       spawnElectrocuteEffect: (id) => this.unitRenderer.spawnElectrocuteEffect(id),
       fireFlamethrower: (from, to, id, cb) => this.unitRenderer.fireFlamethrower(from, to, id, cb),
       fireStoneColumn: (from, to, id, cb) => this.unitRenderer.fireStoneColumn(from, to, id, cb),
@@ -1307,6 +1464,7 @@ class Cubitopia {
       getElementOrbColor: (element) => UnitRenderer.elementOrbColor(element),
       fireAxeThrow: (from, to, id, cb) => this.unitRenderer.fireAxeThrow(from, to, id, cb),
       spawnDeflectedAxe: (pos) => this.unitRenderer.spawnDeflectedAxe(pos),
+      spawnOgreGroundPound: (pos) => this.unitRenderer.spawnOgreGroundPound(pos),
       fireHealOrb: (from, to, id, cb) => this.unitRenderer.fireHealOrb(from, to, id, cb),
       applyHeal: (healerId, targetId) => {
         const healer = this.players.flatMap(p => p.units).find(u => u.id === healerId);
@@ -1329,8 +1487,8 @@ class Cubitopia {
       damageWall: (pos, dmg) => this.wallSystem.damageWall(pos, dmg),
       isGateAt: (key) => this.wallSystem.gatesBuilt.has(key),
       onStructureDestroyed: (key) => this.garrisonSystem.onStructureDestroyed(key),
-      handleBuildWall: (unit, pos) => this.wallSystem.handleBuildWall(unit, pos),
-      handleBuildGate: (unit, pos) => this.wallSystem.handleBuildGate(unit, pos),
+      handleBuildWall: (unit, pos) => { this.wallSystem.handleBuildWall(unit, pos); this.garrisonSystem.markNetworkDirty(); },
+      handleBuildGate: (unit, pos) => { this.wallSystem.handleBuildGate(unit, pos); this.garrisonSystem.markNetworkDirty(); },
       handleChopWood: (unit, pos) => this.handleChopWood(unit, pos),
       handleWoodDeposit: (unit) => this.resourceManager.handleWoodDeposit(unit),
       handleMineTerrain: (unit, pos) => this.handleMineTerrain(unit, pos),
@@ -1345,6 +1503,16 @@ class Cubitopia {
       handleFoodDeposit: (unit) => this.resourceManager.handleFoodDeposit(unit),
       isPlayerGateBlueprint: (key) => UnitAI.playerGateBlueprint.has(key),
       handleConstructTick: (unit, buildingId, amount) => this.handleConstructTick(unit, buildingId, amount),
+      // Trade routes
+      getBases: () => this.bases,
+      getPrimaryBasePosition: (owner) => UnitAI.basePositions.get(owner),
+      addTradeGold: (owner, amount) => {
+        this.goldStockpile[owner] += amount;
+        this.players[owner].resources.gold += amount;
+        if (owner === 0) {
+          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        }
+      },
     });
 
     // Spawn queue system
@@ -1400,6 +1568,20 @@ class Cubitopia {
         this.foodStockpile[owner] = v;
         this.players[owner].resources.food = v;
       },
+      getFoodNeededForNext: (owner) => {
+        if (this.populationSystem) return this.populationSystem.getFoodNeededForNext(owner);
+        return 0;
+      },
+      getBuildingSquadAssignment: (buildingHexKey) => {
+        return this.buildingSquadAssignment.get(buildingHexKey) ?? null;
+      },
+      assignUnitToSquad: (unit, squadSlot) => {
+        // Tag the unit with the squad ID so SquadIndicatorSystem picks it up
+        unit._squadId = squadSlot;
+        unit._squadJoining = true;
+        // Append to the control group without disrupting current selection
+        this.selectionManager.appendToControlGroup(squadSlot, unit);
+      },
     });
 
     // Base Upgrade System — checks tier requirements (population + unique buildings)
@@ -1426,6 +1608,15 @@ class Cubitopia {
     this.populationSystem = new PopulationSystem({
       getFoodStockpile: (owner) => this.foodStockpile[owner] ?? 0,
       getAllUnits: () => this.allUnits,
+      getBaseTier: (owner) => {
+        let maxTier = 0;
+        for (const base of this.bases) {
+          if (base.owner === owner && !base.destroyed && base.tier > maxTier) {
+            maxTier = base.tier;
+          }
+        }
+        return maxTier;
+      },
     });
 
     // Map Initializer — handles map generation and setup
@@ -1499,22 +1690,24 @@ class Cubitopia {
     this.players = [];
     this.bases = [];
     this.gameOver = false;
-    this.woodStockpile = [30, 30]; // Start with some wood so players can build immediately
-    this.stoneStockpile = [0, 0];
-    this.goldStockpile = [0, 0];
-    this.foodStockpile = [0, 0];
-    this.grassFiberStockpile = [0, 0];
-    this.clayStockpile = [0, 0];
-    this.ropeStockpile = [0, 0];
-    this.ironStockpile = [0, 0];
-    this.charcoalStockpile = [0, 0];
-    this.steelStockpile = [0, 0];
-    this.crystalStockpile = [0, 0];
+    const _n = this.playerCount;
+    this.woodStockpile = Array(_n).fill(30); // Start with some wood so players can build immediately
+    this.stoneStockpile = Array(_n).fill(0);
+    this.goldStockpile = Array(_n).fill(0);
+    this.foodStockpile = Array(_n).fill(GAME_CONFIG.population.startingFood);
+    this.grassFiberStockpile = Array(_n).fill(0);
+    this.clayStockpile = Array(_n).fill(0);
+    this.ropeStockpile = Array(_n).fill(0);
+    this.ironStockpile = Array(_n).fill(0);
+    this.charcoalStockpile = Array(_n).fill(0);
+    this.steelStockpile = Array(_n).fill(0);
+    this.crystalStockpile = Array(_n).fill(0);
     this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
     // Clear rally point system
     this.rallyPointSystem.clearAllRallyPoints();
+    this.buildingSquadAssignment.clear();
     // Clear all interaction modes via state machine
     this.interaction.clear();
 
@@ -1530,14 +1723,14 @@ class Cubitopia {
     this.tooltipController.cleanup();
     this.spawnQueueSystem.cleanup();
     this.garrisonSystem.cleanup();
-    this.foodStockpile = [10, 10];
-    this.stoneStockpile = [0, 0];
-    this.grassFiberStockpile = [0, 0];
-    this.clayStockpile = [0, 0];
-    this.ropeStockpile = [0, 0];
-    this.ironStockpile = [0, 0];
-    this.charcoalStockpile = [0, 0];
-    this.steelStockpile = [0, 0];
+    this.foodStockpile = Array(this.playerCount).fill(GAME_CONFIG.population.startingFood);
+    this.stoneStockpile = Array(this.playerCount).fill(0);
+    this.grassFiberStockpile = Array(this.playerCount).fill(0);
+    this.clayStockpile = Array(this.playerCount).fill(0);
+    this.ropeStockpile = Array(this.playerCount).fill(0);
+    this.ironStockpile = Array(this.playerCount).fill(0);
+    this.charcoalStockpile = Array(this.playerCount).fill(0);
+    this.steelStockpile = Array(this.playerCount).fill(0);
     // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
     UnitAI.playerGrassBlueprint.clear();
@@ -1639,6 +1832,141 @@ class Cubitopia {
     this.startNewGame();
   }
 
+  /** Override scene lighting/fog/sky for the dreamy Skyland aesthetic */
+  private applySkylandAtmosphere(): void {
+    const scene = this.renderer.scene;
+
+    // Bright pastel sky gradient background
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#87ceeb');   // sky blue zenith
+    gradient.addColorStop(0.3, '#b0e0e6'); // powder blue
+    gradient.addColorStop(0.55, '#ffe4f0'); // soft pink
+    gradient.addColorStop(0.75, '#fff8dc'); // cornsilk warm
+    gradient.addColorStop(0.9, '#fffaf0');  // floral white horizon
+    gradient.addColorStop(1, '#fff0f5');    // lavender blush
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = tex;
+
+    // Soft light fog instead of dark space fog
+    scene.fog = new THREE.FogExp2(0xf0e8ff, 0.004); // very light lavender, gentle density
+
+    // Brighten ambient light
+    scene.traverse((child) => {
+      if (child instanceof THREE.AmbientLight) {
+        child.color.set(0xfff8ff); // warm white-pink
+        child.intensity = 0.7;     // brighter ambient
+      }
+      if (child instanceof THREE.DirectionalLight && child.castShadow) {
+        child.color.set(0xfffae8); // warm golden sun
+        child.intensity = 1.8;     // slightly softer than default 2.2
+      }
+    });
+  }
+
+  private applyVolcanicAtmosphere(): void {
+    const scene = this.renderer.scene;
+
+    // Dark apocalyptic sky gradient — deep red to smoky black
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#1a0505');   // near-black smoky zenith
+    gradient.addColorStop(0.2, '#2a0a08'); // very dark red
+    gradient.addColorStop(0.4, '#4a1510'); // dark crimson
+    gradient.addColorStop(0.6, '#6a2015'); // deep volcanic red
+    gradient.addColorStop(0.8, '#8a3020'); // glowing horizon red
+    gradient.addColorStop(1, '#aa4422');   // bright ember horizon
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = tex;
+
+    // Heavy dark smoke/ember fog
+    scene.fog = new THREE.FogExp2(0x1a0808, 0.006);
+
+    // Harsh volcanic lighting
+    scene.traverse((child) => {
+      if (child instanceof THREE.AmbientLight) {
+        child.color.set(0x4a2020); // dim reddish ambient
+        child.intensity = 0.5;
+      }
+      if (child instanceof THREE.DirectionalLight && child.castShadow) {
+        child.color.set(0xff6030); // fiery orange-red sun
+        child.intensity = 2.5;    // harsh directional
+      }
+    });
+  }
+
+  private applyArchipelagoAtmosphere(): void {
+    const scene = this.renderer.scene;
+
+    // Bright tropical sky — vivid blue to warm horizon
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#1e90ff');   // dodger blue zenith
+    gradient.addColorStop(0.3, '#40b4ff'); // bright sky blue
+    gradient.addColorStop(0.55, '#87ceeb'); // light sky blue
+    gradient.addColorStop(0.75, '#b0e8f0'); // pale cyan
+    gradient.addColorStop(0.9, '#ffe4b0');  // warm golden horizon
+    gradient.addColorStop(1, '#ffd080');    // sunset gold
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = tex;
+
+    // Light oceanic haze
+    scene.fog = new THREE.FogExp2(0xc0e8f8, 0.003);
+
+    // Bright warm tropical lighting
+    scene.traverse((child) => {
+      if (child instanceof THREE.AmbientLight) {
+        child.color.set(0xf0f8ff); // cool white ambient
+        child.intensity = 0.75;
+      }
+      if (child instanceof THREE.DirectionalLight && child.castShadow) {
+        child.color.set(0xfff5e0); // warm sunlight
+        child.intensity = 2.0;
+      }
+    });
+
+    // ── Ocean plane: visible turquoise water between islands ──
+    const oldOcean = scene.getObjectByName('ocean-plane');
+    if (oldOcean) {
+      scene.remove(oldOcean);
+      if (oldOcean instanceof THREE.Mesh) {
+        oldOcean.geometry.dispose();
+        (oldOcean.material as THREE.Material).dispose();
+      }
+    }
+    const oceanSize = 120; // plenty to cover 50x50 map
+    const oceanGeo = new THREE.PlaneGeometry(oceanSize, oceanSize);
+    const oceanMat = new THREE.MeshLambertMaterial({
+      color: 0x30b8d8,       // bright tropical turquoise
+      transparent: true,
+      opacity: 0.85,
+    });
+    const oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
+    oceanMesh.rotation.x = -Math.PI / 2;
+    oceanMesh.position.set(25, 0.6, 25); // center of 50x50 map, just below surface
+    oceanMesh.name = 'ocean-plane';
+    oceanMesh.receiveShadow = true;
+    scene.add(oceanMesh);
+  }
+
   private setupResizeHandler(): void {
     window.addEventListener('resize', () => {
       this.renderer.resize(window.innerWidth, window.innerHeight);
@@ -1688,11 +2016,34 @@ class Cubitopia {
   startNewGame(): void {
     const isArena = this.mapType === MapType.ARENA;
 
+    // Determine player count from game mode
+    this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
+
+    // Ensure AI and capture systems are sized for the player count
+    this.aiController.ensurePlayerCount(this.playerCount);
+    this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene, this.playerCount);
+
+    // Apply map-specific decoration modes BEFORE setupMap so decorateTile uses correct mode
+    this.terrainDecorator.desertMode = false;
+    this.terrainDecorator.skylandMode = false;
+    this.terrainDecorator.volcanicMode = false;
+    this.terrainDecorator.archipelagoMode = false;
+    if (this.mapType === MapType.DESERT_TUNNELS) {
+      this.terrainDecorator.desertMode = true;
+    } else if (this.mapType === MapType.SKYLAND) {
+      this.terrainDecorator.skylandMode = true;
+    } else if (this.mapType === MapType.VOLCANIC) {
+      this.terrainDecorator.volcanicMode = true;
+    } else if (this.mapType === MapType.ARCHIPELAGO) {
+      this.terrainDecorator.archipelagoMode = true;
+    }
+
     // Step 1: Initialize map (terrain, bases, decorations)
-    const mapSetupResult = this.mapInitializer.setupMap(this.mapType, this.gameMode, isArena);
+    const mapSetupResult = this.mapInitializer.setupMap(this.mapType, this.gameMode, isArena, this.playerCount);
     const map = mapSetupResult.map;
     const MAP_SIZE = mapSetupResult.mapSize;
     const bases = mapSetupResult.bases;
+    const baseCoords = mapSetupResult.baseCoords;
     const p1BaseCoord = mapSetupResult.p1BaseCoord;
     const p2BaseCoord = mapSetupResult.p2BaseCoord;
     const midR = Math.floor(MAP_SIZE / 2);
@@ -1705,13 +2056,21 @@ class Cubitopia {
 
     this.currentMap = map;
     this.bases = bases;
-    this._deadUnitKills = [0, 0];
+    this._deadUnitKills = Array(this.playerCount).fill(0);
 
-    // Apply arena decoration mode if needed
-    if (isArena) {
-      this.terrainDecorator.desertMode = false;
-    } else if (this.mapType === MapType.DESERT_TUNNELS) {
-      this.terrainDecorator.desertMode = true;
+    // Skyland: create cloud void plane instead of ocean
+    if (this.skyCloudSystem) {
+      this.skyCloudSystem.dispose();
+      this.skyCloudSystem = null;
+    }
+    if (this.mapType === MapType.SKYLAND) {
+      this.skyCloudSystem = new SkyCloudSystem(this.renderer.scene);
+      this.skyCloudSystem.build(MAP_SIZE);
+      this.applySkylandAtmosphere();
+    } else if (this.mapType === MapType.VOLCANIC) {
+      this.applyVolcanicAtmosphere();
+    } else if (this.mapType === MapType.ARCHIPELAGO) {
+      this.applyArchipelagoAtmosphere();
     }
 
     // --- Spawn Units ---
@@ -1722,12 +2081,22 @@ class Cubitopia {
       : { food: 50, wood: 50, stone: 20, iron: 0, gold: 25, crystal: 0, grass_fiber: 0, clay: 0, rope: 0, charcoal: 0, steel: 0 };
 
     const p1IsAI = this.gameMode === 'aivai';
-    this.players = [
-      { id: 0, name: p1IsAI ? 'AI Blue' : 'Player 1', color: new THREE.Color(0x3498db), cities: [], units: [],
-        resources: makeResources(), technology: [], isAI: p1IsAI, defeated: false },
-      { id: 1, name: 'AI Opponent', color: new THREE.Color(0xe74c3c), cities: [], units: [],
-        resources: makeResources(), technology: [], isAI: true, defeated: false },
-    ];
+    const colorNames = ['Blue', 'Red', 'Green', 'Gold'];
+    this.players = [];
+    for (let i = 0; i < this.playerCount; i++) {
+      const pc = getPlayerColor(i);
+      const isHuman = (i === 0 && !p1IsAI);
+      this.players.push({
+        id: i,
+        name: isHuman ? 'Player 1' : `AI ${colorNames[i] ?? i}`,
+        color: new THREE.Color(pc.primary),
+        cities: [], units: [],
+        resources: makeResources(),
+        technology: [],
+        isAI: !isHuman,
+        defeated: false,
+      });
+    }
 
     if (isArena) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
@@ -1747,7 +2116,7 @@ class Cubitopia {
 
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
         const defs = owner === 0 ? blueArmyDefs : redArmyDefs;
-        const dir = owner === 0 ? 1 : -1; // toward center
+        const dir = baseQ < arenaCenter ? 1 : baseQ > arenaCenter ? -1 : (baseR < arenaCenter ? 1 : -1); // toward center
 
         // Flatten defs into individual units and sort by role depth (front first)
         const units: { type: UnitType; depth: number }[] = [];
@@ -1787,47 +2156,42 @@ class Cubitopia {
           this.unitRenderer.addUnit(unit, this.getElevation(pos));
         }
       };
-      // Spawn armies AT their bases — maximum separation across arena
-      // Base offset 8 (near wall, 3 hexes from wall ring at radius 11)
+      // Spawn armies AT their bases — use actual base coordinates for symmetry
       // Units spread inward from base toward center
-      const arenaBaseOffset = 8;
-      spawnArmy(0, arenaCenter - arenaBaseOffset, arenaCenter);
-      spawnArmy(1, arenaCenter + arenaBaseOffset, arenaCenter);
-    } else {
-      // Standard mode: workers near base
-      const p1Defs = [
-        { type: UnitType.BUILDER, pq: P1_Q + 2, pr: P1_R },
-        { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R - 2 },
-        { type: UnitType.LUMBERJACK, pq: P1_Q + 2, pr: P1_R + 2 },
-        { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R - 4 },
-        { type: UnitType.VILLAGER, pq: P1_Q + 2, pr: P1_R + 4 },
-      ];
-      for (const def of p1Defs) {
-        const pos = this.findSpawnTile(map, def.pq, def.pr);
-        const unit = UnitFactory.create(def.type, 0, pos);
-        const wp = this.hexToWorld(pos);
-        unit.worldPosition = { ...wp };
-        this.players[0].units.push(unit);
-        this.unitRenderer.addUnit(unit, this.getElevation(pos));
+      for (let pid = 0; pid < this.playerCount; pid++) {
+        const bc = baseCoords[pid];
+        spawnArmy(pid, bc.q, bc.r);
       }
-      const p2Defs = [
-        { type: UnitType.BUILDER, pq: P2_Q - 2, pr: P2_R },
-        { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R - 2 },
-        { type: UnitType.LUMBERJACK, pq: P2_Q - 2, pr: P2_R + 2 },
-        { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R - 4 },
-        { type: UnitType.VILLAGER, pq: P2_Q - 2, pr: P2_R + 4 },
-      ];
-      for (const def of p2Defs) {
-        const pos = this.findSpawnTile(map, def.pq, def.pr);
-        const unit = UnitFactory.create(def.type, 1, pos);
-        const wp = this.hexToWorld(pos);
-        unit.worldPosition = { ...wp };
-        this.players[1].units.push(unit);
-        this.unitRenderer.addUnit(unit, this.getElevation(pos));
+    } else {
+      // Standard mode: workers near base for each player
+      for (let pid = 0; pid < this.playerCount; pid++) {
+        const bc = baseCoords[pid];
+        // Offset units toward the center of the map from their base
+        const centerQ = Math.floor(MAP_SIZE / 2);
+        const centerR = Math.floor(MAP_SIZE / 2);
+        const dq = Math.sign(centerQ - bc.q) || 1;
+        const dr = Math.sign(centerR - bc.r) || 1;
+        const off = 2; // distance from base
+
+        const defs = [
+          { type: UnitType.BUILDER, pq: bc.q + dq * off, pr: bc.r },
+          { type: UnitType.LUMBERJACK, pq: bc.q + dq * off, pr: bc.r - 2 },
+          { type: UnitType.LUMBERJACK, pq: bc.q + dq * off, pr: bc.r + 2 },
+          { type: UnitType.VILLAGER, pq: bc.q + dq * off, pr: bc.r - 4 },
+          { type: UnitType.VILLAGER, pq: bc.q + dq * off, pr: bc.r + 4 },
+        ];
+        for (const def of defs) {
+          const pos = this.findSpawnTile(map, def.pq, def.pr);
+          const unit = UnitFactory.create(def.type, pid, pos);
+          const wp = this.hexToWorld(pos);
+          unit.worldPosition = { ...wp };
+          this.players[pid].units.push(unit);
+          this.unitRenderer.addUnit(unit, this.getElevation(pos));
+        }
       }
     }
 
-    this.allUnits = [...this.players[0].units, ...this.players[1].units];
+    this.allUnits = this.players.flatMap(p => p.units);
     this.selectionManager.setPlayerUnits(this.allUnits, 0);
 
     // Sync internal stockpiles with player resources (critical for arena mode
@@ -1852,19 +2216,22 @@ class Cubitopia {
     // Base setup already done by mapInitializer.setupMap()
     // Here we just finalize the remaining game state
 
-    // Add wallConnectable tags for player bases
-    const p1Base = this.bases[0];
-    const p2Base = this.bases[1];
-    this.buildingSystem.wallConnectable.add(`${p1BaseCoord.q},${p1BaseCoord.r}`);
-    this.buildingSystem.wallConnectable.add(`${p2BaseCoord.q},${p2BaseCoord.r}`);
+    // Add wallConnectable tags for ALL player bases
+    for (let i = 0; i < this.playerCount; i++) {
+      const bc = baseCoords[i];
+      this.buildingSystem.wallConnectable.add(`${bc.q},${bc.r}`);
+    }
 
-    // Setup UnitAI static references
-    UnitAI.basePositions.set(0, p1BaseCoord);
-    UnitAI.basePositions.set(1, p2BaseCoord);
+    // Setup UnitAI static references for all players
+    for (let i = 0; i < this.playerCount; i++) {
+      UnitAI.basePositions.set(i, baseCoords[i]);
+      UnitAI.siloPositions.set(i, baseCoords[i]);
+    }
     UnitAI.bases = this.bases;
     UnitAI.arenaMode = isArena;
-    UnitAI.siloPositions.set(0, p1BaseCoord);
-    UnitAI.siloPositions.set(1, p2BaseCoord);
+    UnitAI.playerCount = this.playerCount;
+    UnitAI.mapWidth = this.currentMap!.width;
+    UnitAI.mapHeight = this.currentMap!.height;
 
     // Auto-enable combat logging in Arena mode
     if (isArena) {
@@ -1872,10 +2239,11 @@ class Cubitopia {
       this.debugPanel.setUnits(this.allUnits);
     }
 
-    // Standard mode only: generate builder wall plans
+    // Standard mode only: generate builder wall plans for all players
     if (!isArena) {
-      UnitAI.generateKeepWallPlan(0, p1BaseCoord, map);
-      UnitAI.generateKeepWallPlan(1, p2BaseCoord, map);
+      for (let i = 0; i < this.playerCount; i++) {
+        UnitAI.generateKeepWallPlan(i, baseCoords[i], map);
+      }
     }
 
     // Set camera bounds to prevent panning off the map
@@ -1885,9 +2253,10 @@ class Cubitopia {
     const centerQ = Math.floor(MAP_SIZE / 2);
     this.camera.focusOn(new THREE.Vector3(centerQ * 1.5, 2, midR * 1.5));
 
-    // Display initial stockpiles
-    this.resourceManager.updateStockpileVisual(0);
-    this.resourceManager.updateStockpileVisual(1);
+    // Display initial stockpiles for all players
+    for (let i = 0; i < this.playerCount; i++) {
+      this.resourceManager.updateStockpileVisual(i);
+    }
 
     // Update HUD mode indicator
     this.hud.setGameMode(this.gameMode);
@@ -2047,12 +2416,15 @@ class Cubitopia {
         }
       }
 
-      // Set visual position
+      // Set visual position (pass elevation state for organic hop/climb effects)
       this.unitRenderer.setWorldPosition(
         unit.id,
         unit.worldPosition.x,
         unit.worldPosition.y,
-        unit.worldPosition.z
+        unit.worldPosition.z,
+        unit._elevActive,
+        unit._elevGoingUp,
+        unit._elevProgress
       );
 
       // Animate
@@ -2099,20 +2471,14 @@ class Cubitopia {
 
     // AI commander: periodically issue orders (skip if disableAI)
     if (!this.hud.debugFlags.disableAI) {
-      // Player 2 (always AI)
-      this.aiController.updateSmartAICommander(1, delta);
-      this.aiController.updateSmartAIEconomy(1, delta);
-      this.aiController.updateSmartAISpawnQueue(1, delta);
-      this.aiController.updateSmartAITactics(1, delta);
-      this.aiController.updateSmartAIStrategy(1, delta);
-
-      // Player 1 AI (only in AI vs AI mode)
-      if (this.gameMode === 'aivai') {
-        this.aiController.updateSmartAICommander(0, delta);
-        this.aiController.updateSmartAIEconomy(0, delta);
-        this.aiController.updateSmartAISpawnQueue(0, delta);
-        this.aiController.updateSmartAITactics(0, delta);
-        this.aiController.updateSmartAIStrategy(0, delta);
+      for (let pid = 0; pid < this.playerCount; pid++) {
+        if (!this.players[pid]?.isAI) continue;
+        if (this.players[pid].defeated) continue;
+        this.aiController.updateSmartAICommander(pid, delta);
+        this.aiController.updateSmartAIEconomy(pid, delta);
+        this.aiController.updateSmartAISpawnQueue(pid, delta);
+        this.aiController.updateSmartAITactics(pid, delta);
+        this.aiController.updateSmartAIStrategy(pid, delta);
       }
     }
 
@@ -2133,6 +2499,9 @@ class Cubitopia {
     // Update base health bar billboards
     this.baseRenderer.updateBillboards(this.camera.camera);
 
+    // Update wall/gate health bar billboards + debris particles
+    this.wallSystem.updateBillboards(this.camera.camera);
+
     // Update HUD resource display with wood stockpile + population cap info
     // Throttle popInfo to every 0.5s to avoid per-frame .filter() allocations
     this._popInfoTimer += delta;
@@ -2146,6 +2515,17 @@ class Cubitopia {
       }
     }
     this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0], this._popInfoCache);
+
+    // Army strength comparison bar (throttled to 2Hz internally)
+    if (this.players.length >= 2) {
+      this.hud.updateArmyStrength(this.players[0].units, this.players[1].units);
+    }
+
+    // Update wall build mode cost preview when in wall mode
+    if (this.interaction.state.kind === 'wall_build') {
+      const bpInfo = this.blueprintSystem.getBlueprintCounts();
+      this.hud.updateBuildModeInfo(bpInfo, this.stoneStockpile[0]);
+    }
 
     // Base upgrades, population disband, and dead cleanup — delegated to LifecycleUpdater
     this.lifecycleUpdater.update(delta);
@@ -2213,42 +2593,63 @@ class Cubitopia {
       }
     }
 
-    // Notification
-    const capturerName = evt.newOwner === 0
-      ? (this.gameMode === 'aivai' ? 'Blue' : 'You')
-      : (this.gameMode === 'aivai' ? 'Red' : 'Enemy');
+    // AI outpost building — if an AI captures an outpost, build forward-operating buildings
+    const isAI = evt.newOwner > 0 || this.gameMode === 'aivai';
+    if (isAI && !evt.isMainBase) {
+      this.aiController.onBaseCapture(evt.newOwner, base.position);
+    }
+
+    // Notification — N-player aware
+    const colorName = PLAYER_COLORS[evt.newOwner]?.name ?? `Player ${evt.newOwner}`;
+    const isHumanCapture = evt.newOwner === 0 && this.gameMode !== 'aivai';
+    const capturerName = isHumanCapture ? 'You' : colorName;
+    const capturerCSS = getPlayerCSS(evt.newOwner);
     const baseLabel = evt.isMainBase ? 'main base' : 'outpost';
 
     if (evt.isMainBase) {
-      // Main base captured = instant defeat for the previous owner
-      this.hud.showNotification(`${capturerName} captured the enemy ${baseLabel}!`, evt.newOwner === 0 ? '#3498db' : '#e74c3c');
-      this.gameOver = true;
-      let winner: string;
-      let isVictory: boolean;
-      if (this.gameMode === 'aivai') {
-        winner = evt.newOwner === 0 ? 'AI BLUE' : 'AI RED';
-        isVictory = evt.newOwner === 0;
-      } else {
-        winner = evt.newOwner === 0 ? 'PLAYER' : 'AI OPPONENT';
-        isVictory = evt.newOwner === 0;
+      // Main base captured = defeat for the previous owner
+      this.hud.showNotification(`${capturerName} captured a ${baseLabel}!`, capturerCSS);
+
+      // Mark the previous owner as defeated
+      if (this.players[evt.previousOwner]) {
+        this.players[evt.previousOwner].defeated = true;
       }
-      this.showGameOverScreen(winner, isVictory);
+
+      // Check: how many players remain un-defeated?
+      const alive = this.players.filter(p => !p.defeated);
+      if (alive.length <= 1) {
+        // Game over — last player standing wins
+        this.gameOver = true;
+        const winnerId = alive.length === 1 ? alive[0].id : evt.newOwner;
+        const isVictory = winnerId === 0 && this.gameMode !== 'aivai';
+        let winner: string;
+        if (this.gameMode === 'aivai') {
+          winner = `AI ${PLAYER_COLORS[winnerId]?.name?.toUpperCase() ?? winnerId}`;
+        } else if (winnerId === 0) {
+          winner = 'PLAYER';
+        } else {
+          winner = `AI ${PLAYER_COLORS[winnerId]?.name?.toUpperCase() ?? winnerId}`;
+        }
+        this.showGameOverScreen(winner, isVictory);
+      }
     } else {
-      this.hud.showNotification(`${capturerName} captured an ${baseLabel}!`, evt.newOwner === 0 ? '#3498db' : '#e74c3c');
+      this.hud.showNotification(`${capturerName} captured an ${baseLabel}!`, capturerCSS);
     }
   }
 
   /** Debug: check for destroyed bases (from instant win/lose debug commands) */
   private debugCheckWinCondition(): void {
     for (const base of this.bases) {
-      if (base.id === 'base_neutral') continue;
+      if (base.id.includes('neutral')) continue;
       if (base.destroyed) {
-        // Determine the new owner (the other player)
-        const newOwner = base.owner === 0 ? 1 : 0;
+        // Determine the new owner — pick first alive enemy
+        const prevOwner = base.owner;
+        const newOwner = this.players.findIndex((p, i) => i !== prevOwner && !p.defeated);
+        if (newOwner < 0) continue;
         this.handleCaptureEvent({
           baseId: base.id,
           newOwner,
-          previousOwner: base.owner,
+          previousOwner: prevOwner,
           isMainBase: true,
         });
         return;
@@ -2257,17 +2658,57 @@ class Cubitopia {
   }
 
   private showGameOverScreen(winner: string, isVictory: boolean): void {
-    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode);
+    // Compute game stats for the battle report
+    let stats: GameOverStats | undefined;
+    try {
+      const player = this.players[0];
+      const enemy = this.players[1];
+      if (player && enemy) {
+        // Count alive and dead units per player
+        const playerAlive = player.units.filter(u => u.state !== UnitState.DEAD);
+        const playerDead = player.units.filter(u => u.state === UnitState.DEAD);
+        const enemyDead = enemy.units.filter(u => u.state === UnitState.DEAD);
+
+        // Sum kills from alive units + kills from dead units
+        const playerKills = player.units.reduce((sum, u) => sum + (u.kills ?? 0), 0);
+        const enemyKills = enemy.units.reduce((sum, u) => sum + (u.kills ?? 0), 0);
+
+        // Zones held by player
+        const playerBases = this.bases.filter(b => b.owner === 0 && !b.destroyed).length;
+        const totalBases = this.bases.filter(b => !b.id.includes('neutral') || b.owner >= 0).length;
+
+        // Player main base tier — use capture zone system for isMainBase info,
+        // fall back to first player-owned base
+        const czZones = this.captureZoneSystem?.getZones() ?? [];
+        const playerMainZone = czZones.find(z => z.isMainBase && z.base.owner === 0);
+        const playerMainBase = playerMainZone?.base ?? this.bases.find(b => b.owner === 0);
+        const playerBaseTier = playerMainBase?.tier ?? 0;
+
+        stats = {
+          gameDuration: this.clock.elapsedTime,
+          playerUnitsKilled: playerKills,
+          playerUnitsLost: playerDead.length,
+          enemyUnitsKilled: enemyKills,
+          enemyUnitsLost: enemyDead.length,
+          basesOwned: playerBases,
+          totalBases,
+          playerBaseTier,
+        };
+      }
+    } catch {
+      // If stats computation fails, continue without stats
+    }
+    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats);
   }
 
   // --- Wood stockpile per player: each tree = 4 wall blocks ---
-  private woodStockpile: number[] = [0, 0]; // [player0, player1]
+  private woodStockpile: number[] = [0, 0]; // Resized in startNewGame
   // Wall/gate state is managed by WallSystem (this.wallSystem)
 
   /** Y-level from slicer for troop commands — null means surface, number means underground */
   commandYLevel: number | null = null;
   // Interaction mode state fully managed by InteractionStateMachine (legacy getters removed 2026-04-01)
-  private stoneStockpile: number[] = [0, 0]; // [player0, player1]
+  private stoneStockpile: number[] = [0, 0]; // Resized in startNewGame
 
   // Query/registry methods are in BuildingSystem — accessed via this.buildingSystem.*
 
@@ -2317,8 +2758,8 @@ class Cubitopia {
       .filter(b => b.owner !== 0 && !b.destroyed)
       .sort((a, b) => {
         // Neutral first, then by distance
-        const aN = a.owner === 2 ? 0 : 1;
-        const bN = b.owner === 2 ? 0 : 1;
+        const aN = a.owner >= this.playerCount ? 0 : 1;
+        const bN = b.owner >= this.playerCount ? 0 : 1;
         if (aN !== bN) return aN - bN;
         return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
       });
@@ -2335,7 +2776,7 @@ class Cubitopia {
       UnitAI.commandMove(unit, target.position, this.currentMap!);
     }
 
-    const label = target.owner === 2 ? 'neutral outpost' : 'enemy zone';
+    const label = target.owner >= this.playerCount ? 'neutral outpost' : 'enemy zone';
     this.hud.showNotification(`${selected.length} units capturing ${label}!`, '#27ae60');
     const elev = this.getElevation(target.position);
     this.tileHighlighter.showAttackIndicator(target.position, elev);
@@ -2358,6 +2799,30 @@ class Cubitopia {
       UnitAI.commandAttack(unit, position, null, this.currentMap!);
     }
     this.hud.showNotification(`${units.length} units attacking!`, '#e74c3c');
+
+    const elev = this.getElevation(position);
+    this.tileHighlighter.showAttackIndicator(position, elev);
+  }
+
+  /** Order selected units to focus-attack a specific enemy unit (chase & kill — from tooltip) */
+  private focusAttackUnitFromTooltip(unitId: string, position: HexCoord): void {
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const units = selected.length > 0
+      ? selected
+      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+
+    if (units.length === 0) {
+      this.hud.showNotification('No combat units available!', '#e74c3c');
+      return;
+    }
+
+    for (const unit of units) {
+      unit._playerCommanded = true;
+      unit._forceMove = false;
+      unit._focusTarget = unitId;
+      UnitAI.commandAttack(unit, position, unitId, this.currentMap!);
+    }
+    this.hud.showNotification(`${units.length} units focus-targeting!`, '#e74c3c');
 
     const elev = this.getElevation(position);
     this.tileHighlighter.showAttackIndicator(position, elev);
@@ -3061,6 +3526,7 @@ class Cubitopia {
 
       this.renderer.updateParticles(rawDelta);
       this.terrainDecorator.updateWater(rawDelta);
+      if (this.skyCloudSystem) this.skyCloudSystem.update(rawDelta);
       const camPos = this.camera.camera.position;
       this.terrainDecorator.cameraWorldPos.x = camPos.x;
       this.terrainDecorator.cameraWorldPos.z = camPos.z;

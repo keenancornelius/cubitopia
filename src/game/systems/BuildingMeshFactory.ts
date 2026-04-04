@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { HexCoord } from '../../types';
+import { getPlayerHex } from '../PlayerConfig';
 // Pathfinder import removed — blockedTiles now managed by BuildingSystem
 
 /** Helper: create a mesh and set its position */
@@ -55,7 +56,7 @@ function glow(color: number, intensity = 0.6): THREE.MeshLambertMaterial {
 // ========================================================================
 export function buildForestryMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'forestry', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const logBrown = 0x6b4226; const darkLog = 0x4a2a12; const lightLog = 0x8b6a3e;
   const stucco = 0xe0d4b8; const moss = 0x4a7c3a; const slate = 0x5a5a4a;
   const iron = 0x5a5550; const gold = 0xd4a44a; const rope = 0xc9a96e;
@@ -285,7 +286,7 @@ export function buildForestryMesh(pos: HexCoord, owner: number, scene: THREE.Sce
 // ========================================================================
 export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'barracks', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const stone = 0xc8b89a; const darkStone = 0xa09078; const midStone = 0xb4a488;
   const iron = 0x5a5550; const darkIron = 0x3a3530; const gold = 0xd4a44a;
   const plank = 0x6a4a2a; const darkPlank = 0x4a3018;
@@ -564,7 +565,7 @@ export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Sce
 // ========================================================================
 export function buildMasonryMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'masonry', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const stucco = 0xd5cbb8; const stone = 0x9a9080; const block = 0xb8b0a0;
   const darkStone = 0x6a6a5a; const iron = 0x5a5550; const plank = 0x6a4a2a;
   const gold = 0xd4a44a;
@@ -753,7 +754,7 @@ export function buildMasonryMesh(pos: HexCoord, owner: number, scene: THREE.Scen
 // ========================================================================
 export function buildFarmhouseMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'farmhouse', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const plaster = 0xe0d0a8; const barn = 0x8b3a2a; const darkBarn = 0x5a2a1a;
   const hay = 0xd4b45c; const plank = 0x7a5a3a; const darkPlank = 0x4a3018;
   const iron = 0x5a5550; const gold = 0xd4a44a; const stone = 0x8a8a7a;
@@ -965,7 +966,7 @@ export function buildFarmhouseMesh(pos: HexCoord, owner: number, scene: THREE.Sc
 // ========================================================================
 export function buildWorkshopMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'workshop', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const stucco = 0xc0b098; const iron = 0x5a5550; const darkIron = 0x3a3530;
   const stone = 0x808080; const darkStone = 0x606060; const plank = 0x6a4a2a;
   const gold = 0xd4a44a; const brick = 0x8a5a3a;
@@ -1162,7 +1163,7 @@ export function buildWorkshopMesh(pos: HexCoord, owner: number, scene: THREE.Sce
 // ========================================================================
 export function buildSiloMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'silo', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const stucco = 0xe0d8c8; const band = 0xb8b0a0; const plank = 0x7a5a3a;
   const darkPlank = 0x4a3018; const iron = 0x5a5550; const gold = 0xd4a44a;
   const stone = 0x8a8a7a;
@@ -1360,7 +1361,7 @@ export function buildSiloMesh(pos: HexCoord, owner: number, scene: THREE.Scene, 
 // ========================================================================
 export function buildSmelterMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'smelter', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const grayStone = 0x808080; const darkStone = 0x505050; const midStone = 0x686868;
   const brick = 0x8a5a3a; const darkBrick = 0x6a3a1a; const iron = 0x5a5550;
   const plank = 0x6a4a2a; const gold = 0xd4a44a;
@@ -1551,7 +1552,7 @@ export function buildSmelterMesh(pos: HexCoord, owner: number, scene: THREE.Scen
 // ========================================================================
 export function buildArmoryMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'armory', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const darkStone = 0x606060; const midStone = 0x808080; const lightStone = 0x909090;
   const iron = 0x5a5550; const darkIron = 0x3a3530; const plank = 0x6a4a2a;
   const darkPlank = 0x4a3018; const gold = 0xd4a44a;
@@ -1748,7 +1749,7 @@ export function buildArmoryMesh(pos: HexCoord, owner: number, scene: THREE.Scene
 // ========================================================================
 export function buildWizardTowerMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
   const g = createBuildingGroup(pos, owner, 'wizardtower', getElevation);
-  const tc = owner === 0 ? 0x3498db : 0xe74c3c;
+  const tc = getPlayerHex(owner);
   const stoneColor = 0x7a7a7a; const darkStone = 0x5a5a5a; const midStone = 0x6a6a6a;
   const purple = 0x6600aa; const crystal = 0x8844dd; const gold = 0xd4a44a;
   const plank = 0x5a3a2a;

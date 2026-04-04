@@ -32,11 +32,13 @@ export interface CombatEventOps {
   showDamageEffect(worldPos: { x: number; y: number; z: number }): void;
   flashUnit(unitId: string, duration: number): void;
   queueDeferredEffect(delayMs: number, callback: () => void): void;
+  resetAttackAnim(unitId: string): void;
   fireArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireDeflectedArrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireMagicOrb(from: any, to: any, color: number, targetId: string, isSplash: boolean, onImpact: () => void): void;
   fireLightningBolt(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireLightningChain(from: any, to: any, targetId: string): void;
+  fireKamehamehaBeam(from: any, to: any, piercedPositions: { x: number; y: number; z: number }[]): void;
   spawnElectrocuteEffect(unitId: string): void;
   fireFlamethrower(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireStoneColumn(from: any, to: any, targetId: string, onImpact: () => void): void;
@@ -51,6 +53,7 @@ export interface CombatEventOps {
   fireHealOrb(from: any, to: any, targetId: string, onImpact: () => void): void;
   fireAxeThrow(from: any, to: any, targetId: string, onImpact: () => void): void;
   spawnDeflectedAxe(impactPos: { x: number; y: number; z: number }): void;
+  spawnOgreGroundPound(centerPos: { x: number; y: number; z: number }): void;
   applyHeal(healerId: string, targetId: string): void;
   showXPText(worldPos: any, xp: number): void;
   showCritText(worldPos: any, combo: string, damage: number, color: string): void;
@@ -94,6 +97,11 @@ export interface CombatEventOps {
 
   // Building construction
   handleConstructTick(unit: Unit, buildingId: string, amount: number): void;
+
+  // Trade routes
+  getBases(): { id: string; owner: number; position: HexCoord; destroyed: boolean }[];
+  getPrimaryBasePosition(owner: number): HexCoord | undefined;
+  addTradeGold(owner: number, amount: number): void;
 }
 
 export default class CombatEventHandler {
@@ -122,6 +130,44 @@ export default class CombatEventHandler {
 
   constructor(ops: CombatEventOps) {
     this.ops = ops;
+  }
+
+  /**
+   * Trade route bonus: when a worker deposits resources near an owned base
+   * that is NOT their home (primary) base, award bonus gold.
+   * Rewards players for capturing and maintaining multiple bases.
+   */
+  private checkTradeRouteBonus(unit: Unit): void {
+    const cfg = GAME_CONFIG.economy.trade.tradeRoute;
+    const bases = this.ops.getBases();
+    const ownedBases = bases.filter(b => b.owner === unit.owner && !b.destroyed);
+
+    // Need at least minBases to activate trade routes
+    if (ownedBases.length < cfg.minBases) return;
+
+    const primaryPos = this.ops.getPrimaryBasePosition(unit.owner);
+    if (!primaryPos) return;
+
+    // Check if the worker is near any non-primary owned base
+    for (const base of ownedBases) {
+      // Skip the primary/home base
+      if (base.position.q === primaryPos.q && base.position.r === primaryPos.r) continue;
+
+      // Hex distance check
+      const dq = Math.abs(unit.position.q - base.position.q);
+      const dr = Math.abs(unit.position.r - base.position.r);
+      const ds = Math.abs((-unit.position.q - unit.position.r) - (-base.position.q - base.position.r));
+      const dist = Math.max(dq, dr, ds);
+
+      if (dist <= cfg.proximityRadius) {
+        // Award trade gold!
+        this.ops.addTradeGold(unit.owner, cfg.goldPerDelivery);
+        if (unit.owner === 0) {
+          this.ops.showNotification(`🔄 +${cfg.goldPerDelivery} trade gold`, '#ffd700');
+        }
+        return; // only one bonus per delivery
+      }
+    }
   }
 
   /** Process all events from UnitAI.update() */
@@ -175,7 +221,8 @@ export default class CombatEventHandler {
 
       // ─── Combat (melee / ranged) ───
       if (event.type === 'combat' && event.attacker && event.defender && !debugFlags.disableCombat) {
-        const isRangedAttack = event.attacker.stats.range > 1;
+        // Ogre has range 2 for gameplay reach but attacks as melee (club slam, not projectile)
+        const isRangedAttack = event.attacker.stats.range > 1 && event.attacker.type !== UnitType.OGRE;
 
         // Determine sound
         const isDeflected = !!event.result?.deflected;
@@ -500,6 +547,9 @@ export default class CombatEventHandler {
           }
           ops.updateHealthBar(event.attacker);
         } else {
+          // Reset attack animation so it starts fresh from wind-up (phase 0).
+          // This syncs the animation cycle with our fixed strike delay.
+          ops.resetAttackAnim(event.attacker.id);
           // Per-unit-type melee strike delay — synced to when the blade connects
           // in the attack animation (wind-up must complete before damage applies)
           const meleeStrikeDelay = CombatEventHandler.MELEE_STRIKE_DELAY[event.attacker.type] ?? 250;
@@ -530,21 +580,62 @@ export default class CombatEventHandler {
         }
       }
 
-      // ─── Greatsword cleave knockback ───
+      // ─── Ogre ground pound VFX (synced to end of club slam impact phase) ───
+      // Animation phases: wind-up 0–0.35, slam 0.35–0.50, ground-impact 0.50–0.65, recovery 0.65–1.0
+      // At speed 0.6: impact hold ends at cycle 0.65 → 0.65/0.6*1000 ≈ 1083ms
+      // We fire VFX + whomp at the tail end of the impact-tremor phase + slight delay
+      if ((event as any).type === 'combat:ogreSlam') {
+        const slamEvt = event as any;
+        const aPos = slamEvt.attackerWorldPos;
+        const tPos = slamEvt.targetWorldPos;
+        // Offset the burst center slightly in front of the ogre (toward target)
+        const dx = tPos.x - aPos.x;
+        const dz = tPos.z - aPos.z;
+        const len = Math.sqrt(dx * dx + dz * dz) || 1;
+        const offset = 1.0; // 1 unit forward
+        const burstCenter = {
+          x: aPos.x + (dx / len) * offset,
+          y: aPos.y,
+          z: aPos.z + (dz / len) * offset,
+        };
+        // Defer VFX to end of impact-tremor phase (cycle 0.65 @ speed 0.6 = 1083ms)
+        // Animation now starts from cycle 0 on each attack via resetAttackAnim()
+        const ogreImpactEnd = 1083;
+        ops.queueDeferredEffect(ogreImpactEnd, () => {
+          ops.spawnOgreGroundPound(burstCenter);
+        });
+        // Whomp sound slightly after visual for cinematic weight
+        ops.queueDeferredEffect(ogreImpactEnd + 80, () => {
+          ops.playSound('ogre_whomp');
+        });
+      }
+
+      // ─── Greatsword / Ogre cleave knockback ───
       if ((event as any).type === 'combat:cleave') {
         const ce = event as any;
-        const victim = ops.getAllUnits().find(u => u.id === ce.unitId);
-        if (victim && victim.state !== UnitState.DEAD && !victim._pendingRangedDeath) {
-          // Update logical position immediately (pathfinding, targeting, etc.)
-          victim.position = { q: ce.knockQ, r: ce.knockR };
-          const wp = ops.hexToWorld(victim.position, !!victim._underground);
-          victim.worldPosition = { x: wp.x, y: wp.y, z: wp.z };
-          // Animate the knockback visually — smooth hop arc, not a teleport
-          ops.knockbackUnit(victim.id, wp);
-          ops.updateHealthBar(victim);
-          ops.showDamageEffect(victim.worldPosition);
-          ops.flashUnit(victim.id, 0.12);
-          ops.playSound('hit_cleave');
+        const isOgreKnockback = ce.attackerType === UnitType.OGRE;
+        const applyCleave = () => {
+          const victim = ops.getAllUnits().find(u => u.id === ce.unitId);
+          if (victim && victim.state !== UnitState.DEAD && !victim._pendingRangedDeath) {
+            // Update logical position immediately (pathfinding, targeting, etc.)
+            victim.position = { q: ce.knockQ, r: ce.knockR };
+            const wp = ops.hexToWorld(victim.position, !!victim._underground);
+            victim.worldPosition = { x: wp.x, y: wp.y, z: wp.z };
+            // Animate the knockback visually — smooth hop arc, not a teleport
+            ops.knockbackUnit(victim.id, wp);
+            ops.updateHealthBar(victim);
+            ops.showDamageEffect(victim.worldPosition);
+            ops.flashUnit(victim.id, 0.12);
+            ops.playSound('hit_cleave');
+          }
+        };
+        if (isOgreKnockback) {
+          // Defer knockback to just after ground pound VFX (shockwave reaches enemies then they fly)
+          // 1083ms (tremor end) + 150ms (shockwave propagation)
+          const ogreKnockbackDelay = 1233;
+          ops.queueDeferredEffect(ogreKnockbackDelay, applyCleave);
+        } else {
+          applyCleave();
         }
       }
 
@@ -666,6 +757,7 @@ export default class CombatEventHandler {
       }
       if (event.type === 'lumberjack:deposit' && event.unit && !debugFlags.disableDeposit) {
         ops.handleWoodDeposit(event.unit!);
+        this.checkTradeRouteBonus(event.unit!);
       }
 
       // ─── Builder: mine ───
@@ -686,6 +778,7 @@ export default class CombatEventHandler {
         } else {
           ops.handleStoneDeposit(event.unit!);
         }
+        this.checkTradeRouteBonus(event.unit!);
       }
 
       // ─── Villager ───
@@ -697,6 +790,7 @@ export default class CombatEventHandler {
       }
       if (event.type === 'villager:deposit' && event.unit && !debugFlags.disableDeposit) {
         ops.handleFoodDeposit(event.unit!);
+        this.checkTradeRouteBonus(event.unit!);
       }
 
       // ─── Attack building/wall ───
@@ -839,24 +933,42 @@ export default class CombatEventHandler {
             ops.playSound('splash_aoe');
             ops.showCritText(unit.worldPosition, 'KAMEHAMEHA', evt.damage || 9, '#aa44ff');
 
-            // Draw laser VFX from caster through all pierced enemies
+            // Draw dedicated Kamehameha laser beam from caster through all pierced enemies
             if (evt.casterId) {
               const caster = ops.getAllUnits().find(u => u.id === evt.casterId);
               if (caster) {
-                // Fire a chain of lightning bolts along the beam path
-                let prevPos = caster.worldPosition;
-                // Primary target gets electrocute effect
+                // Collect all impact positions along the beam
+                const piercedPositions: { x: number; y: number; z: number }[] = [
+                  { x: unit.worldPosition.x, y: unit.worldPosition.y, z: unit.worldPosition.z },
+                ];
+                // Primary target gets electrocute sparks
                 ops.spawnElectrocuteEffect(unit.id);
-                ops.fireLightningChain(caster.worldPosition, unit.worldPosition, unit.id);
+
+                // Compute beam endpoint (extend beyond last pierced target)
+                const dq = unit.position.q - caster.position.q;
+                const dr = unit.position.r - caster.position.r;
+                const len = Math.max(Math.abs(dq), Math.abs(dr), 1);
+                const stepQ = Math.round(dq / len);
+                const stepR = Math.round(dr / len);
+                // Default endpoint: 4 hexes beyond primary target
+                let endX = unit.worldPosition.x + stepQ * 1.5 * 4;
+                let endZ = unit.worldPosition.z + stepR * 1.5 * 4;
+                let endY = unit.worldPosition.y;
 
                 if (evt.piercedIds) {
-                  prevPos = unit.worldPosition;
                   for (const pid of evt.piercedIds) {
                     const pierced = ops.getAllUnits().find(u => u.id === pid);
                     if (pierced) {
-                      const pPrev = prevPos;
+                      piercedPositions.push({
+                        x: pierced.worldPosition.x, y: pierced.worldPosition.y, z: pierced.worldPosition.z,
+                      });
+                      // Extend endpoint beyond the last pierced unit
+                      endX = pierced.worldPosition.x + stepQ * 1.5 * 2;
+                      endZ = pierced.worldPosition.z + stepR * 1.5 * 2;
+                      endY = pierced.worldPosition.y;
+
+                      // Deferred damage visuals for each pierced target
                       ops.queueDeferredEffect(100, () => {
-                        ops.fireLightningChain(pPrev, pierced.worldPosition, pierced.id);
                         ops.spawnElectrocuteEffect(pierced.id);
                         ops.flashUnit(pierced.id, 0.2);
                         ops.updateHealthBar(pierced);
@@ -866,10 +978,16 @@ export default class CombatEventHandler {
                           ops.playSound('death');
                         }
                       });
-                      prevPos = pierced.worldPosition;
                     }
                   }
                 }
+
+                // Fire the full beam VFX
+                ops.fireKamehamehaBeam(
+                  caster.worldPosition,
+                  { x: endX, y: endY, z: endZ },
+                  piercedPositions,
+                );
               }
             }
             if (unit.currentHealth <= 0) {

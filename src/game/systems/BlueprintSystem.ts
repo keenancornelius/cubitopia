@@ -135,6 +135,15 @@ export default class BlueprintSystem {
     this.blueprintGhosts.clear();
   }
 
+  /** Get pending wall/gate blueprint counts for cost preview display */
+  getBlueprintCounts(): { walls: number; gates: number; totalStone: number } {
+    const walls = UnitAI.playerWallBlueprint.size;
+    const gates = UnitAI.playerGateBlueprint.size;
+    const wallCost = walls * 1; // GAME_CONFIG.defenses.wall.cost.stone
+    const gateCost = gates * 2; // GAME_CONFIG.defenses.gate.cost.stone
+    return { walls, gates, totalStone: wallCost + gateCost };
+  }
+
   // ===================== HARVEST MARKERS =====================
 
   toggleHarvestBlueprint(coord: HexCoord): void {

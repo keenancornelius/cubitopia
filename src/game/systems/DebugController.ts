@@ -80,6 +80,7 @@ export interface DebugOps {
   setPlayerFoodResource(pid: number, value: number): void;
   rebuildAllUnits(): void;
   getArmyComposition(): { blue: { type: UnitType; count: number }[]; red: { type: UnitType; count: number }[] };
+  getPlayerCount?(): number;
 }
 
 export default class DebugController {
@@ -154,7 +155,7 @@ export default class DebugController {
 
   killAllEnemy(): void {
     for (const unit of this.ops.getAllUnits()) {
-      if (unit.owner === 1 && unit.state !== UnitState.DEAD) {
+      if (unit.owner !== 0 && unit.state !== UnitState.DEAD) {
         unit.currentHealth = 0;
         unit.state = UnitState.DEAD;
         this.ops.removeUnitFromGame(unit);
@@ -319,7 +320,8 @@ export default class DebugController {
     owner: number, baseQ: number, baseR: number,
     defs: { type: UnitType; count: number }[], map: GameMap,
   ): number {
-    const dir = owner === 0 ? 1 : -1;
+    const centerQ = Math.floor((map?.width ?? 40) / 2);
+    const dir = baseQ < centerQ ? 1 : -1;
     const units: { type: UnitType; depth: number }[] = [];
     for (const def of defs) {
       const depth = DebugController.ROLE_DEPTH[def.type] ?? 1;
@@ -376,17 +378,19 @@ export default class DebugController {
     const scaledRed = redDefs.map(d => ({ type: d.type, count: d.count * scale }));
 
     const bases = this.ops.getBases();
+    const playerCount = this.ops.getPlayerCount?.() ?? 2;
     let totalSpawned = 0;
-    for (let owner = 0; owner < 2; owner++) {
+    for (let owner = 0; owner < playerCount; owner++) {
       const base = bases.find(b => b.owner === owner && !b.destroyed);
       if (!base) continue;
-      const defs = owner === 0 ? scaledBlue : scaledRed;
+      // Alternate army compositions for variety
+      const defs = owner % 2 === 0 ? scaledBlue : scaledRed;
       totalSpawned += this.spawnFormationArmy(owner, base.position.q, base.position.r, defs, map);
     }
 
     this.ops.rebuildAllUnits();
     const foodNeeded = totalSpawned * FOOD_PER_COMBAT_UNIT + 50;
-    for (let pid = 0; pid < 2; pid++) {
+    for (let pid = 0; pid < playerCount; pid++) {
       const current = this.ops.getFoodForPlayer(pid);
       this.ops.setFoodForPlayer(pid, Math.max(current, foodNeeded));
       this.ops.setPlayerFoodResource(pid, Math.max(current, foodNeeded));

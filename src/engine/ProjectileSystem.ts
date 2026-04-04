@@ -445,51 +445,171 @@ export class ProjectileSystem {
   }
 
   /**
-   * Fire a secondary chain lightning arc between two positions (no projectile travel)
+   * Fire a chain lightning arc between two positions — jagged bolt with branches,
+   * bright impact flash, and electric sparks at the target.
    */
   fireLightningChain(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, _targetUnitId?: string): void {
     const group = new THREE.Group();
     const start = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const end = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
-    const dir = end.clone().sub(start);
-    const dist = dir.length();
-    const segments = Math.max(3, Math.floor(dist * 3));
+    const dist = end.clone().sub(start).length();
+    const segments = Math.max(5, Math.floor(dist * 4));
 
-    const boltMat = new THREE.MeshBasicMaterial({ color: 0xccddff, transparent: true, opacity: 0.85 });
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0x6688ff, transparent: true, opacity: 0.3 });
+    // Brighter, more vivid materials
+    const boltMat = new THREE.MeshBasicMaterial({ color: 0xeeffff, transparent: true, opacity: 0.95 });
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0x44aaff, transparent: true, opacity: 0.45,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const outerGlowMat = new THREE.MeshBasicMaterial({
+      color: 0x2266cc, transparent: true, opacity: 0.15,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
 
-    for (let i = 0; i < segments; i++) {
-      const t0 = i / segments;
-      const t1 = (i + 1) / segments;
-      const p0 = start.clone().lerp(end.clone(), t0);
-      const p1 = start.clone().lerp(end.clone(), t1);
-      if (i > 0) {
-        p0.x += (Math.random() - 0.5) * 0.12;
-        p0.y += (Math.random() - 0.5) * 0.12;
-        p0.z += (Math.random() - 0.5) * 0.12;
+    // Store jagged path points for branch spawning
+    const pathPoints: THREE.Vector3[] = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const p = start.clone().lerp(end.clone(), t);
+      if (i > 0 && i < segments) {
+        const jitter = 0.18 + dist * 0.02;
+        p.x += (Math.random() - 0.5) * jitter;
+        p.y += (Math.random() - 0.5) * jitter;
+        p.z += (Math.random() - 0.5) * jitter;
       }
-      if (i + 1 < segments) {
-        p1.x += (Math.random() - 0.5) * 0.12;
-        p1.y += (Math.random() - 0.5) * 0.12;
-        p1.z += (Math.random() - 0.5) * 0.12;
-      }
+      pathPoints.push(p);
+    }
+
+    // Draw main bolt segments with triple-layer glow
+    for (let i = 0; i < pathPoints.length - 1; i++) {
+      const p0 = pathPoints[i];
+      const p1 = pathPoints[i + 1];
       const segLen = p1.clone().sub(p0).length();
-      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, segLen), boltMat);
-      seg.position.copy(p0.clone().add(p1).multiplyScalar(0.5));
+      const mid = p0.clone().add(p1).multiplyScalar(0.5);
+
+      // Core bolt (bright white-blue)
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, segLen), boltMat);
+      seg.position.copy(mid);
       seg.lookAt(p1);
       group.add(seg);
-      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, segLen), glowMat);
-      glow.position.copy(seg.position);
+      // Inner glow
+      const glow = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, segLen), glowMat);
+      glow.position.copy(mid);
       glow.lookAt(p1);
       group.add(glow);
+      // Outer bloom
+      const outer = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.28, segLen), outerGlowMat);
+      outer.position.copy(mid);
+      outer.lookAt(p1);
+      group.add(outer);
+    }
+
+    // Add 2-3 forked branches splitting off the main bolt
+    const numBranches = 2 + Math.floor(Math.random() * 2);
+    const branchMat = new THREE.MeshBasicMaterial({
+      color: 0x88ccff, transparent: true, opacity: 0.6,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    for (let b = 0; b < numBranches; b++) {
+      // Pick a random point along the main path
+      const idx = 1 + Math.floor(Math.random() * (pathPoints.length - 2));
+      const branchStart = pathPoints[idx].clone();
+      const branchLen = 0.4 + Math.random() * 0.6;
+      const branchDir = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.3) * 1.5,
+        (Math.random() - 0.5) * 2,
+      ).normalize();
+      const branchEnd = branchStart.clone().add(branchDir.multiplyScalar(branchLen));
+      const branchSegs = 2 + Math.floor(Math.random() * 2);
+      for (let bs = 0; bs < branchSegs; bs++) {
+        const bt0 = bs / branchSegs;
+        const bt1 = (bs + 1) / branchSegs;
+        const bp0 = branchStart.clone().lerp(branchEnd, bt0);
+        const bp1 = branchStart.clone().lerp(branchEnd, bt1);
+        if (bs > 0) {
+          bp0.x += (Math.random() - 0.5) * 0.1;
+          bp0.y += (Math.random() - 0.5) * 0.1;
+          bp0.z += (Math.random() - 0.5) * 0.1;
+        }
+        const bSegLen = bp1.clone().sub(bp0).length();
+        const bSeg = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, bSegLen), branchMat);
+        bSeg.position.copy(bp0.clone().add(bp1).multiplyScalar(0.5));
+        bSeg.lookAt(bp1);
+        group.add(bSeg);
+      }
+    }
+
+    // Impact flash at target — bright sphere burst
+    const impactFlash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.25, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    );
+    impactFlash.position.copy(end);
+    group.add(impactFlash);
+
+    // Electric sparks at impact point
+    const numSparks = 6;
+    const sparkMeshes: THREE.Mesh[] = [];
+    for (let i = 0; i < numSparks; i++) {
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0xeeffff : 0x66bbff,
+        transparent: true, opacity: 0.8,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const spark = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.03), sparkMat);
+      spark.position.copy(end);
+      group.add(spark);
+      sparkMeshes.push(spark);
     }
 
     this.scene.add(group);
-    // Auto-remove after brief display
-    setTimeout(() => {
-      this.scene.remove(group);
-      group.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
-    }, 300);
+
+    // Animate: sparks fly outward, bolt flickers, then fade
+    const chainStart = performance.now();
+    const chainDuration = 350;
+    const sparkVelocities = sparkMeshes.map(() => ({
+      vx: (Math.random() - 0.5) * 4,
+      vy: 1 + Math.random() * 3,
+      vz: (Math.random() - 0.5) * 4,
+    }));
+
+    const animateChain = () => {
+      const elapsed = performance.now() - chainStart;
+      const t = Math.min(elapsed / chainDuration, 1.0);
+
+      // Bolt flickers in first 60%, then fades
+      const flicker = t < 0.6 ? (1 - 0.15 * Math.sin(t * 80)) : (1 - (t - 0.6) / 0.4);
+      boltMat.opacity = 0.95 * Math.max(0, flicker);
+      glowMat.opacity = 0.45 * Math.max(0, flicker);
+      outerGlowMat.opacity = 0.15 * Math.max(0, flicker);
+      branchMat.opacity = 0.6 * Math.max(0, flicker);
+
+      // Impact flash fades
+      (impactFlash.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t);
+      impactFlash.scale.setScalar(1 + t * 2);
+
+      // Sparks fly outward with gravity
+      const dt = 0.016;
+      for (let i = 0; i < sparkMeshes.length; i++) {
+        sparkMeshes[i].position.x += sparkVelocities[i].vx * dt;
+        sparkMeshes[i].position.y += sparkVelocities[i].vy * dt;
+        sparkMeshes[i].position.z += sparkVelocities[i].vz * dt;
+        sparkVelocities[i].vy -= 8 * dt;
+        (sparkMeshes[i].material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+      }
+
+      if (t < 1) {
+        requestAnimationFrame(animateChain);
+      } else {
+        this.scene.remove(group);
+        group.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+      }
+    };
+    requestAnimationFrame(animateChain);
   }
 
   /**
@@ -1092,6 +1212,132 @@ export class ProjectileSystem {
    * @param radius number of hex rings to affect (1 = 7 hexes, 2 = 19 hexes)
    * @param color primary explosion color
    */
+  /**
+   * Ogre ground pound — a massive club slam that sends a dust shockwave ring
+   * expanding outward across 9 hexes, with debris chunks flying up.
+   */
+  spawnOgreGroundPound(centerWorld: { x: number; y: number; z: number }): void {
+    const cx = centerWorld.x, cy = centerWorld.y, cz = centerWorld.z;
+    const startTime = performance.now() / 1000;
+
+    // === PHASE 1: Impact flash at ground level ===
+    const flashGeo = new THREE.RingGeometry(0.1, 1.05, 16);
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xFFDD88, transparent: true, opacity: 0.9, side: THREE.DoubleSide
+    });
+    const flash = new THREE.Mesh(flashGeo, flashMat);
+    flash.position.set(cx, cy + 0.15, cz);
+    flash.rotation.x = -Math.PI / 2;
+    this.scene.add(flash);
+
+    const animFlash = () => {
+      const elapsed = performance.now() / 1000 - startTime;
+      if (elapsed > 0.25) {
+        this.scene.remove(flash);
+        flashGeo.dispose(); flashMat.dispose();
+        return;
+      }
+      const p = elapsed / 0.25;
+      const s = 1 + p * 2;
+      flash.scale.set(s, s, 1);
+      flashMat.opacity = 0.9 * (1 - p);
+      requestAnimationFrame(animFlash);
+    };
+    requestAnimationFrame(animFlash);
+
+    // === PHASE 2: Expanding dust shockwave ring (30% smaller radius) ===
+    const ringGeo = new THREE.TorusGeometry(0.35, 0.21, 6, 24);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x8B7355, transparent: true, opacity: 0.7
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(cx, cy + 0.2, cz);
+    ring.rotation.x = -Math.PI / 2;
+    this.scene.add(ring);
+
+    const animRing = () => {
+      const elapsed = performance.now() / 1000 - startTime;
+      if (elapsed > 0.6) {
+        this.scene.remove(ring);
+        ringGeo.dispose(); ringMat.dispose();
+        return;
+      }
+      const p = elapsed / 0.6;
+      // Expand from radius 0.35 to ~2.8 (70% of original)
+      const s = 1 + p * 4.9;
+      ring.scale.set(s, s, 1 - p * 0.6);
+      ringMat.opacity = 0.7 * (1 - p * p);
+      requestAnimationFrame(animRing);
+    };
+    requestAnimationFrame(animRing);
+
+    // === PHASE 3: Dust clouds billowing outward ===
+    const dustCount = 20;
+    for (let i = 0; i < dustCount; i++) {
+      const angle = (i / dustCount) * Math.PI * 2 + Math.random() * 0.3;
+      const isDark = Math.random() > 0.5;
+      const dustColor = isDark ? 0x6B5B45 : 0xA0906A;
+      const dust = this.getPooledParticle(dustColor, 0.8);
+      dust.position.set(cx, cy + 0.2, cz);
+      const s = 0.3 + Math.random() * 0.4;
+      dust.scale.set(s, s, s);
+      this.scene.add(dust);
+
+      const speed = 1.4 + Math.random() * 2.1;
+      const vx = Math.cos(angle) * speed;
+      const vy = 0.4 + Math.random() * 1.0;
+      const vz = Math.sin(angle) * speed;
+
+      this.trailParticles.push({
+        mesh: dust,
+        velocity: { x: vx, y: vy, z: vz },
+        startTime: startTime + Math.random() * 0.05,
+        duration: 0.5 + Math.random() * 0.4,
+      });
+    }
+
+    // === PHASE 4: Debris chunks flying up ===
+    const chunkCount = 8;
+    for (let i = 0; i < chunkCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const chunkGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+      const chunkMat = new THREE.MeshLambertMaterial({
+        color: Math.random() > 0.5 ? 0x7B6B55 : 0x5A4A3A,
+        transparent: true, opacity: 1.0
+      });
+      const chunk = new THREE.Mesh(chunkGeo, chunkMat);
+      const dist = 0.2 + Math.random() * 0.56;
+      chunk.position.set(cx + Math.cos(angle) * dist, cy + 0.3, cz + Math.sin(angle) * dist);
+      chunk.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      this.scene.add(chunk);
+
+      const speed = 1.5 + Math.random() * 2;
+      const vx = Math.cos(angle) * speed * 0.5;
+      const vy = 3 + Math.random() * 4;
+      const vz = Math.sin(angle) * speed * 0.5;
+      const chunkStart = startTime;
+      const chunkDur = 0.6 + Math.random() * 0.3;
+
+      const animChunk = () => {
+        const elapsed = performance.now() / 1000 - chunkStart;
+        if (elapsed > chunkDur) {
+          this.scene.remove(chunk);
+          chunkGeo.dispose(); chunkMat.dispose();
+          return;
+        }
+        const p = elapsed / chunkDur;
+        chunk.position.x += vx * 0.016;
+        chunk.position.y += (vy - elapsed * 12) * 0.016; // gravity
+        chunk.position.z += vz * 0.016;
+        chunk.rotation.x += 0.1;
+        chunk.rotation.z += 0.15;
+        chunkMat.opacity = 1 - p * p;
+        requestAnimationFrame(animChunk);
+      };
+      requestAnimationFrame(animChunk);
+    }
+  }
+
   spawnAoEExplosion(centerWorld: { x: number; y: number; z: number }, radius: number, color: number): void {
     const t = performance.now() / 1000;
     const cx = centerWorld.x, cy = centerWorld.y, cz = centerWorld.z;
@@ -1361,6 +1607,313 @@ export class ProjectileSystem {
       targetUnitId,
       onImpact,
     });
+  }
+
+  /**
+   * Fire a Kamehameha laser beam — the big cross-class Arcane+Lightning payoff.
+   * Multi-phase effect: charge-up energy buildup → piercing beam with bloom → impact explosions on each target.
+   * @param fromPos  Caster world position
+   * @param toPos    Final beam endpoint (beyond last pierced unit)
+   * @param piercedPositions  Array of world positions along the beam (each hit target)
+   */
+  fireKamehamehaBeam(
+    fromPos: WorldPos,
+    toPos: WorldPos,
+    piercedPositions: WorldPos[]
+  ): void {
+    const start = new THREE.Vector3(fromPos.x, fromPos.y + 1.4, fromPos.z);
+    const end = new THREE.Vector3(toPos.x, toPos.y + 0.8, toPos.z);
+    const dir = end.clone().sub(start);
+    const beamLength = dir.length();
+    dir.normalize();
+
+    // === PHASE 1: Charge-up energy convergence (0-300ms) ===
+    const chargeGroup = new THREE.Group();
+    // Convergence particles spiral inward toward caster's hands
+    const numChargeMotes = 16;
+    const chargeMotes: THREE.Mesh[] = [];
+    for (let i = 0; i < numChargeMotes; i++) {
+      const size = 0.06 + Math.random() * 0.06;
+      const moteColor = i % 3 === 0 ? 0xaa44ff : i % 3 === 1 ? 0xff88ff : 0xffffff;
+      const moteMat = new THREE.MeshBasicMaterial({
+        color: moteColor, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const mote = new THREE.Mesh(new THREE.SphereGeometry(size, 4, 4), moteMat);
+      const angle = (i / numChargeMotes) * Math.PI * 2;
+      const radius = 1.5 + Math.random() * 1.0;
+      mote.position.set(
+        start.x + Math.cos(angle) * radius,
+        start.y + (Math.random() - 0.5) * 1.5,
+        start.z + Math.sin(angle) * radius,
+      );
+      chargeGroup.add(mote);
+      chargeMotes.push(mote);
+    }
+    // Central charge glow at caster position
+    const chargeGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xcc66ff, transparent: true, opacity: 0.0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    );
+    chargeGlow.position.copy(start);
+    chargeGroup.add(chargeGlow);
+    this.scene.add(chargeGroup);
+
+    const chargeStartTime = performance.now();
+    const chargeDuration = 300;
+    const animateCharge = () => {
+      const elapsed = performance.now() - chargeStartTime;
+      const t = Math.min(elapsed / chargeDuration, 1.0);
+      // Motes spiral inward
+      for (let i = 0; i < chargeMotes.length; i++) {
+        const mote = chargeMotes[i];
+        const angle = (i / numChargeMotes) * Math.PI * 2 + t * Math.PI * 3;
+        const radius = (1.5 + Math.random() * 0.2) * (1 - t * 0.95);
+        mote.position.set(
+          start.x + Math.cos(angle) * radius,
+          start.y + (Math.sin(t * Math.PI * 2 + i) * 0.3) * (1 - t),
+          start.z + Math.sin(angle) * radius,
+        );
+        (mote.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t * 0.5);
+        const s = 1 + t * 0.5;
+        mote.scale.setScalar(s);
+      }
+      // Charge glow intensifies
+      (chargeGlow.material as THREE.MeshBasicMaterial).opacity = t * 0.8;
+      const glowScale = 0.15 + t * 0.6;
+      chargeGlow.scale.setScalar(glowScale / 0.15);
+
+      if (t < 1) {
+        requestAnimationFrame(animateCharge);
+      } else {
+        // Remove charge particles
+        this.scene.remove(chargeGroup);
+        chargeGroup.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+        // Fire the beam
+        this.spawnKamehamehaBeamCore(start, end, dir, beamLength, piercedPositions);
+      }
+    };
+    requestAnimationFrame(animateCharge);
+  }
+
+  /** Internal: spawn the actual beam after charge-up completes */
+  private spawnKamehamehaBeamCore(
+    start: THREE.Vector3,
+    end: THREE.Vector3,
+    dir: THREE.Vector3,
+    beamLength: number,
+    piercedPositions: WorldPos[]
+  ): void {
+    const beamGroup = new THREE.Group();
+
+    // === PHASE 2: Piercing laser beam ===
+    const midpoint = start.clone().add(end).multiplyScalar(0.5);
+
+    // Inner core beam — bright white-purple
+    const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, beamLength, 8, 1);
+    coreGeo.rotateX(Math.PI / 2); // align along Z for lookAt
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xeeccff, transparent: true, opacity: 0.95,
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.position.copy(midpoint);
+    core.lookAt(end);
+    beamGroup.add(core);
+
+    // Middle glow layer — purple
+    const midGeo = new THREE.CylinderGeometry(0.22, 0.22, beamLength, 8, 1);
+    midGeo.rotateX(Math.PI / 2);
+    const midMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff, transparent: true, opacity: 0.5,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const mid = new THREE.Mesh(midGeo, midMat);
+    mid.position.copy(midpoint);
+    mid.lookAt(end);
+    beamGroup.add(mid);
+
+    // Outer bloom layer — wide, faint purple-pink
+    const outerGeo = new THREE.CylinderGeometry(0.5, 0.5, beamLength, 8, 1);
+    outerGeo.rotateX(Math.PI / 2);
+    const outerMat = new THREE.MeshBasicMaterial({
+      color: 0xcc66ff, transparent: true, opacity: 0.18,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const outer = new THREE.Mesh(outerGeo, outerMat);
+    outer.position.copy(midpoint);
+    outer.lookAt(end);
+    beamGroup.add(outer);
+
+    // Energy swirl particles along the beam
+    const numSwirls = Math.max(8, Math.floor(beamLength * 4));
+    for (let i = 0; i < numSwirls; i++) {
+      const t = i / numSwirls;
+      const pos = start.clone().lerp(end, t);
+      const perpAngle = t * Math.PI * 8 + Math.random();
+      // Find perpendicular vectors
+      const up = new THREE.Vector3(0, 1, 0);
+      const right = new THREE.Vector3().crossVectors(dir, up).normalize();
+      const realUp = new THREE.Vector3().crossVectors(right, dir).normalize();
+      const swirlRadius = 0.25 + Math.sin(t * Math.PI) * 0.15;
+      pos.add(right.clone().multiplyScalar(Math.cos(perpAngle) * swirlRadius));
+      pos.add(realUp.clone().multiplyScalar(Math.sin(perpAngle) * swirlRadius));
+
+      const swirlColor = i % 4 === 0 ? 0xffffff : i % 4 === 1 ? 0xff88ff : i % 4 === 2 ? 0xaa44ff : 0xcc88ff;
+      const swirlMat = new THREE.MeshBasicMaterial({
+        color: swirlColor, transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const swirl = new THREE.Mesh(new THREE.SphereGeometry(0.04 + Math.random() * 0.04, 4, 4), swirlMat);
+      swirl.position.copy(pos);
+      beamGroup.add(swirl);
+    }
+
+    // Bright flash at caster origin
+    const originFlash = new THREE.Mesh(
+      new THREE.SphereGeometry(0.6, 8, 8),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    );
+    originFlash.position.copy(start);
+    beamGroup.add(originFlash);
+
+    this.scene.add(beamGroup);
+
+    // === PHASE 3: Impact explosions at each pierced position ===
+    const allImpactPositions = [...piercedPositions];
+    for (let i = 0; i < allImpactPositions.length; i++) {
+      const impactPos = allImpactPositions[i];
+      const delay = 50 + i * 80; // stagger impacts for dramatic effect
+      setTimeout(() => {
+        this.spawnKamehamehaImpact({ x: impactPos.x, y: impactPos.y + 0.5, z: impactPos.z });
+      }, delay);
+    }
+
+    // === PHASE 4: Beam fade-out (400ms) ===
+    const beamStartTime = performance.now();
+    const beamDuration = 500;
+    const animateBeam = () => {
+      const elapsed = performance.now() - beamStartTime;
+      const t = Math.min(elapsed / beamDuration, 1.0);
+
+      // Pulsing intensity in first half, then fade
+      const intensity = t < 0.3
+        ? 1.0 + Math.sin(t * 30) * 0.15 // rapid flicker
+        : 1.0 - ((t - 0.3) / 0.7); // smooth fadeout
+
+      coreMat.opacity = 0.95 * intensity;
+      midMat.opacity = 0.5 * intensity;
+      outerMat.opacity = 0.18 * intensity;
+      (originFlash.material as THREE.MeshBasicMaterial).opacity = 0.9 * intensity;
+
+      // Beam widens slightly as it fades
+      if (t > 0.3) {
+        const expand = 1 + (t - 0.3) * 0.5;
+        mid.scale.set(expand, 1, expand);
+        outer.scale.set(expand, 1, expand);
+      }
+
+      if (t < 1) {
+        requestAnimationFrame(animateBeam);
+      } else {
+        this.scene.remove(beamGroup);
+        beamGroup.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+      }
+    };
+    requestAnimationFrame(animateBeam);
+  }
+
+  /** Spawn a purple energy explosion at a Kamehameha impact point */
+  private spawnKamehamehaImpact(pos: WorldPos): void {
+    const center = new THREE.Vector3(pos.x, pos.y, pos.z);
+
+    // Central purple flash
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xcc66ff, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const flash = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), flashMat);
+    flash.position.copy(center);
+    this.scene.add(flash);
+
+    // Expanding shockwave ring
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xaa44ff, transparent: true, opacity: 0.6, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.25, 16), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.copy(center);
+    this.scene.add(ring);
+
+    // Burst particles — purple/white energy fragments
+    const burstParticles: { mesh: THREE.Mesh; vx: number; vy: number; vz: number }[] = [];
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2;
+      const pColor = i % 3 === 0 ? 0xffffff : i % 3 === 1 ? 0xff88ff : 0xaa44ff;
+      const pMat = new THREE.MeshBasicMaterial({
+        color: pColor, transparent: true, opacity: 0.8,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const p = new THREE.Mesh(new THREE.SphereGeometry(0.05, 4, 4), pMat);
+      p.position.copy(center);
+      this.scene.add(p);
+      burstParticles.push({
+        mesh: p,
+        vx: Math.cos(angle) * speed,
+        vy: 1.5 + Math.random() * 2,
+        vz: Math.sin(angle) * speed,
+      });
+    }
+
+    const impactStart = performance.now();
+    const impactDuration = 400;
+    const animateImpact = () => {
+      const elapsed = performance.now() - impactStart;
+      const t = Math.min(elapsed / impactDuration, 1.0);
+
+      // Flash expands and fades
+      flash.scale.setScalar(1 + t * 3);
+      flashMat.opacity = 0.9 * (1 - t);
+
+      // Ring expands outward
+      const ringScale = 1 + t * 6;
+      ring.scale.setScalar(ringScale);
+      ringMat.opacity = 0.6 * (1 - t);
+
+      // Burst particles fly outward with gravity
+      const dt = 0.016;
+      for (const bp of burstParticles) {
+        bp.mesh.position.x += bp.vx * dt;
+        bp.mesh.position.y += bp.vy * dt;
+        bp.mesh.position.z += bp.vz * dt;
+        bp.vy -= 6 * dt; // gravity
+        (bp.mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+      }
+
+      if (t < 1) {
+        requestAnimationFrame(animateImpact);
+      } else {
+        this.scene.remove(flash);
+        flashMat.dispose();
+        flash.geometry.dispose();
+        this.scene.remove(ring);
+        ringMat.dispose();
+        ring.geometry.dispose();
+        for (const bp of burstParticles) {
+          this.scene.remove(bp.mesh);
+          bp.mesh.geometry.dispose();
+          (bp.mesh.material as THREE.Material).dispose();
+        }
+      }
+    };
+    requestAnimationFrame(animateImpact);
   }
 
   /**

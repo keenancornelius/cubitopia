@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { Logger } from '../engine/Logger';
 import { SeededRandom, GameRNG } from './SeededRandom';
+import type { MapGenParams } from './MapPresets';
 
 // Simple 2D noise function (value noise)
 class SimpleNoise {
@@ -109,19 +110,26 @@ export class MapGenerator {
   private noiseOffsetX: number;   // large random offset to shift entire noise space
   private noiseOffsetY: number;
 
-  constructor(seed?: number) {
+  constructor(seed?: number, params?: MapGenParams) {
     const s = seed ?? GameRNG.rng.nextRange(0, 999999);
     this.rng = new SeededRandom(s);
     this.noise = new SimpleNoise(s);
     this.noiseB = new SimpleNoise(s + 7919); // offset seed for second layer
     this.noiseC = new SimpleNoise(s + 15731); // third layer for color/detail
 
-    // Randomize terrain shape parameters so each seed produces a distinct map
-    this.elevScale = 0.08 + this.rng.next() * 0.08;        // 0.08–0.16
-    this.warpStrength = 2 + this.rng.next() * 4;            // 2–6
+    // Helper: pick random value within [min, max] range
+    const pick = (range: [number, number] | undefined, fallbackMin: number, fallbackMax: number): number => {
+      const [lo, hi] = range ?? [fallbackMin, fallbackMax];
+      return lo + this.rng.next() * (hi - lo);
+    };
+
+    // Randomize terrain shape parameters — param overrides constrain ranges
+    // so different map types produce distinct terrain feels
+    this.elevScale = pick(params?.elevScale, 0.08, 0.16);
+    this.warpStrength = 2 + this.rng.next() * 4;            // 2–6 (not overridable yet)
     this.spiralStrength = 0.01 + this.rng.next() * 0.07;    // 0.01–0.08
-    this.mountainWeight = 0.15 + this.rng.next() * 0.20;    // 0.15–0.35
-    this.valleyWeight = 0.10 + this.rng.next() * 0.20;      // 0.10–0.30
+    this.mountainWeight = pick(params?.mountainWeight, 0.15, 0.35);
+    this.valleyWeight = pick(params?.valleyWeight, 0.10, 0.30);
     this.shelfWeight = 0.10 + this.rng.next() * 0.12;       // 0.10–0.22
     this.coastFalloff = 1.0 + this.rng.next() * 0.6;        // 1.0–1.6
     this.coastScale = 1.8 + this.rng.next() * 0.6;          // 1.8–2.4
@@ -129,7 +137,22 @@ export class MapGenerator {
     // Large noise-space offset so even similar seeds produce wildly different terrain
     this.noiseOffsetX = this.rng.next() * 10000 - 5000;
     this.noiseOffsetY = this.rng.next() * 10000 - 5000;
+
+    // Override water level if specified (used during lake identification)
+    if (params?.waterLevel !== undefined) this._waterLevelOverride = params.waterLevel;
+    // Override mountain cluster count
+    if (params?.mountainClusters) this._mountainClusterRange = params.mountainClusters;
+    // Override river count
+    if (params?.riverCount) this._riverCountRange = params.riverCount;
+    // Override base area flattening radius
+    if (params?.flattenRadius !== undefined) this._flattenRadius = params.flattenRadius;
   }
+
+  // Optional overrides set by MapGenParams
+  private _waterLevelOverride?: number;
+  private _mountainClusterRange?: [number, number];
+  private _riverCountRange?: [number, number];
+  private _flattenRadius?: number;
 
   /** Get fine-detail noise value for color variation at a hex coordinate */
   getColorNoise(q: number, r: number): number {
@@ -143,7 +166,8 @@ export class MapGenerator {
     // === PASS 0: Place mountain biome clusters using golden angle spiral ===
     // The golden angle (≈137.5°) distributes points evenly without clumping —
     // the same pattern sunflowers and pinecones use for optimal packing.
-    const numMountains = 3 + Math.floor(this.rng.next() * 4); // 3-6 clusters
+    const [mcMin, mcMax] = this._mountainClusterRange ?? [3, 6];
+    const numMountains = mcMin + Math.floor(this.rng.next() * (mcMax - mcMin + 1));
     this.mountainCenters = [];
     const centerQ = width / 2;
     const centerR = height / 2;
@@ -498,9 +522,10 @@ export class MapGenerator {
       }
     }
 
-    // Sort by elevation (highest first) and pick 2-4 source peaks
+    // Sort by elevation (highest first) and pick source peaks
     candidates.sort((a, b) => b.elev - a.elev);
-    const sourceCount = Math.min(2 + Math.floor(this.rng.next() * 2), candidates.length);
+    const [rcMin, rcMax] = this._riverCountRange ?? [2, 4];
+    const sourceCount = Math.min(rcMin + Math.floor(this.rng.next() * (rcMax - rcMin + 1)), candidates.length);
     const sources: { q: number; r: number; elev: number }[] = [];
 
     for (let i = 0; i < candidates.length && sources.length < sourceCount; i++) {
@@ -1073,9 +1098,10 @@ export class MapGenerator {
       }
       if (tooClose) continue;
 
-      // Only place in lower-elevation areas
+      // Only place in lower-elevation areas (waterLevel override shifts threshold)
+      const waterThreshold = this._waterLevelOverride ?? 0.50;
       const elev = elevMap.get(`${lq},${lr}`) ?? 0.5;
-      if (elev > 0.50) continue;
+      if (elev > waterThreshold) continue;
 
       placed.push({ q: lq, r: lr });
 
@@ -1121,8 +1147,43 @@ export class MapGenerator {
 
   /** Second pass: compute shell blocks for each tile using neighbor info */
   public computeShellBlocks(map: GameMap, width: number, height: number): void {
+    // Detect custom-generator block types so we can preserve hand-crafted columns
+    const SKYLAND_BLOCK_TYPES = new Set([
+      BlockType.CLOUD, BlockType.PASTEL_GRASS, BlockType.CREAM_STONE, BlockType.RAINBOW_BRIDGE,
+    ]);
+    const VOLCANIC_BLOCK_TYPES = new Set([
+      BlockType.BASALT, BlockType.OBSIDIAN, BlockType.ASH, BlockType.LAVA,
+      BlockType.MAGMA, BlockType.SCORCHED_EARTH,
+    ]);
+    const ARCHIPELAGO_BLOCK_TYPES = new Set([
+      BlockType.CORAL, BlockType.TROPICAL_GRASS, BlockType.PALM_WOOD,
+    ]);
+
     map.tiles.forEach((tile, key) => {
       const [q, r] = key.split(',').map(Number);
+
+      // ── Skyland preservation: skip void tiles entirely, keep custom island blocks ──
+      const hasCustomBlocks = tile.voxelData.blocks.some(b => SKYLAND_BLOCK_TYPES.has(b.type) || VOLCANIC_BLOCK_TYPES.has(b.type) || ARCHIPELAGO_BLOCK_TYPES.has(b.type));
+      if (hasCustomBlocks) {
+        // This is a Skyland island/bridge tile — keep its hand-crafted voxel column.
+        // Still recalculate elevation from blocks so pathfinding works.
+        let maxY = -Infinity;
+        for (const b of tile.voxelData.blocks) {
+          if (b.localPosition.y > maxY) maxY = b.localPosition.y;
+        }
+        if (maxY > -Infinity) {
+          tile.elevation = maxY + 1;
+          tile.voxelData.heightMap = [[tile.elevation]];
+          tile.walkableFloor = tile.elevation;
+        }
+        return; // skip shell replacement
+      }
+      // Void tiles (low-elevation water with no blocks) — leave empty for cloud plane
+      if (tile.terrain === TerrainType.WATER && tile.elevation <= 0) {
+        tile.voxelData.blocks = []; // ensure truly empty — no blocks rendered
+        return;
+      }
+
       const neighbors = this.hexNeighbors(q, r);
 
       // Determine if tile is on map edge
@@ -1321,13 +1382,50 @@ export class MapGenerator {
       }
     });
 
-    desertCandidates.sort((a, b) => {
-      const da = Math.sqrt((a.q - centerQ) ** 2 + (a.r - centerR) ** 2);
-      const db = Math.sqrt((b.q - centerQ) ** 2 + (b.r - centerR) ** 2);
-      return da - db;
+    // Strategic scoring: favor tiles that are equidistant between player bases
+    // (contested ground), near chokepoints (high neighbor elevation variance),
+    // and near rivers/resources. Higher score = better neutral city location.
+    const BASE_INSET_NEUTRAL = 5;
+    const p1 = { q: BASE_INSET_NEUTRAL, r: h - 1 - BASE_INSET_NEUTRAL };
+    const p2 = { q: w - 1 - BASE_INSET_NEUTRAL, r: BASE_INSET_NEUTRAL };
+    const strategicScore = (c: { q: number; r: number; elev: number }): number => {
+      // Balance score: prefer tiles equidistant from both player bases
+      const d1 = Math.sqrt((c.q - p1.q) ** 2 + (c.r - p1.r) ** 2);
+      const d2 = Math.sqrt((c.q - p2.q) ** 2 + (c.r - p2.r) ** 2);
+      const balanceScore = 1 - Math.abs(d1 - d2) / Math.max(d1, d2, 1);
+
+      // Centrality: slight preference for mid-map (contested zone)
+      const dc = Math.sqrt((c.q - centerQ) ** 2 + (c.r - centerR) ** 2);
+      const centralityScore = 1 - dc / (Math.max(w, h) * 0.5);
+
+      // Chokepoint score: high elevation variance among neighbors = bottleneck
+      const neighbors = this.hexNeighbors(c.q, c.r);
+      let elevSum = 0, elevCount = 0;
+      for (const [nq, nr] of neighbors) {
+        const nt = map.tiles.get(`${nq},${nr}`);
+        if (nt) { elevSum += nt.elevation; elevCount++; }
+      }
+      const avgNeighborElev = elevCount > 0 ? elevSum / elevCount : c.elev;
+      const elevVariance = Math.abs(c.elev - avgNeighborElev);
+      const chokeScore = Math.min(1, elevVariance / 4);
+
+      // Resource proximity: tiles near resources are more valuable to contest
+      let nearbyResources = 0;
+      for (const [nq, nr] of neighbors) {
+        const nt = map.tiles.get(`${nq},${nr}`);
+        if (nt?.resource) nearbyResources++;
+      }
+      const resourceScore = Math.min(1, nearbyResources / 3);
+
+      return balanceScore * 0.4 + centralityScore * 0.25 + chokeScore * 0.2 + resourceScore * 0.15;
+    };
+
+    desertCandidates.sort((a, b) => strategicScore(b) - strategicScore(a));
+    // Mountain forts: strategic score with height tiebreak
+    mountainCandidates.sort((a, b) => {
+      const scoreDiff = strategicScore(b) - strategicScore(a);
+      return Math.abs(scoreDiff) > 0.05 ? scoreDiff : b.elev - a.elev;
     });
-    // Prefer highest mountains — mountain forts should be dramatic
-    mountainCandidates.sort((a, b) => b.elev - a.elev);
 
     const results: Array<{ center: { q: number; r: number }; terrain: string }> = [];
     const allPlaced: { q: number; r: number }[] = [];

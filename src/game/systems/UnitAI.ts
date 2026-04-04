@@ -76,6 +76,8 @@ export class UnitAI {
 
   /** Cached player references (set each frame in update) — used by static methods that only receive owner id */
   static players: Map<number, Player> = new Map();
+  /** Number of players in the current game (set by main.ts at game start) */
+  static playerCount: number = 2;
 
   /** Check if a position is an underground base — used to force tunnel pathing */
   static isUndergroundBase(pos: HexCoord, map: GameMap): boolean {
@@ -657,17 +659,17 @@ export class UnitAI {
       const captureTargets = bases
         .filter(b => b.owner !== 0 && !b.destroyed)
         .sort((a, b) => {
-          // Neutral first (owner 2), then by distance
-          const aN = a.owner === 2 ? 0 : 1;
-          const bN = b.owner === 2 ? 0 : 1;
+          // Neutral first (owner >= playerCount), then by distance
+          const aN = a.owner >= UnitAI.playerCount ? 0 : 1;
+          const bN = b.owner >= UnitAI.playerCount ? 0 : 1;
           if (aN !== bN) return aN - bN;
           return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
         });
       return captureTargets[0] ?? null;
     } else {
-      // ASSAULT: target the enemy capital (player 1's main base), or nearest enemy base
+      // ASSAULT: target the enemy capital, or nearest enemy base
       const enemyBases = bases
-        .filter(b => b.owner !== 0 && b.owner !== 2 && !b.destroyed)
+        .filter(b => b.owner !== 0 && b.owner < UnitAI.playerCount && !b.destroyed)
         .sort((a, b) => {
           // Capitals first (tier matters), then by distance
           const aTier = a.tier ?? 0;
@@ -774,7 +776,7 @@ export class UnitAI {
             const fleeDist = GAME_CONFIG.gather.workerFleeDistance;
             const fleeQ = basePos
               ? unit.position.q + Math.sign(basePos.q - unit.position.q) * fleeDist
-              : (unit.owner === 0 ? Math.max(0, unit.position.q - fleeDist) : Math.min(map.width - 1, unit.position.q + fleeDist));
+              : Math.max(0, Math.min(map.width - 1, unit.position.q - fleeDist));
             const fleeR = basePos
               ? unit.position.r + Math.sign(basePos.r - unit.position.r)
               : unit.position.r;
@@ -792,7 +794,7 @@ export class UnitAI {
                 (w as any)._fleeCooldown = 5.0;
                 const wFleeQ = basePos
                   ? w.position.q + Math.sign(basePos.q - w.position.q) * fleeDist
-                  : (w.owner === 0 ? Math.max(0, w.position.q - fleeDist) : Math.min(map.width - 1, w.position.q + fleeDist));
+                  : Math.max(0, Math.min(map.width - 1, w.position.q - fleeDist));
                 const wFleeR = basePos
                   ? w.position.r + Math.sign(basePos.r - w.position.r)
                   : w.position.r;
@@ -1623,9 +1625,10 @@ export class UnitAI {
         } else {
           const basePos = UnitAI.basePositions.get(unit.owner);
           if (basePos) {
+            const offset = UnitAI.getStockpileOffset(unit.owner);
             const stockPos: HexCoord = {
-              q: basePos.q + (unit.owner === 0 ? -2 : 2),
-              r: basePos.r,
+              q: basePos.q + offset.q,
+              r: basePos.r + offset.r,
             };
             unit.state = UnitState.RETURNING;
             UnitAI.commandMove(unit, stockPos, map);
@@ -1830,18 +1833,25 @@ export class UnitAI {
         const elevDiff = targetWorld.y - unit.worldPosition.y;
         if (Math.abs(elevDiff) < 0.05) {
           unit.worldPosition.y = targetWorld.y;
+          unit._elevActive = false;
+          unit._elevProgress = 0;
         } else if (hexProgress < STEP_THRESHOLD) {
           const curTile = map?.tiles.get(`${unit.position.q},${unit.position.r}`);
           if (curTile) {
             const floorY = curTile.elevation * 0.5 + 0.25;
             if (unit.worldPosition.y < floorY - 0.02) unit.worldPosition.y = floorY;
           }
+          unit._elevActive = false;
+          unit._elevProgress = 0;
         } else {
           const blendT = (hexProgress - STEP_THRESHOLD) / (1 - STEP_THRESHOLD);
           const smooth = blendT * blendT * (3 - 2 * blendT);
           const curTile = map?.tiles.get(`${unit.position.q},${unit.position.r}`);
           const sourceY = curTile ? curTile.elevation * 0.5 + 0.25 : unit.worldPosition.y;
           unit.worldPosition.y = sourceY + (targetWorld.y - sourceY) * smooth;
+          unit._elevActive = true;
+          unit._elevGoingUp = elevDiff > 0;
+          unit._elevProgress = blendT;
         }
       }
     }
@@ -1860,6 +1870,20 @@ export class UnitAI {
 
   /** Base positions per player — set by main.ts on game init */
   static basePositions: Map<number, HexCoord> = new Map();
+  /** Map dimensions — set by main.ts at game start for direction calculations */
+  static mapWidth: number = 40;
+  static mapHeight: number = 40;
+
+  /** Get stockpile offset from base toward map center (for resource drop-off) */
+  static getStockpileOffset(owner: number): HexCoord {
+    const basePos = UnitAI.basePositions.get(owner);
+    if (!basePos) return { q: 0, r: 0 };
+    const centerQ = Math.floor(UnitAI.mapWidth / 2);
+    const centerR = Math.floor(UnitAI.mapHeight / 2);
+    const dq = Math.sign(centerQ - basePos.q) || 1;
+    const dr = Math.sign(centerR - basePos.r);
+    return { q: dq * 2, r: dr };
+  }
 
   /** Barracks positions per player — set by main.ts when barracks is built */
   static barracksPositions: Map<number, HexCoord> = new Map();
@@ -2008,7 +2032,8 @@ export class UnitAI {
 
     // Scan from near the base out to just past the map midpoint
     // to find the tightest choke point in mountain passes through ridges
-    const dir = owner === 0 ? 1 : -1;  // Player 0 scans right, player 1 scans left (toward enemy)
+    const centerQ = Math.floor(map.width / 2);
+    const dir = basePos.q < centerQ ? 1 : -1;  // Scan toward map center (toward enemy territory)
     const SCAN_MIN = 5;
     const midQ = Math.floor(map.width / 2);
     // Scan up to the midpoint of the map (or a bit past it)
@@ -2302,11 +2327,10 @@ export class UnitAI {
       if (UnitAI.isUnreachable(unit.id, key)) return;
 
       const [q, r] = key.split(',').map(Number);
-      // Allow lumberjacks to reach up to 70% of map width past midpoint
-      // (they still prefer own side via scoring, but can push forward)
+      // Allow lumberjacks to reach up to 70% of map width from their base
       const maxReach = Math.floor(map.width * 0.7);
-      if (unit.owner === 0 && q > midQ + maxReach) return;
-      if (unit.owner === 1 && q < midQ - maxReach) return;
+      const distFromBase = Pathfinder.heuristic(basePos, { q, r });
+      if (distFromBase > maxReach) return;
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
       const unitDist = Pathfinder.heuristic(unit.position, coord);
@@ -2375,9 +2399,9 @@ export class UnitAI {
       if (UnitAI.isUnreachable(unit.id, key)) continue;
 
       const [q, r] = key.split(',').map(Number);
-      // Only look at grass on the unit's own half (+2 buffer)
-      if (unit.owner === 0 && q > midQ + 2) continue;
-      if (unit.owner === 1 && q < midQ - 2) continue;
+      // Only look at grass reasonably close to own base
+      const distFromBase = Pathfinder.heuristic(basePos, { q, r });
+      if (distFromBase > Math.floor(map.width * 0.5) + 2) continue;
 
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
@@ -2580,12 +2604,10 @@ export class UnitAI {
       if (UnitAI.isUnreachable(unit.id, key)) return;
 
       const [q, r] = key.split(',').map(Number);
-      // Allow mining up to 70% past the midpoint — rare resources may be on either side.
-      // Uses same generous boundary as lumberjacks (line ~1740) to ensure both players
-      // can reach crystal/iron deposits regardless of map generation RNG.
+      // Allow mining up to a generous distance from own base — rare resources may be far away.
       const maxReach = Math.floor(map.width * GAME_CONFIG.combat.unitAI.miningSearch.maxReachFactor);
-      if (unit.owner === 0 && q > midQ + maxReach) return;
-      if (unit.owner === 1 && q < midQ - maxReach) return;
+      const distFromBase = Pathfinder.heuristic(basePos, { q, r });
+      if (distFromBase > maxReach) return;
 
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
@@ -3030,6 +3052,8 @@ export class UnitAI {
         if (!hasElevChange) {
           // Flat terrain — snap to target Y
           unit.worldPosition.y = targetWorld.y;
+          unit._elevActive = false;
+          unit._elevProgress = 0;
         } else {
           // Asymmetric transition window:
           // Going UP: start early (20%) to avoid walking into cliff face
@@ -3039,13 +3063,21 @@ export class UnitAI {
           const EDGE_END = goingUp ? 0.50 : 0.65;
           if (hexProgress <= EDGE_START) {
             unit.worldPosition.y = sourceY;
+            unit._elevActive = false;
+            unit._elevProgress = 0;
           } else if (hexProgress >= EDGE_END) {
             unit.worldPosition.y = targetWorld.y;
+            unit._elevActive = false;
+            unit._elevProgress = 1;
           } else {
             // Fast cubic ease within the edge window
             const t = (hexProgress - EDGE_START) / (EDGE_END - EDGE_START);
             const smooth = t * t * (3 - 2 * t);
             unit.worldPosition.y = sourceY + elevDiff * smooth;
+            // Expose transition state for the renderer's organic movement effects
+            unit._elevActive = true;
+            unit._elevGoingUp = goingUp;
+            unit._elevProgress = t; // 0→1 within the transition window
           }
         }
 
@@ -3119,15 +3151,16 @@ export class UnitAI {
         for (const pr of cycloneResult.pulled) events.push({ type: 'combat:cyclone', unitId: pr.unitId, knockQ: pr.knockQ, knockR: pr.knockR } as any);
         const cleaveResults = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked);
         for (const cr of cleaveResults) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
-        // Ogre club swipe — 2-hex AOE knockback
+        // Ogre club swipe — 2-hex AOE knockback with ground pound VFX
         const ogreResults = CombatSystem.applyOgreClubSwipe(unit, target, allUnits, isTileBlocked);
-        for (const or of ogreResults) events.push({ type: 'combat:cleave', unitId: or.unitId, knockQ: or.knockQ, knockR: or.knockR } as any);
+        if (ogreResults.length > 0) events.push({ type: 'combat:ogreSlam', attackerWorldPos: { x: unit.worldPosition.x, y: unit.worldPosition.y, z: unit.worldPosition.z }, targetWorldPos: { x: target.worldPosition.x, y: target.worldPosition.y, z: target.worldPosition.z } } as any);
+        for (const or of ogreResults) events.push({ type: 'combat:cleave', unitId: or.unitId, knockQ: or.knockQ, knockR: or.knockR, attackerType: UnitType.OGRE } as any);
         // Shieldbearer shield bash knockback
         const bashResult = CombatSystem.applyShieldBash(unit, target, isTileBlocked);
         if (bashResult) events.push({ type: 'combat:cleave', unitId: bashResult.unitId, knockQ: bashResult.knockQ, knockR: bashResult.knockR } as any);
         if (!result.defenderSurvived) {
           // Ranged kills: defer DEAD state until projectile lands (avoids "frozen unit" visual)
-          if (unit.stats.range > 1) {
+          if (unit.stats.range > 1 && unit.type !== UnitType.OGRE) {
             target._pendingRangedDeath = true;
           } else {
             target.state = UnitState.DEAD;
@@ -3197,16 +3230,17 @@ export class UnitAI {
         for (const pr of cycloneResult2.pulled) events.push({ type: 'combat:cyclone', unitId: pr.unitId, knockQ: pr.knockQ, knockR: pr.knockR } as any);
         const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
         for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
-        // Ogre club swipe — 2-hex AOE knockback
+        // Ogre club swipe — 2-hex AOE knockback with ground pound VFX
         const ogreResults2 = CombatSystem.applyOgreClubSwipe(unit, target, allUnits, isTileBlocked2);
-        for (const or2 of ogreResults2) events.push({ type: 'combat:cleave', unitId: or2.unitId, knockQ: or2.knockQ, knockR: or2.knockR } as any);
+        if (ogreResults2.length > 0) events.push({ type: 'combat:ogreSlam', attackerWorldPos: { x: unit.worldPosition.x, y: unit.worldPosition.y, z: unit.worldPosition.z }, targetWorldPos: { x: target.worldPosition.x, y: target.worldPosition.y, z: target.worldPosition.z } } as any);
+        for (const or2 of ogreResults2) events.push({ type: 'combat:cleave', unitId: or2.unitId, knockQ: or2.knockQ, knockR: or2.knockR, attackerType: UnitType.OGRE } as any);
         // Shieldbearer shield bash knockback
         const bashResult2 = CombatSystem.applyShieldBash(unit, target, isTileBlocked2);
         if (bashResult2) events.push({ type: 'combat:cleave', unitId: bashResult2.unitId, knockQ: bashResult2.knockQ, knockR: bashResult2.knockR } as any);
 
         if (!result.defenderSurvived) {
           // Ranged kills: defer DEAD state until projectile lands (avoids "frozen unit" visual)
-          if (unit.stats.range > 1) {
+          if (unit.stats.range > 1 && unit.type !== UnitType.OGRE) {
             target._pendingRangedDeath = true;
           } else {
             target.state = UnitState.DEAD;
@@ -3245,7 +3279,7 @@ export class UnitAI {
       }
     } else {
       // Out of range — move closer (ranged units stop at max range)
-      if (unit.stats.range > 1) {
+      if (unit.stats.range > 1 && unit.type !== UnitType.OGRE) {
         // Ranged unit: find a tile within weapon range of the target
         const targetPos = target.position;
         let bestTile: HexCoord | null = null;

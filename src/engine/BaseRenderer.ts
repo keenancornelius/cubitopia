@@ -6,11 +6,14 @@
 
 import * as THREE from 'three';
 import { Base, BaseTier, HexCoord } from '../types';
+import { getPlayerHex } from '../game/PlayerConfig';
 
 const PLAYER_BASE_COLORS = [
-  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0x3498db, accent: 0xd4cfc0, ring: 0x3498db }, // Off-white + Blue flag
-  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0xe74c3c, accent: 0xd4cfc0, ring: 0xe74c3c }, // Off-white + Red flag
-  { wall: 0x8a8a8a, tower: 0x6a6a6a, flag: 0xd4af37, accent: 0x555555, ring: 0xd4af37 }, // Dark stone + Gold flag (neutral)
+  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0x3498db, accent: 0xd4cfc0, ring: 0x3498db }, // P0: Off-white + Blue flag
+  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0xe74c3c, accent: 0xd4cfc0, ring: 0xe74c3c }, // P1: Off-white + Red flag
+  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0x2ecc71, accent: 0xd4cfc0, ring: 0x2ecc71 }, // P2: Off-white + Green flag
+  { wall: 0xf0ece0, tower: 0xe8e0d0, flag: 0xf39c12, accent: 0xd4cfc0, ring: 0xf39c12 }, // P3: Off-white + Gold flag
+  { wall: 0x8a8a8a, tower: 0x6a6a6a, flag: 0xd4af37, accent: 0x555555, ring: 0xd4af37 }, // Neutral: Dark stone + Gold flag
 ];
 
 interface BaseMeshGroup {
@@ -84,7 +87,7 @@ export class BaseRenderer {
     hpBg.position.set(0, topY + 1.0, 0); hpBg.renderOrder = 999; group.add(hpBg);
 
     const hpGeo = new THREE.PlaneGeometry(barWidth, barHeight);
-    const hpColor = base.owner === 0 ? 0x3498db : 0xe74c3c;
+    const hpColor = getPlayerHex(base.owner);
     const hpMat = new THREE.MeshBasicMaterial({ color: hpColor, side: THREE.DoubleSide, depthTest: false });
     const hpBar = new THREE.Mesh(hpGeo, hpMat);
     hpBar.position.set(0, topY + 1.0, 0); hpBar.renderOrder = 1000; group.add(hpBar);
@@ -589,7 +592,7 @@ export class BaseRenderer {
     // Color changes with damage
     const hpMat = meshGroup.healthBar.material as THREE.MeshBasicMaterial;
     if (pct > 0.5) {
-      hpMat.color.setHex(base.owner === 0 ? 0x3498db : 0xe74c3c);
+      hpMat.color.setHex(getPlayerHex(base.owner));
     } else if (pct > 0.25) {
       hpMat.color.setHex(0xf39c12);
     } else {

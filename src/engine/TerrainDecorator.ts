@@ -17,6 +17,8 @@ const SNOW_PINE_COLORS = [0x1b5e20, 0x2e7d32, 0x33691e] as const;
 const FLOWER_COLORS = [0xff6b6b, 0xffd93d, 0x6bcb77, 0xc084fc, 0xff8fab] as const;
 const DESERT_ROCK_COLORS = [0xc4a46c, 0xb8956a, 0xd4a96a, 0xc9935e] as const;
 const JUNGLE_TREE_COLORS = [0x1b7a1e, 0x237b28, 0x2e7d32] as const;
+const SKYLAND_TREE_COLORS = [0xffb6c1, 0xe6b0f0, 0x98fb98, 0xb0e0e6, 0xffd1dc] as const; // pink, lavender, mint, powder blue, rose
+const SCORCHED_TREE_COLORS = [0x2a1a0a, 0x3a2010, 0x1a1008, 0x332211] as const; // charred black-brown
 const GRASS_VARIANT_COUNT = 4;
 
 // Seeded random for consistent decoration placement
@@ -360,6 +362,12 @@ export class TerrainDecorator {
   private grassTime = 0;
   /** When true, MOUNTAIN tiles get desert decorations (cacti/rocks) instead of trees */
   desertMode = false;
+  /** When true, trees use pastel foliage (pink/lavender/mint) for Skyland maps */
+  skylandMode = false;
+  /** When true, use volcanic decorations: scorched trees, dark rocks, ember particles */
+  volcanicMode = false;
+  /** When true, use tropical decorations: palm/jungle trees, no snow pines */
+  archipelagoMode = false;
   /** Camera position reference for grass distance culling. Set externally each frame. */
   cameraWorldPos: { x: number; z: number } = { x: 0, z: 0 };
   private _grassFrameSkip = 0;
@@ -452,9 +460,17 @@ export class TerrainDecorator {
     switch (terrain) {
       case TerrainType.FOREST:
         if (!neighborTooTall) {
-          if (elevation >= 6.5) {
+          if (this.volcanicMode) {
+            // Scorched forest: charred dead trees, volcanic rocks, no greenery
+            this.addScorchedTree(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.5) this.addScorchedTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
+            if (rng.next() > 0.6) this.addVolcanicRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
+          } else if (elevation >= 6.5 && !this.skylandMode) {
             this.addSnowPine(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.6) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
+          } else if (this.skylandMode) {
+            this.addPastelTree(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.6) this.addPastelTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
           } else {
             this.addTree(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.6) this.addTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
@@ -463,10 +479,31 @@ export class TerrainDecorator {
         break;
       case TerrainType.PLAINS:
         if (!neighborTooTall) {
-          const hasGrassSurface = elevation < 3.0;
-          if (hasGrassSurface && rng.next() > 0.7) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
-          if (hasGrassSurface && rng.next() > 0.3) {
-            this.addGrassAtStage(coord, treeElevation, 1 + (rng.next() > 0.5 ? 1 : 0));
+          if (this.volcanicMode) {
+            // Ash plains: sparse volcanic rocks, no grass or flowers
+            if (rng.next() > 0.55) this.addVolcanicRock(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.75) this.addVolcanicRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+            if (rng.next() > 0.9) this.addScorchedTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
+          } else if (this.archipelagoMode) {
+            // Tropical clearing: lush grass, bright flowers, occasional jungle tree
+            if (rng.next() > 0.3) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.3) {
+              this.addGrassAtStage(coord, treeElevation, 1 + (rng.next() > 0.5 ? 1 : 0));
+            }
+            if (rng.next() > 0.85) this.addJungleTree(worldX, treeElevation, worldZ, rng, tileKey);
+          } else if (this.skylandMode) {
+            // Skyland plains: abundant flowers, occasional pastel trees, soft grass
+            if (rng.next() > 0.4) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.85) this.addPastelTree(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.4) {
+              this.addGrassAtStage(coord, treeElevation, 1 + (rng.next() > 0.5 ? 1 : 0));
+            }
+          } else {
+            const hasGrassSurface = elevation < 3.0;
+            if (hasGrassSurface && rng.next() > 0.7) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
+            if (hasGrassSurface && rng.next() > 0.3) {
+              this.addGrassAtStage(coord, treeElevation, 1 + (rng.next() > 0.5 ? 1 : 0));
+            }
           }
         }
         break;
@@ -475,6 +512,18 @@ export class TerrainDecorator {
           if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
           if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
           if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
+        } else if (this.volcanicMode) {
+          // Volcanic peak: dense dark rocks, iron ore veins, no trees
+          if (rng.next() > 0.3) this.addVolcanicRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.4) this.addVolcanicRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.5) this.addVolcanicRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+          if (rng.next() > 0.7) this.addVolcanicRock(worldX + 0.1, treeElevation, worldZ + 0.3, rng, tileKey);
+        } else if (this.skylandMode) {
+          // Cloud Peak: dense rocky terrain with occasional hardy pastel tree
+          if (rng.next() > 0.35) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.5) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.7) this.addRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+          if (!neighborTooTall && rng.next() > 0.85) this.addPastelTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
         } else {
           if (rng.next() > 0.55) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
           if (rng.next() > 0.8) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
@@ -493,24 +542,36 @@ export class TerrainDecorator {
       case TerrainType.WATER:
         break;
       case TerrainType.DESERT:
-        if (rng.next() > 0.75) this.addCactus(worldX, elevation, worldZ, rng, tileKey);
-        if (rng.next() > 0.85) {
-          this.addTumbleweed(
-            worldX + (rng.next() - 0.5) * 0.5,
-            elevation,
-            worldZ + (rng.next() - 0.5) * 0.5,
-            rng,
-            tileKey
-          );
-        }
-        if (rng.next() > 0.92) {
-          this.addDesertRock(
-            worldX + (rng.next() - 0.5) * 0.4,
-            elevation,
-            worldZ + (rng.next() - 0.5) * 0.4,
-            rng,
-            tileKey
-          );
+        if (this.skylandMode) {
+          // Cloud Valley: sandy lowlands with scattered rocks, flowers, and occasional pastel trees
+          if (rng.next() > 0.5) this.addRock(worldX, elevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.6) this.addRock(worldX + 0.3, elevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.5) this.addFlowers(worldX, elevation, worldZ, rng, tileKey);
+          if (!neighborTooTall && rng.next() > 0.8) this.addPastelTree(worldX - 0.2, elevation, worldZ + 0.1, rng, tileKey);
+        } else if (this.archipelagoMode) {
+          // Tropical beach: sparse rocks, occasional flowers, no cacti
+          if (rng.next() > 0.8) this.addRock(worldX, elevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.7) this.addFlowers(worldX, elevation, worldZ, rng, tileKey);
+        } else {
+          if (rng.next() > 0.75) this.addCactus(worldX, elevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.85) {
+            this.addTumbleweed(
+              worldX + (rng.next() - 0.5) * 0.5,
+              elevation,
+              worldZ + (rng.next() - 0.5) * 0.5,
+              rng,
+              tileKey
+            );
+          }
+          if (rng.next() > 0.92) {
+            this.addDesertRock(
+              worldX + (rng.next() - 0.5) * 0.4,
+              elevation,
+              worldZ + (rng.next() - 0.5) * 0.4,
+              rng,
+              tileKey
+            );
+          }
         }
         break;
       case TerrainType.SNOW:
@@ -608,6 +669,57 @@ export class TerrainDecorator {
       { x: scale, y: scale, z: scale }
     );
     if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  /** Pastel-foliaged tree for Skyland maps */
+  private addPastelTree(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const variant = Math.floor(rng.next() * SKYLAND_TREE_COLORS.length);
+    const offsetX = (rng.next() - 0.5) * 0.3;
+    const offsetZ = (rng.next() - 0.5) * 0.3;
+    const rotationY = rng.next() * Math.PI * 2;
+    const scale = 0.8 + rng.next() * 0.5;
+    const type = `skyland_tree_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x: x + offsetX, y: elevation, z: z + offsetZ },
+      new THREE.Euler(0, rotationY, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  /** Charred/scorched tree for Volcanic maps — dark trunk, no leaves, sometimes tilted */
+  private addScorchedTree(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const variant = Math.floor(rng.next() * SCORCHED_TREE_COLORS.length);
+    const offsetX = (rng.next() - 0.5) * 0.3;
+    const offsetZ = (rng.next() - 0.5) * 0.3;
+    const rotationY = rng.next() * Math.PI * 2;
+    // Scorched trees are often broken/shorter
+    const scale = 0.5 + rng.next() * 0.4;
+    // Sometimes tilted as if damaged
+    const tilt = (rng.next() - 0.5) * 0.3;
+    const type = `scorched_tree_${variant}`;
+    const instanceId = this.instancedObjects.addInstance(
+      type,
+      { x: x + offsetX, y: elevation, z: z + offsetZ },
+      new THREE.Euler(tilt, rotationY, 0),
+      { x: scale, y: scale, z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+  /** Dark volcanic rock for Volcanic maps */
+  private addVolcanicRock(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
+    const offsetX = (rng.next() - 0.5) * 0.4;
+    const offsetZ = (rng.next() - 0.5) * 0.4;
+    const scale = 0.15 + rng.next() * 0.25;
+    const instanceId = this.instancedObjects.addInstance(
+      'volcanic_rock',
+      { x: x + offsetX, y: elevation - 0.05, z: z + offsetZ },
+      new THREE.Euler(rng.next(), rng.next() * Math.PI, rng.next()),
+      { x: scale, y: scale * (0.6 + rng.next() * 0.8), z: scale }
+    );
+    if (tileKey) this.trackInstanceDecoration(tileKey, 'volcanic_rock', instanceId);
   }
 
   private addSnowPine(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
@@ -1226,6 +1338,33 @@ export class TerrainDecorator {
         );
       }
     }
+
+    for (let i = 0; i < SKYLAND_TREE_COLORS.length; i++) {
+      this.instancedObjects.registerType(
+        `skyland_tree_${i}`,
+        createTreeGeometry(SKYLAND_TREE_COLORS[i]),
+        treeMaterial.clone(),
+        { castShadow: true, initialCapacity: 128 }
+      );
+    }
+
+    for (let i = 0; i < SCORCHED_TREE_COLORS.length; i++) {
+      this.instancedObjects.registerType(
+        `scorched_tree_${i}`,
+        createTreeGeometry(SCORCHED_TREE_COLORS[i]),
+        treeMaterial.clone(),
+        { castShadow: true, initialCapacity: 128 }
+      );
+    }
+
+    // Volcanic rock — darker, more angular
+    const volcRockGeo = new THREE.DodecahedronGeometry(1, 0);
+    this.instancedObjects.registerType(
+      'volcanic_rock',
+      volcRockGeo,
+      new THREE.MeshLambertMaterial({ color: 0x1a1a1e }),
+      { castShadow: true, initialCapacity: 256 }
+    );
 
     for (let i = 0; i < SNOW_PINE_COLORS.length; i++) {
       this.instancedObjects.registerType(
