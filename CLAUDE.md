@@ -54,6 +54,31 @@ Build on the strong foundation of hex combat, capture zones, and economy.
 
 ---
 
+## Parallel Session Coordination
+
+Multiple Claude sessions may work on this project simultaneously. **Read `TASKS.md` before starting any work.**
+
+### How it works
+- `TASKS.md` is the task board. It defines work streams (A–H), each with its own set of owned files and tasks.
+- Each session claims ONE work stream, marks it `[ACTIVE]`, and only edits files listed under that stream.
+- Shared files (`types/index.ts`, `GameConfig.ts`, `UnitFactory.ts`) can be edited by any stream but only for small, additive changes (new types, new config entries). Never restructure shared files.
+- If you need a change in another stream's file, add a request to the "Cross-Stream Requests" table in TASKS.md.
+
+### Before you start
+1. Read `TASKS.md` — check which streams are OPEN vs ACTIVE
+2. Pick an OPEN stream that matches what the user wants you to work on
+3. Mark it `[ACTIVE]` with a session identifier
+4. Work only within your stream's files
+5. Commit frequently — other sessions may pull your changes
+
+### Conflict prevention
+- **Never edit a file owned by another active stream** without coordination
+- **git pull before starting work** if other sessions have been committing
+- **Small, focused commits** — easier to merge if two sessions touch shared files
+- If you encounter a merge conflict, stop and tell the user
+
+---
+
 ## Git Commit Policy
 
 **MANDATORY: Create a git commit BEFORE every major code overhaul.** This gives us a clean rollback point if changes break the game.

@@ -1026,21 +1026,30 @@ export class DebugPanel {
 
   private updateCombatStats(): void {
     if (!this.statsContainer || this.allUnitsRef.length === 0) return;
-    const alive = [0, 0];
-    const totalHp = [0, 0];
-    const maxHp = [0, 0];
+    const teamNames = ['BLUE', 'RED', 'GREEN', 'GOLD'];
+    const teamColors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12'];
+    const maxTeams = 4;
+    const alive = new Array(maxTeams).fill(0);
+    const totalHp = new Array(maxTeams).fill(0);
+    const maxHp = new Array(maxTeams).fill(0);
     for (const u of this.allUnitsRef) {
       if (u.state === UnitState.DEAD) continue;
-      alive[u.owner]++;
-      totalHp[u.owner] += u.currentHealth;
-      maxHp[u.owner] += u.stats.maxHealth;
+      if (u.owner < maxTeams) {
+        alive[u.owner]++;
+        totalHp[u.owner] += u.currentHealth;
+        maxHp[u.owner] += u.stats.maxHealth;
+      }
     }
-    const pct0 = maxHp[0] > 0 ? Math.round(totalHp[0] / maxHp[0] * 100) : 0;
-    const pct1 = maxHp[1] > 0 ? Math.round(totalHp[1] / maxHp[1] * 100) : 0;
     const evCount = CombatLog.getEvents().length;
+    const teamSpans = [];
+    for (let i = 0; i < maxTeams; i++) {
+      if (alive[i] > 0 || maxHp[i] > 0) {
+        const pct = maxHp[i] > 0 ? Math.round(totalHp[i] / maxHp[i] * 100) : 0;
+        teamSpans.push(`<span style="color:${teamColors[i]};font-weight:bold">${teamNames[i]}: ${alive[i]} alive (${pct}%HP)</span>`);
+      }
+    }
     this.statsContainer.innerHTML = `
-      <span style="color:#3498db;font-weight:bold">BLUE: ${alive[0]} alive (${pct0}%HP)</span>
-      <span style="color:#e74c3c;font-weight:bold">RED: ${alive[1]} alive (${pct1}%HP)</span>
+      ${teamSpans.join(' ')}
       <span style="color:#555">Events: ${evCount} T+${CombatLog.getTime()}s</span>
     `;
   }

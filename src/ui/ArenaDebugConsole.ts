@@ -125,7 +125,7 @@ export class CombatLog {
   static logKill(killer: Unit, victim: Unit): void {
     CombatLog.log(
       DebugEventType.KILL, killer.owner,
-      `${CombatLog.typeName(killer.type)}${CombatLog.shortId(killer)} KILLED ${CombatLog.typeName(victim.type)}${CombatLog.shortId(victim)} (${victim.owner === 0 ? 'BLUE' : 'RED'})`,
+      `${CombatLog.typeName(killer.type)}${CombatLog.shortId(killer)} KILLED ${CombatLog.typeName(victim.type)}${CombatLog.shortId(victim)} (${['BLUE','RED','GREEN','GOLD'][victim.owner] ?? `P${victim.owner}`})`,
       killer.type, killer.id
     );
   }

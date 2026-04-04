@@ -74,7 +74,8 @@ export default class DebugOverlayRenderer {
       const cacheKey = `${(unit.type as string)[0]}${(unit.state as string)[0]}${hp}${maxHp}${atk}${def}`;
       if ((lbl as any)._cache !== cacheKey) {
         (lbl as any)._cache = cacheKey;
-        const oc = unit.owner === 0 ? '#4fc3f7' : '#ef5350';
+        const ownerColors = ['#4fc3f7', '#ef5350', '#66bb6a', '#ffa726'];
+        const oc = ownerColors[unit.owner] ?? '#aaaaaa';
         lbl.innerHTML = `<span style="color:${oc}">${(unit.type as string).substring(0, 4).toUpperCase()}</span> <span style="color:#aaa">${(unit.state as string).substring(0, 4).toUpperCase()}</span> <span style="color:#81c784">${hp}/${maxHp}</span> <span style="color:#ffb74d">A${atk} D${def}</span>`;
       }
       lbl.style.left = sx + 'px';

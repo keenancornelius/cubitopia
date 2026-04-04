@@ -7,6 +7,7 @@ import { StatusEffectSystem } from '../game/systems/StatusEffectSystem';
 import { StrategyCamera } from '../engine/Camera';
 import { GAME_CONFIG } from '../game/GameConfig';
 import { getUnitPortrait } from '../engine/UnitPortraits';
+import { UI, COLORS, FONT, BORDER, SHADOW, SPACE } from './UITheme';
 
 export class HUD {
   private container: HTMLElement;
@@ -133,6 +134,141 @@ export class HUD {
     }
   }
 
+  /**
+   * Refresh theme-dependent inline styles on ALL persistent panels.
+   * Call after setSkin() to apply the new skin to every existing element.
+   */
+  refreshTheme(): void {
+    // ── HUD container ──
+    this.container.style.fontFamily = FONT.family;
+    this.container.style.color = COLORS.textPrimary;
+
+    // ── Resource bars (appended to document.body) ──
+    const reBarStyle = `${UI.panel()}; padding: 12px 16px; font-size: ${FONT.lg};`;
+    this.elements.resourceBar.style.cssText = `position: fixed; top: 16px; left: 16px; ${reBarStyle} z-index: 10000;`;
+    this.elements.enemyResourceBar.style.cssText = `position: fixed; top: 16px; right: 140px; ${reBarStyle} z-index: 10000;`;
+
+    // Resource bar text colors
+    const reColorize = (el: HTMLElement | null) => { if (el) el.parentElement!.style.fontFamily = FONT.family; };
+    [this.resWoodVal, this.resStoneVal, this.resIronVal, this.resCrystalVal,
+     this.resGrassFiberVal, this.resClayVal, this.resCharcoalVal, this.resRopeVal,
+     this.resSteelVal, this.resFoodVal, this.resGoldVal, this.resUnitVal].forEach(reColorize);
+
+    // Resource dropdown group buttons
+    const groupBtnStyle = `cursor:pointer; padding:3px 8px; border-radius:${BORDER.radius.sm}; transition:background 0.15s; white-space:nowrap; user-select:none; font-family:${FONT.family}; color:${COLORS.textPrimary};`;
+    if (this.earthGroupBtn) this.earthGroupBtn.style.cssText = groupBtnStyle;
+    if (this.craftedGroupBtn) this.craftedGroupBtn.style.cssText = groupBtnStyle;
+    if (this.enemyEarthGroupBtn) this.enemyEarthGroupBtn.style.cssText = groupBtnStyle;
+    if (this.enemyCraftedGroupBtn) this.enemyCraftedGroupBtn.style.cssText = groupBtnStyle;
+
+    // Resource dropdown panels
+    const ddStyle = `position:absolute; top:100%; left:0; margin-top:6px; ${UI.dropdown()}; min-width:200px; z-index:1000; display:none;`;
+    if (this.earthGroupDropdown) this.earthGroupDropdown.style.cssText = ddStyle;
+    if (this.craftedGroupDropdown) this.craftedGroupDropdown.style.cssText = ddStyle.replace('200px', '200px');
+    if (this.enemyEarthGroupDropdown) this.enemyEarthGroupDropdown.style.cssText = ddStyle;
+    if (this.enemyCraftedGroupDropdown) this.enemyCraftedGroupDropdown.style.cssText = ddStyle;
+    const ddStyleNarrow = ddStyle.replace('200px', '180px');
+    if (this.unitDropdown) this.unitDropdown.style.cssText = ddStyleNarrow;
+    if (this.enemyUnitDropdown) this.enemyUnitDropdown.style.cssText = ddStyleNarrow;
+
+    // ── Title bar ──
+    this.elements.titleBar.style.cssText = `position: absolute; top: 16px; left: 50%; transform: translateX(-50%); ${UI.panel()}; padding: 8px 24px; font-size: 18px; text-align: center;`;
+
+    // ── Selection info ──
+    const selDisplay = this.elements.selectionInfo.style.display;
+    this.elements.selectionInfo.style.cssText = `position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); ${UI.panel()}; padding: 12px 24px; font-size: ${FONT.lg}; display: ${selDisplay};`;
+
+    // ── Menu button ──
+    this.elements.newMapButton.style.cssText = `position: absolute; top: 16px; right: 16px; ${UI.ctaButton('linear-gradient(135deg, #2980b9, #1a5276)')}; padding: 8px 20px; font-size: ${FONT.lg}; letter-spacing: 2px;`;
+
+    // ── Control panel + all child buttons ──
+    if (this.controlPanel) {
+      this.controlPanel.style.cssText = `position: absolute; bottom: 16px; left: 16px; ${UI.panel()}; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; z-index: 101; min-width: 220px;`;
+      // Re-style all buttons inside the control panel
+      this.controlPanel.querySelectorAll('button').forEach(btn => {
+        btn.style.fontFamily = FONT.family;
+        btn.style.borderRadius = BORDER.radius.md;
+      });
+      // Re-style all headers
+      this.controlPanel.querySelectorAll('div').forEach(div => {
+        if (div.style.textTransform === 'uppercase' && div.style.letterSpacing) {
+          div.style.fontFamily = FONT.family;
+          div.style.color = COLORS.textSecondary;
+        }
+      });
+    }
+
+    // ── Selection command panel ──
+    if (this.selectionCommandPanel) {
+      this.selectionCommandPanel.style.cssText = `position: fixed; bottom: 16px; right: 16px; ${UI.panel()}; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; z-index: 10000; min-width: 170px;`;
+      this.selectionCommandPanel.querySelectorAll('button').forEach(btn => {
+        btn.style.fontFamily = FONT.family;
+        btn.style.borderRadius = BORDER.radius.sm;
+      });
+    }
+
+    // ── Mode indicators (all of them) ──
+    const modeEls = [
+      this.buildModeIndicator, this.barracksModeIndicator, this.forestryModeIndicator,
+      this.masonryModeIndicator, this.farmhouseModeIndicator, this.siloModeIndicator,
+      this.farmPatchModeIndicator, this.harvestModeIndicator, this.plantTreeModeIndicator,
+      this.mineModeIndicator, this.plantCropsModeIndicator, this.rallyPointModeIndicator,
+      this.workshopModeIndicator, this.smelterModeIndicator, this.armoryModeIndicator,
+      this.wizardTowerModeIndicator,
+    ];
+    for (const el of modeEls) {
+      if (!el) continue;
+      // Preserve the border-color (unique per mode) but update panel styling
+      const borderColor = el.style.borderColor || el.style.color || COLORS.borderDefault;
+      el.style.background = COLORS.panelBg;
+      el.style.fontFamily = FONT.family;
+      el.style.borderRadius = BORDER.radius.lg;
+      el.style.boxShadow = SHADOW.panel;
+      el.style.color = borderColor;
+    }
+
+    // ── Help overlay ──
+    if (this.helpOverlay) {
+      this.helpOverlay.style.cssText = `${UI.overlay('rgba(5, 5, 16, 0.94)')}; display: ${this.helpOverlay.style.display}; overflow-y: auto; animation: uiFadeIn 0.25s ease;`;
+    }
+
+    // ── Notification element ──
+    if (this.notificationEl) {
+      const color = this.notificationEl.style.borderColor || '#e74c3c';
+      this.notificationEl.style.background = COLORS.panelBg;
+      this.notificationEl.style.fontFamily = FONT.family;
+      this.notificationEl.style.borderRadius = BORDER.radius.lg;
+    }
+
+    // ── Terrain info panel ──
+    if (this.terrainInfoPanel) {
+      this.terrainInfoPanel.style.cssText = `position: absolute; top: 80px; left: 16px; ${UI.panel()}; padding: 12px 16px; min-width: 180px; pointer-events: none; z-index: 10001; transition: opacity 0.2s;`;
+    }
+
+    // ── Unit stats panel ──
+    if (this.unitStatsPanel) {
+      this.unitStatsPanel.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); ${UI.panel(COLORS.borderHover)}; padding: 16px; min-width: 600px; max-height: 80vh; overflow-y: auto; pointer-events: auto; z-index: 500;`;
+    }
+
+    // ── Spawn queue panel ──
+    // Dynamic (rebuilt each update) — will pick up new constants automatically
+
+    // ── Capture zone CSS — rebuild the injected stylesheet ──
+    if (this._czStyle) {
+      document.head.removeChild(this._czStyle);
+      this._czStyle = null;
+      this.ensureCaptureZoneStyles();
+    }
+
+    // ── Army strength bar — destroy so it recreates with new theme ──
+    if (this.armyStrengthBar) {
+      this.armyStrengthBar.remove();
+      this.armyStrengthBar = null;
+      this.armyStrengthFill = null;
+      this.armyStrengthLabel = null;
+    }
+  }
+
   // Nested menu dynamic content area
   private menuContentArea: HTMLElement | null = null;
   private _onMenuAction: ((action: string) => void) | null = null;
@@ -142,19 +278,18 @@ export class HUD {
     const panel = document.createElement('div');
     panel.style.cssText = `
       position: absolute; bottom: 16px; left: 16px;
-      background: rgba(0, 0, 0, 0.85); padding: 8px 10px; border-radius: 10px;
-      border: 2px solid rgba(255,255,255,0.2);
+      ${UI.panel()}; padding: 8px 10px;
       display: flex; flex-direction: column; gap: 2px;
-      pointer-events: auto; z-index: 101; min-width: 220px;
+      z-index: 101; min-width: 220px;
     `;
 
     const makeBtn = (label: string, key: string, color: string, cb: () => void): HTMLElement => {
       const btn = document.createElement('button');
       btn.style.cssText = `
         background: linear-gradient(135deg, ${color}, ${this.darken(color)});
-        color: white; border: 1px solid rgba(255,255,255,0.2);
-        padding: 5px 8px; font-size: 10px; font-family: 'Courier New', monospace;
-        font-weight: bold; border-radius: 6px; cursor: pointer;
+        color: white; border: ${BORDER.thin} solid ${COLORS.borderDefault};
+        padding: 5px 8px; font-size: ${FONT.sm}; font-family: ${FONT.family};
+        font-weight: bold; border-radius: ${BORDER.radius.md}; cursor: pointer;
         text-transform: uppercase; letter-spacing: 0.5px;
         text-align: left; white-space: nowrap; flex-shrink: 0;
       `;
@@ -168,8 +303,7 @@ export class HUD {
     const makeHeaderBtn = (label: string): HTMLElement => {
       const header = document.createElement('div');
       header.style.cssText = `
-        color: #aaa; font-size: 10px; font-weight: bold; text-transform: uppercase;
-        margin-top: 4px; margin-bottom: 2px; letter-spacing: 1px; padding-left: 4px;
+        ${UI.sectionHeader()}; margin-top: 4px; margin-bottom: 2px; padding-left: 4px;
       `;
       header.innerHTML = label;
       return header;
@@ -238,8 +372,9 @@ export class HUD {
     header.style.cssText = `
       color: #fff; font-size: 11px; font-weight: bold; text-transform: uppercase;
       margin-top: 6px; margin-bottom: 4px; letter-spacing: 1px; padding: 4px 6px;
-      background: rgba(255,255,255,0.08); border-radius: 6px;
+      background: rgba(255,255,255,0.08); border-radius: ${BORDER.radius.md};
       display: flex; justify-content: space-between; align-items: center;
+      font-family: ${FONT.family};
     `;
     header.innerHTML = `
       <span>${cat.name}</span>
@@ -255,9 +390,9 @@ export class HUD {
       const isActive = i === buildingIndex;
       tab.style.cssText = `
         background: ${isActive ? `linear-gradient(135deg, ${b.color}, ${this.darken(b.color)})` : 'rgba(40,40,40,0.8)'};
-        color: ${isActive ? '#fff' : '#888'}; border: 1px solid ${isActive ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)'};
-        padding: 4px 8px; font-size: 10px; font-family: 'Courier New', monospace;
-        font-weight: bold; border-radius: 6px; cursor: pointer;
+        color: ${isActive ? '#fff' : '#888'}; border: ${BORDER.thin} solid ${isActive ? COLORS.borderHover : COLORS.divider};
+        padding: 4px 8px; font-size: ${FONT.sm}; font-family: ${FONT.family};
+        font-weight: bold; border-radius: ${BORDER.radius.md}; cursor: pointer;
         text-transform: uppercase; letter-spacing: 0.5px;
         ${isActive ? `box-shadow: 0 0 8px ${b.color}40;` : ''}
       `;
@@ -292,9 +427,9 @@ export class HUD {
         const btn = document.createElement('button');
         btn.style.cssText = `
           background: linear-gradient(135deg, ${building.color}cc, ${this.darken(building.color)});
-          color: white; border: 1px solid rgba(255,255,255,0.2);
-          padding: 4px 7px; font-size: 10px; font-family: 'Courier New', monospace;
-          font-weight: bold; border-radius: 5px; cursor: pointer;
+          color: white; border: ${BORDER.thin} solid ${COLORS.borderDefault};
+          padding: 4px 7px; font-size: ${FONT.sm}; font-family: ${FONT.family};
+          font-weight: bold; border-radius: ${BORDER.radius.sm}; cursor: pointer;
           text-align: left; white-space: nowrap;
         `;
         btn.innerHTML = `<span style="background:rgba(0,0,0,0.4);padding:1px 4px;border-radius:3px;margin-right:3px;font-size:9px;">${a.key}</span>${a.label}`;
@@ -321,7 +456,7 @@ export class HUD {
     div.id = 'game-hud';
     div.style.cssText = `
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      pointer-events: none; font-family: 'Courier New', monospace; color: white; z-index: 100;
+      pointer-events: none; font-family: ${FONT.family}; color: white; z-index: 100;
     `;
     return div;
   }
@@ -331,8 +466,7 @@ export class HUD {
     const titleBar = document.createElement('div');
     titleBar.style.cssText = `
       position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7); padding: 8px 24px; border-radius: 8px;
-      font-size: 18px; text-align: center; border: 2px solid rgba(255,255,255,0.2);
+      ${UI.panel()}; padding: 8px 24px; font-size: 18px; text-align: center;
     `;
     titleBar.innerHTML = '<strong>CUBITOPIA</strong><br><span style="font-size:12px">RTS Mode</span>';
     this.container.appendChild(titleBar);
@@ -341,10 +475,8 @@ export class HUD {
     const resourceBar = document.createElement('div');
     resourceBar.style.cssText = `
       position: fixed; top: 16px; left: 16px;
-      background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px;
-      font-size: 14px; border: 2px solid rgba(255,255,255,0.2);
-      pointer-events: auto; z-index: 10000;
-      font-family: 'Courier New', monospace; color: white;
+      ${UI.panel()}; padding: 12px 16px; font-size: 14px;
+      z-index: 10000;
     `;
     // Prevent clicks from propagating to the game canvas
     resourceBar.addEventListener('mousedown', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
@@ -357,10 +489,8 @@ export class HUD {
     const enemyResourceBar = document.createElement('div');
     enemyResourceBar.style.cssText = `
       position: fixed; top: 16px; right: 140px;
-      background: rgba(0, 0, 0, 0.7); padding: 12px 16px; border-radius: 8px;
-      font-size: 14px; border: 2px solid rgba(255,255,255,0.2);
-      pointer-events: auto; z-index: 10000;
-      font-family: 'Courier New', monospace; color: white;
+      ${UI.panel()}; padding: 12px 16px; font-size: 14px;
+      z-index: 10000;
     `;
     enemyResourceBar.addEventListener('mousedown', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
     enemyResourceBar.addEventListener('mouseup', (e) => { e.stopPropagation(); e.stopImmediatePropagation(); });
@@ -372,9 +502,7 @@ export class HUD {
     const selectionInfo = document.createElement('div');
     selectionInfo.style.cssText = `
       position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7); padding: 12px 24px; border-radius: 8px;
-      font-size: 14px; border: 2px solid rgba(255,255,255,0.2); display: none;
-      pointer-events: auto;
+      ${UI.panel()}; padding: 12px 24px; font-size: 14px; display: none;
     `;
     // Block clicks on selection info from propagating to the canvas (which would clear the selection)
     for (const evt of ['mousedown', 'click', 'dblclick'] as const) {
@@ -387,10 +515,8 @@ export class HUD {
     newMapButton.textContent = '☰ MENU';
     newMapButton.style.cssText = `
       position: absolute; top: 16px; right: 16px;
-      background: linear-gradient(135deg, #2980b9, #1a5276); color: white;
-      border: 2px solid rgba(255,255,255,0.3); padding: 8px 20px; font-size: 14px;
-      font-family: 'Courier New', monospace; font-weight: bold; border-radius: 8px;
-      cursor: pointer; pointer-events: auto; text-transform: uppercase; letter-spacing: 2px;
+      ${UI.ctaButton('linear-gradient(135deg, #2980b9, #1a5276)')};
+      padding: 8px 20px; font-size: 14px; letter-spacing: 2px;
     `;
     newMapButton.addEventListener('mouseenter', () => {
       newMapButton.style.background = 'linear-gradient(135deg, #1a5276, #154360)';
@@ -541,11 +667,7 @@ export class HUD {
     const earthDropdown = document.createElement('div');
     earthDropdown.style.cssText = `
       position:absolute; top:100%; left:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:200px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      ${UI.dropdown()}; min-width:200px; z-index:1000; display:none;
     `;
     this.earthGroupDropdown = earthDropdown;
 
@@ -596,11 +718,7 @@ export class HUD {
     const craftedDropdown = document.createElement('div');
     craftedDropdown.style.cssText = `
       position:absolute; top:100%; left:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:200px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      ${UI.dropdown()}; min-width:200px; z-index:1000; display:none;
     `;
     this.craftedGroupDropdown = craftedDropdown;
 
@@ -658,11 +776,7 @@ export class HUD {
     const dropdown = document.createElement('div');
     dropdown.style.cssText = `
       position:absolute; top:100%; left:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:180px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      \${UI.dropdown()}; min-width:180px; z-index:1000; display:none;
     `;
     this.unitDropdownContent = document.createElement('div');
     dropdown.appendChild(this.unitDropdownContent);
@@ -798,11 +912,7 @@ export class HUD {
     const earthDropdown = document.createElement('div');
     earthDropdown.style.cssText = `
       position:absolute; top:100%; right:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:200px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      ${UI.dropdown()}; min-width:200px; z-index:1000; display:none;
     `;
     this.enemyEarthGroupDropdown = earthDropdown;
 
@@ -852,11 +962,7 @@ export class HUD {
     const craftedDropdown = document.createElement('div');
     craftedDropdown.style.cssText = `
       position:absolute; top:100%; right:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:200px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      ${UI.dropdown()}; min-width:200px; z-index:1000; display:none;
     `;
     this.enemyCraftedGroupDropdown = craftedDropdown;
 
@@ -912,11 +1018,7 @@ export class HUD {
     const dropdown = document.createElement('div');
     dropdown.style.cssText = `
       position:absolute; top:100%; right:0; margin-top:6px;
-      background:rgba(10,10,18,0.94); padding:10px 14px; border-radius:8px;
-      font-size:13px; border:2px solid rgba(255,255,255,0.25);
-      min-width:180px; z-index:1000; pointer-events:auto;
-      backdrop-filter:blur(10px); box-shadow:0 8px 28px rgba(0,0,0,0.6);
-      display:none;
+      \${UI.dropdown()}; min-width:180px; z-index:1000; display:none;
     `;
     this.enemyUnitDropdownContent = document.createElement('div');
     dropdown.appendChild(this.enemyUnitDropdownContent);
@@ -1006,6 +1108,122 @@ export class HUD {
     this._lastEnemyUnits = player.units;
   }
 
+  // === Army Strength Indicator ===
+  private armyStrengthBar: HTMLElement | null = null;
+  private armyStrengthFill: HTMLElement | null = null;
+  private armyStrengthLabel: HTMLElement | null = null;
+  private _lastStrengthUpdate = 0;
+
+  // N-player team colors — expandable to any number of players
+  static readonly TEAM_COLORS: string[] = ['#3498db', '#e74c3c', '#d4af37', '#2ecc71', '#9b59b6', '#e67e22'];
+  static readonly TEAM_NAMES: string[] = ['Blue', 'Red', 'Gold', 'Green', 'Purple', 'Orange'];
+
+  /** Create the army strength comparison bar — shows relative military power for N players */
+  private createArmyStrengthBar(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = `
+      position:absolute; top:86px; left:50%; transform:translateX(-50%);
+      width:280px; z-index:100; pointer-events:none;
+      font-family:${FONT.family};
+    `;
+
+    this.armyStrengthLabel = document.createElement('div');
+    this.armyStrengthLabel.style.cssText = `
+      ${UI.sectionHeader(COLORS.textMuted)}; text-align:center; margin-bottom:3px;
+      letter-spacing:1.5px;
+    `;
+    this.armyStrengthLabel.textContent = 'ARMY POWER';
+    wrap.appendChild(this.armyStrengthLabel);
+
+    // Segmented bar container
+    this.armyStrengthFill = document.createElement('div');
+    this.armyStrengthFill.style.cssText = `
+      ${UI.barWrap('8px')}; display:flex; overflow:hidden;
+      border: ${BORDER.thin} solid rgba(255,255,255,0.08);
+    `;
+    wrap.appendChild(this.armyStrengthFill);
+
+    this.armyStrengthBar = wrap;
+    return wrap;
+  }
+
+  /** Update the army strength comparison — supports N players */
+  updateArmyStrength(playerUnits: Unit[], enemyUnits: Unit[], allPlayers?: { units: Unit[]; color?: string }[]): void {
+    const now = performance.now();
+    if (now - this._lastStrengthUpdate < 500) return; // throttle to 2Hz
+    this._lastStrengthUpdate = now;
+
+    if (!this.armyStrengthBar) {
+      this.container.appendChild(this.createArmyStrengthBar());
+    }
+
+    const power = (units: Unit[]) => {
+      let total = 0;
+      for (const u of units) {
+        if (u.state === 'dead' || !HUD.isCombatType(u.type)) continue;
+        total += u.currentHealth * (u.stats.attack + u.stats.defense);
+      }
+      return total;
+    };
+
+    // Build player power array — use allPlayers if provided, else fall back to 2-player
+    const teams: { power: number; color: string }[] = [];
+    if (allPlayers && allPlayers.length > 2) {
+      for (let i = 0; i < allPlayers.length; i++) {
+        teams.push({ power: power(allPlayers[i].units), color: allPlayers[i].color || HUD.TEAM_COLORS[i] || '#888' });
+      }
+    } else {
+      teams.push({ power: power(playerUnits), color: HUD.TEAM_COLORS[0] });
+      teams.push({ power: power(enemyUnits), color: HUD.TEAM_COLORS[1] });
+    }
+
+    const totalPower = teams.reduce((s, t) => s + t.power, 0);
+
+    if (!this.armyStrengthFill) return;
+
+    if (totalPower === 0) {
+      // Equal empty — show even segments
+      const evenPct = Math.round(100 / teams.length);
+      this.armyStrengthFill.innerHTML = teams.map((t, i) =>
+        `<div style="height:100%; width:${i === teams.length - 1 ? 100 - evenPct * i : evenPct}%; background:${t.color}40; transition:width 0.5s ease-out;"></div>`
+      ).join('');
+      if (this.armyStrengthLabel) {
+        this.armyStrengthLabel.textContent = 'ARMY POWER';
+        this.armyStrengthLabel.style.color = COLORS.textMuted;
+      }
+      return;
+    }
+
+    // Build segmented bar
+    this.armyStrengthFill.innerHTML = teams.map(t => {
+      const pct = Math.max(1, Math.round((t.power / totalPower) * 100));
+      return `<div style="height:100%; width:${pct}%; background:${t.color}; transition:width 0.5s ease-out;"></div>`;
+    }).join('');
+
+    // Label: for 2-player show advantage/disadvantage, for N-player show leader
+    if (this.armyStrengthLabel) {
+      if (teams.length === 2) {
+        const playerPct = Math.round((teams[0].power / totalPower) * 100);
+        if (playerPct > 65) {
+          this.armyStrengthLabel.textContent = 'ARMY ADVANTAGE';
+          this.armyStrengthLabel.style.color = COLORS.success;
+        } else if (playerPct < 35) {
+          this.armyStrengthLabel.textContent = 'ARMY DISADVANTAGE';
+          this.armyStrengthLabel.style.color = COLORS.danger;
+        } else {
+          this.armyStrengthLabel.textContent = 'ARMY POWER';
+          this.armyStrengthLabel.style.color = COLORS.textMuted;
+        }
+      } else {
+        // N-player: show which team leads
+        const maxIdx = teams.reduce((best, t, i) => t.power > teams[best].power ? i : best, 0);
+        const leaderPct = Math.round((teams[maxIdx].power / totalPower) * 100);
+        this.armyStrengthLabel.textContent = `${HUD.TEAM_NAMES[maxIdx] || 'P' + maxIdx} LEADS (${leaderPct}%)`;
+        this.armyStrengthLabel.style.color = teams[maxIdx].color;
+      }
+    }
+  }
+
   private hideUnitDropdown(): void {
     if (this.unitDropdown) this.unitDropdown.style.display = 'none';
     this.unitDropdownVisible = false;
@@ -1077,8 +1295,30 @@ export class HUD {
     if (this.resRopeVal) this.resRopeVal.textContent = `${player.resources.rope} rope`;
     if (this.resSteelVal) this.resSteelVal.textContent = `${player.resources.steel} steel`;
 
-    // Standalone resources
-    if (this.resFoodVal) this.resFoodVal.textContent = `${food} food`;
+    // Standalone resources — food with cap context
+    if (this.resFoodVal) {
+      if (popInfo) {
+        this.resFoodVal.textContent = `${food} food`;
+        // Add food→cap hint next to food value
+        const foodParent = this.resFoodVal.parentElement;
+        if (foodParent) {
+          let foodCapHint = foodParent.querySelector('.food-cap-hint') as HTMLElement;
+          if (!foodCapHint) {
+            foodCapHint = document.createElement('span');
+            foodCapHint.className = 'food-cap-hint';
+            foodCapHint.style.cssText = 'font-size:10px;opacity:0.6;margin-left:2px;';
+            foodParent.appendChild(foodCapHint);
+          }
+          foodCapHint.textContent = `(cap ${popInfo.cap})`;
+          // Pulse color when near cap
+          const capColor = popInfo.current >= popInfo.cap ? '#e74c3c'
+            : popInfo.current >= popInfo.cap * 0.8 ? '#e67e22' : '#8bc34a';
+          foodCapHint.style.color = capColor;
+        }
+      } else {
+        this.resFoodVal.textContent = `${food} food`;
+      }
+    }
     if (this.resGoldVal) this.resGoldVal.textContent = `${player.resources.gold} gold`;
     // Unit count with pop cap indicator
     if (this.resUnitVal) {
@@ -1097,7 +1337,7 @@ export class HUD {
             capSpan.style.cssText = 'font-size:10px;opacity:0.7;margin-left:2px;';
             parent.insertBefore(capSpan, parent.querySelector('.unit-arrow'));
           }
-          capSpan.textContent = ` (${popInfo.current}/${popInfo.cap})`;
+          capSpan.textContent = ` (⚔${popInfo.current}/${popInfo.cap})`;
           capSpan.style.color = color;
         }
       } else {
@@ -1126,11 +1366,7 @@ export class HUD {
     if (!this.barracksModeIndicator) {
       this.barracksModeIndicator = document.createElement('div');
       this.barracksModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #e67e22; color: #e67e22;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#e67e22')};
       `;
       this.barracksModeIndicator.innerHTML = `🏗️ BARRACKS PLACEMENT — Click to place barracks (costs ${GAME_CONFIG.buildings.barracks.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.barracksModeIndicator);
@@ -1143,11 +1379,7 @@ export class HUD {
     if (!this.forestryModeIndicator) {
       this.forestryModeIndicator = document.createElement('div');
       this.forestryModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #6b8e23; color: #6b8e23;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#6b8e23')};
       `;
       this.forestryModeIndicator.innerHTML = `🌳 FORESTRY PLACEMENT — Click to place forestry (costs ${GAME_CONFIG.buildings.forestry.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.forestryModeIndicator);
@@ -1160,11 +1392,7 @@ export class HUD {
     if (!this.masonryModeIndicator) {
       this.masonryModeIndicator = document.createElement('div');
       this.masonryModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #808080; color: #808080;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#808080')};
       `;
       this.masonryModeIndicator.innerHTML = `⬜ MASONRY PLACEMENT — Click to place masonry (costs ${GAME_CONFIG.buildings.masonry.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.masonryModeIndicator);
@@ -1182,11 +1410,7 @@ export class HUD {
     if (!this.farmhouseModeIndicator) {
       this.farmhouseModeIndicator = document.createElement('div');
       this.farmhouseModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #daa520; color: #daa520;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#daa520')};
       `;
       this.farmhouseModeIndicator.innerHTML = `🏠 FARMHOUSE PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.farmhouse.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.farmhouseModeIndicator);
@@ -1199,11 +1423,7 @@ export class HUD {
     if (!this.siloModeIndicator) {
       this.siloModeIndicator = document.createElement('div');
       this.siloModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #c0c0c0; color: #c0c0c0;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#c0c0c0')};
       `;
       this.siloModeIndicator.innerHTML = `🏗️ SILO PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.silo.cost.player.wood} wood) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.siloModeIndicator);
@@ -1216,11 +1436,7 @@ export class HUD {
     if (!this.farmPatchModeIndicator) {
       this.farmPatchModeIndicator = document.createElement('div');
       this.farmPatchModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #8b6914; color: #8b6914;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#8b6914')};
       `;
       this.farmPatchModeIndicator.innerHTML = '🌾 HARVEST — Click plains for farms, tall grass for hay (villagers) · [Tab] to close';
       this.container.appendChild(this.farmPatchModeIndicator);
@@ -1234,11 +1450,7 @@ export class HUD {
     if (!this.plantTreeModeIndicator) {
       this.plantTreeModeIndicator = document.createElement('div');
       this.plantTreeModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #228B22; color: #228B22;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#228B22')};
       `;
       this.plantTreeModeIndicator.innerHTML = `🌱 PLANT TREES — Click & drag on plains to plant saplings (${GAME_CONFIG.economy.harvest.tree.plantCost.wood} wood each) · [Tab] to close`;
       this.container.appendChild(this.plantTreeModeIndicator);
@@ -1253,11 +1465,7 @@ export class HUD {
     if (!this.mineModeIndicator) {
       this.mineModeIndicator = document.createElement('div');
       this.mineModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #ff8c00; color: #ff8c00;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#ff8c00')};
       `;
       this.container.appendChild(this.mineModeIndicator);
     }
@@ -1277,11 +1485,7 @@ export class HUD {
     if (!this.plantCropsModeIndicator) {
       this.plantCropsModeIndicator = document.createElement('div');
       this.plantCropsModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #228B22; color: #228B22;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#228B22')};
       `;
       this.plantCropsModeIndicator.innerHTML = '🌱 PLANT CROPS — Click cleared plains to plant farm crops · [Tab] to close';
       this.container.appendChild(this.plantCropsModeIndicator);
@@ -1297,11 +1501,7 @@ export class HUD {
     if (!this.workshopModeIndicator) {
       this.workshopModeIndicator = document.createElement('div');
       this.workshopModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #5d4037; color: #c9a96e;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#5d4037')}; color: #c9a96e;
       `;
       this.workshopModeIndicator.innerHTML = `🔧 WORKSHOP PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.workshop.cost.player.wood} wood + ${GAME_CONFIG.buildings.workshop.cost.player.stone} stone) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.workshopModeIndicator);
@@ -1318,11 +1518,7 @@ export class HUD {
     if (!this.smelterModeIndicator) {
       this.smelterModeIndicator = document.createElement('div');
       this.smelterModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #8b4513; color: #d4956a;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#8b4513')}; color: #d4956a;
       `;
       this.smelterModeIndicator.innerHTML = `🔥 SMELTER PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.smelter.cost.player.wood} wood + ${GAME_CONFIG.buildings.smelter.cost.player.stone} stone) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.smelterModeIndicator);
@@ -1335,11 +1531,7 @@ export class HUD {
     if (!this.armoryModeIndicator) {
       this.armoryModeIndicator = document.createElement('div');
       this.armoryModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #708090; color: #a0b0c0;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#708090')}; color: #a0b0c0;
       `;
       this.armoryModeIndicator.innerHTML = `⚔️ ARMORY PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.armory.cost.player.wood} wood + ${GAME_CONFIG.buildings.armory.cost.player.stone} stone + ${GAME_CONFIG.buildings.armory.cost.player.steel} steel) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.armoryModeIndicator);
@@ -1352,11 +1544,7 @@ export class HUD {
     if (!this.wizardTowerModeIndicator) {
       this.wizardTowerModeIndicator = document.createElement('div');
       this.wizardTowerModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #6a0dad; color: #b388ff;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#6a0dad')}; color: #b388ff;
       `;
       this.wizardTowerModeIndicator.innerHTML = `🔮 WIZARD TOWER PLACEMENT — Click to place (costs ${GAME_CONFIG.buildings.wizard_tower.cost.player.wood} wood + ${GAME_CONFIG.buildings.wizard_tower.cost.player.stone} stone + ${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) · [R] Rotate · [Tab] to close`;
       this.container.appendChild(this.wizardTowerModeIndicator);
@@ -1370,10 +1558,11 @@ export class HUD {
 
   // ---- Unified stacking queue display ----
 
-  /** Queue entry for unified display */
+  /** Queue entry for unified display — supports player-categorized grouping */
   updateAllSpawnQueues(queues: {
     kind: string;
     color: string;
+    owner?: number; // player index (0 = you, 1+ = opponents/AI)
     items: { type: string }[];
     timerProgress: number; // 0..1 (fraction of spawn time elapsed for current unit)
   }[]): void {
@@ -1383,6 +1572,7 @@ export class HUD {
         position: absolute; bottom: 90px; right: 12px;
         display: flex; flex-direction: column; gap: 6px;
         pointer-events: none; z-index: 50;
+        max-height: 60vh; overflow-y: auto;
       `;
       this.container.appendChild(this.unifiedQueuePanel);
     }
@@ -1401,58 +1591,77 @@ export class HUD {
     }
     this.unifiedQueuePanel.style.display = 'flex';
 
-    // Build HTML for stacking modules
-    let html = '';
+    // Group queues by owner for player-categorized display
+    const byOwner = new Map<number, typeof active>();
     for (const q of active) {
-      const borderColor = q.color;
-      const bgColor = q.color + '18'; // low-alpha version
-      html += `<div style="
-        background: rgba(0,0,0,0.88); border: 1px solid ${borderColor}; border-radius: 6px;
-        padding: 6px 10px; min-width: 140px;
-      ">`;
-      // Header
-      html += `<div style="font-size:10px; color:${borderColor}; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:4px; font-weight:bold;">${q.kind}</div>`;
+      const ownerId = q.owner ?? 0;
+      if (!byOwner.has(ownerId)) byOwner.set(ownerId, []);
+      byOwner.get(ownerId)!.push(q);
+    }
 
-      // Stacked unit modules
-      for (let i = 0; i < q.items.length; i++) {
-        const item = q.items[i];
-        const isFirst = i === 0;
-        const progress = isFirst ? q.timerProgress : 0;
-        const barWidth = Math.round(progress * 100);
+    // Sort owners: player 0 first, then others
+    const sortedOwners = [...byOwner.keys()].sort((a, b) => a - b);
 
+    let html = '';
+    for (const ownerId of sortedOwners) {
+      const ownerQueues = byOwner.get(ownerId)!;
+      const teamColor = HUD.TEAM_COLORS[ownerId] || '#888';
+      const teamName = ownerId === 0 ? 'YOUR SPAWNS' : `${(HUD.TEAM_NAMES[ownerId] || 'P' + ownerId).toUpperCase()} SPAWNS`;
+
+      // Player section header (only show if multiple owners)
+      if (sortedOwners.length > 1) {
         html += `<div style="
-          display:flex; align-items:center; gap:6px; margin-bottom:${i < q.items.length - 1 ? '3' : '0'}px;
-          background: ${bgColor}; border-radius: 4px; padding: 3px 6px; position: relative; overflow: hidden;
-        ">`;
-
-        // Progress fill (behind text)
-        if (isFirst) {
-          html += `<div style="
-            position:absolute; left:0; top:0; bottom:0; width:${barWidth}%;
-            background: ${borderColor}30; border-radius: 4px; transition: width 0.15s linear;
-          "></div>`;
-        }
-
-        // Unit type label
-        html += `<span style="
-          font-size:11px; color:#ddd; position:relative; z-index:1; flex:1;
-        ">${item.type}</span>`;
-
-        // Side progress bar (thin vertical bar on the right)
-        if (isFirst) {
-          html += `<div style="
-            width:4px; height:16px; background:rgba(255,255,255,0.1); border-radius:2px;
-            position:relative; z-index:1; overflow:hidden;
-          "><div style="
-            position:absolute; bottom:0; left:0; right:0; height:${barWidth}%;
-            background:${borderColor}; border-radius:2px; transition: height 0.15s linear;
-          "></div></div>`;
-        }
-
-        html += `</div>`;
+          font-size:${FONT.xs}; color:${teamColor}; text-transform:uppercase;
+          letter-spacing:2px; font-weight:bold; font-family:${FONT.family};
+          padding:2px 4px; margin-top:${ownerId === sortedOwners[0] ? '0' : '4px'};
+          border-left:3px solid ${teamColor};
+        ">${teamName}</div>`;
       }
 
-      html += `</div>`;
+      for (const q of ownerQueues) {
+        const borderColor = q.color;
+        const bgColor = q.color + '18';
+        html += `<div style="
+          background:${COLORS.panelBg}; border:${BORDER.thin} solid ${borderColor};
+          border-radius:${BORDER.radius.md}; padding:6px 10px; min-width:140px;
+          font-family:${FONT.family}; box-shadow:${SHADOW.panel};
+        ">`;
+        html += `<div style="font-size:${FONT.sm}; color:${borderColor}; text-transform:uppercase; letter-spacing:1.5px; margin-bottom:4px; font-weight:bold;">${q.kind}</div>`;
+
+        for (let i = 0; i < q.items.length; i++) {
+          const item = q.items[i];
+          const isFirst = i === 0;
+          const progress = isFirst ? q.timerProgress : 0;
+          const barWidth = Math.round(progress * 100);
+
+          html += `<div style="
+            display:flex; align-items:center; gap:6px; margin-bottom:${i < q.items.length - 1 ? '3' : '0'}px;
+            background:${bgColor}; border-radius:${BORDER.radius.sm}; padding:3px 6px; position:relative; overflow:hidden;
+          ">`;
+
+          if (isFirst) {
+            html += `<div style="
+              position:absolute; left:0; top:0; bottom:0; width:${barWidth}%;
+              background:${borderColor}30; border-radius:${BORDER.radius.sm}; transition:width 0.15s linear;
+            "></div>`;
+          }
+
+          html += `<span style="font-size:11px; color:${COLORS.textPrimary}; position:relative; z-index:1; flex:1;">${item.type}</span>`;
+
+          if (isFirst) {
+            html += `<div style="
+              width:4px; height:16px; background:rgba(255,255,255,0.1); border-radius:2px;
+              position:relative; z-index:1; overflow:hidden;
+            "><div style="
+              position:absolute; bottom:0; left:0; right:0; height:${barWidth}%;
+              background:${borderColor}; border-radius:2px; transition:height 0.15s linear;
+            "></div></div>`;
+          }
+
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
     }
 
     this.unifiedQueuePanel.innerHTML = html;
@@ -1462,11 +1671,7 @@ export class HUD {
     if (!this.rallyPointModeIndicator) {
       this.rallyPointModeIndicator = document.createElement('div');
       this.rallyPointModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #f0c040; color: #f0c040;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#f0c040')};
       `;
       this.container.appendChild(this.rallyPointModeIndicator);
     }
@@ -1521,12 +1726,13 @@ export class HUD {
       @keyframes cz-fill-glow { 0%,100%{filter:brightness(1)} 50%{filter:brightness(1.35)} }
       .cz-card{
         position:relative;overflow:hidden;
-        background:linear-gradient(135deg,rgba(10,10,20,0.92),rgba(20,20,35,0.88));
-        padding:5px 10px;border-radius:8px;
-        border:1px solid rgba(255,255,255,0.12);
-        font-family:'Segoe UI',system-ui,sans-serif;font-size:12px;color:#ddd;
+        background:${COLORS.panelBg};
+        padding:5px 10px;border-radius:${BORDER.radius.lg};
+        border:${BORDER.thin} solid ${COLORS.borderDefault};
+        font-family:${FONT.family};font-size:${FONT.md};color:${COLORS.textPrimary};
         min-width:200px;max-width:240px;
         backdrop-filter:blur(8px);
+        box-shadow:${SHADOW.panel};
         transition:border-color 0.4s,box-shadow 0.4s;
       }
       .cz-card.cz-active{animation:cz-pulse 2s ease-in-out infinite;}
@@ -1537,7 +1743,7 @@ export class HUD {
       }
       .cz-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
       .cz-label{font-weight:700;font-size:12px;letter-spacing:0.3px;text-transform:uppercase;}
-      .cz-status{font-size:10px;font-weight:600;padding:1px 6px;border-radius:10px;background:rgba(255,255,255,0.08);}
+      .cz-status{font-size:10px;font-weight:600;padding:1px 6px;border-radius:8px;background:rgba(255,255,255,0.08);}
       .cz-troops{display:flex;gap:12px;font-size:11px;margin-bottom:3px;}
       .cz-troop{display:flex;align-items:center;gap:3px;}
       .cz-dot{width:7px;height:7px;border-radius:50%;display:inline-block;}
@@ -1560,8 +1766,8 @@ export class HUD {
 
     // Show ALL zones (owned, neutral, enemy) so the player always has a strategic overview
     const allZones = [...zones].sort((a, b) => {
-      // Player bases first, then neutral, then enemy
-      const order = (c: number) => c === 0 ? 0 : c === 2 ? 1 : 2;
+      // Player bases first, then neutral, then enemy teams
+      const order = (c: number) => c === 0 ? 0 : c === 2 ? 1 : c + 1;
       return order(a.controller) - order(b.controller);
     });
 
@@ -1593,8 +1799,14 @@ export class HUD {
       this.captureZoneContainer.appendChild(card);
     }
 
-    const teamColors: Record<number, string> = { 0: '#3498db', 1: '#e74c3c', 2: '#d4af37' };
-    const teamNames: Record<number, string> = { 0: 'Your', 1: 'Enemy', 2: 'Neutral' };
+    // Dynamic team colors — supports N players + neutral (owner 2)
+    const teamColors: Record<number, string> = {};
+    const teamNames: Record<number, string> = {};
+    for (let p = 0; p < HUD.TEAM_COLORS.length; p++) {
+      teamColors[p] = HUD.TEAM_COLORS[p];
+      teamNames[p] = p === 0 ? 'Your' : HUD.TEAM_NAMES[p] || `P${p}`;
+    }
+    teamColors[2] = '#d4af37'; teamNames[2] = 'Neutral'; // Override neutral
 
     for (let i = 0; i < allZones.length; i++) {
       const zone = allZones[i];
@@ -1633,9 +1845,12 @@ export class HUD {
         statusHTML = `<span class="cz-status" style="color:#666;">QUIET</span>`;
       }
 
-      // Troop counts
-      const p0 = zone.unitCounts[0];
-      const p1 = zone.unitCounts[1];
+      // Troop counts — dynamic for N players
+      const troopDots = zone.unitCounts.map((count, idx) => {
+        if (idx === 2) return ''; // skip neutral
+        const tc = teamColors[idx] || '#888';
+        return `<span class="cz-troop"><span class="cz-dot" style="background:${tc};${count > 0 ? `box-shadow:0 0 4px ${tc};` : ''}"></span>${count}</span>`;
+      }).filter(Boolean).join('');
 
       // Progress bar (only when capturing or contested)
       let barHTML = '';
@@ -1655,10 +1870,7 @@ export class HUD {
           <span class="cz-label" style="color:${controlColor};">${icon} ${label} <span style="font-size:9px;opacity:0.7;">${tierStr}</span></span>
           ${statusHTML}
         </div>
-        <div class="cz-troops">
-          <span class="cz-troop"><span class="cz-dot" style="background:#3498db;${p0 > 0 ? 'box-shadow:0 0 4px #3498db;' : ''}"></span>${p0}</span>
-          <span class="cz-troop"><span class="cz-dot" style="background:#e74c3c;${p1 > 0 ? 'box-shadow:0 0 4px #e74c3c;' : ''}"></span>${p1}</span>
-        </div>
+        <div class="cz-troops">${troopDots}</div>
         ${barHTML}
       `;
     }
@@ -1671,16 +1883,18 @@ export class HUD {
     if (!this.notificationEl) {
       this.notificationEl = document.createElement('div');
       this.notificationEl.style.cssText = `
-        position: absolute; top: 120px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.9); padding: 12px 28px; border-radius: 8px;
-        font-size: 16px; font-weight: bold; letter-spacing: 1px;
-        text-align: center; display: none; pointer-events: auto;
-        animation: fadeIn 0.2s ease;
+        position: absolute; top: 120px; left: 16px;
+        ${UI.panel(color)}; padding: 10px 20px;
+        font-size: ${FONT.lg}; font-weight: bold; letter-spacing: 1px;
+        text-align: left; display: none; pointer-events: auto;
+        max-width: 320px;
+        animation: uiSlideUp 0.2s ease;
+        z-index: 10001;
       `;
       this.container.appendChild(this.notificationEl);
     }
     this.notificationEl.style.borderColor = color;
-    this.notificationEl.style.border = `2px solid ${color}`;
+    this.notificationEl.style.border = `${BORDER.width} solid ${color}`;
     this.notificationEl.style.color = color;
     this.notificationEl.innerHTML = message;
     this.notificationEl.style.display = 'block';
@@ -1794,8 +2008,8 @@ export class HUD {
         <div style="margin-bottom:4px;">
           HP: <span style="color:${healthColor}">${unit.currentHealth}/${unit.stats.maxHealth}</span>
         </div>
-        <div style="background:#333; border-radius:4px; height:6px; margin-bottom:6px;">
-          <div style="background:${healthColor}; height:100%; width:${healthPct}%; border-radius:4px;"></div>
+        <div style="${UI.barWrap()}; margin-bottom:6px;">
+          <div style="${UI.barFill(healthColor, healthPct)};"></div>
         </div>
         <div>ATK: ${unit.stats.attack} · DEF: ${unit.stats.defense} · RNG: ${unit.stats.range} · SPD: ${unit.moveSpeed.toFixed(1)}</div>
         <div style="margin-top:4px; color:#ccc; font-size:11px;">Stance: ${stanceLabel} · Move: ${unit.stats.movement}</div>
@@ -2037,11 +2251,9 @@ export class HUD {
       this.selectionCommandPanel = document.createElement('div');
       this.selectionCommandPanel.style.cssText = `
         position: fixed; bottom: 16px; right: 16px;
-        background: rgba(0, 0, 0, 0.9); padding: 8px 10px; border-radius: 10px;
-        border: 2px solid rgba(255,255,255,0.25);
+        ${UI.panel()}; padding: 8px 10px;
         display: flex; flex-direction: column; gap: 4px;
-        pointer-events: auto; z-index: 10000; min-width: 170px;
-        font-family: 'Courier New', monospace; color: white;
+        z-index: 10000; min-width: 170px;
       `;
       // Prevent clicks on this panel from propagating to the game canvas,
       // which would clear the unit selection
@@ -2059,9 +2271,9 @@ export class HUD {
       const btn = document.createElement('button');
       btn.style.cssText = `
         background: ${active ? color : 'rgba(60,60,60,0.8)'};
-        color: white; border: 1px solid ${active ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)'};
-        padding: 4px 8px; font-size: 10px; font-family: 'Courier New', monospace;
-        font-weight: bold; border-radius: 5px; cursor: pointer;
+        color: white; border: ${BORDER.thin} solid ${active ? COLORS.borderActive : 'rgba(255,255,255,0.15)'};
+        padding: 4px 8px; font-size: ${FONT.sm}; font-family: ${FONT.family};
+        font-weight: bold; border-radius: ${BORDER.radius.sm}; cursor: pointer;
         text-transform: uppercase; letter-spacing: 0.5px;
         pointer-events: auto; position: relative;
         ${active ? 'box-shadow: 0 0 6px ' + color + ';' : ''}
@@ -2077,7 +2289,7 @@ export class HUD {
 
     const makeHeader = (text: string): HTMLElement => {
       const h = document.createElement('div');
-      h.style.cssText = 'color: #aaa; font-size: 9px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; padding-left: 2px;';
+      h.style.cssText = `${UI.sectionHeader()}; padding-left: 2px;`;
       h.textContent = text;
       return h;
     };
@@ -2190,15 +2402,19 @@ export class HUD {
     }
   }
 
+  /** Hide the bottom-center selection info panel (used when PIP tooltip is shown instead) */
+  hideSelectionInfo(): void {
+    this.elements.selectionInfo.style.display = 'none';
+    if (this.selectionCommandPanel) {
+      this.selectionCommandPanel.style.display = 'none';
+    }
+  }
+
   private createBuildModeIndicator(): HTMLElement {
     const indicator = document.createElement('div');
     indicator.id = 'build-mode-indicator';
     indicator.style.cssText = `
-      position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-      font-size: 16px; border: 2px solid #f0c040; color: #f0c040;
-      font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-      display: none; text-align: center;
+      ${UI.modeIndicator('#f0c040')};
     `;
     indicator.innerHTML = `🏰 WALL BUILD MODE — Click tiles for walls (${GAME_CONFIG.defenses.wall.cost.stone} stone) · Shift+click for gates (${GAME_CONFIG.defenses.gate.cost.stone} stone) · Walls auto-connect · [Tab] to close`;
     this.container.appendChild(indicator);
@@ -2212,15 +2428,23 @@ export class HUD {
     if (active) this.hideAllModeIndicators('build');
   }
 
+  /** Update build mode indicator with blueprint cost info */
+  updateBuildModeInfo(blueprintInfo: { walls: number; gates: number; totalStone: number }, stoneAvailable: number): void {
+    if (!this.buildModeIndicator || this.buildModeIndicator.style.display === 'none') return;
+    const { walls, gates, totalStone } = blueprintInfo;
+    const costColor = totalStone > stoneAvailable ? '#e74c3c' : '#4caf50';
+    let costText = '';
+    if (walls > 0 || gates > 0) {
+      costText = ` · <span style="color:${costColor}">Queued: ${walls} wall${walls !== 1 ? 's' : ''}${gates > 0 ? `, ${gates} gate${gates !== 1 ? 's' : ''}` : ''} = ${totalStone} stone (have ${stoneAvailable})</span>`;
+    }
+    this.buildModeIndicator.innerHTML = `🏰 WALL BUILD — Click for walls (${GAME_CONFIG.defenses.wall.cost.stone}🪨) · Shift+click for gates (${GAME_CONFIG.defenses.gate.cost.stone}🪨) · Drag to draw${costText} · [Tab] close`;
+  }
+
   setHarvestMode(active: boolean): void {
     if (!this.harvestModeIndicator) {
       this.harvestModeIndicator = document.createElement('div');
       this.harvestModeIndicator.style.cssText = `
-        position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85); padding: 10px 24px; border-radius: 8px;
-        font-size: 16px; border: 2px solid #4caf50; color: #4caf50;
-        font-weight: bold; text-transform: uppercase; letter-spacing: 2px;
-        display: none; text-align: center;
+        ${UI.modeIndicator('#4caf50')};
       `;
       this.harvestModeIndicator.innerHTML = '🪓 HARVEST MODE — Click & drag to mark trees for chopping · [Tab] to close';
       this.container.appendChild(this.harvestModeIndicator);
@@ -2235,11 +2459,9 @@ export class HUD {
     const overlay = document.createElement('div');
     overlay.id = 'help-overlay';
     overlay.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0, 0, 0, 0.88); display: none; z-index: 300;
-      font-family: 'Courier New', monospace; color: #e0e0e0;
-      pointer-events: auto; overflow-y: auto;
-      animation: helpFadeIn 0.25s ease;
+      ${UI.overlay('rgba(5, 5, 16, 0.94)')};
+      display: none; overflow-y: auto;
+      animation: uiFadeIn 0.25s ease;
     `;
 
     // Add keyframe animation
@@ -2253,10 +2475,10 @@ export class HUD {
         display: inline-block;
         background: linear-gradient(180deg, #555, #333);
         color: #fff;
-        border: 1px solid #777;
-        border-radius: 4px;
+        border: ${BORDER.thin} solid #777;
+        border-radius: ${BORDER.radius.sm};
         padding: 2px 8px;
-        font-size: 13px;
+        font-size: ${FONT.base};
         font-weight: bold;
         min-width: 20px;
         text-align: center;
@@ -2265,19 +2487,19 @@ export class HUD {
       }
       #help-overlay .section {
         background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.1);
-        border-radius: 10px;
+        border: ${BORDER.thin} solid ${COLORS.divider};
+        border-radius: ${BORDER.radius.lg};
         padding: 16px 20px;
         margin-bottom: 12px;
       }
       #help-overlay .section-title {
-        font-size: 14px;
+        font-size: ${FONT.lg};
         font-weight: bold;
         text-transform: uppercase;
         letter-spacing: 3px;
         margin-bottom: 12px;
         padding-bottom: 6px;
-        border-bottom: 1px solid rgba(255,255,255,0.15);
+        border-bottom: ${BORDER.thin} solid rgba(255,255,255,0.15);
       }
       #help-overlay .row {
         display: flex;
@@ -2286,8 +2508,8 @@ export class HUD {
         padding: 5px 0;
       }
       #help-overlay .row-label {
-        color: #aaa;
-        font-size: 13px;
+        color: ${COLORS.textSecondary};
+        font-size: ${FONT.base};
       }
       #help-overlay .row-keys {
         flex-shrink: 0;
@@ -2300,27 +2522,40 @@ export class HUD {
       }
       #help-overlay .unit-icon {
         width: 32px; height: 32px;
-        border-radius: 4px;
+        border-radius: ${BORDER.radius.sm};
         flex-shrink: 0;
         image-rendering: pixelated;
         background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.12);
+        border: ${BORDER.thin} solid rgba(255,255,255,0.12);
       }
       #help-overlay .unit-name {
-        font-weight: bold; font-size: 13px; min-width: 90px;
+        font-weight: bold; font-size: ${FONT.base}; min-width: 90px;
       }
       #help-overlay .unit-desc {
-        font-size: 12px; color: #999;
+        font-size: ${FONT.md}; color: ${COLORS.textMuted};
       }
       #help-overlay .tip {
-        display: flex; gap: 8px; padding: 4px 0; font-size: 12px;
+        display: flex; gap: 8px; padding: 4px 0; font-size: ${FONT.md};
       }
       #help-overlay .tip-bullet {
-        color: #f0c040; flex-shrink: 0;
+        color: ${COLORS.gold}; flex-shrink: 0;
       }
       #help-overlay .close-hint {
         position: absolute; top: 16px; right: 24px;
-        font-size: 13px; color: #888;
+        font-size: ${FONT.base}; color: ${COLORS.textMuted};
+      }
+      #help-overlay .vx {
+        display: inline-block;
+        width: 10px; height: 10px;
+        border-radius: 2px;
+        vertical-align: middle;
+        margin-right: 4px;
+        box-shadow: inset -1px -1px 0 rgba(0,0,0,0.3), inset 1px 1px 0 rgba(255,255,255,0.15);
+        image-rendering: pixelated;
+      }
+      #help-overlay .vx-lg {
+        width: 14px; height: 14px; border-radius: 2px;
+        margin-right: 6px;
       }
     `;
     document.head.appendChild(style);
@@ -2340,7 +2575,7 @@ export class HUD {
 
         <!-- UNIT TYPES -->
         <div class="section">
-          <div class="section-title" style="color: #9b59b6;">⚔️ Unit Types</div>
+          <div class="section-title" style="color: #9b59b6;"><span class="vx vx-lg" style="background:#9b59b6;"></span> Unit Types</div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px;">
             <div class="unit-row">
               <img class="unit-icon" data-unit-portrait="${UnitType.WARRIOR}" alt="Warrior">
@@ -2463,93 +2698,93 @@ export class HUD {
             </div>
           </div>
 
-          <div class="section-title" style="color: #f1c40f; margin-top: 12px;">🏰 Base Tiers & Population</div>
+          <div class="section-title" style="color: #f1c40f; margin-top: 12px;"><span class="vx vx-lg" style="background:#f1c40f;"></span> Base Tiers & Population</div>
           <div style="font-size: 12px; color: #ccc; margin-bottom: 6px;">
             Bases upgrade through 3 tiers. Each tier-up spawns a free Ogre. Workers (builders, lumberjacks, villagers) are FREE — they don't count toward the population cap.
           </div>
-          <div class="tip"><span class="tip-bullet">🏕️</span> <span><strong>Camp</strong> (starting tier) — No requirements.</span></div>
-          <div class="tip"><span class="tip-bullet">🏰</span> <span><strong>Fort</strong> — 30 population + 3 unique building types in zone. Spawns 1 Ogre.</span></div>
-          <div class="tip"><span class="tip-bullet">👑</span> <span><strong>Castle</strong> — 60 population + 6 unique building types in zone. Spawns 1 more Ogre.</span></div>
-          <div class="tip"><span class="tip-bullet">🍖</span> <span><strong>Food Pop Cap</strong> — Every ${GAME_CONFIG.population.foodPerCombatUnit} food supports 1 combat unit. Start with ${GAME_CONFIG.population.startingFood} food (${Math.floor(GAME_CONFIG.population.startingFood / GAME_CONFIG.population.foodPerCombatUnit)} unit cap). Build farms to grow your army.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#8B6914;"></span></span> <span><strong>Camp</strong> (starting tier) — No requirements.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#7f8c8d;"></span></span> <span><strong>Fort</strong> — 30 population + 3 unique building types in zone. Spawns 1 Ogre.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f1c40f;"></span></span> <span><strong>Castle</strong> — 60 population + 6 unique building types in zone. Spawns 1 more Ogre.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#8bc34a;"></span></span> <span><strong>Food Pop Cap</strong> — Every ${GAME_CONFIG.population.foodPerCombatUnit} food supports 1 combat unit. Start with ${GAME_CONFIG.population.startingFood} food (${Math.floor(GAME_CONFIG.population.startingFood / GAME_CONFIG.population.foodPerCombatUnit)} unit cap). Build farms to grow your army.</span></div>
         </div>
 
         <!-- NESTED MENU SYSTEM -->
         <div class="section">
-          <div class="section-title" style="color: #f0c040;">🎮 Menu System</div>
+          <div class="section-title" style="color: #f0c040;"><span class="vx vx-lg" style="background:#f0c040;"></span> Menu System</div>
           <div style="margin-bottom: 8px; font-size: 12px; color: #ccc;">
             Press a number key to open a building category. <strong>Shift</strong> cycles buildings.
             <strong>Click</strong> to place. <strong>QWERTY</strong> keys queue units/actions. <strong>Tab</strong> to exit.
           </div>
-          <div class="tip" style="color:#f39c12; margin-top:4px;"><span class="tip-bullet" style="color:#f39c12;">⚠</span> <span>Buildings start as <strong>blueprints</strong> — a Builder must walk over and construct them before they become functional (~8s).</span></div>
+          <div class="tip" style="color:#f39c12; margin-top:4px;"><span class="tip-bullet" style="color:#f39c12;"><span class="vx" style="background:#f39c12;"></span></span> <span>Buildings start as <strong>blueprints</strong> — a Builder must walk over and construct them before they become functional (~8s).</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #c0392b; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">1</span> COMBAT BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">●</span> <span><strong style="color:#e67e22;">Barracks</strong> (${GAME_CONFIG.buildings.barracks.cost.player.wood}w) — Q: Warrior ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g · W: Archer ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g · E: Rider ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g · R: Scout ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#708090;">●</span> <span><strong style="color:#708090;">Armory</strong> (${GAME_CONFIG.buildings.armory.cost.player.wood}w+${GAME_CONFIG.buildings.armory.cost.player.stone}s+${GAME_CONFIG.buildings.armory.cost.player.steel} steel) — Q: Greatsword ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s · W: Assassin ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s · E: Berserker ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s · R: Shieldbearer ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;">●</span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (${GAME_CONFIG.buildings.wizard_tower.cost.player.wood}w+${GAME_CONFIG.buildings.wizard_tower.cost.player.stone}s+${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) — Q: Mage ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c · W: Battlemage ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c · E: Healer ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c · R: Paladin ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}c</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;"><span class="vx" style="background:#e67e22;"></span></span> <span><strong style="color:#e67e22;">Barracks</strong> (${GAME_CONFIG.buildings.barracks.cost.player.wood}w) — Q: Warrior ${GAME_CONFIG.units[UnitType.WARRIOR].costs.menu.gold}g · W: Archer ${GAME_CONFIG.units[UnitType.ARCHER].costs.menu.gold}g · E: Rider ${GAME_CONFIG.units[UnitType.RIDER].costs.menu.gold}g · R: Scout ${GAME_CONFIG.units[UnitType.SCOUT].costs.menu.gold}g</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#708090;"><span class="vx" style="background:#708090;"></span></span> <span><strong style="color:#708090;">Armory</strong> (${GAME_CONFIG.buildings.armory.cost.player.wood}w+${GAME_CONFIG.buildings.armory.cost.player.stone}s+${GAME_CONFIG.buildings.armory.cost.player.steel} steel) — Q: Greatsword ${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.GREATSWORD].costs.menu.steel}s · W: Assassin ${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.ASSASSIN].costs.menu.steel}s · E: Berserker ${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BERSERKER].costs.menu.steel}s · R: Shieldbearer ${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.SHIELDBEARER].costs.menu.steel}s</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6a0dad;"><span class="vx" style="background:#6a0dad;"></span></span> <span><strong style="color:#6a0dad;">Wizard Tower</strong> (${GAME_CONFIG.buildings.wizard_tower.cost.player.wood}w+${GAME_CONFIG.buildings.wizard_tower.cost.player.stone}s+${GAME_CONFIG.buildings.wizard_tower.cost.player.crystal} crystal) — Q: Mage ${GAME_CONFIG.units[UnitType.MAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.MAGE].costs.menu.crystal}c · W: Battlemage ${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.BATTLEMAGE].costs.menu.crystal}c · E: Healer ${GAME_CONFIG.units[UnitType.HEALER].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.HEALER].costs.menu.crystal}c · R: Paladin ${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.gold}g+${GAME_CONFIG.units[UnitType.PALADIN].costs.menu.crystal}c</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">2</span> ECONOMY BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;">●</span> <span><strong style="color:#6b8e23;">Forestry</strong> (${GAME_CONFIG.buildings.forestry.cost.player.wood}w) — Q: Lumberjack ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood}w · W: Chop Trees · E: Plant Trees</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#b08050;">●</span> <span><strong style="color:#b08050;">Masonry</strong> (${GAME_CONFIG.buildings.masonry.cost.player.wood}w) — Q: Builder ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood}w · W: Mine Terrain · E: Build Walls</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#daa520;">●</span> <span><strong style="color:#daa520;">Farmhouse</strong> (${GAME_CONFIG.buildings.farmhouse.cost.player.wood}w) — Q: Villager ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood}w · W: Farm/Hay · E: Plant Crops</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#5d4037;">●</span> <span><strong style="color:#5d4037;">Workshop</strong> (${GAME_CONFIG.buildings.workshop.cost.player.wood}w+${GAME_CONFIG.buildings.workshop.cost.player.stone}s) — Q: Trebuchet · W: Craft Rope · E: Sell Wood</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#6b8e23;"><span class="vx" style="background:#6b8e23;"></span></span> <span><strong style="color:#6b8e23;">Forestry</strong> (${GAME_CONFIG.buildings.forestry.cost.player.wood}w) — Q: Lumberjack ${GAME_CONFIG.units[UnitType.LUMBERJACK].costs.menu.wood}w · W: Chop Trees · E: Plant Trees</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#b08050;"><span class="vx" style="background:#b08050;"></span></span> <span><strong style="color:#b08050;">Masonry</strong> (${GAME_CONFIG.buildings.masonry.cost.player.wood}w) — Q: Builder ${GAME_CONFIG.units[UnitType.BUILDER].costs.menu.wood}w · W: Mine Terrain · E: Build Walls</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#daa520;"><span class="vx" style="background:#daa520;"></span></span> <span><strong style="color:#daa520;">Farmhouse</strong> (${GAME_CONFIG.buildings.farmhouse.cost.player.wood}w) — Q: Villager ${GAME_CONFIG.units[UnitType.VILLAGER].costs.menu.wood}w · W: Farm/Hay · E: Plant Crops</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#5d4037;"><span class="vx" style="background:#5d4037;"></span></span> <span><strong style="color:#5d4037;">Workshop</strong> (${GAME_CONFIG.buildings.workshop.cost.player.wood}w+${GAME_CONFIG.buildings.workshop.cost.player.stone}s) — Q: Trebuchet · W: Craft Rope · E: Sell Wood</span></div>
 
           <div style="font-weight: bold; font-size: 12px; color: #f39c12; margin-bottom: 4px; margin-top: 8px;">
             <span class="key">3</span> CRAFTING BUILDINGS
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#8b4513;">●</span> <span><strong style="color:#8b4513;">Smelter</strong> (${GAME_CONFIG.buildings.smelter.cost.player.wood}w+${GAME_CONFIG.buildings.smelter.cost.player.stone}s) — Q: Smelt Steel (${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal) · W: Craft Charcoal (${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay)</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;">●</span> <span><strong style="color:#c0c0c0;">Silo</strong> (${GAME_CONFIG.buildings.silo.cost.player.wood}w) — Extra food storage capacity.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b4513;"><span class="vx" style="background:#8b4513;"></span></span> <span><strong style="color:#8b4513;">Smelter</strong> (${GAME_CONFIG.buildings.smelter.cost.player.wood}w+${GAME_CONFIG.buildings.smelter.cost.player.stone}s) — Q: Smelt Steel (${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal) · W: Craft Charcoal (${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#c0c0c0;"><span class="vx" style="background:#c0c0c0;"></span></span> <span><strong style="color:#c0c0c0;">Silo</strong> (${GAME_CONFIG.buildings.silo.cost.player.wood}w) — Extra food storage capacity.</span></div>
         </div>
 
         <!-- GLOBAL ACTIONS -->
         <div class="section">
-          <div class="section-title" style="color: #2980b9;">🎯 Global Actions (always available)</div>
-          <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;">●</span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Y-slicer (Shift+scroll) is always available to view underground layers and right-click resources.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">●</span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#f39c12;">●</span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade ${GAME_CONFIG.economy.trade.sellWood.input.wood} wood for ${GAME_CONFIG.economy.trade.sellWood.output.gold} gold.</span></div>
+          <div class="section-title" style="color: #2980b9;"><span class="vx vx-lg" style="background:#2980b9;"></span> Global Actions (always available)</div>
+          <div class="tip"><span class="tip-bullet" style="color:#2980b9;"><span class="vx" style="background:#2980b9;"></span></span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#27ae60;"><span class="vx" style="background:#27ae60;"></span></span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ff8c00;"><span class="vx" style="background:#ff8c00;"></span></span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Y-slicer (Shift+scroll) is always available to view underground layers and right-click resources.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8bc34a;"><span class="vx" style="background:#8bc34a;"></span></span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f39c12;"><span class="vx" style="background:#f39c12;"></span></span> <span><span class="key">G</span> <strong>Sell Wood</strong> — Trade ${GAME_CONFIG.economy.trade.sellWood.input.wood} wood for ${GAME_CONFIG.economy.trade.sellWood.output.gold} gold.</span></div>
         </div>
 
         <!-- RESOURCES -->
         <div class="section">
-          <div class="section-title" style="color: #27ae60;">💎 Resources</div>
+          <div class="section-title" style="color: #27ae60;"><span class="vx vx-lg" style="background:#27ae60;"></span> Resources</div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px;">
-            <div class="tip"><span class="tip-bullet" style="color:#f0c040;">🪵</span> <span><strong style="color:#f0c040;">Wood</strong> — Harvested from forests by Lumberjacks. Used to build structures and train workers.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#aaa;">🪨</span> <span><strong style="color:#aaa;">Stone</strong> — Mined from mountains/terrain by Builders. Used for advanced buildings.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#8bc34a;">🌾</span> <span><strong style="color:#8bc34a;">Food</strong> — Harvested from farms/grass by Villagers. Feeds your population.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#f39c12;">💰</span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span>, killing enemies (${GAME_CONFIG.economy.trade.combatRewards.unitKillGold}g/kill, ${GAME_CONFIG.economy.trade.combatRewards.siegeKillGold}g siege), or mining gold ore. Used to train combat units.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#66bb6a;">🌿</span> <span><strong style="color:#66bb6a;">Grass Fiber</strong> — Gathered by Villagers when harvesting grass. Used to craft Rope.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#bf8040;">🧱</span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope & Charcoal.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;">🪢</span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from ${GAME_CONFIG.economy.recipes.rope.input.grass_fiber} fiber + ${GAME_CONFIG.economy.recipes.rope.input.clay} clay. Required for Trebuchets.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#c0652a;">⛏</span> <span><strong style="color:#c0652a;">Iron</strong> — Mined from iron ore veins on mountains (orange rocks). Foundation of the steel chain.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#444;">⚫</span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from ${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay. Carbon needed for smelting steel.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#71797e;">🔨</span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from ${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal (requires Smelter). Used for Armory units.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💎</span> <span><strong style="color:#9b59b6;">Crystal</strong> — Mined from gem ores (ruby, emerald, sapphire, amethyst) found in tunnel walls. Yields ${GAME_CONFIG.economy.mining.crystalYield} per block. Used for Wizard Tower units.</span></div>
-            <div class="tip"><span class="tip-bullet" style="color:#ffd700;">⛏</span> <span><strong style="color:#ffd700;">Gold (mined)</strong> — Found in desert terrain and mountain gold veins. Builders mine gold blocks and deposit them at base.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#f0c040;"><span class="vx" style="background:#f0c040;"></span></span> <span><strong style="color:#f0c040;">Wood</strong> — Harvested from forests by Lumberjacks. Used to build structures and train workers.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#aaa;"><span class="vx" style="background:#aaa;"></span></span> <span><strong style="color:#aaa;">Stone</strong> — Mined from mountains/terrain by Builders. Used for advanced buildings.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#8bc34a;"><span class="vx" style="background:#8bc34a;"></span></span> <span><strong style="color:#8bc34a;">Food</strong> — Harvested from farms/grass by Villagers. Feeds your population.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#f39c12;"><span class="vx" style="background:#f39c12;"></span></span> <span><strong style="color:#f39c12;">Gold</strong> — Earned by selling wood <span class="key" style="font-size:9px;">G</span>, killing enemies (${GAME_CONFIG.economy.trade.combatRewards.unitKillGold}g/kill, ${GAME_CONFIG.economy.trade.combatRewards.siegeKillGold}g siege), or mining gold ore. Used to train combat units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#66bb6a;"><span class="vx" style="background:#66bb6a;"></span></span> <span><strong style="color:#66bb6a;">Grass Fiber</strong> — Gathered by Villagers when harvesting grass. Used to craft Rope.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#bf8040;"><span class="vx" style="background:#bf8040;"></span></span> <span><strong style="color:#bf8040;">Clay</strong> — Mined from sand/desert terrain by Builders. Used to craft Rope & Charcoal.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#c9a96e;"><span class="vx" style="background:#c9a96e;"></span></span> <span><strong style="color:#c9a96e;">Rope</strong> — Crafted <span class="key" style="font-size:9px;">L</span> from ${GAME_CONFIG.economy.recipes.rope.input.grass_fiber} fiber + ${GAME_CONFIG.economy.recipes.rope.input.clay} clay. Required for Trebuchets.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#c0652a;"><span class="vx" style="background:#ffd700;"></span></span> <span><strong style="color:#c0652a;">Iron</strong> — Mined from iron ore veins on mountains (orange rocks). Foundation of the steel chain.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#444;"><span class="vx" style="background:#444;"></span></span> <span><strong style="color:#999;">Charcoal</strong> — Crafted <span class="key" style="font-size:9px;">X</span> from ${GAME_CONFIG.economy.recipes.charcoal.input.wood} wood + ${GAME_CONFIG.economy.recipes.charcoal.input.clay} clay. Carbon needed for smelting steel.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#71797e;"><span class="vx" style="background:#71797e;"></span></span> <span><strong style="color:#71797e;">Steel</strong> — Smelted <span class="key" style="font-size:9px;">Z</span> from ${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal (requires Smelter). Used for Armory units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#9b59b6;"><span class="vx" style="background:#9b59b6;"></span></span> <span><strong style="color:#9b59b6;">Crystal</strong> — Mined from gem ores (ruby, emerald, sapphire, amethyst) found in tunnel walls. Yields ${GAME_CONFIG.economy.mining.crystalYield} per block. Used for Wizard Tower units.</span></div>
+            <div class="tip"><span class="tip-bullet" style="color:#ffd700;"><span class="vx" style="background:#ffd700;"></span></span> <span><strong style="color:#ffd700;">Gold (mined)</strong> — Found in desert terrain and mountain gold veins. Builders mine gold blocks and deposit them at base.</span></div>
           </div>
         </div>
 
         <!-- COMBAT: STANCES & FORMATIONS -->
         <div class="section">
-          <div class="section-title" style="color: #e74c3c;">🎯 Combat Stances & Formations</div>
+          <div class="section-title" style="color: #e74c3c;"><span class="vx vx-lg" style="background:#e74c3c;"></span> Combat Stances & Formations</div>
           <div style="margin-bottom: 8px; font-size: 12px; color: #aaa;">Select combat units to access stances and formations in the bottom-right command panel.</div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px;">
             <div>
               <div style="font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Stances</div>
-              <div class="tip"><span class="tip-bullet" style="color:#7f8c8d;">●</span> <span><strong style="color:#7f8c8d;">Passive</strong> — Units hold position and never attack, even when hit. Use for scouting or retreat.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><strong style="color:#2980b9;">Defensive</strong> — Units guard their command position. They chase enemies that enter detection range, then return to post when threats leave. Archers kite melee threats instead of chasing. Default stance.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#c0392b;">●</span> <span><strong style="color:#c0392b;">Aggressive</strong> — Units actively chase and attack enemies within detection range. Auto-patrols area.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#7f8c8d;"><span class="vx" style="background:#7f8c8d;"></span></span> <span><strong style="color:#7f8c8d;">Passive</strong> — Units hold position and never attack, even when hit. Use for scouting or retreat.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#2980b9;"><span class="vx" style="background:#2980b9;"></span></span> <span><strong style="color:#2980b9;">Defensive</strong> — Units guard their command position. They chase enemies that enter detection range, then return to post when threats leave. Archers kite melee threats instead of chasing. Default stance.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#c0392b;"><span class="vx" style="background:#c0392b;"></span></span> <span><strong style="color:#c0392b;">Aggressive</strong> — Units actively chase and attack enemies within detection range. Auto-patrols area.</span></div>
             </div>
             <div>
               <div style="font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Formations</div>
-              <div class="tip"><span class="tip-bullet" style="color:#27ae60;">●</span> <span><strong style="color:#27ae60;">Line</strong> — Horizontal spread. Maximizes frontline width for ranged units.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#8e44ad;">●</span> <span><strong style="color:#8e44ad;">Box</strong> — Compact square. Good all-purpose formation for mixed armies.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#d35400;">●</span> <span><strong style="color:#d35400;">Wedge</strong> — V-shape. Pierces through enemy lines, strong warriors in front.</span></div>
-              <div class="tip"><span class="tip-bullet" style="color:#2980b9;">●</span> <span><strong style="color:#2980b9;">Circle</strong> — Defensive ring. Protects against attacks from all sides.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#27ae60;"><span class="vx" style="background:#27ae60;"></span></span> <span><strong style="color:#27ae60;">Line</strong> — Horizontal spread. Maximizes frontline width for ranged units.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#8e44ad;"><span class="vx" style="background:#8e44ad;"></span></span> <span><strong style="color:#8e44ad;">Box</strong> — Compact square. Good all-purpose formation for mixed armies.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#d35400;"><span class="vx" style="background:#d35400;"></span></span> <span><strong style="color:#d35400;">Wedge</strong> — V-shape. Pierces through enemy lines, strong warriors in front.</span></div>
+              <div class="tip"><span class="tip-bullet" style="color:#2980b9;"><span class="vx" style="background:#2980b9;"></span></span> <span><strong style="color:#2980b9;">Circle</strong> — Defensive ring. Protects against attacks from all sides.</span></div>
             </div>
           </div>
           <div style="margin-top: 8px; font-size: 11px; color: #888;">
@@ -2557,81 +2792,81 @@ export class HUD {
             <strong>Kill:</strong> Permanently remove selected units from the game.
           </div>
           <div style="margin-top: 10px; font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">Squad Selection</div>
-          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;">●</span> <span><strong style="color:#4a9eff;">Type Toggle</strong> — When multiple units are selected, click unit type badges in the tooltip to include/exclude types from the selection. Quickly filter to just melee, just ranged, etc.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;">●</span> <span><strong style="color:#4a9eff;">Double-Click</strong> — Double-click a unit to select all units of that type on the map.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;">●</span> <span><strong style="color:#4a9eff;">Control Groups</strong> — <span class="key" style="font-size:9px;">Ctrl/⌘</span>+<span class="key" style="font-size:9px;">A/S/D/F/G</span> assigns selected units to squad slots. Press <span class="key" style="font-size:9px;">S/D/F/G</span> alone to recall a squad. <span class="key" style="font-size:9px;">A</span> alone recalls squad A only when no units are selected.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;"><span class="vx" style="background:#4a9eff;"></span></span> <span><strong style="color:#4a9eff;">Type Toggle</strong> — When multiple units are selected, click unit type badges in the tooltip to include/exclude types from the selection. Quickly filter to just melee, just ranged, etc.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;"><span class="vx" style="background:#4a9eff;"></span></span> <span><strong style="color:#4a9eff;">Double-Click</strong> — Double-click a unit to select all units of that type on the map.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#4a9eff;"><span class="vx" style="background:#4a9eff;"></span></span> <span><strong style="color:#4a9eff;">Control Groups</strong> — <span class="key" style="font-size:9px;">Ctrl/⌘</span>+<span class="key" style="font-size:9px;">A/S/D/F/G</span> assigns selected units to squad slots. Press <span class="key" style="font-size:9px;">S/D/F/G</span> alone to recall a squad. <span class="key" style="font-size:9px;">A</span> alone recalls squad A only when no units are selected.</span></div>
           <div style="margin-top: 10px; font-weight: bold; font-size: 12px; color: #f0c040; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 1px;">High Ground</div>
-          <div class="tip"><span class="tip-bullet" style="color:#d35400;">●</span> <span><strong style="color:#d35400;">Elevation Bonus</strong> — Units with 3+ elevation advantage get +2 attack. Defenders on high ground get +2 defense. Mountain forts are key strategic positions!</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#d35400;"><span class="vx" style="background:#d35400;"></span></span> <span><strong style="color:#d35400;">Elevation Bonus</strong> — Units with 3+ elevation advantage get +2 attack. Defenders on high ground get +2 defense. Mountain forts are key strategic positions!</span></div>
         </div>
 
         <!-- TIPS -->
         <div class="section">
-          <div class="section-title" style="color: #9b59b6;">✨ How Magic Works</div>
+          <div class="section-title" style="color: #9b59b6;"><span class="vx vx-lg" style="background:#9b59b6;"></span> How Magic Works</div>
           <div style="font-size: 12px; color: #ccc; margin-bottom: 8px;">
             Magic units (Mage, Battlemage, Healer) all cast elemental spells. Every attack cycles through 5 elements: Fire, Water, Lightning, Wind, Earth. Some elements leave a <strong>status effect</strong> on the enemy — and when the RIGHT follow-up element hits a unit that already has a status, it triggers a powerful <strong>combo</strong>.
           </div>
 
-          <div style="font-weight: bold; font-size: 12px; color: #2980b9; margin-bottom: 4px;">🧙 MAGE — Single-Target Spells</div>
+          <div style="font-weight: bold; font-size: 12px; color: #2980b9; margin-bottom: 4px;"><span class="vx" style="background:#2980b9;"></span> MAGE — Single-Target Spells</div>
           <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
             The Mage is your combo starter. His spells hit one enemy at a time, but the status effects they leave behind are what make him dangerous. Here's how it works:
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#3498db;">💧</span> <span><strong>Water spell</strong> — Drenches the target, making them <strong style="color:#3498db;">Wet</strong> for ${GAME_CONFIG.combat.statusEffects.wet.duration} seconds. By itself it does normal damage. But if the NEXT spell that hits a Wet enemy is Lightning...</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;">⚡</span> <span><strong>Lightning + Wet = ELECTROCUTE CRIT</strong> — The Wet status gets consumed and the target explodes with chain lightning that arcs to ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.chainCount} nearby enemies, dealing ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.damageMultiplier}× damage each. Emperor Palpatine style. This is the Mage's only way to do big AoE damage.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">🔥</span> <span><strong>Fire spell</strong> — Sets the target <strong style="color:#e74c3c;">Ablaze</strong> for ${GAME_CONFIG.combat.statusEffects.ablaze.duration} seconds. They take ${GAME_CONFIG.combat.statusEffects.ablaze.dps} burn damage per second while on fire. But if a Wind spell hits them while they're burning...</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">🌪️</span> <span><strong>Wind + Ablaze = INFERNO</strong> — The fire gets consumed and erupts into a firestorm that deals ${GAME_CONFIG.combat.statusEffects.inferno.burstDamage} burst damage and spreads Ablaze to ${GAME_CONFIG.combat.statusEffects.inferno.spreadCount} nearby enemies. Now THEY'RE on fire too.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#1abc9c;">💚</span> <span><strong>Water + Ablaze = SOOTHE (oops!)</strong> — If your Water spell hits an enemy that's already Ablaze, the fire goes out and they get HEALED for ${GAME_CONFIG.combat.statusEffects.soothe.healAmount} HP. This is the anti-synergy — you accidentally helped the enemy. Watch your element cycle!</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#8b6914;">🪨</span> <span><strong>Earth spell</strong> — Straight damage, no status effect. A safe hit that won't mess up any combos.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#3498db;"><span class="vx" style="background:#3498db;"></span></span> <span><strong>Water spell</strong> — Drenches the target, making them <strong style="color:#3498db;">Wet</strong> for ${GAME_CONFIG.combat.statusEffects.wet.duration} seconds. By itself it does normal damage. But if the NEXT spell that hits a Wet enemy is Lightning...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;"><span class="vx" style="background:#f1c40f;"></span></span> <span><strong>Lightning + Wet = ELECTROCUTE CRIT</strong> — The Wet status gets consumed and the target explodes with chain lightning that arcs to ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.chainCount} nearby enemies, dealing ${GAME_CONFIG.combat.statusEffects.electrocuteCrit.damageMultiplier}× damage each. Emperor Palpatine style. This is the Mage's only way to do big AoE damage.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;"><span class="vx" style="background:#e74c3c;"></span></span> <span><strong>Fire spell</strong> — Sets the target <strong style="color:#e74c3c;">Ablaze</strong> for ${GAME_CONFIG.combat.statusEffects.ablaze.duration} seconds. They take ${GAME_CONFIG.combat.statusEffects.ablaze.dps} burn damage per second while on fire. But if a Wind spell hits them while they're burning...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;"><span class="vx" style="background:#e67e22;"></span></span> <span><strong>Wind + Ablaze = INFERNO</strong> — The fire gets consumed and erupts into a firestorm that deals ${GAME_CONFIG.combat.statusEffects.inferno.burstDamage} burst damage and spreads Ablaze to ${GAME_CONFIG.combat.statusEffects.inferno.spreadCount} nearby enemies. Now THEY'RE on fire too.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#1abc9c;"><span class="vx" style="background:#1abc9c;"></span></span> <span><strong>Water + Ablaze = SOOTHE (oops!)</strong> — If your Water spell hits an enemy that's already Ablaze, the fire goes out and they get HEALED for ${GAME_CONFIG.combat.statusEffects.soothe.healAmount} HP. This is the anti-synergy — you accidentally helped the enemy. Watch your element cycle!</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b6914;"><span class="vx" style="background:#aaa;"></span></span> <span><strong>Earth spell</strong> — Straight damage, no status effect. A safe hit that won't mess up any combos.</span></div>
 
-          <div style="font-weight: bold; font-size: 12px; color: #8e44ad; margin-top: 10px; margin-bottom: 4px;">🔮 BATTLEMAGE — AoE Setup Spells</div>
+          <div style="font-weight: bold; font-size: 12px; color: #8e44ad; margin-top: 10px; margin-bottom: 4px;"><span class="vx" style="background:#8e44ad;"></span> BATTLEMAGE — AoE Setup Spells</div>
           <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
             The Battlemage hits groups of enemies with low-damage AoE, but his real job is to <strong>set up combos for the Mage</strong>. Alone he's mediocre — paired with a Mage he's devastating.
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#3498db;">💧</span> <span><strong>Water AoE</strong> — Splashes a whole group, making them all <strong style="color:#3498db;">Wet</strong>. Low damage on its own, but now a single Mage Lightning spell triggers Electrocute on any of them. That's the dream combo.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#78909c;">🌬️</span> <span><strong>Wind AoE = KNOCKUP</strong> — Launches enemies into the air for ${GAME_CONFIG.combat.statusEffects.knockup.duration}s. They can't move or attack while airborne. Pure crowd control — use it to lock down a group, then follow up with Water or Fire.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">🟣</span> <span><strong>Lightning AoE = ARCANE</strong> — Marks enemies with purple <strong style="color:#9b59b6;">Arcane</strong> orbs for ${GAME_CONFIG.combat.statusEffects.arcane.duration}s. On its own this does nothing. But when a Mage's Lightning hits an Arcane-marked target...</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">💜</span> <span><strong>Lightning + Arcane = KAMEHAMEHA</strong> — The Mage fires a massive piercing laser beam straight through the target and up to ${GAME_CONFIG.combat.statusEffects.kamehameha.pierceCount} enemies behind it in a line, dealing ${GAME_CONFIG.combat.statusEffects.kamehameha.damageMultiplier}× damage to everything it hits. The ultimate cross-class combo.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">🔥</span> <span><strong>Fire AoE</strong> — Sets the whole group Ablaze, same burn as the Mage's Fire. A Mage's Wind spell on any of them triggers Inferno and spreads fire everywhere.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#8b6914;">🪨</span> <span><strong>Earth AoE</strong> — Straight AoE damage. No status, no combo — just hits.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#3498db;"><span class="vx" style="background:#3498db;"></span></span> <span><strong>Water AoE</strong> — Splashes a whole group, making them all <strong style="color:#3498db;">Wet</strong>. Low damage on its own, but now a single Mage Lightning spell triggers Electrocute on any of them. That's the dream combo.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#78909c;"><span class="vx" style="background:#78909c;"></span></span> <span><strong>Wind AoE = KNOCKUP</strong> — Launches enemies into the air for ${GAME_CONFIG.combat.statusEffects.knockup.duration}s. They can't move or attack while airborne. Pure crowd control — use it to lock down a group, then follow up with Water or Fire.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;"><span class="vx" style="background:#9b59b6;"></span></span> <span><strong>Lightning AoE = ARCANE</strong> — Marks enemies with purple <strong style="color:#9b59b6;">Arcane</strong> orbs for ${GAME_CONFIG.combat.statusEffects.arcane.duration}s. On its own this does nothing. But when a Mage's Lightning hits an Arcane-marked target...</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;"><span class="vx" style="background:#9b59b6;"></span></span> <span><strong>Lightning + Arcane = KAMEHAMEHA</strong> — The Mage fires a massive piercing laser beam straight through the target and up to ${GAME_CONFIG.combat.statusEffects.kamehameha.pierceCount} enemies behind it in a line, dealing ${GAME_CONFIG.combat.statusEffects.kamehameha.damageMultiplier}× damage to everything it hits. The ultimate cross-class combo.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;"><span class="vx" style="background:#e74c3c;"></span></span> <span><strong>Fire AoE</strong> — Sets the whole group Ablaze, same burn as the Mage's Fire. A Mage's Wind spell on any of them triggers Inferno and spreads fire everywhere.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#8b6914;"><span class="vx" style="background:#aaa;"></span></span> <span><strong>Earth AoE</strong> — Straight AoE damage. No status, no combo — just hits.</span></div>
 
-          <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-top: 10px; margin-bottom: 4px;">💚 HEALER — Support Spells</div>
+          <div style="font-weight: bold; font-size: 12px; color: #27ae60; margin-top: 10px; margin-bottom: 4px;"><span class="vx" style="background:#27ae60;"></span> HEALER — Support Spells</div>
           <div style="font-size: 12px; color: #bbb; margin-bottom: 4px;">
             The Healer keeps your team alive and clean. She counts as a mage for group synergies.
           </div>
-          <div class="tip"><span class="tip-bullet" style="color:#27ae60;">✚</span> <span><strong>Heal</strong> — Auto-targets the most injured ally in range and fires a healing orb. ${GAME_CONFIG.combat.healer.healAmount} HP per cast.</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#ffd700;">✦</span> <span><strong>Cleanse</strong> — When no one needs healing, the Healer cleanses the most debuffed nearby ally. Removes ALL status effects (Wet, Ablaze, Knockup, slows, everything). The cleansed unit gets a <strong style="color:#ffd700;">speed boost</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.speedBoostDuration}s with a golden trail, and is <strong>immune to status effects</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.lingerDuration}s after. Cooldown: ${GAME_CONFIG.combat.statusEffects.cleanse.cooldown}s.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#27ae60;"><span class="vx" style="background:#27ae60;"></span></span> <span><strong>Heal</strong> — Auto-targets the most injured ally in range and fires a healing orb. ${GAME_CONFIG.combat.healer.healAmount} HP per cast.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#ffd700;"><span class="vx" style="background:#ffd700;"></span></span> <span><strong>Cleanse</strong> — When no one needs healing, the Healer cleanses the most debuffed nearby ally. Removes ALL status effects (Wet, Ablaze, Knockup, slows, everything). The cleansed unit gets a <strong style="color:#ffd700;">speed boost</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.speedBoostDuration}s with a golden trail, and is <strong>immune to status effects</strong> for ${GAME_CONFIG.combat.statusEffects.cleanse.lingerDuration}s after. Cooldown: ${GAME_CONFIG.combat.statusEffects.cleanse.cooldown}s.</span></div>
 
-          <div style="font-weight: bold; font-size: 12px; color: #e91e63; margin-top: 10px; margin-bottom: 4px;">🎯 THE KEY COMBOS (cheat sheet)</div>
-          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;">1.</span> <span>Battlemage Water AoE (wets the group) → Mage Lightning (Electrocute Crit chains through all of them)</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#e67e22;">2.</span> <span>Battlemage Fire AoE (ablaze the group) → Mage Wind (Inferno burst + fire spreads further)</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">3.</span> <span>Battlemage Lightning AoE (Arcane marks) → Mage Lightning (Kamehameha laser beam pierces the line)</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#78909c;">4.</span> <span>Battlemage Wind AoE (Knockup CC) → follow with any other spell while they're helpless in the air</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;">⚠</span> <span><strong>Watch out:</strong> Mage Water + enemy Ablaze = Soothe (heals them). Don't Water a burning enemy by accident!</span></div>
-          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;">★</span> <span><strong>Group your casters!</strong> ${GAME_CONFIG.combat.mageSynergy.minMages}+ mages within ${GAME_CONFIG.combat.mageSynergy.proximityRange} hex trigger <strong>Arcane Convergence</strong> — a free AoE burst every ${GAME_CONFIG.combat.mageSynergy.cooldown}s dealing ${GAME_CONFIG.combat.mageSynergy.damagePerMage} damage per mage in the cluster.</span></div>
+          <div style="font-weight: bold; font-size: 12px; color: #e91e63; margin-top: 10px; margin-bottom: 4px;"><span class="vx" style="background:#e91e63;"></span> THE KEY COMBOS (cheat sheet)</div>
+          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;"><span class="vx" style="background:#f1c40f;"></span></span> <span>Battlemage Water AoE (wets the group) → Mage Lightning (Electrocute Crit chains through all of them)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e67e22;"><span class="vx" style="background:#f1c40f;"></span></span> <span>Battlemage Fire AoE (ablaze the group) → Mage Wind (Inferno burst + fire spreads further)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;"><span class="vx" style="background:#f1c40f;"></span></span> <span>Battlemage Lightning AoE (Arcane marks) → Mage Lightning (Kamehameha laser beam pierces the line)</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#78909c;"><span class="vx" style="background:#f1c40f;"></span></span> <span>Battlemage Wind AoE (Knockup CC) → follow with any other spell while they're helpless in the air</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;"><span class="vx" style="background:#e74c3c;"></span></span> <span><strong>Watch out:</strong> Mage Water + enemy Ablaze = Soothe (heals them). Don't Water a burning enemy by accident!</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#9b59b6;"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Group your casters!</strong> ${GAME_CONFIG.combat.mageSynergy.minMages}+ mages within ${GAME_CONFIG.combat.mageSynergy.proximityRange} hex trigger <strong>Arcane Convergence</strong> — a free AoE burst every ${GAME_CONFIG.combat.mageSynergy.cooldown}s dealing ${GAME_CONFIG.combat.mageSynergy.damagePerMage} damage per mage in the cluster.</span></div>
 
-          <div class="section-title" style="color: #3498db;">💡 Tips</div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Workers auto-harvest nearby resources when idle — no micro needed!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Crafting chain: mine iron → craft charcoal (3→Smelter→W) → smelt steel (3→Smelter→Q) → build Armory units (1→Armory)!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Use walls to funnel enemies into kill zones.</span></div>
+          <div class="section-title" style="color: #3498db;"><span class="vx vx-lg" style="background:#3498db;"></span> Tips</div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Workers auto-harvest nearby resources when idle — no micro needed!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Crafting chain: mine iron → craft charcoal (3→Smelter→W) → smelt steel (3→Smelter→Q) → build Armory units (1→Armory)!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Set stances before sending troops — Defensive units hold chokepoints, Aggressive units push forward.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Use Wedge formation to punch through, Line for ranged volleys, Box for balanced fights.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Use walls to funnel enemies into kill zones.</span></div>
           ${ENABLE_UNDERGROUND ? `
-          <div class="tip"><span class="tip-bullet">★</span> <span>Lava tubes are natural underground tunnels connecting mountains. Mine gem veins (ruby, emerald, sapphire, amethyst) for crystal — found only in tunnel walls!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Y-Slicer:</strong> Always available! Use Shift+scroll or the slider to cut through terrain layers. Right-click underground tiles to see block resources. Works without selecting a unit.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Underground Combat:</strong> Units auto-enter tunnels when walking through an entrance and auto-surface when exiting. AI commanders route armies through tunnels for long-distance flanks.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Desert Tunnels Map:</strong> Features 3-4 surface openings, a deep underground network, and a central battle cavern with a capturable neutral outpost.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Lava tubes are natural underground tunnels connecting mountains. Mine gem veins (ruby, emerald, sapphire, amethyst) for crystal — found only in tunnel walls!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Y-Slicer:</strong> Always available! Use Shift+scroll or the slider to cut through terrain layers. Right-click underground tiles to see block resources. Works without selecting a unit.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Underground Combat:</strong> Units auto-enter tunnels when walking through an entrance and auto-surface when exiting. AI commanders route armies through tunnels for long-distance flanks.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Desert Tunnels Map:</strong> Features 3-4 surface openings, a deep underground network, and a central battle cavern with a capturable neutral outpost.</span></div>
           ` : ''}
-          <div class="tip"><span class="tip-bullet">★</span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish. Enemy buildings show an <strong style="color:#e74c3c;">Attack</strong> button; bases show a <strong style="color:#27ae60;">Capture Zone</strong> button.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Your units spread their attacks across multiple enemies instead of all targeting one — fewer wasted hits!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span>Archers automatically flee from melee threats and reposition to maintain range advantage.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Zone Control:</strong> Every base has a 5-hex capture zone. Hold more units in the zone than the enemy to capture it. A progress bar shows capture advancement. Contested zones stall when both sides are present. The zone HUD on the right shows all zones at a glance.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture = Victory:</strong> Capturing the enemy's main base wins the game instantly. Neutral outposts flip to your team and you inherit all buildings in the zone. Use Defensive stance to hold zones without getting lured out!</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Unit Stats <span class="key" style="font-size:9px;">I</span>:</strong> Press I to toggle a live unit stats panel showing both teams' alive units with kill counts, levels, HP, and current state.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Click on buildings to open a tooltip — queue units, view status, or demolish. Enemy buildings show an <strong style="color:#e74c3c;">Attack</strong> button; bases show a <strong style="color:#27ae60;">Capture Zone</strong> button.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Your units spread their attacks across multiple enemies instead of all targeting one — fewer wasted hits!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span>Archers automatically flee from melee threats and reposition to maintain range advantage.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Zone Control:</strong> Every base has a 5-hex capture zone. Hold more units in the zone than the enemy to capture it. A progress bar shows capture advancement. Contested zones stall when both sides are present. The zone HUD on the right shows all zones at a glance.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Capture = Victory:</strong> Capturing the enemy's main base wins the game instantly. Neutral outposts flip to your team and you inherit all buildings in the zone. Use Defensive stance to hold zones without getting lured out!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Building Destruction:</strong> Non-base buildings (Barracks, Armory, etc.) are destructible. Regular units deal 15% damage (min 1) — very tanky! Siege weapons (Trebuchet) deal full damage. Walls and gates are siege-only.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Right-Click Attack:</strong> Right-click an enemy building or wall to send selected units to attack it. Units auto-attack adjacent enemy structures when idle in aggressive/defensive stance.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Capture Zone Button:</strong> When combat units are selected, use the "Capture Zone" action in the command panel to send them to the nearest uncaptured zone in defensive stance.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Unit Stats <span class="key" style="font-size:9px;">I</span>:</strong> Press I to toggle a live unit stats panel showing both teams' alive units with kill counts, levels, HP, and current state.</span></div>
           <!-- Arcane Convergence covered in Magic System section above -->
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>AI Squads:</strong> AI commanders group units into formation squads that march together at a shared speed. Tanks lead, ranged units stay behind, siege follows. This creates cohesive army movements instead of scattered charges.</span></div>
-          <div class="tip"><span class="tip-bullet">★</span> <span><strong>Surface Bases:</strong> Standard maps feature neutral desert outposts and mountain forts. Mountain forts perch on peaks with walkable paths — capture them for high ground advantage!</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>AI Squads:</strong> AI commanders group units into formation squads that march together at a shared speed. Tanks lead, ranged units stay behind, siege follows. This creates cohesive army movements instead of scattered charges.</span></div>
+          <div class="tip"><span class="tip-bullet"><span class="vx" style="background:#f0c040;"></span></span> <span><strong>Surface Bases:</strong> Standard maps feature neutral desert outposts and mountain forts. Mountain forts perch on peaks with walkable paths — capture them for high ground advantage!</span></div>
         </div>
 
         <!-- Footer -->
@@ -2709,9 +2944,14 @@ export class HUD {
     // Called each frame — can be used for animations or time display
   }
 
-  setGameMode(mode: 'pvai' | 'aivai'): void {
-    const label = mode === 'pvai' ? 'Player vs AI' : 'AI vs AI';
-    const color = mode === 'pvai' ? '#3498db' : '#e74c3c';
+  setGameMode(mode: 'pvai' | 'aivai' | 'ffa' | '2v2'): void {
+    const labels: Record<string, [string, string]> = {
+      'pvai': ['Player vs AI', '#3498db'],
+      'aivai': ['AI vs AI', '#e74c3c'],
+      'ffa': ['Free-For-All', '#2ecc71'],
+      '2v2': ['2v2 Teams', '#f39c12'],
+    };
+    const [label, color] = labels[mode] ?? ['Unknown', '#888'];
     this.elements.titleBar.innerHTML = `<strong>CUBITOPIA</strong><br><span style="font-size:12px;color:${color}">${label}</span>`;
   }
 
@@ -2729,8 +2969,7 @@ export class HUD {
       this.terrainInfoPanel = document.createElement('div');
       this.terrainInfoPanel.style.cssText = `
         position: absolute; top: 80px; left: 16px;
-        background: rgba(0, 0, 0, 0.9); padding: 12px 16px; border-radius: 8px;
-        font-size: 13px; border: 1px solid rgba(255,255,255,0.2); color: #ddd;
+        ${UI.panel()}; padding: 12px 16px;
         min-width: 180px; pointer-events: none; z-index: 10001;
         transition: opacity 0.2s;
       `;
@@ -3244,7 +3483,7 @@ export class HUD {
       this.slicerContainer.style.cssText = `
         position: absolute; right: 180px; bottom: 80px;
         display: flex; flex-direction: column; align-items: center; gap: 4px;
-        background: rgba(0,0,0,0.8); padding: 10px 8px; border-radius: 10px;
+        background: rgba(0,0,0,0.8); padding: 10px 8px; border-radius: 8px;
         border: 2px solid #ff8c00; z-index: 100; user-select: none;
         pointer-events: auto;
       `;
@@ -3399,30 +3638,29 @@ export class HUD {
     }
   }
 
-  updateUnitStatsPanel(allUnits: Unit[], deadUnitKills?: [number, number]): void {
+  updateUnitStatsPanel(allUnits: Unit[], deadUnitKills?: number[]): void {
     if (!this.unitStatsPanelVisible) return;
 
     if (!this.unitStatsPanel) {
       this.unitStatsPanel = document.createElement('div');
       this.unitStatsPanel.style.cssText = `
         position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.92); padding: 16px; border-radius: 10px;
-        font-size: 12px; border: 2px solid rgba(255,255,255,0.3); color: #ddd;
+        ${UI.panel(COLORS.borderHover)}; padding: 16px;
         min-width: 600px; max-height: 80vh; overflow-y: auto; pointer-events: auto; z-index: 500;
-        font-family: 'Courier New', monospace;
       `;
       document.body.appendChild(this.unitStatsPanel);
     }
     this.unitStatsPanel.style.display = 'block';
 
-    // Build team data
-    const teams: { [owner: number]: { alive: Unit[]; dead: Unit[]; totalKills: number } } = {
-      0: { alive: [], dead: [], totalKills: deadUnitKills?.[0] ?? 0 },
-      1: { alive: [], dead: [], totalKills: deadUnitKills?.[1] ?? 0 },
-    };
+    // Build team data — dynamic for N players
+    const teams: { [owner: number]: { alive: Unit[]; dead: Unit[]; totalKills: number } } = {};
+    for (const u of allUnits) {
+      if (!teams[u.owner]) {
+        teams[u.owner] = { alive: [], dead: [], totalKills: deadUnitKills?.[u.owner] ?? 0 };
+      }
+    }
 
     for (const u of allUnits) {
-      if (u.owner !== 0 && u.owner !== 1) continue;
       const team = teams[u.owner];
       if (u.state === 'dead') {
         team.dead.push(u);
