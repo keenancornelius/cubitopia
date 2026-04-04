@@ -59,14 +59,14 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     carryCapacity: 8, isSiege: false,
   },
   [UnitType.LUMBERJACK]: {
-    stats: { maxHealth: 8, attack: 2, defense: 1, movement: 2, range: 1 },
-    moveSpeed: 1.2, attackSpeed: 0.8, color: 0x6d4c41,
-    carryCapacity: 6, isSiege: false,
+    stats: { maxHealth: 10, attack: 2, defense: 1, movement: 3, range: 1 },
+    moveSpeed: 1.6, attackSpeed: 0.8, color: 0x6d4c41,
+    carryCapacity: 8, isSiege: false,
   },
   [UnitType.VILLAGER]: {
-    stats: { maxHealth: 7, attack: 1, defense: 1, movement: 2, range: 1 },
-    moveSpeed: 1.0, attackSpeed: 0.6, color: 0xdaa520,
-    carryCapacity: 5, isSiege: false,
+    stats: { maxHealth: 10, attack: 1, defense: 1, movement: 3, range: 1 },
+    moveSpeed: 1.4, attackSpeed: 0.6, color: 0xdaa520,
+    carryCapacity: 8, isSiege: false,
   },
   // --- Advanced combat units ---
   [UnitType.HEALER]: {

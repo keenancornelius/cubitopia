@@ -103,6 +103,14 @@ export default class SpawnQueueSystem {
   wizardTowerSpawnQueue: WizardTowerQueueItem[] = [];
   wizardTowerSpawnTimer = 0;
 
+  /** Cached per-frame spawn configs — built once, avoids 7+ closure allocations per frame */
+  private _cachedSpawnConfigs: {
+    kind: string; color: string; spawnTime: number;
+    queue: { type: UnitType }[];
+    getTimer: () => number; setTimer: (v: number) => void;
+    canAfford: (item: any) => boolean; deductCost: (item: any) => void;
+  }[] | null = null;
+
   constructor(ops: SpawnQueueOps) {
     this.ops = ops;
   }
@@ -119,6 +127,81 @@ export default class SpawnQueueSystem {
     masonry:   { buildingKind: 'masonry',   resourceType: 'wood', getResource: () => this.ops.getWood(),  getQueue: () => this.masonrySpawnQueue },
     farmhouse: { buildingKind: 'farmhouse', resourceType: 'wood', getResource: () => this.ops.getWood(),  getQueue: () => this.farmhouseSpawnQueue },
   };
+
+  /** Build spawn configs once, reuse every frame */
+  private getSpawnConfigs() {
+    if (this._cachedSpawnConfigs) return this._cachedSpawnConfigs;
+    const ops = this.ops;
+    this._cachedSpawnConfigs = [
+      {
+        kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime,
+        queue: this.spawnQueue,
+        getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => ops.getGold() >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { ops.setGold(ops.getGold() - item.cost); },
+      },
+      {
+        kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime,
+        queue: this.forestrySpawnQueue,
+        getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
+      },
+      {
+        kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime,
+        queue: this.masonrySpawnQueue,
+        getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
+      },
+      {
+        kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime,
+        queue: this.farmhouseSpawnQueue,
+        getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
+        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
+        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
+      },
+      {
+        kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime,
+        queue: this.workshopSpawnQueue,
+        getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
+        canAfford: (item: WorkshopQueueItem) =>
+          ops.getRope() >= item.cost.rope &&
+          ops.getStone() >= item.cost.stone &&
+          ops.getWood() >= item.cost.wood,
+        deductCost: (item: WorkshopQueueItem) => {
+          ops.setRope(ops.getRope() - item.cost.rope);
+          ops.setStone(ops.getStone() - item.cost.stone);
+          ops.setWood(ops.getWood() - item.cost.wood);
+        },
+      },
+      {
+        kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime,
+        queue: this.armorySpawnQueue,
+        getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
+        canAfford: (item: ArmoryQueueItem) =>
+          ops.getGold() >= item.cost.gold &&
+          ops.getSteel() >= item.cost.steel,
+        deductCost: (item: ArmoryQueueItem) => {
+          ops.setGold(ops.getGold() - item.cost.gold);
+          ops.setSteel(ops.getSteel() - item.cost.steel);
+        },
+      },
+      {
+        kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime,
+        queue: this.wizardTowerSpawnQueue,
+        getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
+        canAfford: (item: WizardTowerQueueItem) =>
+          ops.getGold() >= item.cost.gold &&
+          ops.getCrystal() >= item.cost.crystal,
+        deductCost: (item: WizardTowerQueueItem) => {
+          ops.setGold(ops.getGold() - item.cost.gold);
+          ops.setCrystal(ops.getCrystal() - item.cost.crystal);
+        },
+      },
+    ];
+    return this._cachedSpawnConfigs;
+  }
 
   /** Queue a unit for a simple (single-resource) building */
   doSpawnQueueGeneric(buildingKey: string, type: UnitType, cost: number, name: string): void {
@@ -268,79 +351,7 @@ export default class SpawnQueueSystem {
 
     const debugFlags = ops.getDebugFlags();
 
-    const spawnConfigs: {
-      kind: string; color: string; spawnTime: number;
-      queue: { type: UnitType }[];
-      getTimer: () => number; setTimer: (v: number) => void;
-      canAfford: (item: any) => boolean; deductCost: (item: any) => void;
-    }[] = [
-      {
-        kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime,
-        queue: this.spawnQueue,
-        getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getGold() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setGold(ops.getGold() - item.cost); },
-      },
-      {
-        kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime,
-        queue: this.forestrySpawnQueue,
-        getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime,
-        queue: this.masonrySpawnQueue,
-        getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime,
-        queue: this.farmhouseSpawnQueue,
-        getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime,
-        queue: this.workshopSpawnQueue,
-        getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
-        canAfford: (item: WorkshopQueueItem) =>
-          ops.getRope() >= item.cost.rope &&
-          ops.getStone() >= item.cost.stone &&
-          ops.getWood() >= item.cost.wood,
-        deductCost: (item: WorkshopQueueItem) => {
-          ops.setRope(ops.getRope() - item.cost.rope);
-          ops.setStone(ops.getStone() - item.cost.stone);
-          ops.setWood(ops.getWood() - item.cost.wood);
-        },
-      },
-      {
-        kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime,
-        queue: this.armorySpawnQueue,
-        getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
-        canAfford: (item: ArmoryQueueItem) =>
-          ops.getGold() >= item.cost.gold &&
-          ops.getSteel() >= item.cost.steel,
-        deductCost: (item: ArmoryQueueItem) => {
-          ops.setGold(ops.getGold() - item.cost.gold);
-          ops.setSteel(ops.getSteel() - item.cost.steel);
-        },
-      },
-      {
-        kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime,
-        queue: this.wizardTowerSpawnQueue,
-        getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
-        canAfford: (item: WizardTowerQueueItem) =>
-          ops.getGold() >= item.cost.gold &&
-          ops.getCrystal() >= item.cost.crystal,
-        deductCost: (item: WizardTowerQueueItem) => {
-          ops.setGold(ops.getGold() - item.cost.gold);
-          ops.setCrystal(ops.getCrystal() - item.cost.crystal);
-        },
-      },
-    ];
+    const spawnConfigs = this.getSpawnConfigs();
 
     // ─── Process spawn timers ───
     for (const cfg of spawnConfigs) {
@@ -511,5 +522,7 @@ export default class SpawnQueueSystem {
     this.armorySpawnTimer = 0;
     this.wizardTowerSpawnQueue = [];
     this.wizardTowerSpawnTimer = 0;
+    // Invalidate cached configs so they pick up fresh queue refs
+    this._cachedSpawnConfigs = null;
   }
 }

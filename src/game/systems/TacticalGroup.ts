@@ -178,6 +178,8 @@ export class TacticalGroup {
   static REFORM_DELAY = GAME_CONFIG.tacticalGroup.reformDelay;
   /** Health-weighted strength ratio below which we retreat */
   static RETREAT_THRESHOLD = GAME_CONFIG.tacticalGroup.retreatThreshold;
+  /** Hex range to detect enemies during march */
+  static CONTACT_RANGE = (GAME_CONFIG.tacticalGroup as any).contactRange ?? 10;
 
   constructor(owner: number, objective: HexCoord) {
     this.id = `tg_${nextGroupId++}`;
@@ -256,7 +258,7 @@ export class TacticalGroup {
     this.marchDirection = hexDir(this.centroid, this.objective);
 
     // Detect nearby enemies
-    const nearbyEnemies = this.findNearbyEnemies(allUnits, 8);
+    const nearbyEnemies = this.findNearbyEnemies(allUnits, TacticalGroup.CONTACT_RANGE);
     const hasContact = nearbyEnemies.length > 0;
 
     if (hasContact) {
@@ -311,7 +313,7 @@ export class TacticalGroup {
           this._engageTimer = 0;
         }
         // After reforming, resume march if objective not reached
-        if (!hasContact && this._noContactTimer >= TacticalGroup.REFORM_DELAY + 2) {
+        if (!hasContact && this._noContactTimer >= TacticalGroup.REFORM_DELAY + 1) {
           if (hexDist(this.centroid, this.objective) > 2) {
             this.phase = GroupPhase.MARCHING;
           }

@@ -1,5 +1,26 @@
 # Cubitopia — Claude Development Guide
 
+## ⚠️ MANDATORY SESSION PROTOCOL — READ THIS FIRST ⚠️
+
+**When the user says "next task", "go", "continue", or anything similar, follow these EXACT steps:**
+
+1. **Read this entire CLAUDE.md file first** — it contains architecture, coding standards, and project context you NEED
+2. Open `TASKS.md` (this same directory)
+3. Find the first OPEN or ACTIVE stream with uncompleted `[ ]` tasks
+4. If no stream is ACTIVE, pick the first OPEN one and mark it `[ACTIVE]`
+5. Work on the next unchecked `[ ]` task in that stream
+6. When done, mark it `[x]` in TASKS.md and move to the next `[ ]` task
+7. When all tasks in the stream are done, mark it `[DONE]` and loop back to step 2
+
+**That's it. Do NOT deviate from this protocol.**
+
+### Banned behaviors (these WILL break your session):
+- ❌ **NEVER use the AskUserQuestion tool** — it is broken and will crash you
+- ❌ **NEVER stop to ask for clarification** — you have CLAUDE.md, TASKS.md, and the codebase, that's enough
+- ❌ **NEVER try to guess what "next task" means** — it ALWAYS means "read TASKS.md and do the next unchecked item"
+- ❌ **NEVER search memory, conversation history, or context** for what to do next — TASKS.md is the single source of truth
+- ❌ **NEVER ask "what do you mean by next task"** — just open TASKS.md and do the work
+
 ## Project Overview
 Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.js + TypeScript + Vite**. No Unity or paid platforms.
 
@@ -14,7 +35,7 @@ Turn-based voxel strategy game (Polytopia-inspired but 3D). Built with **Three.j
 ## Project Goals & Priorities
 
 ### Revenue Target
-Ship on **Steam** (desktop) and/or **App Store** (mobile via web wrapper or native port). The game must reach a quality bar where players would pay for it. Every decision should be evaluated against: "does this make the game more fun, more polished, or more shippable?"
+Ship as a **web game** (hosted website, playable in browser). Monetization via **Stripe microtransactions** (cosmetics, tribe skins, etc. — to be designed later). No Steam, no App Store. The game must reach a quality bar where players engage and want to spend. Every decision should be evaluated against: "does this make the game more fun, more polished, or more shippable?"
 
 ### Architecture Goals (Priority 1 — Unblocks Everything Else)
 These must be addressed BEFORE adding major new features. Technical debt is actively slowing iteration.
@@ -32,23 +53,27 @@ These directly affect whether the game feels good to play.
 3. ~~**Reduce raycasting.**~~ **DONE (2026-04-01).** Eliminated 3 expensive `intersectObjects(scene.children, true)` calls: main.ts `raycastToHex` (per-frame hover), SelectionManager `screenToWorld` (right-click), InputManager attack-move click. Replaced with O(1) ground-plane intersection + `worldToHex` math. Building/base click detection kept as targeted raycasts against small mesh arrays.
 4. ~~**Profile and optimize the game loop.**~~ **DONE (2026-04-01).** Added `Renderer.getPerfInfo()` exposing WebGL draw calls, triangles, textures, geometries. Performance overlay (F3 key) shows live FPS, draw calls, triangle count, unit count, game speed. Updates at 2Hz to avoid overhead.
 
-### Gameplay Goals (Priority 3 — Makes the Game Fun)
-Build on the strong foundation of hex combat, capture zones, and economy.
+### Gameplay Goals (Priority 3 — THE CORE VISION)
+**The goal is dopamine.** Every combat interaction should feel satisfying — the animation timing, the visual effects, the sound design, all working together to make the player FEEL the impact. We're chasing that "one more turn" compulsion through polished, punchy combat.
 
-1. **Make AI feel alive.** Squads should march visibly, capture bases in sequence, and put real pressure on the player. Currently squads stall and lack urgency.
-2. **Polish combat readability.** Players should instantly understand what's happening in a battle — who's winning, which units to focus, when to retreat.
+1. **Combat feel is king.** Animations need snappy wind-ups and impactful strikes with screen-appropriate weight. VFX must sync to the animation frame. Sound must land on impact. Every attack should feel like it connects. This is the single most important thing to get right.
+2. **Make AI feel alive.** Squads should march visibly, capture bases in sequence, and put real pressure on the player.
 3. **Economy depth.** The resource chain (iron → steel, wood → charcoal) is good. Add trade-offs and strategic choices (which buildings to prioritize, tech paths).
 4. **Map variety.** Different map types should create genuinely different games. Island maps, chokepoint maps, resource-scarce maps.
 5. **Win condition clarity.** Capture the enemy capital is clear, but the path to get there should feel like a strategic journey with decision points.
 
-### Future Goals (Not Yet — Requires Architecture First)
-- **Tribe/faction system** — different unit rosters, tech trees, visual themes per faction
-- **Multiplayer** — deterministic simulation, command serialization, netcode. Requires eliminating Math.random() in game logic and separating view from simulation.
-- **Mobile support** — touch controls, performance scaling, responsive UI
+### Upcoming Goals (Next Wave)
+- **Tribe/faction skins** — BECOMING A PRIORITY. Different visual themes, unit rosters, and tech trees per faction. Tribe selector buttons already exist in the menu — need to activate them with actual skin data. Ties into Stripe cosmetic monetization.
+- **Multiplayer** — IN PROGRESS (see Work Stream G in TASKS.md). WebRTC P2P, Firebase matchmaking, lockstep command queue, ELO. Seeded PRNG already done.
+- **FFA mode expansion** — need player count / AI count submenu for FFA. Eventually support 4+ human players in free-for-all.
+- **Mobile support** — touch controls, performance scaling, responsive UI. Interesting near-term goal given we're shipping as a web game.
+- **Enhanced graphics mode** — option to toggle higher-fidelity rendering (better lighting, post-processing, particle density). Could A/B test voxel-pure vs. enhanced to see what players prefer. Not replacing the voxel aesthetic — adding an optional layer on top.
 - **Mod support** — data-driven configs for units, buildings, maps
 
+### Far-Future Vision
+- **MMO-scale RTS** — zoom in for micro territory battles, zoom out to control larger territories. Continuously abstracting scale. Think: start as a squad commander, end as an empire. Long-term aspiration, not current scope.
+
 ### Non-Goals (Avoid Scope Creep)
-- Realistic graphics (we're voxel — lean into it)
 - Complex diplomacy/trade (keep it combat + economy focused)
 - Procedural story/campaign (focus on skirmish replayability first)
 
@@ -59,7 +84,7 @@ Build on the strong foundation of hex combat, capture zones, and economy.
 Multiple Claude sessions may work on this project simultaneously. **Read `TASKS.md` before starting any work.**
 
 ### How it works
-- `TASKS.md` is the task board. It defines work streams (A–H), each with its own set of owned files and tasks.
+- `TASKS.md` is the task board. It defines work streams (A–I), each with its own set of owned files and tasks.
 - Each session claims ONE work stream, marks it `[ACTIVE]`, and only edits files listed under that stream.
 - Shared files (`types/index.ts`, `GameConfig.ts`, `UnitFactory.ts`) can be edited by any stream but only for small, additive changes (new types, new config entries). Never restructure shared files.
 - If you need a change in another stream's file, add a request to the "Cross-Stream Requests" table in TASKS.md.
@@ -69,78 +94,34 @@ Multiple Claude sessions may work on this project simultaneously. **Read `TASKS.
 2. Pick an OPEN stream that matches what the user wants you to work on
 3. Mark it `[ACTIVE]` with a session identifier
 4. Work only within your stream's files
-5. Commit frequently — other sessions may pull your changes
 
 ### Conflict prevention
 - **Never edit a file owned by another active stream** without coordination
-- **git pull before starting work** if other sessions have been committing
-- **Small, focused commits** — easier to merge if two sessions touch shared files
-- If you encounter a merge conflict, stop and tell the user
+- **Do not run git commands** — the project manager handles all commits in batches
 
 ---
 
-## Git Commit Policy
+## Git Policy — Batch Commits (Managed Externally)
 
-**MANDATORY: Create a git commit BEFORE every major code overhaul.** This gives us a clean rollback point if changes break the game.
+**DO NOT commit directly.** Git commits are batched and managed by the project manager (a separate session). This prevents lock conflicts, merge messes, and wasted time on commit ceremony.
 
-### Commit checklist (do this every time):
-1. Run `npx tsc --noEmit` — must be zero errors
-2. Run `npx vite build` — must succeed
-3. Update the **help menu** in `src/ui/HUD.ts` (`createHelpOverlay`) with any new/changed gameplay features
-4. `git add` relevant files (not node_modules/dist)
-5. `git commit` with a descriptive message
-6. **Run the Introspective Review** (see below)
+### Your job:
+- Write code, mark tasks `[x]` in TASKS.md
+- Make sure your code compiles: run `npx tsc --noEmit` before marking a task done
+- Update the **help menu** in `src/ui/HUD.ts` (`createHelpOverlay`) if you changed gameplay features
+- That's it. Move on to the next task.
 
-### When to commit:
-- Before starting a new feature that touches 3+ files
-- After completing a working feature (checkpoint)
-- Before any rename/refactor that touches many files
-- Before experimental changes the user wants to try
-- After updating project architecture in CLAUDE.md or Instructions
-- After updating the CLAUDE.md and instruction files on quirks and discoveries about the code base
-- After updating the help menu with new or missing info, always make sure to update the help menu and check that it all makes sense with the game  code flow.
+### Do NOT do any of these:
+- ❌ Do not run `git add`, `git commit`, or `git push`
+- ❌ Do not run any "Introspective Review" protocol
+- ❌ Do not update CLAUDE.md architecture sections (manager handles this)
+- ❌ Do not worry about merge conflicts — manager batches commits to avoid them
 
-### Introspective Review Protocol (run on every commit)
-After each commit, pause and run through these checks before moving on. This is how the project stays coherent as it grows.
-
-**1. Architecture Accuracy Check**
-- Does the Key Files section still reflect reality? (line counts, descriptions, ownership)
-- Are any new files missing from the Key Files list?
-- Do any integration notes reference methods/fields that have been moved or deleted?
-- Are backward-compat shims still needed, or can they be removed?
-
-**2. Shrink-Wrap Audit**
-- Run `wc -l src/main.ts` — is it the same or smaller than before this commit?
-- Did we introduce any new code in main.ts that should have been a standalone module?
-- Are there any new functions over 40 lines that should be extracted?
-- Any new repetitive patterns that could be data-driven?
-
-**3. Roadmap Alignment Check**
-- Does this commit advance any roadmap phase? If so, update the roadmap status.
-- Did this commit create or remove architecture prep needed for a future phase?
-- Are any roadmap items now unblocked by this change?
-- Does the current extraction target list need reordering based on what we learned?
-
-**4. Vision Coherence Check**
-- Does the current code structure support the tribe system (Phase 2)? Would adding a `TribeConfig` today require touching main.ts?
-- Is UnitFactory closer to being data-driven, or did we add more hardcoded switch cases?
-- Are new subsystems using the slim ops interface pattern, or did we create tight coupling?
-- Would a new developer reading CLAUDE.md understand the project's direction and how to contribute?
-
-**5. Multiplayer-Readiness Check**
-- Did this commit introduce any `Math.random()` calls in game logic? If so, replace with seeded PRNG. (`Math.random()` is OK in rendering/particles/visual-only code.)
-- Does any new player input directly mutate game state? If so, refactor to produce a Command object that the simulation consumes. (Direct mutation = impossible to serialize for netcode.)
-- Is the new code's game state fully serializable? No closures, DOM refs, or Three.js objects stored in simulation state.
-- Could this code run identically on two separate clients given the same inputs? If not, identify the non-determinism source and fix it.
-
-**6. Cleanup Sweep**
-- Remove stale TODO comments that were resolved by this commit
-- Delete dead code paths, unused imports, orphaned type declarations
-- Update line counts in CLAUDE.md if they've drifted by more than 50 lines
-- Check if any Mistakes Log entries are now irrelevant (problem fully resolved, code deleted)
-- For each change, examine the existing system and redesign it into the most elegant solution that would have emerged if the change had been a foundational assumption from the start.
-
-If any check fails, fix it before starting the next task. The 5 minutes spent here saves hours of drift.
+### Quality checks (still your responsibility):
+- `npx tsc --noEmit` must pass before marking a task done
+- No `Math.random()` in game logic (use GameRNG for deterministic multiplayer)
+- No direct game state mutation from player input (route through CommandQueue when in multiplayer mode)
+- Clean up dead code, unused imports, and stale TODOs from your own changes
 
 ---
 
@@ -780,9 +761,8 @@ private buildGameContext(): GameContext {
 
 ## Feature Roadmap
 
-### Roadmap Review Rules
-- **On every commit:** check if the commit advances or blocks any phase. Update status markers below.
-- **Before starting any Phase N feature:** verify all Phase N-1 architecture prep items are complete.
+s any phase. Update status markers below.
+- **Before starting any Phase N f### Roadmap Review Rules
 - **When adding a new system:** ask "does this make the tribe system easier or harder to build?" If harder, redesign.
 - **When touching UnitFactory, BuildingMeshFactory, or AIController:** ask "is this still data-driven? Could a new tribe slot in without code changes?"
 - **When touching game logic:** ask "is this deterministic? Does it use Math.random()?" If so, swap to seeded PRNG. Multiplayer depends on this.

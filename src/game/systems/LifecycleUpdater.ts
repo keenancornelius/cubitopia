@@ -31,6 +31,7 @@ export interface LifecycleOps {
 
   // Dead cleanup
   getAllUnits(): Unit[];
+  getGameFrame(): number;
 }
 
 export default class LifecycleUpdater {
@@ -65,10 +66,11 @@ export default class LifecycleUpdater {
         if (!base) continue;
         base.tier = evt.newTier;
         this.ops.rebuildBaseForTier(base, this.ops.getElevation(base.position));
-        const tierNames = ['Camp', 'Fort', 'Castle'];
-        const msg = `🏰 Base upgraded to ${tierNames[evt.newTier]}!`;
+        const tierNames = ['Camp', 'Fort', 'Castle', 'Citadel'];
+        const tierEmojis = ['🏕️', '🏰', '👑', '🔮'];
+        const msg = `${tierEmojis[evt.newTier] ?? '🏰'} Base upgraded to ${tierNames[evt.newTier]}!`;
         if (pid === 0) {
-          this.ops.showNotification(msg, '#f1c40f');
+          this.ops.showNotification(msg, evt.newTier === BaseTier.CITADEL ? '#9b59b6' : '#f1c40f');
           this.ops.playSound('queue_confirm', 0.8);
         }
         Logger.info('BaseUpgrade', `Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
@@ -125,7 +127,7 @@ export default class LifecycleUpdater {
     if (this.deadCleanupTimer < 1.0) return;
     this.deadCleanupTimer = 0;
 
-    const now = performance.now();
+    const gf = this.ops.getGameFrame();
     const allUnits = this.ops.getAllUnits();
     for (let i = allUnits.length - 1; i >= 0; i--) {
       const u = allUnits[i];
@@ -134,8 +136,8 @@ export default class LifecycleUpdater {
         this.ops.removeUnitFromGame(u);
       } else if (u._pendingRangedDeath) {
         if (!u._pendingDeathTimestamp) {
-          u._pendingDeathTimestamp = now;
-        } else if (now - u._pendingDeathTimestamp > 3000) {
+          u._pendingDeathTimestamp = gf;
+        } else if (gf - u._pendingDeathTimestamp > 180) { // ~3 seconds at 60fps
           Logger.warn('DeadCleanup', `Force-removing stale pending-death unit ${u.type}(${u.id})`);
           u.state = UnitState.DEAD;
           u._pendingRangedDeath = false;

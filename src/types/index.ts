@@ -122,6 +122,21 @@ export enum BlockType {
   CORAL = 'coral',              // Colourful reef block (shallow water)
   TROPICAL_GRASS = 'tropical_grass', // Vibrant bright green island surface
   PALM_WOOD = 'palm_wood',      // Warm tan palm tree wood
+  // Tundra-specific blocks
+  ICE = 'ice',                  // Frozen lake/river surface — translucent blue-white
+  FROZEN_DIRT = 'frozen_dirt',  // Permafrost ground — grey-brown
+  PACKED_SNOW = 'packed_snow',  // Compacted windswept snow surface
+  PINE_WOOD = 'pine_wood',      // Dark evergreen pine wood
+  // Sunken Ruins blocks
+  MOSSY_STONE = 'mossy_stone',       // Green-grey overgrown stone
+  ANCIENT_BRICK = 'ancient_brick',   // Weathered tan-brown bricks
+  VINE = 'vine',                     // Dark green hanging vines
+  RUIN_PILLAR = 'ruin_pillar',       // Pale grey carved stone column
+  // Badlands blocks
+  RED_CLAY = 'red_clay',             // Deep red-orange clay terrain
+  CRACKED_EARTH = 'cracked_earth',   // Dry tan cracked ground
+  MESA_STONE = 'mesa_stone',         // Layered orange-red sedimentary rock
+  DEAD_WOOD = 'dead_wood',           // Bleached grey-white dead tree wood
 }
 
 export enum ImprovementType {
@@ -230,7 +245,7 @@ export interface Unit {
   _squadJoining?: boolean;          // True while unit is catching up to squad — uses own speed, excluded from centroid
   _tacticalGroupId?: string;        // TacticalGroup assignment — coordinated combat
   _isKiting?: boolean;              // Ranged unit is fleeing from melee threat — don't re-aggro
-  _lastRepathTime?: number;         // Timestamp of last wall-repath to throttle pathfinding
+  _lastRepathTime?: number;         // Game frame of last wall-repath to throttle pathfinding
   _pendingRangedDeath?: boolean;    // Unit killed by ranged attack — defer DEAD state until projectile lands
   _pendingDeathTimestamp?: number;  // Timestamp when _pendingRangedDeath was first detected (for safety cleanup)
   kills: number;                    // Total kills this unit has scored
@@ -238,23 +253,23 @@ export interface Unit {
   _elementCycleIndex?: number;      // Current index in element cycle (0-4, advances after each attack)
 
   // --- Debuff system ---
-  _slowUntil?: number;              // Timestamp (performance.now ms) until which unit is slowed
+  _slowUntil?: number;              // Game frame until which unit is slowed
   _slowFactor?: number;             // Movement speed multiplier while slowed (e.g., 0.4 = 40% speed)
 
   // --- Elemental status effects (mage combat interactions) ---
-  _statusWet?: number;              // Timestamp until which unit has Wet status (from Water/Battlemage Water AoE)
-  _statusAblaze?: number;           // Timestamp until which unit has Ablaze status (from Fire spell, burn tick)
+  _statusWet?: number;              // Game frame until which unit has Wet status (from Water/Battlemage Water AoE)
+  _statusAblaze?: number;           // Game frame until which unit has Ablaze status (from Fire spell, burn tick)
   _ablazeDPS?: number;              // Burn damage per second while Ablaze
   _ablazeSource?: string;           // Unit ID of the mage that applied Ablaze (for kill credit)
-  _statusArcane?: number;           // Timestamp until which unit has Arcane status (Battlemage Earth AoE — purple orbs)
-  _statusHighVoltage?: number;      // Timestamp until which unit has High Voltage (Battlemage Lightning AoE — chain cascade on Electrocute hit)
-  _knockupUntil?: number;           // Timestamp until which unit is knocked up / airborne (Battlemage Wind AoE CC)
-  _cleanseLinger?: number;          // Timestamp until which unit is immune to status effects (after Healer cleanse)
-  _cleanseCooldown?: number;        // Healer cleanse ability cooldown
-  _speedBoostUntil?: number;        // Timestamp until which unit has cleanse speed boost
+  _statusArcane?: number;           // Game frame until which unit has Arcane status (Battlemage Earth AoE — purple orbs)
+  _statusHighVoltage?: number;      // Game frame until which unit has High Voltage (Battlemage Lightning AoE — chain cascade on Electrocute hit)
+  _knockupUntil?: number;           // Game frame until which unit is knocked up / airborne (Battlemage Wind AoE CC)
+  _cleanseLinger?: number;          // Game frame until which unit is immune to status effects (after Healer cleanse)
+  _cleanseCooldown?: number;        // Game frame of healer cleanse ability cooldown
+  _speedBoostUntil?: number;        // Game frame until which unit has cleanse speed boost
   _speedBoostFactor?: number;       // Speed multiplier during boost (e.g. 1.5 = 50% faster)
-  _cycloneCooldown?: number;        // Battlemage cyclone pull cooldown
-  _synergyCooldown?: number;        // Mage group synergy cooldown
+  _cycloneCooldown?: number;        // Game frame of battlemage cyclone pull cooldown
+  _synergyCooldown?: number;        // Game frame of mage group synergy cooldown
 
   // --- Movement destination (for stance-based resume after combat) ---
   _moveDestination?: HexCoord;      // Original right-click/A-click destination — used to resume march after combat
@@ -272,7 +287,7 @@ export interface Unit {
   // --- Berserker axe throw ---
   _axeThrowReady?: boolean;        // true = berserker has ranged axe throw available (range 7, resets to melee after use)
   _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)
-  _chaseBoostUntil?: number;       // Timestamp until which berserker has chase speed boost
+  _chaseBoostUntil?: number;       // Game frame until which berserker has chase speed boost
 
   // --- Elevation transition state (set by UnitAI, read by renderer for organic movement) ---
   _elevActive?: boolean;           // True while unit is in an elevation transition (Y is changing)
@@ -323,6 +338,7 @@ export enum BaseTier {
   CAMP = 0,
   FORT = 1,
   CASTLE = 2,
+  CITADEL = 3,
 }
 
 export interface Base {
@@ -432,9 +448,9 @@ export interface GameMap {
 export enum MapType {
   STANDARD = 'standard',
   ARENA = 'arena',
-  HIGHLAND = 'highland',
+  SUNKEN_RUINS = 'sunken_ruins',
   ARCHIPELAGO = 'archipelago',
-  FLATLAND = 'flatland',
+  BADLANDS = 'badlands',
   DESERT_TUNNELS = 'desert_tunnels',
   VOLCANIC = 'volcanic',
   TUNDRA = 'tundra',
@@ -569,6 +585,10 @@ export interface GameContext {
   selectionManager: SelectionManager;
   terrainDecorator: TerrainDecorator;
   voxelBuilder: VoxelBuilder;
+
+  /** Monotonic game frame counter — use instead of Date.now()/performance.now() in game logic.
+   *  Increments once per updateRTS call (~60/s). Convert ms to frames: ms * 60 / 1000 */
+  gameFrame: number;
 
   woodStockpile: number[];
   stoneStockpile: number[];

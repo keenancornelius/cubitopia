@@ -56,10 +56,13 @@ import { TacticalGroupManager } from './game/systems/TacticalGroup';
 import { InputManager } from './game/InputManager';
 import { InteractionStateMachine, InteractionState, InteractionCallbacks } from './game/InteractionStateMachine';
 import { GAME_CONFIG } from './game/GameConfig';
+import { hexDist } from './game/HexMath';
 import { GameRNG } from './game/SeededRandom';
 import { getPlayerColor, getPlayerHex, getPlayerCSS, PLAYER_COLORS, NEUTRAL_OWNER } from './game/PlayerConfig';
 import { MultiplayerController } from './network';
 import { MultiplayerUI } from './ui/MultiplayerUI';
+import { processCommand, type CommandBridgeGame } from './network/CommandBridge';
+import { NetCommandType, type NetworkCommand } from './network/Protocol';
 import {
   EngineConfig,
   CameraConfig,
@@ -138,6 +141,9 @@ class Cubitopia {
   private baseRenderer: BaseRenderer;
   private captureZoneSystem!: CaptureZoneSystem;
   private gameOver = false;
+  /** Monotonic frame counter — incremented once per updateRTS call (~60/s).
+   *  Used by all game systems instead of Date.now()/performance.now() for deterministic timing. */
+  private _gameFrame = 0;
   // gameOverOverlay and mainMenuOverlay moved to MenuController
   private gameSpeed = 1;
   private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' = 'pvai';
@@ -187,6 +193,10 @@ class Cubitopia {
   /** Phase 5B: Multiplayer controller (Firebase + WebRTC + matchmaking) */
   readonly multiplayer = new MultiplayerController();
   private multiplayerUI: MultiplayerUI | null = null;
+  /** Opponent display name for multiplayer matches (set by onStartMultiplayerGame) */
+  private _multiplayerOpponentName: string = '';
+  /** Accumulated delta for multiplayer tick advancement (fixed tick rate) */
+  private _mpTickAccumulator = 0;
   // _musicInitialized + _musicIntensityTimer moved into ProceduralMusic.updateFromGameState()
   private _buildingMeshScratch: THREE.Object3D[] | null = null;
   private _baseMeshScratch: THREE.Object3D[] | null = null;
@@ -276,6 +286,7 @@ class Cubitopia {
       getUnitById: (id) => this._unitById?.get(id),
       removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
       getAllUnits: () => this.allUnits,
+      getGameFrame: () => this._gameFrame,
     });
 
     // Interaction state machine — replaces 26+ boolean mode flags
@@ -730,12 +741,10 @@ class Cubitopia {
 
     // --- Right-click on ENEMY: focus-target that enemy ---
     if (enemyAtTarget) {
-      for (const unit of selected) {
-        unit._playerCommanded = true;
-        unit._forceMove = false;
-        unit._focusTarget = enemyAtTarget.id;
-        UnitAI.commandAttack(unit, hexCoord, enemyAtTarget.id, this.currentMap!);
-      }
+      this.enqueueCommand(NetCommandType.ATTACK, {
+        unitIds: selected.map(u => u.id),
+        targetUnitId: enemyAtTarget.id,
+      });
       this.spawnClickIndicator(worldPos, 0xff2222, 1.0); // Red for attack
       return;
     }
@@ -745,10 +754,10 @@ class Cubitopia {
       const healers = selected.filter(u => u.type === UnitType.HEALER);
       if (healers.length > 0) {
         for (const healer of healers) {
-          healer._playerCommanded = true;
-          healer._healTarget = friendlyAtTarget.id;
-          healer._forceMove = false;
-          UnitAI.commandMove(healer, friendlyAtTarget.position, this.currentMap!, preferUnderground);
+          this.enqueueCommand(NetCommandType.SET_HEAL_TARGET, {
+            unitId: healer.id,
+            targetUnitId: friendlyAtTarget.id,
+          });
         }
         this.hud.showNotification(`Healing ${friendlyAtTarget.type}!`, '#2ecc71');
         this.spawnClickIndicator(worldPos, 0x44ff44, 0.8); // Green for heal
@@ -760,13 +769,16 @@ class Cubitopia {
     // Check for enemy/neutral base at click target
     const baseAtTarget = this.findBaseAt(hexCoord, selected[0].owner);
     if (baseAtTarget) {
-      for (const unit of selected) {
-        unit._playerCommanded = true;
-        unit._forceMove = true;
-        unit._focusTarget = undefined;
-        unit.stance = UnitStance.DEFENSIVE;
-        UnitAI.commandMove(unit, baseAtTarget.position, this.currentMap!, preferUnderground);
-      }
+      this.enqueueCommand(NetCommandType.MOVE, {
+        unitIds: selected.map(u => u.id),
+        target: baseAtTarget.position,
+      });
+      // Also set stance to defensive for capture (applied locally for responsiveness,
+      // will be re-applied via CommandBridge on both clients)
+      this.enqueueCommand(NetCommandType.SET_STANCE, {
+        unitIds: selected.map(u => u.id),
+        stance: UnitStance.DEFENSIVE,
+      });
       this.hud.showNotification(`Capturing zone — hold position!`, '#3498db');
       const baseElev = this.getElevation(baseAtTarget.position, baseAtTarget.id === 'base_neutral');
       this.tileHighlighter.showAttackIndicator(baseAtTarget.position, baseElev);
@@ -776,12 +788,10 @@ class Cubitopia {
     // Check for enemy structure at click target
     const enemyStructure = this.findEnemyStructureAt(hexCoord, selected[0].owner);
     if (enemyStructure) {
-      for (const unit of selected) {
-        unit._playerCommanded = true;
-        unit._forceMove = false;
-        unit._focusTarget = undefined;
-        UnitAI.commandAttack(unit, enemyStructure, null, this.currentMap!, preferUnderground);
-      }
+      this.enqueueCommand(NetCommandType.ATTACK_MOVE, {
+        unitIds: selected.map(u => u.id),
+        target: enemyStructure,
+      });
       this.hud.showNotification(`Attacking structure!`, '#e74c3c');
       const structElev = this.getElevation(enemyStructure);
       this.tileHighlighter.showAttackIndicator(enemyStructure, structElev);
@@ -824,8 +834,11 @@ class Cubitopia {
             builder._forceMove = false;
             builder.state = UnitState.IDLE; // interrupt current task
             builder.command = null;
-            UnitAI.commandMove(builder, blueprint.position, this.currentMap!, preferUnderground);
           }
+          this.enqueueCommand(NetCommandType.MOVE, {
+            unitIds: builders.map(b => b.id),
+            target: blueprint.position,
+          });
           this.hud.showNotification(`Builder assigned to ${blueprint.kind}!`, '#f39c12');
           this.spawnClickIndicator(worldPos, 0xf39c12, 0.8); // Orange for build
           return;
@@ -841,8 +854,11 @@ class Cubitopia {
             builder._forceMove = false;
             builder.state = UnitState.IDLE;
             builder.command = null;
-            UnitAI.commandMove(builder, hexCoord, this.currentMap!, preferUnderground);
           }
+          this.enqueueCommand(NetCommandType.MOVE, {
+            unitIds: builders.map(b => b.id),
+            target: hexCoord,
+          });
           this.hud.showNotification(`Builder assigned to mine!`, '#f39c12');
           this.spawnClickIndicator(worldPos, 0xf39c12, 0.8);
           return;
@@ -856,8 +872,11 @@ class Cubitopia {
             builder._forceMove = false;
             builder.state = UnitState.IDLE;
             builder.command = null;
-            UnitAI.commandMove(builder, hexCoord, this.currentMap!, preferUnderground);
           }
+          this.enqueueCommand(NetCommandType.MOVE, {
+            unitIds: builders.map(b => b.id),
+            target: hexCoord,
+          });
           this.hud.showNotification(`Builder assigned to wall!`, '#f39c12');
           this.spawnClickIndicator(worldPos, 0xf39c12, 0.8);
           return;
@@ -866,30 +885,17 @@ class Cubitopia {
     }
 
     // --- Right-click on ground: stance-based movement ---
-    // Aggressive: fight through enemies on the way (no _forceMove)
-    // Defensive: defend if attacked, then resume toward destination (no _forceMove)
-    // Passive: pure move, ignore everything (_forceMove = true)
-    const setupMoveUnit = (unit: Unit, dest: HexCoord) => {
-      unit._playerCommanded = true;
-      unit._focusTarget = undefined;
-      unit._healTarget = undefined;
-      unit._assignedBlueprintId = undefined;
-      unit._moveDestination = dest; // Store destination for post-combat resume
-
-      if (unit.stance === UnitStance.PASSIVE) {
-        unit._forceMove = true;  // Passive: ignore everything
-      } else {
-        unit._forceMove = false; // Aggressive/Defensive: react to enemies en route
-        if (unit.stance === UnitStance.DEFENSIVE) {
-          unit._postPosition = dest; // Defensive: destination becomes the new "post"
-        }
-      }
-    };
+    // Unit flag setup (_playerCommanded, _forceMove, etc.) is handled by
+    // CommandBridge.processCommand() so both clients set identical state.
 
     if (selected.length === 1) {
-      setupMoveUnit(selected[0], hexCoord);
-      UnitAI.commandMove(selected[0], hexCoord, this.currentMap!, preferUnderground);
+      this.enqueueCommand(NetCommandType.MOVE, {
+        unitIds: [selected[0].id],
+        target: hexCoord,
+      });
     } else {
+      // Formation layout is computed locally (same map state on both clients)
+      // and each unit gets its own MOVE command to the assigned slot.
       const sortedSelected = [...selected].sort((a, b) =>
         getUnitFormationPriority(a) - getUnitFormationPriority(b)
       );
@@ -897,8 +903,10 @@ class Cubitopia {
       for (let i = 0; i < sortedSelected.length; i++) {
         const unit = sortedSelected[i];
         const slot = formationSlots[i] || hexCoord;
-        setupMoveUnit(unit, slot);
-        UnitAI.commandMove(unit, slot, this.currentMap!, preferUnderground);
+        this.enqueueCommand(NetCommandType.MOVE, {
+          unitIds: [unit.id],
+          target: slot,
+        });
       }
     }
 
@@ -1087,6 +1095,7 @@ class Cubitopia {
       get selectionManager() { return self.selectionManager; },
       get terrainDecorator() { return self.terrainDecorator; },
       get voxelBuilder() { return self.voxelBuilder; },
+      get gameFrame() { return self._gameFrame; },
       get woodStockpile() { return self.woodStockpile; },
       set woodStockpile(v) { self.woodStockpile = v; },
       get stoneStockpile() { return self.stoneStockpile; },
@@ -1129,14 +1138,53 @@ class Cubitopia {
         this.menuController.showMainMenu();
       },
       onStartMultiplayerGame: (mapSeed, mapType, isGhost, opponentName, ghostDifficulty) => {
-        // TODO Phase 5D: Wire seed into map generator, start multiplayer match
+        // ── Multiplayer game start ──
+        // Re-init command queue for multiplayer mode (overrides single-player default).
+        // Ghost matches use null network; real matches use the active WebRTC connection.
+        const net = isGhost ? null : this.multiplayer.network;
+        this.multiplayer.commandQueue.initMultiplayer(net, isGhost);
+        this.multiplayer.commandQueue.setCommandProcessor((cmd: NetworkCommand) => {
+          processCommand(this._commandBridgeAdapter, cmd);
+        });
+
+        // TODO Phase 5D: Wire mapSeed into map generator for deterministic maps
         this.hud.setVisible(true);
         this.mapType = mapType;
         this.gameMode = 'pvai'; // Multiplayer uses PvAI mode with networked/ghost AI
+        this._multiplayerOpponentName = opponentName;
         this.startNewGame();
       },
       onReturnToLobby: () => {
+        // Reset command queue back to single-player mode for lobby state
+        this.multiplayer.commandQueue.initSinglePlayer();
+        this.multiplayer.commandQueue.setCommandProcessor((cmd: NetworkCommand) => {
+          processCommand(this._commandBridgeAdapter, cmd);
+        });
+        this._mpTickAccumulator = 0;
+        this._multiplayerOpponentName = '';
         this.multiplayerUI!.showLobby();
+      },
+    });
+
+    // ── Multiplayer event listeners ──
+    // Handle opponent disconnect and desync events during a match.
+    this.multiplayer.setEvents({
+      onOpponentDisconnect: () => {
+        if (!this.gameOver) {
+          this.hud.showNotification('Opponent disconnected — you win!', 'color:#2ecc71;font-weight:bold;');
+          this.gameOver = true;
+          // Award win by default
+          this.multiplayer.reportMatchResult(true).catch(() => {});
+          this.showGameOverScreen('PLAYER', true);
+        }
+      },
+      onDesync: (tick: number) => {
+        console.warn(`[MP] Desync detected at tick ${tick}`);
+        this.hud.showNotification(`Desync detected (tick ${tick}) — match may be unstable`, 'color:#e74c3c;');
+      },
+      onError: (msg: string) => {
+        console.error('[MP] Error:', msg);
+        this.hud.showNotification(`Multiplayer error: ${msg}`, 'color:#e74c3c;');
       },
     });
   }
@@ -1370,6 +1418,21 @@ class Cubitopia {
       removeGrassClump: (key) => this.terrainDecorator.removeGrassClump(key),
       addGrassAtStage: (pos, baseY, stage) => this.terrainDecorator.addGrassAtStage(pos, baseY, stage),
       hasGrass: (key) => this.terrainDecorator.hasGrass(key),
+      getForestryBuildings: () => {
+        return this.buildingSystem.placedBuildings
+          .filter(pb => pb.kind === 'forestry' && !pb.isBlueprint)
+          .map(pb => ({ q: pb.position.q, r: pb.position.r, owner: pb.owner }));
+      },
+      addWoodToStockpile: (owner, amount) => {
+        this.woodStockpile[owner] = (this.woodStockpile[owner] ?? 0) + amount;
+        if (this.players[owner]) {
+          this.players[owner].resources.wood += amount;
+        }
+        this.resourceManager.updateStockpileVisual(owner);
+        if (owner === 0) {
+          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        }
+      },
     };
     this.natureSystem = new NatureSystem(natureOps);
 
@@ -1597,14 +1660,10 @@ class Cubitopia {
         }
         return count;
       },
-      hexDistance: (a, b) => {
-        const dq = a.q - b.q;
-        const dr = a.r - b.r;
-        return (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
-      },
+      hexDistance: hexDist,
     });
 
-    // Population System — food-based population cap
+    // Population System — food-based population cap with morale
     this.populationSystem = new PopulationSystem({
       getFoodStockpile: (owner) => this.foodStockpile[owner] ?? 0,
       getAllUnits: () => this.allUnits,
@@ -1616,6 +1675,13 @@ class Cubitopia {
           }
         }
         return maxTier;
+      },
+      getFarmhouseCount: (owner) => {
+        let count = 0;
+        for (const [, bld] of this.buildingSystem.buildings) {
+          if (bld.kind === 'farmhouse' && bld.owner === owner && !bld.destroyed) count++;
+        }
+        return count;
       },
     });
 
@@ -1651,6 +1717,142 @@ class Cubitopia {
       getDebugPanel: () => this.debugPanel,
     };
     this.mapInitializer = new MapInitializer(mapInitOps);
+
+    // ── Command Queue wiring (Phase 5B) ──
+    // Initialize in single-player mode by default (multiplayer overrides later)
+    this.multiplayer.commandQueue.initSinglePlayer();
+    this.multiplayer.commandQueue.setCommandProcessor((cmd: NetworkCommand) => {
+      processCommand(this._commandBridgeAdapter, cmd);
+    });
+
+    // ── Desync detection: provide state hash for periodic comparison ──
+    this.multiplayer.commandQueue.setStateHashProvider(() => {
+      const p0 = this.players[0];
+      const p1 = this.players[1];
+      return {
+        units: this.allUnits
+          .filter(u => u.currentHealth > 0)
+          .map(u => ({ id: u.id, position: u.position, currentHealth: u.currentHealth, state: u.state })),
+        p1Resources: p0 ? p0.resources : {},
+        p2Resources: p1 ? p1.resources : {},
+      };
+    });
+  }
+
+  // ── CommandBridge adapter ─────────────────────────────────
+  // Implements CommandBridgeGame interface to translate network
+  // commands into actual game state mutations.
+  private get _commandBridgeAdapter(): CommandBridgeGame {
+    return {
+      findUnitById: (id: string) => this.allUnits.find(u => u.id === id),
+      getPlayerUnits: (owner: number) => this.players[owner]?.units ?? [],
+      getCurrentMap: () => this.currentMap,
+
+      commandMove: (unit: Unit, target: HexCoord, preferUnderground?: boolean) => {
+        UnitAI.commandMove(unit, target, this.currentMap!, preferUnderground);
+      },
+      commandAttack: (unit: Unit, target: HexCoord, targetUnitId: string | null, preferUnderground?: boolean) => {
+        UnitAI.commandAttack(unit, target, targetUnitId, this.currentMap!, preferUnderground);
+      },
+      commandStop: (unit: Unit) => {
+        UnitAI.commandStop(unit);
+      },
+
+      placeBuilding: (_kind: string, _position: HexCoord, _owner: number) => {
+        // Building placement goes through BlueprintSystem → BuildingSystem.registerBuilding
+        // This is a stub — actual placement is handled by the existing building mode flow
+        console.warn('[CommandBridge] placeBuilding stub — use building mode UI');
+      },
+      cancelBuilding: (_blueprintId: string) => {
+        // Building cancellation handled via tooltip controller
+        console.warn('[CommandBridge] cancelBuilding stub — use tooltip UI');
+      },
+
+      placeWall: (positions: HexCoord[], isGate: boolean, owner: number) => {
+        for (const pos of positions) {
+          if (isGate) {
+            this.wallSystem.placeGateDirect(pos, owner);
+          } else {
+            this.wallSystem.placeWallDirect(pos, owner);
+          }
+        }
+      },
+
+      queueUnit: (unitType: string, buildingKind: string, owner: number) => {
+        this.spawnQueueSystem.queueUnitFromTooltip(unitType as any, buildingKind as any);
+      },
+
+      setUnitStance: (unit: Unit, stance: UnitStance) => {
+        unit.stance = stance;
+      },
+
+      lockElement: (unit: Unit, element: ElementType | null) => {
+        if (element === null) {
+          unit._lockedElement = undefined;
+        } else {
+          unit._lockedElement = element;
+          unit.element = element;
+          const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
+          unit._elementCycleIndex = ELEMENT_CYCLE.indexOf(element);
+        }
+      },
+
+      setHealTarget: (unit: Unit, targetUnitId: string | null) => {
+        unit._healTarget = targetUnitId ?? undefined;
+      },
+
+      setFocusTarget: (unit: Unit, targetUnitId: string | null) => {
+        unit._focusTarget = targetUnitId ?? undefined;
+      },
+
+      setRallyPoint: (buildingId: string, position: HexCoord) => {
+        this.rallyPointSystem.setRallyPoint(buildingId, position);
+      },
+
+      garrisonUnit: (unitIds: string[], buildingPosition?: HexCoord) => {
+        const units = unitIds.map(id => this.allUnits.find(u => u.id === id)).filter(Boolean) as Unit[];
+        if (buildingPosition) {
+          const key = `${buildingPosition.q},${buildingPosition.r}`;
+          this.garrisonSystem.garrison(units, key);
+        }
+      },
+
+      ungarrison: (_unitIds: string[], buildingPosition?: HexCoord) => {
+        if (buildingPosition) {
+          const key = `${buildingPosition.q},${buildingPosition.r}`;
+          this.garrisonSystem.ungarrison(key);
+        }
+      },
+
+      setSquadObjective: (squadId: number, objective: string, target?: HexCoord) => {
+        // Squad objectives applied to control groups via selection manager
+        const group = this.selectionManager.selectControlGroup(squadId);
+        if (group && group.length > 0) {
+          for (const unit of group) {
+            unit._squadObjective = objective as any;
+          }
+        }
+      },
+
+      getOwnerForPlayerId: (playerId: string) => {
+        // In single-player, always player 0
+        // In multiplayer, host = 0, guest = 1
+        if (!this.multiplayer.commandQueue.isMultiplayer) return 0;
+        if (this.multiplayer.network.isHost) {
+          return playerId === this.multiplayer.network.localUid ? 0 : 1;
+        }
+        return playerId === this.multiplayer.network.localUid ? 1 : 0;
+      },
+    };
+  }
+
+  /**
+   * Enqueue a player command through the command queue.
+   * In single-player, this executes immediately.
+   * In multiplayer, this buffers for deterministic lockstep.
+   */
+  enqueueCommand(type: NetCommandType, payload: Record<string, unknown>): void {
+    this.multiplayer.commandQueue.enqueue(type, payload);
   }
 
   // --- Shared action methods (called by both keys and control panel buttons) ---
@@ -1739,6 +1941,7 @@ class Cubitopia {
     UnitAI.clearUnreachableCache();
     UnitAI.siloPositions.clear();
     UnitAI.farmhousePositions.clear();
+    UnitAI.forestryPositions.clear();
     UnitAI.grassTiles.clear();
     // Building meshes are cleaned up by buildingSystem.cleanup() above
     this.natureSystem.cleanup();
@@ -1808,6 +2011,7 @@ class Cubitopia {
     UnitAI.clearUnreachableCache();
     UnitAI.siloPositions.clear();
     UnitAI.farmhousePositions.clear();
+    UnitAI.forestryPositions.clear();
     UnitAI.grassTiles.clear();
     this.natureSystem.cleanup();
     for (const st of this.aiController.aiState) {
@@ -1967,6 +2171,85 @@ class Cubitopia {
     scene.add(oceanMesh);
   }
 
+  private applyTundraAtmosphere(): void {
+    const scene = this.renderer.scene;
+
+    // Cold pale sky — icy blue to soft white horizon
+    const canvas = document.createElement('canvas');
+    canvas.width = 2;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const gradient = ctx.createLinearGradient(0, 0, 0, 256);
+    gradient.addColorStop(0, '#6090b8');   // steel blue zenith
+    gradient.addColorStop(0.25, '#8ab0d0'); // pale blue
+    gradient.addColorStop(0.5, '#b0c8dc');  // icy blue-grey
+    gradient.addColorStop(0.75, '#d0dce8'); // near-white cold
+    gradient.addColorStop(0.9, '#e0e8f0');  // snow-white horizon
+    gradient.addColorStop(1, '#e8ecf2');    // bright white base
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 2, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = tex;
+
+    // Light snow haze — visibility is good but there's a cold mist
+    scene.fog = new THREE.FogExp2(0xd8e4f0, 0.004);
+
+    // Cold bright lighting — harsh low-angle winter sun
+    scene.traverse((child) => {
+      if (child instanceof THREE.AmbientLight) {
+        child.color.set(0xd0e0f0); // cold blue-white ambient
+        child.intensity = 0.7;
+      }
+      if (child instanceof THREE.DirectionalLight && child.castShadow) {
+        child.color.set(0xf0f4ff); // cool white sunlight
+        child.intensity = 1.8;
+      }
+    });
+  }
+
+  private applySunkenRuinsAtmosphere(): void {
+    // Misty jungle-ruins: humid green-grey sky
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, '#7a9a7a');   // mossy green-grey top
+    g.addColorStop(0.5, '#a0b890'); // pale sage middle
+    g.addColorStop(1, '#d0d8c0');   // misty cream horizon
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    this.renderer.scene.background = tex;
+    this.renderer.scene.fog = new THREE.FogExp2(0xc8d8c0, 0.005);
+    // Dappled green-tinted lighting
+    const amb = this.renderer.scene.children.find((c: any) => c.isAmbientLight) as THREE.AmbientLight | undefined;
+    if (amb) { amb.color.set(0xb0c8a0); amb.intensity = 0.7; }
+    const dir = this.renderer.scene.children.find((c: any) => c.isDirectionalLight) as THREE.DirectionalLight | undefined;
+    if (dir) { dir.color.set(0xe0e8d0); dir.intensity = 1.0; }
+  }
+
+  private applyBadlandsAtmosphere(): void {
+    // Scorching heat haze: orange-red dusty sky
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0, '#c87040');   // burnt orange sky
+    g.addColorStop(0.5, '#e0a060'); // hazy amber middle
+    g.addColorStop(1, '#e8c8a0');   // dusty pale horizon
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    this.renderer.scene.background = tex;
+    this.renderer.scene.fog = new THREE.FogExp2(0xd8b888, 0.004);
+    // Hot harsh sunlight
+    const amb = this.renderer.scene.children.find((c: any) => c.isAmbientLight) as THREE.AmbientLight | undefined;
+    if (amb) { amb.color.set(0xd8b090); amb.intensity = 0.6; }
+    const dir = this.renderer.scene.children.find((c: any) => c.isDirectionalLight) as THREE.DirectionalLight | undefined;
+    if (dir) { dir.color.set(0xf0d0a0); dir.intensity = 1.3; }
+  }
+
   private setupResizeHandler(): void {
     window.addEventListener('resize', () => {
       this.renderer.resize(window.innerWidth, window.innerHeight);
@@ -2014,6 +2297,8 @@ class Cubitopia {
   }
 
   startNewGame(): void {
+    this._gameFrame = 0;
+    this._mpTickAccumulator = 0;
     const isArena = this.mapType === MapType.ARENA;
 
     // Determine player count from game mode
@@ -2028,6 +2313,7 @@ class Cubitopia {
     this.terrainDecorator.skylandMode = false;
     this.terrainDecorator.volcanicMode = false;
     this.terrainDecorator.archipelagoMode = false;
+    this.terrainDecorator.tundraMode = false;
     if (this.mapType === MapType.DESERT_TUNNELS) {
       this.terrainDecorator.desertMode = true;
     } else if (this.mapType === MapType.SKYLAND) {
@@ -2036,6 +2322,8 @@ class Cubitopia {
       this.terrainDecorator.volcanicMode = true;
     } else if (this.mapType === MapType.ARCHIPELAGO) {
       this.terrainDecorator.archipelagoMode = true;
+    } else if (this.mapType === MapType.TUNDRA) {
+      this.terrainDecorator.tundraMode = true;
     }
 
     // Step 1: Initialize map (terrain, bases, decorations)
@@ -2071,6 +2359,12 @@ class Cubitopia {
       this.applyVolcanicAtmosphere();
     } else if (this.mapType === MapType.ARCHIPELAGO) {
       this.applyArchipelagoAtmosphere();
+    } else if (this.mapType === MapType.TUNDRA) {
+      this.applyTundraAtmosphere();
+    } else if (this.mapType === MapType.SUNKEN_RUINS) {
+      this.applySunkenRuinsAtmosphere();
+    } else if (this.mapType === MapType.BADLANDS) {
+      this.applyBadlandsAtmosphere();
     }
 
     // --- Spawn Units ---
@@ -2114,9 +2408,21 @@ class Cubitopia {
       ];
       const redArmyDefs = armyComp.red.length > 0 ? armyComp.red : blueArmyDefs;
 
+      // Symmetrical spawning: compute forward/lateral vectors from base toward center,
+      // then place formation rows as parallel lines equidistant from the midpoint.
+      // Each player's formation is a mirror image of every other player's.
       const spawnArmy = (owner: number, baseQ: number, baseR: number) => {
         const defs = owner === 0 ? blueArmyDefs : redArmyDefs;
-        const dir = baseQ < arenaCenter ? 1 : baseQ > arenaCenter ? -1 : (baseR < arenaCenter ? 1 : -1); // toward center
+
+        // Forward vector: base → center (normalized)
+        const fwdQ = arenaCenter - baseQ;
+        const fwdR = arenaCenter - baseR;
+        const fwdLen = Math.sqrt(fwdQ * fwdQ + fwdR * fwdR) || 1;
+        const nfQ = fwdQ / fwdLen; // normalized forward Q
+        const nfR = fwdR / fwdLen; // normalized forward R
+        // Lateral vector: perpendicular to forward (rotate 90°)
+        const nlQ = -nfR;
+        const nlR = nfQ;
 
         // Flatten defs into individual units and sort by role depth (front first)
         const units: { type: UnitType; depth: number }[] = [];
@@ -2128,25 +2434,31 @@ class Cubitopia {
         }
         units.sort((a, b) => a.depth - b.depth);
 
-        // Place units in formation lines: each depth gets its own row(s)
-        // Front line is closest to center (baseQ + dir*offset)
+        // Count units per depth for centering rows
+        const depthCounts: Record<number, number> = {};
+        for (const u of units) depthCounts[u.depth] = (depthCounts[u.depth] ?? 0) + 1;
+
+        // Place units in formation lines along the lateral axis
+        // Depth 0 (frontline) is 2 tiles forward from base, each subsequent depth 2 tiles back
         const lineCounters: Record<number, number> = {};
+        const LINE_WIDTH = 5;
         for (const u of units) {
           const lineIdx = lineCounters[u.depth] ?? 0;
           lineCounters[u.depth] = lineIdx + 1;
 
-          // Q offset: front line (depth 0) is closest to enemy, back lines further from enemy
-          // Depth 0 = +2 toward center, depth 1 = +0 (at base), depth 2 = -2, depth 3 = -4
-          const qOffset = (2 - u.depth * 2) * dir;
-          // R offset: spread units in a line, centered on baseR
-          const lineWidth = 5; // max units per sub-row
-          const subRow = Math.floor(lineIdx / lineWidth);
-          const posInRow = lineIdx % lineWidth;
-          const rOffset = posInRow - Math.floor(Math.min(lineWidth, units.filter(x => x.depth === u.depth).length) / 2);
-          const qExtra = subRow * dir; // extra rows push slightly forward/back
+          // Forward offset: depth 0 = +2, depth 1 = 0 (at base), depth 2 = -2, depth 3 = -4
+          const forwardDist = 2 - u.depth * 2;
+          // Lateral offset: center the row on base position
+          const totalInDepth = depthCounts[u.depth] ?? 1;
+          const subRow = Math.floor(lineIdx / LINE_WIDTH);
+          const posInRow = lineIdx % LINE_WIDTH;
+          const rowSize = Math.min(LINE_WIDTH, totalInDepth - subRow * LINE_WIDTH);
+          const lateralDist = posInRow - (rowSize - 1) / 2;
+          // Extra forward offset for overflow sub-rows
+          const extraForward = -subRow;
 
-          const oq = baseQ + qOffset + qExtra;
-          const or2 = baseR + rOffset;
+          const oq = Math.round(baseQ + nfQ * (forwardDist + extraForward) + nlQ * lateralDist);
+          const or2 = Math.round(baseR + nfR * (forwardDist + extraForward) + nlR * lateralDist);
           const pos = this.findSpawnTile(map, oq, or2);
           const unit = UnitFactory.create(u.type, owner, pos);
           const wp = this.hexToWorld(pos);
@@ -2156,8 +2468,7 @@ class Cubitopia {
           this.unitRenderer.addUnit(unit, this.getElevation(pos));
         }
       };
-      // Spawn armies AT their bases — use actual base coordinates for symmetry
-      // Units spread inward from base toward center
+      // Spawn armies at their bases — formations face center, mirror-symmetric
       for (let pid = 0; pid < this.playerCount; pid++) {
         const bc = baseCoords[pid];
         spawnArmy(pid, bc.q, bc.r);
@@ -2274,6 +2585,23 @@ class Cubitopia {
   private updateRTS(delta: number): void {
     if (!this.currentMap || this.players.length === 0 || this.gameOver) return;
 
+    // Advance deterministic game frame counter (used by all systems instead of Date.now)
+    this._gameFrame++;
+    UnitAI.gameFrame = this._gameFrame;
+
+    // ── Multiplayer tick advancement ──
+    // In multiplayer mode, advance the command queue at a fixed tick rate
+    // so both clients process buffered commands in lockstep.
+    // Ghost matches also use tick advancement to process AI commands.
+    if (this.multiplayer.commandQueue.isMultiplayer) {
+      const TICK_RATE = 1 / 10; // 10 ticks per second (100ms per tick)
+      this._mpTickAccumulator += delta;
+      while (this._mpTickAccumulator >= TICK_RATE) {
+        this._mpTickAccumulator -= TICK_RATE;
+        this.multiplayer.commandQueue.processTick();
+      }
+    }
+
     // Debug: infinite resources — top up all resources to 999 each tick
     if (this.hud.debugFlags.infiniteResources) {
       this.woodStockpile[0] = 999;
@@ -2385,6 +2713,14 @@ class Cubitopia {
 
     // Update garrison system (ranged fire from garrisoned units)
     this.garrisonSystem.update(delta);
+
+    // ── MORALE & STARVATION ──
+    // Apply starvation health drain and cache morale modifier per player
+    for (let pi = 0; pi < this.players.length; pi++) {
+      this.populationSystem.applyStarvationDrain(pi, delta);
+      // Cache morale modifier on UnitAI for combat speed calculations
+      UnitAI.moraleModifiers[pi] = this.populationSystem.getMoraleModifier(pi);
+    }
 
     // ── SINGLE CONSOLIDATED LOOP: Y-fix + position + animate + strafe + aggro ──
     const gameTime = this.clock.elapsedTime;
@@ -2621,15 +2957,37 @@ class Cubitopia {
         // Game over — last player standing wins
         this.gameOver = true;
         const winnerId = alive.length === 1 ? alive[0].id : evt.newOwner;
-        const isVictory = winnerId === 0 && this.gameMode !== 'aivai';
+
+        // Determine if the LOCAL player won.
+        // In multiplayer, the local player may be owner 0 (host) or 1 (guest).
+        let localOwner = 0;
+        if (this.multiplayer.commandQueue.isMultiplayer && this.multiplayer.network.isConnected) {
+          localOwner = this.multiplayer.network.isHost ? 0 : 1;
+        }
+        const isVictory = winnerId === localOwner && this.gameMode !== 'aivai';
+
         let winner: string;
         if (this.gameMode === 'aivai') {
           winner = `AI ${PLAYER_COLORS[winnerId]?.name?.toUpperCase() ?? winnerId}`;
-        } else if (winnerId === 0) {
-          winner = 'PLAYER';
+        } else if (winnerId === localOwner) {
+          winner = this.multiplayer.commandQueue.isMultiplayer ? (this._multiplayerOpponentName ? 'YOU' : 'PLAYER') : 'PLAYER';
         } else {
-          winner = `AI ${PLAYER_COLORS[winnerId]?.name?.toUpperCase() ?? winnerId}`;
+          winner = this.multiplayer.commandQueue.isMultiplayer
+            ? (this._multiplayerOpponentName || `Player ${winnerId + 1}`)
+            : `AI ${PLAYER_COLORS[winnerId]?.name?.toUpperCase() ?? winnerId}`;
         }
+        // Report match result to multiplayer controller (ELO update + Firebase)
+        if (this.multiplayer.commandQueue.isMultiplayer && this.multiplayer.isInMatch) {
+          this.multiplayer.reportMatchResult(isVictory).then((eloResult) => {
+            if (eloResult && this.multiplayerUI) {
+              // Show ELO change on the result screen
+              console.log(`[MP] Match result reported: ${isVictory ? 'WIN' : 'LOSS'}, ELO: ${eloResult.newElo} (${eloResult.change >= 0 ? '+' : ''}${eloResult.change})`);
+            }
+          }).catch((err) => {
+            console.warn('[MP] Failed to report match result:', err);
+          });
+        }
+
         this.showGameOverScreen(winner, isVictory);
       }
     } else {
@@ -3090,11 +3448,15 @@ class Cubitopia {
         ? GAME_CONFIG.economy.harvest.tree.woodYieldByAge.young
         : GAME_CONFIG.economy.harvest.tree.woodYieldByAge.mature;
 
+    // Auto-replant: lumberjacks mark chopped tiles for guaranteed regrowth
+    // (NatureSystem only regrows "original forest" tiles by default)
+    this.natureSystem.markAsReGrowable(key);
+
     // Start regrowth timer, clean up growth tracking
     this.natureSystem.onTreeChopped(key);
 
-    // Load wood onto the lumberjack — they must carry it back to the stockpile
-    unit.carryAmount = Math.min(woodYield, unit.carryCapacity);
+    // Accumulate wood onto the lumberjack (multi-chop: add to existing carry)
+    unit.carryAmount = Math.min((unit.carryAmount || 0) + woodYield, unit.carryCapacity);
     unit.carryType = ResourceType.WOOD;
   }
 
@@ -3138,7 +3500,7 @@ class Cubitopia {
     unitAIHook?: (coord: HexCoord) => void;
   }> = {
     barracks:      { woodCost: GAME_CONFIG.buildings.barracks.cost.player.wood, stoneCost: GAME_CONFIG.buildings.barracks.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], maxHealth: GAME_CONFIG.defenses.barracks.maxHealth, unitAIHook: (c) => UnitAI.barracksPositions.set(0, c) },
-    forestry:      { woodCost: GAME_CONFIG.buildings.forestry.cost.player.wood, stoneCost: GAME_CONFIG.buildings.forestry.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
+    forestry:      { woodCost: GAME_CONFIG.buildings.forestry.cost.player.wood, stoneCost: GAME_CONFIG.buildings.forestry.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Forestry built! Lumberjacks will drop off wood here.', unitAIHook: (c) => { const arr = UnitAI.forestryPositions.get(0) ?? []; arr.push(c); UnitAI.forestryPositions.set(0, arr); } },
     masonry:       { woodCost: GAME_CONFIG.buildings.masonry.cost.player.wood, stoneCost: GAME_CONFIG.buildings.masonry.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT] },
     farmhouse:     { woodCost: GAME_CONFIG.buildings.farmhouse.cost.player.wood, stoneCost: GAME_CONFIG.buildings.farmhouse.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Farmhouse built! Now build a Silo [I] and farm patches [J]', unitAIHook: (c) => UnitAI.farmhousePositions.set(0, c) },
     workshop:      { woodCost: GAME_CONFIG.buildings.workshop.cost.player.wood, stoneCost: GAME_CONFIG.buildings.workshop.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT, TerrainType.FOREST], notification: 'Workshop built!' },
@@ -3373,10 +3735,11 @@ class Cubitopia {
   private setSelectedUnitsStance(stance: UnitStance): void {
     const selected = this.selectionManager.getSelectedUnits();
     if (selected.length === 0) return;
-    for (const unit of selected) {
-      unit.stance = stance;
-    }
-    // Update the stance highlight without rebuilding the whole panel
+    this.enqueueCommand(NetCommandType.SET_STANCE, {
+      unitIds: selected.map(u => u.id),
+      stance,
+    });
+    // Update the stance highlight without rebuilding the whole panel (local UI response)
     this.hud.updateStanceHighlight(stance);
     const label = stance === UnitStance.PASSIVE ? 'Passive' :
                   stance === UnitStance.DEFENSIVE ? 'Defensive' : 'Aggressive';
@@ -3394,44 +3757,30 @@ class Cubitopia {
       return;
     }
 
-    if (objective === null) {
-      // Clear objective — return to manual control
-      for (const u of selected) {
-        u._playerObjective = undefined;
-        u._playerObjectiveTarget = undefined;
-        u._squadObjective = undefined;
-        // Don't clear _squadId — keep the squad grouping for visual indicators
-      }
-      this.hud.showNotification(`${selected.length} units: Manual control`, '#7f8c8d');
-    } else {
-      // Ensure all selected units have a _squadId so squad indicators render.
-      // Use existing squad ID if units share one, otherwise assign a new one.
-      // Player squad IDs use 100+ to avoid collision with AI squads (0-4).
-      let squadId = selected.find(u => u._squadId != null)?._squadId ?? null;
+    // Route through command queue for multiplayer sync
+    // Squad ID assignment is deterministic (same allUnits state on both clients)
+    let squadId: number | null = null;
+    if (objective !== null) {
+      squadId = selected.find(u => u._squadId != null)?._squadId ?? null;
       if (squadId == null) {
-        // Find next available player squad ID (100-104 for A/S/D/F/G slots)
-        const usedIds = new Set(this.allUnits.filter(u => u.owner === 0 && u._squadId != null).map(u => u._squadId!));
+        const usedIds = new Set(this.allUnits.filter((u: Unit) => u.owner === 0 && u._squadId != null).map((u: Unit) => u._squadId!));
         for (let id = 100; id < 110; id++) {
           if (!usedIds.has(id)) { squadId = id; break; }
         }
-        if (squadId == null) squadId = 100; // Fallback
+        if (squadId == null) squadId = 100;
       }
+    }
 
-      // Compute march speed (25th percentile like AI commander)
-      const speeds = selected.map(u => u.moveSpeed).sort((a, b) => a - b);
-      const p25Idx = Math.max(0, Math.floor(speeds.length * 0.25));
-      const marchSpeed = speeds[p25Idx] + (speeds[speeds.length - 1] - speeds[p25Idx]) * 0.3;
+    this.enqueueCommand(NetCommandType.SET_SQUAD_OBJECTIVE, {
+      unitIds: selected.map(u => u.id),
+      squadId: squadId ?? undefined,
+      objective: objective ?? 'CLEAR',
+    });
 
-      const stance = objective === 'CAPTURE' ? UnitStance.DEFENSIVE : UnitStance.AGGRESSIVE;
-      for (const u of selected) {
-        u._playerObjective = objective;
-        u._playerObjectiveTarget = undefined; // Will be assigned on next tick
-        u._squadObjective = objective;
-        u._squadId = squadId;
-        u._squadSpeed = marchSpeed;
-        u.stance = stance;
-        u._playerCommanded = true;
-      }
+    // Local UI feedback (immediate, doesn't wait for queue processing)
+    if (objective === null) {
+      this.hud.showNotification(`${selected.length} units: Manual control`, '#7f8c8d');
+    } else {
       const color = objective === 'CAPTURE' ? '#27ae60' : '#e74c3c';
       const icon = objective === 'CAPTURE' ? '🏴' : '⚔️';
       this.hud.showNotification(`${icon} ${selected.length} units: ${objective}`, color);

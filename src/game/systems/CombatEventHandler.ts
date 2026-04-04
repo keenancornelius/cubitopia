@@ -6,7 +6,7 @@
  */
 
 import { Unit, UnitType, UnitState, HexCoord, ResourceType, Player, PlacedBuilding, BuildingKind, ElementType } from '../../types';
-import { UnitEvent } from './UnitAI';
+import { UnitAI, UnitEvent } from './UnitAI';
 import { GAME_CONFIG } from '../GameConfig';
 import { StatusEffectSystem, StatusEvent } from './StatusEffectSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
@@ -335,10 +335,10 @@ export default class CombatEventHandler {
                             ops.updateHealthBar(chainUnit);
 
                             // --- HIGH VOLTAGE CASCADE: if chain target has HV, consume it → arc cascade + stun ---
-                            if (chainUnit._statusHighVoltage && performance.now() < chainUnit._statusHighVoltage && chainUnit.currentHealth > 0) {
+                            if (chainUnit._statusHighVoltage && UnitAI.gameFrame < chainUnit._statusHighVoltage && chainUnit.currentHealth > 0) {
                               chainUnit._statusHighVoltage = 0; // consume
                               // Stun the HV target (knockup)
-                              chainUnit._knockupUntil = performance.now() + hvCfg.stunDuration * 1000;
+                              chainUnit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
                               // Cascade damage on the HV target itself
                               const cascadeDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
                               chainUnit.currentHealth = Math.max(0, chainUnit.currentHealth - cascadeDmg);
@@ -360,7 +360,7 @@ export default class CombatEventHandler {
                                 const cDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
                                 cascadeUnit.currentHealth = Math.max(0, cascadeUnit.currentHealth - cDmg);
                                 // Stun cascade targets too
-                                cascadeUnit._knockupUntil = performance.now() + hvCfg.stunDuration * 1000;
+                                cascadeUnit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
                                 const cascadeRef = cascadeUnit;
                                 ops.queueDeferredEffect(100, () => {
                                   ops.fireLightningChain(chainUnit.worldPosition, cascadeRef.worldPosition, cascadeRef.id);
@@ -390,9 +390,9 @@ export default class CombatEventHandler {
                       }
                     }
                     // Also check if PRIMARY target has High Voltage
-                    if (defenderRef._statusHighVoltage && performance.now() < defenderRef._statusHighVoltage && defenderRef.currentHealth > 0) {
+                    if (defenderRef._statusHighVoltage && UnitAI.gameFrame < defenderRef._statusHighVoltage && defenderRef.currentHealth > 0) {
                       defenderRef._statusHighVoltage = 0;
-                      defenderRef._knockupUntil = performance.now() + hvCfg.stunDuration * 1000;
+                      defenderRef._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
                       const hvDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
                       defenderRef.currentHealth = Math.max(0, defenderRef.currentHealth - hvDmg);
                       ops.updateHealthBar(defenderRef);
@@ -410,7 +410,7 @@ export default class CombatEventHandler {
                       for (const ct of hvPrimaryTargets) {
                         const cDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
                         ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - cDmg);
-                        ct.unit._knockupUntil = performance.now() + hvCfg.stunDuration * 1000;
+                        ct.unit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
                         const cascRef = ct.unit;
                         ops.queueDeferredEffect(100, () => {
                           ops.fireLightningChain(defenderRef.worldPosition, cascRef.worldPosition, cascRef.id);
@@ -535,11 +535,11 @@ export default class CombatEventHandler {
                 // Axe bounces off shield — spawn deflected axe visual, NO slow debuff
                 ops.spawnDeflectedAxe(bDefender.worldPosition);
               } else {
-                // Apply slow debuff — 2 seconds at 35% speed
-                bDefender._slowUntil = performance.now() + 2000;
+                // Apply slow debuff — ~2 seconds (120 frames) at 35% speed
+                bDefender._slowUntil = UnitAI.gameFrame + 120;
                 bDefender._slowFactor = 0.35;
-                // Give berserker chase speed boost
-                bAttacker._chaseBoostUntil = performance.now() + 2000;
+                // Give berserker chase speed boost — ~2 seconds (120 frames)
+                bAttacker._chaseBoostUntil = UnitAI.gameFrame + 120;
               }
             });
           } else {

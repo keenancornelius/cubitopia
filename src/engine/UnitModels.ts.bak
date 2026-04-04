@@ -18,7 +18,7 @@ export class UnitModels {
       const armGroup = new THREE.Group();
       armGroup.name = name;
       armGroup.position.set(posX, posY, 0);
-      const mat = getCachedLambert(color);
+      const mat = new THREE.MeshLambertMaterial({ color });
       // Upper arm (humerus) — wider, attached at shoulder pivot
       const upper = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.17, 0.11), mat);
       upper.position.y = -0.04;
@@ -34,7 +34,7 @@ export class UnitModels {
       forearm.name = `${name}-forearm`;
       elbowGroup.add(forearm);
       // Hand — small block at end of forearm
-      const handMat = getCachedLambert(0xffdbac); // skin tone
+      const handMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // skin tone
       const hand = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.08), handMat);
       hand.position.y = -0.18;
       hand.name = `${name}-hand`;
@@ -48,7 +48,7 @@ export class UnitModels {
       const legGroup = new THREE.Group();
       legGroup.name = name;
       legGroup.position.set(posX, posY, 0);
-      const mat = getCachedLambert(color);
+      const mat = new THREE.MeshLambertMaterial({ color });
       // Thigh — upper leg, wider
       const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.16, 0.13), mat);
       thigh.position.y = -0.03;
@@ -69,7 +69,7 @@ export class UnitModels {
       shin.name = `${name}-shin`;
       kneeGroup.add(shin);
       // Foot — flat block angled forward
-      const footMat = getCachedLambert(0x5d4037); // dark brown boot
+      const footMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // dark brown boot
       const foot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.05, 0.16), footMat);
       foot.position.set(0, -0.18, 0.03); // extends forward
       foot.name = `${name}-foot`;
@@ -84,16 +84,16 @@ export class UnitModels {
         // The backbone melee unit. Medium plate armor, distinctive helm with team plume.
 
         // --- Shared materials ---
-        const wPlateMat = getCachedLambert(0x9e9e9e); // polished steel
-        const wPlateHiMat = getCachedLambert(0xbdbdbd); // bright steel highlight
-        const wPlateDkMat = getCachedLambert(0x757575); // shadow steel
-        const wGoldMat = getCachedLambert(0xb8860b); // brass/gold
-        const wGoldBright = getCachedLambert(0xffd700); // bright gold
-        const wLeatherMat = getCachedLambert(0x5d4037); // dark leather
-        const wTeamMat = getCachedLambert(playerColor);
-        const wBladeMat = getCachedLambert(0xe0e0e0); // polished blade
-        const wBlackMat = getCachedLambert(0x1a1a1a); // visor slits
-        const wChainMat = getCachedLambert(0x808080); // chainmail
+        const wPlateMat = new THREE.MeshLambertMaterial({ color: 0x9e9e9e }); // polished steel
+        const wPlateHiMat = new THREE.MeshLambertMaterial({ color: 0xbdbdbd }); // bright steel highlight
+        const wPlateDkMat = new THREE.MeshLambertMaterial({ color: 0x757575 }); // shadow steel
+        const wGoldMat = new THREE.MeshLambertMaterial({ color: 0xb8860b }); // brass/gold
+        const wGoldBright = new THREE.MeshLambertMaterial({ color: 0xffd700 }); // bright gold
+        const wLeatherMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // dark leather
+        const wTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const wBladeMat = new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }); // polished blade
+        const wBlackMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a }); // visor slits
+        const wChainMat = new THREE.MeshLambertMaterial({ color: 0x808080 }); // chainmail
 
         // ─── PASS 1: SILHOUETTE — medium build, solid fighter ───
         // Core torso
@@ -233,12 +233,12 @@ export class UnitModels {
         blade.position.set(0, 0.28, 0);
         wSwordGrp.add(blade);
         // Fuller groove
-        const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.65, 0.06), getCachedLambert(0x999999));
+        const fuller = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.65, 0.06), new THREE.MeshLambertMaterial({ color: 0x999999 }));
         fuller.position.set(0, 0.30, 0);
         wSwordGrp.add(fuller);
         // Edge highlights
         for (const ex of [-0.065, 0.065]) {
-          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.80, 0.06), getCachedLambert(0xffffff));
+          const edge = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.80, 0.06), new THREE.MeshLambertMaterial({ color: 0xffffff }));
           edge.position.set(ex, 0.28, 0);
           wSwordGrp.add(edge);
         }
@@ -269,7 +269,7 @@ export class UnitModels {
         wSwordGrp.add(grip);
         // Grip wrap
         for (let wi = 0; wi < 2; wi++) {
-          const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), getCachedLambert(0x4e342e));
+          const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshLambertMaterial({ color: 0x4e342e }));
           wrap.position.set(0, -0.22 + wi * 0.06, 0);
           wSwordGrp.add(wrap);
         }
@@ -294,7 +294,9 @@ export class UnitModels {
         bucklerRim.position.set(-0.07, -0.12, 0.08);
         wElbowL.add(bucklerRim);
         // Inner face plate (slightly smaller, for depth)
-        const bucklerInner = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 0.24), getCachedLambert((playerColor as number) !== 0 ? playerColor : 0x4488cc));
+        const bucklerInner = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.24, 0.24), new THREE.MeshLambertMaterial({
+          color: (playerColor as number) !== 0 ? playerColor : 0x4488cc
+        }));
         bucklerInner.position.set(-0.09, -0.12, 0.08);
         wElbowL.add(bucklerInner);
         // Central boss (gold sphere)
@@ -367,19 +369,19 @@ export class UnitModels {
         // ════════════════════════════════════════════════════════
 
         // Shared materials
-        const aLeatherMat = getCachedLambert(0x4a6b3a); // forest green leather
-        const aLeatherDkMat = getCachedLambert(0x3a5530); // dark green
-        const aLeatherLtMat = getCachedLambert(0x5d8248); // lighter green
-        const aBrownMat = getCachedLambert(0x6b4226); // rich brown leather
-        const aBrownDkMat = getCachedLambert(0x4a2e1a); // dark brown
-        const aBrownLtMat = getCachedLambert(0x8b5e3c); // light brown
-        const aTeamMat = getCachedLambert(playerColor);
-        const aGoldMat = getCachedLambert(0xc8a832); // brass fittings
-        const aSkinMat = getCachedLambert(0xffdbac);
-        const aBlackMat = getCachedLambert(0x1a1a1a);
-        const aBowWoodMat = getCachedLambert(0x8b5a2b); // yew wood
-        const aBowDarkMat = getCachedLambert(0x5c3a1e); // bow limb tips
-        const aStringMat = getCachedLambert(0xd4c8a0); // bowstring
+        const aLeatherMat = new THREE.MeshLambertMaterial({ color: 0x4a6b3a }); // forest green leather
+        const aLeatherDkMat = new THREE.MeshLambertMaterial({ color: 0x3a5530 }); // dark green
+        const aLeatherLtMat = new THREE.MeshLambertMaterial({ color: 0x5d8248 }); // lighter green
+        const aBrownMat = new THREE.MeshLambertMaterial({ color: 0x6b4226 }); // rich brown leather
+        const aBrownDkMat = new THREE.MeshLambertMaterial({ color: 0x4a2e1a }); // dark brown
+        const aBrownLtMat = new THREE.MeshLambertMaterial({ color: 0x8b5e3c }); // light brown
+        const aTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const aGoldMat = new THREE.MeshLambertMaterial({ color: 0xc8a832 }); // brass fittings
+        const aSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        const aBlackMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+        const aBowWoodMat = new THREE.MeshLambertMaterial({ color: 0x8b5a2b }); // yew wood
+        const aBowDarkMat = new THREE.MeshLambertMaterial({ color: 0x5c3a1e }); // bow limb tips
+        const aStringMat = new THREE.MeshLambertMaterial({ color: 0xd4c8a0 }); // bowstring
 
         // ─── PASS 1: SILHOUETTE — lean, agile build ───
         // Core torso (studded leather vest)
@@ -479,12 +481,12 @@ export class UnitModels {
         aHatBand.position.set(0, 0.93, -0.01);
         group.add(aHatBand);
         // Feather — tall, sticking out the side at a jaunty angle
-        const aFeatherQuill = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.28, 0.015), getCachedLambert(0xf5f5f0));
+        const aFeatherQuill = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.28, 0.015), new THREE.MeshLambertMaterial({ color: 0xf5f5f0 }));
         aFeatherQuill.position.set(-0.18, 1.10, -0.02);
         aFeatherQuill.rotation.z = 0.25; // angled outward
         group.add(aFeatherQuill);
         // Feather vane (colored plume)
-        const aFeatherVane = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.02), getCachedLambert(0xcc3333));
+        const aFeatherVane = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.02), new THREE.MeshLambertMaterial({ color: 0xcc3333 }));
         aFeatherVane.position.set(-0.20, 1.14, -0.02);
         aFeatherVane.rotation.z = 0.25;
         group.add(aFeatherVane);
@@ -638,7 +640,7 @@ export class UnitModels {
         aArrowShaft.position.set(0, 0, -0.10);
         aNockedArrow.add(aArrowShaft);
         // Arrowhead
-        const aArrowHead = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.08), getCachedLambert(0xc0c0c0));
+        const aArrowHead = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.08), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         aArrowHead.position.set(0, 0, 0.20);
         aNockedArrow.add(aArrowHead);
         // Fletching
@@ -687,14 +689,14 @@ export class UnitModels {
         // === ELABORATE MOUNTED KNIGHT — Ornate horse with plate barding, armored rider, lance & shield ===
 
         // --- Shared Materials ---
-        const rHorseBody = getCachedLambert(0x8B4513); // chestnut
-        const rHorseBarding = getCachedLambert(playerColor); // team color armor
-        const rArmorSteel = getCachedLambert(0xa8a8a8); // bright steel
-        const rArmorDark = getCachedLambert(0x6b6b6b); // shadow steel
-        const rGoldMat = getCachedLambert(0xb8860b); // brass trim
-        const rSkinMat = getCachedLambert(0xffdbac); // skin
-        const rLeatherMat = getCachedLambert(0x5d4037); // dark brown leather
-        const rSilverMat = getCachedLambert(0xd8d8d8); // polished silver
+        const rHorseBody = new THREE.MeshLambertMaterial({ color: 0x8B4513 }); // chestnut
+        const rHorseBarding = new THREE.MeshLambertMaterial({ color: playerColor }); // team color armor
+        const rArmorSteel = new THREE.MeshLambertMaterial({ color: 0xa8a8a8 }); // bright steel
+        const rArmorDark = new THREE.MeshLambertMaterial({ color: 0x6b6b6b }); // shadow steel
+        const rGoldMat = new THREE.MeshLambertMaterial({ color: 0xb8860b }); // brass trim
+        const rSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // skin
+        const rLeatherMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // dark brown leather
+        const rSilverMat = new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }); // polished silver
 
         // ─── HORSE: MUSCULAR BODY WITH LAYERED PLATE ARMOR ───
         // Core muscular body
@@ -814,10 +816,10 @@ export class UnitModels {
         group.add(riderHead);
         // Eyes — fierce and focused, visible through visor slit
         for (const ex of [-0.06, 0.06]) {
-          const rEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.035, 0.02), getCachedLambert(0xf0f0f0));
+          const rEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.035, 0.02), new THREE.MeshLambertMaterial({ color: 0xf0f0f0 }));
           rEyeWhite.position.set(ex, 0.90, 0.13);
           group.add(rEyeWhite);
-          const rEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.02), getCachedLambert(0x1a3a5c));
+          const rEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.02), new THREE.MeshLambertMaterial({ color: 0x1a3a5c }));
           rEyePupil.position.set(ex, 0.90, 0.135);
           group.add(rEyePupil);
         }
@@ -844,12 +846,12 @@ export class UnitModels {
         faceplate.position.set(0, 0.92, 0.16);
         group.add(faceplate);
         // Visor slit (horizontal dark gap — eyes visible through here)
-        const visorSlit = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.07), getCachedLambert(0x0a0a0a));
+        const visorSlit = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.07), new THREE.MeshLambertMaterial({ color: 0x0a0a0a }));
         visorSlit.position.set(0, 0.90, 0.17);
         group.add(visorSlit);
         // Breathing holes below visor (3 small holes)
         for (let bh = 0; bh < 3; bh++) {
-          const hole = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.06), getCachedLambert(0x0a0a0a));
+          const hole = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.06), new THREE.MeshLambertMaterial({ color: 0x0a0a0a }));
           hole.position.set(-0.05 + bh * 0.05, 0.85, 0.17);
           group.add(hole);
         }
@@ -882,7 +884,7 @@ export class UnitModels {
         const riderElbowR = riderArmRight.getObjectByName('arm-right-elbow')!;
 
         // Lance shaft (wood texture, polished)
-        const lanceShaft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.3), getCachedLambert(0xa0826d));
+        const lanceShaft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.3), new THREE.MeshLambertMaterial({ color: 0xa0826d }));
         lanceShaft.position.set(0, -0.16, 0.65);
         riderElbowR.add(lanceShaft);
 
@@ -958,7 +960,7 @@ export class UnitModels {
           legGroup.add(legArmor);
 
           // Hoof
-          const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.04, 0.12), getCachedLambert(0x2c1810));
+          const hoof = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.04, 0.12), new THREE.MeshLambertMaterial({ color: 0x2c1810 }));
           hoof.position.y = -0.28;
           legGroup.add(hoof);
 
@@ -971,132 +973,132 @@ export class UnitModels {
         // === PALADIN — Holy knight, ornate gilded plate, great mace, tower shield, divine aura ===
 
         // --- TORSO: Layered ornate plate armor ---
-        const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.65, 0.5), getCachedLambert(0xc0c0c0));
+        const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.65, 0.5), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         pBody.position.y = 0.32;
         pBody.castShadow = true;
         group.add(pBody);
         // Polished front breastplate (bright steel, slightly forward)
-        const pBreast = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.45, 0.08), getCachedLambert(0xd8d8d8));
+        const pBreast = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.45, 0.08), new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
         pBreast.position.set(0, 0.38, 0.26);
         group.add(pBreast);
         // Gold chest emblem — sunburst cross
-        const pEmbV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), getCachedLambert(0xffd700));
+        const pEmbV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pEmbV.position.set(0, 0.38, 0.31);
         group.add(pEmbV);
-        const pEmbH = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.02), getCachedLambert(0xffd700));
+        const pEmbH = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pEmbH.position.set(0, 0.38, 0.31);
         group.add(pEmbH);
         // Sunburst rays (4 diagonal)
         for (const rz of [-0.78, 0.78, -2.36, 2.36]) {
-          const ray = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.02), getCachedLambert(0xffd700));
+          const ray = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           ray.position.set(0, 0.38, 0.31);
           ray.rotation.z = rz;
           group.add(ray);
         }
         // Belt with ornate buckle
-        const pBelt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.1, 0.54), getCachedLambert(0x6d4c41));
+        const pBelt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.1, 0.54), new THREE.MeshLambertMaterial({ color: 0x6d4c41 }));
         pBelt.position.set(0, 0.05, 0);
         group.add(pBelt);
-        const pBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.06), getCachedLambert(0xffd700));
+        const pBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pBuckle.position.set(0, 0.05, 0.28);
         group.add(pBuckle);
         // Gorget (neck armor)
-        const pGorget = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.46), getCachedLambert(0xc0c0c0));
+        const pGorget = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.46), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         pGorget.position.set(0, 0.68, 0);
         group.add(pGorget);
         // Tabard / battle skirt — front (team color)
-        const pTabard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.08), getCachedLambert(playerColor));
+        const pTabard = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.2, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         pTabard.position.set(0, -0.05, 0.22);
         group.add(pTabard);
         // Tabard / battle skirt — back (team color, matching front)
-        const pTabardBack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.08), getCachedLambert(playerColor));
+        const pTabardBack = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         pTabardBack.position.set(0, -0.07, -0.22);
         group.add(pTabardBack);
 
         // --- BACK DECORATIONS: polished backplate, spine ridge, holy symbol ---
         // Polished back plate (bright steel)
-        const pBackPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.44, 0.08), getCachedLambert(0xd8d8d8));
+        const pBackPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.44, 0.08), new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
         pBackPlate.position.set(0, 0.38, -0.26);
         group.add(pBackPlate);
         // Raised spine ridge (center of back)
-        const pSpine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.48, 0.06), getCachedLambert(0xe8e8e8));
+        const pSpine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.48, 0.06), new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }));
         pSpine.position.set(0, 0.36, -0.30);
         group.add(pSpine);
         // Gold cross emblem on back (matching front sunburst cross)
-        const pBackCrossV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), getCachedLambert(0xffd700));
+        const pBackCrossV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pBackCrossV.position.set(0, 0.38, -0.31);
         group.add(pBackCrossV);
-        const pBackCrossH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.02), getCachedLambert(0xffd700));
+        const pBackCrossH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pBackCrossH.position.set(0, 0.40, -0.31);
         group.add(pBackCrossH);
         // Gold trim lines flanking spine (decorative channels)
         for (const bx of [-0.12, 0.12]) {
-          const channel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.36, 0.02), getCachedLambert(0xffd700));
+          const channel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.36, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           channel.position.set(bx, 0.36, -0.31);
           group.add(channel);
         }
         // Back of helm — raised guard plate
-        const pHelmBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.08), getCachedLambert(0xc0c0c0));
+        const pHelmBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.08), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         pHelmBack.position.set(0, 0.88, -0.24);
         group.add(pHelmBack);
         // Gold trim on back of helm
-        const pHelmBackTrim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.09), getCachedLambert(0xffd700));
+        const pHelmBackTrim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pHelmBackTrim.position.set(0, 0.80, -0.24);
         group.add(pHelmBackTrim);
 
         // --- SHOULDER PAULDRONS: massive ornate layered plates ---
         for (const sx of [-0.36, 0.36]) {
           // Main pauldron
-          const ppMain = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.38), getCachedLambert(0xd8d8d8));
+          const ppMain = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.38), new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
           ppMain.position.set(sx, 0.68, 0);
           group.add(ppMain);
           // Gold trim on bottom edge
-          const ppTrim = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.4), getCachedLambert(0xffd700));
+          const ppTrim = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.4), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           ppTrim.position.set(sx, 0.60, 0);
           group.add(ppTrim);
           // Raised top ridge
-          const ppRidge = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.3), getCachedLambert(0xe8e8e8));
+          const ppRidge = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.3), new THREE.MeshLambertMaterial({ color: 0xe8e8e8 }));
           ppRidge.position.set(sx, 0.78, 0);
           group.add(ppRidge);
           // Gold stud on pauldron face
-          const ppStud = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), getCachedLambert(0xffd700));
+          const ppStud = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           ppStud.position.set(sx, 0.68, 0.18);
           group.add(ppStud);
         }
 
         // --- HELMET: Great helm with crown crest, visor, cheek plates ---
         // Main helm
-        const pHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), getCachedLambert(0xd8d8d8));
+        const pHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
         pHelm.position.y = 0.96;
         group.add(pHelm);
         // Darker faceplate
-        const pFace = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.32, 0.08), getCachedLambert(0xaaaaaa));
+        const pFace = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.32, 0.08), new THREE.MeshLambertMaterial({ color: 0xaaaaaa }));
         pFace.position.set(0, 0.92, 0.24);
         group.add(pFace);
         // Eye slit (dark)
-        const pEyeSlit = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.09), getCachedLambert(0x1a1a1a));
+        const pEyeSlit = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.09), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
         pEyeSlit.position.set(0, 0.96, 0.26);
         group.add(pEyeSlit);
         // Breathing holes (3 small dots below visor)
         for (let bx = -0.06; bx <= 0.06; bx += 0.06) {
-          const hole = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.09), getCachedLambert(0x1a1a1a));
+          const hole = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.09), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
           hole.position.set(bx, 0.86, 0.26);
           group.add(hole);
         }
         // Crown crest on top — 5 points like a crown
         for (let ci = -2; ci <= 2; ci++) {
           const h = ci === 0 ? 0.14 : (Math.abs(ci) === 1 ? 0.10 : 0.07);
-          const crestPt = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), getCachedLambert(0xffd700));
+          const crestPt = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           crestPt.position.set(ci * 0.08, 1.19 + h / 2, 0);
           group.add(crestPt);
         }
         // Crown base band
-        const crownBand = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.06, 0.48), getCachedLambert(0xffd700));
+        const crownBand = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.06, 0.48), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         crownBand.position.set(0, 1.19, 0);
         group.add(crownBand);
         // Cheek guards
         for (const cx of [-0.24, 0.24]) {
-          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.1), getCachedLambert(0xc0c0c0));
+          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.1), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
           cheek.position.set(cx, 0.88, 0.2);
           group.add(cheek);
         }
@@ -1106,33 +1108,33 @@ export class UnitModels {
         // Shield body — tall tower shield (offset further from arm)
         const shZ = 0.32; // shield Z offset — farther out from body
         const shX = 0.18; // shield X offset
-        const pShield = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.1), getCachedLambert(playerColor));
+        const pShield = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.8, 0.1), new THREE.MeshLambertMaterial({ color: playerColor }));
         pShield.name = 'shield-tower';
         pShield.position.set(shX, -0.05, shZ);
         pArmL.add(pShield);
         // Steel rim — top
-        const pRimT = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), getCachedLambert(0xc0c0c0));
+        const pRimT = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         pRimT.position.set(shX, 0.35, shZ);
         pArmL.add(pRimT);
         // Steel rim — bottom
-        const pRimB = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), getCachedLambert(0xc0c0c0));
+        const pRimB = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
         pRimB.position.set(shX, -0.45, shZ);
         pArmL.add(pRimB);
         // Steel rim — sides
         for (const rx of [-0.28, 0.28]) {
-          const pRimS = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.12), getCachedLambert(0xc0c0c0));
+          const pRimS = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.12), new THREE.MeshLambertMaterial({ color: 0xc0c0c0 }));
           pRimS.position.set(shX + rx, -0.05, shZ);
           pArmL.add(pRimS);
         }
         // Large golden sun boss
-        const pBoss = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.14), getCachedLambert(0xffd700));
+        const pBoss = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.14), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pBoss.position.set(shX, 0.05, shZ + 0.07);
         pArmL.add(pBoss);
         // Sun rays from boss (8 directions)
         for (let ri = 0; ri < 8; ri++) {
           const angle = (ri / 8) * Math.PI * 2;
           const rayLen = 0.15;
-          const sunRay = new THREE.Mesh(new THREE.BoxGeometry(0.04, rayLen, 0.02), getCachedLambert(0xffd700));
+          const sunRay = new THREE.Mesh(new THREE.BoxGeometry(0.04, rayLen, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           sunRay.position.set(
             shX + Math.sin(angle) * 0.16,
             0.05 + Math.cos(angle) * 0.16,
@@ -1142,11 +1144,11 @@ export class UnitModels {
           pArmL.add(sunRay);
         }
         // Vertical gold stripe on shield
-        const pStripeV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.02), getCachedLambert(0xffd700));
+        const pStripeV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pStripeV.position.set(shX, -0.05, shZ + 0.06);
         pArmL.add(pStripeV);
         // Horizontal gold stripe
-        const pStripeH = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.06, 0.02), getCachedLambert(0xffd700));
+        const pStripeH = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.06, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pStripeH.position.set(shX, 0.05, shZ + 0.06);
         pArmL.add(pStripeH);
         group.add(pArmL);
@@ -1155,27 +1157,27 @@ export class UnitModels {
         const pArmR = makeArmGroup('arm-right', 0xc0c0c0, 0.3, 0.55);
         const pElbowR = pArmR.getObjectByName('arm-right-elbow')!;
         // Long mace handle (dark wood with gold wrap)
-        const pMHandle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.55), getCachedLambert(0x5d4037));
+        const pMHandle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.55), new THREE.MeshLambertMaterial({ color: 0x5d4037 }));
         pMHandle.name = 'mace-shaft';
         pMHandle.position.set(0, -0.16, 0.28);
         pElbowR.add(pMHandle);
         // Gold grip wrapping (two bands)
         for (const gz of [0.1, 0.2]) {
-          const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), getCachedLambert(0xffd700));
+          const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           grip.position.set(0, -0.16, gz);
           pElbowR.add(grip);
         }
         // Pommel (gold ball at base)
-        const pPommel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), getCachedLambert(0xffd700));
+        const pPommel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pPommel.position.set(0, -0.16, 0.02);
         pElbowR.add(pPommel);
         // Mace head — large ornate flanged ball (bright steel)
-        const pMHead = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), getCachedLambert(0xe0e0e0));
+        const pMHead = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }));
         pMHead.name = 'mace-head';
         pMHead.position.set(0, -0.16, 0.57);
         pElbowR.add(pMHead);
         // 6 big flanges radiating from mace head
-        const flMat = getCachedLambert(0xc0c0c0);
+        const flMat = new THREE.MeshLambertMaterial({ color: 0xc0c0c0 });
         const flangePositions: [number, number][] = [[0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12], [0.08, 0.08], [-0.08, -0.08]];
         for (const [fx, fy] of flangePositions) {
           const fl = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.16), flMat);
@@ -1184,7 +1186,7 @@ export class UnitModels {
           pElbowR.add(fl);
         }
         // Gold cap on mace tip
-        const pMTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), getCachedLambert(0xffd700));
+        const pMTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         pMTip.name = 'mace-tip';
         pMTip.position.set(0, -0.16, 0.68);
         pElbowR.add(pMTip);
@@ -1195,10 +1197,10 @@ export class UnitModels {
         group.add(makeLegGroup('leg-right', 0xc0c0c0, 0.12, 0));
         // Knee guards (gold-trimmed)
         for (const kx of [-0.12, 0.12]) {
-          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), getCachedLambert(0xd8d8d8));
+          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), new THREE.MeshLambertMaterial({ color: 0xd8d8d8 }));
           knee.position.set(kx, 0.05, 0.08);
           group.add(knee);
-          const kneeTrim = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.13), getCachedLambert(0xffd700));
+          const kneeTrim = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.13), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           kneeTrim.position.set(kx, 0.02, 0.08);
           group.add(kneeTrim);
         }
@@ -1256,14 +1258,14 @@ export class UnitModels {
         // === STURDY CONSTRUCTION WORKER — Detailed craftsman with layered work gear, tools ===
 
         // --- Shared Materials ---
-        const bTunicMat = getCachedLambert(0xc9a876); // tan work tunic
-        const bLeatherMat = getCachedLambert(0x5d4037); // dark brown leather
-        const bBeltMat = getCachedLambert(playerColor); // team color accents
-        const bSkinMat = getCachedLambert(0xffdbac); // skin tone
-        const bGloveMat = getCachedLambert(0x8B6914); // tan reinforced leather
-        const bBootMat = getCachedLambert(0x3c2415); // dark boot
-        const bMetalMat = getCachedLambert(0x757575); // tool metal
-        const bWoodMat = getCachedLambert(0x8B5A3C); // hammer handle wood
+        const bTunicMat = new THREE.MeshLambertMaterial({ color: 0xc9a876 }); // tan work tunic
+        const bLeatherMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // dark brown leather
+        const bBeltMat = new THREE.MeshLambertMaterial({ color: playerColor }); // team color accents
+        const bSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // skin tone
+        const bGloveMat = new THREE.MeshLambertMaterial({ color: 0x8B6914 }); // tan reinforced leather
+        const bBootMat = new THREE.MeshLambertMaterial({ color: 0x3c2415 }); // dark boot
+        const bMetalMat = new THREE.MeshLambertMaterial({ color: 0x757575 }); // tool metal
+        const bWoodMat = new THREE.MeshLambertMaterial({ color: 0x8B5A3C }); // hammer handle wood
 
         // ─── TORSO: LAYERED WORK TUNIC ───
         // Core tunic body
@@ -1311,7 +1313,7 @@ export class UnitModels {
         group.add(pouch2);
 
         // Measuring tape coil (decorative spiral on belt)
-        const tapeCoil = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.04, 6), getCachedLambert(0xb8860b));
+        const tapeCoil = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.04, 6), new THREE.MeshLambertMaterial({ color: 0xb8860b }));
         tapeCoil.position.set(0, 0.08, -0.2);
         group.add(tapeCoil);
 
@@ -1325,7 +1327,7 @@ export class UnitModels {
         group.add(toolLoopRight);
 
         // Hanging saw shape (simple angular tool silhouette)
-        const sawBlade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.24, 0.04), getCachedLambert(0x909090));
+        const sawBlade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.24, 0.04), new THREE.MeshLambertMaterial({ color: 0x909090 }));
         sawBlade.position.set(-0.18, 0.15, 0.24);
         sawBlade.rotation.z = 0.3;
         group.add(sawBlade);
@@ -1362,7 +1364,7 @@ export class UnitModels {
         group.add(lampBody);
 
         // Lamp glow (emissive top)
-        const lampGlow = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), getCachedLambert(0xffff99));
+        const lampGlow = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshLambertMaterial({ color: 0xffff99 }));
         lampGlow.position.set(0, 1.04, -0.21);
         group.add(lampGlow);
 
@@ -1386,18 +1388,18 @@ export class UnitModels {
         bldArmRightElbow.add(hammerHeadMain);
 
         // Hammer claw (split prongs, curved up)
-        const clawLeft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.08), getCachedLambert(0x505050));
+        const clawLeft = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.08), new THREE.MeshLambertMaterial({ color: 0x505050 }));
         clawLeft.position.set(-0.08, -0.08, 0.56);
         clawLeft.rotation.z = 0.4;
         bldArmRightElbow.add(clawLeft);
 
-        const clawRight = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.08), getCachedLambert(0x505050));
+        const clawRight = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.1, 0.08), new THREE.MeshLambertMaterial({ color: 0x505050 }));
         clawRight.position.set(0.08, -0.08, 0.56);
         clawRight.rotation.z = -0.4;
         bldArmRightElbow.add(clawRight);
 
         // Hammer head bright edge (highlighting)
-        const hammerShine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.12), getCachedLambert(0xd0d0d0));
+        const hammerShine = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.12), new THREE.MeshLambertMaterial({ color: 0xd0d0d0 }));
         hammerShine.position.set(0, -0.22, 0.52);
         bldArmRightElbow.add(hammerShine);
 
@@ -1408,13 +1410,13 @@ export class UnitModels {
         const bldArmLeftElbow = bldArmLeft.getObjectByName('arm-left-elbow')!;
 
         // Blueprint cylinder (rolled paper)
-        const blueprintRoll = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.3, 6), getCachedLambert(0xd4d4d4));
+        const blueprintRoll = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.3, 6), new THREE.MeshLambertMaterial({ color: 0xd4d4d4 }));
         blueprintRoll.rotation.z = 1.57; // horizontal
         blueprintRoll.position.set(0, -0.16, 0.2);
         bldArmLeftElbow.add(blueprintRoll);
 
         // Blueprint tie (rope detail)
-        const blueprintTie = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.32), getCachedLambert(0x8B6914));
+        const blueprintTie = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.32), new THREE.MeshLambertMaterial({ color: 0x8B6914 }));
         blueprintTie.position.set(-0.06, -0.16, 0.2);
         bldArmLeftElbow.add(blueprintTie);
 
@@ -1440,14 +1442,14 @@ export class UnitModels {
       }
       case UnitType.LUMBERJACK: {
         // ═══ LUMBERJACK — Rugged woodsman with character ═══
-        const lumbTunic = getCachedLambert(0x558020);
-        const lumbBrown = getCachedLambert(0x6b4423);
-        const lumbLeather = getCachedLambert(0x3e2723);
-        const lumbTeam = getCachedLambert(playerColor);
-        const lumbFur = getCachedLambert(0x4a3728);
-        const lumbMetal = getCachedLambert(0x999999);
-        const lumbWood = getCachedLambert(0x8B4513);
-        const lumbBoot = getCachedLambert(0x2c1810);
+        const lumbTunic = new THREE.MeshLambertMaterial({ color: 0x558020 });
+        const lumbBrown = new THREE.MeshLambertMaterial({ color: 0x6b4423 });
+        const lumbLeather = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
+        const lumbTeam = new THREE.MeshLambertMaterial({ color: playerColor });
+        const lumbFur = new THREE.MeshLambertMaterial({ color: 0x4a3728 });
+        const lumbMetal = new THREE.MeshLambertMaterial({ color: 0x999999 });
+        const lumbWood = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const lumbBoot = new THREE.MeshLambertMaterial({ color: 0x2c1810 });
 
         // Body with plaid pattern
         const bodyBase = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, 0.40), lumbTunic);
@@ -1476,7 +1478,7 @@ export class UnitModels {
         group.add(holster);
 
         // Head with beard and cap
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), getCachedLambert(0xffdbac));
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
         head.position.y = 0.78;
         group.add(head);
         const beard = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.15), lumbFur);
@@ -1563,14 +1565,14 @@ export class UnitModels {
 
       case UnitType.VILLAGER: {
         // ═══ VILLAGER — Peasant farmer with warmth and personality ═══
-        const vilTunic = getCachedLambert(0xd4a574);
-        const vilVest = getCachedLambert(0x8b6f47);
-        const vilCloth = getCachedLambert(playerColor);
-        const vilStraw = getCachedLambert(0xf5deb3);
-        const vilWoven = getCachedLambert(0xd2b48c);
-        const vilWood = getCachedLambert(0x8B4513);
-        const vilMetal = getCachedLambert(0xaaaaaa);
-        const vilGreen = getCachedLambert(0x7cb342);
+        const vilTunic = new THREE.MeshLambertMaterial({ color: 0xd4a574 });
+        const vilVest = new THREE.MeshLambertMaterial({ color: 0x8b6f47 });
+        const vilCloth = new THREE.MeshLambertMaterial({ color: playerColor });
+        const vilStraw = new THREE.MeshLambertMaterial({ color: 0xf5deb3 });
+        const vilWoven = new THREE.MeshLambertMaterial({ color: 0xd2b48c });
+        const vilWood = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const vilMetal = new THREE.MeshLambertMaterial({ color: 0xaaaaaa });
+        const vilGreen = new THREE.MeshLambertMaterial({ color: 0x7cb342 });
 
         // Layered tunic body
         const bodyBase = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, 0.40), vilTunic);
@@ -1605,7 +1607,7 @@ export class UnitModels {
         group.add(seedPouch);
 
         // Patched trousers (lower body, offset color for patches)
-        const pants = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.25, 0.42), getCachedLambert(0xa0764f));
+        const pants = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.25, 0.42), new THREE.MeshLambertMaterial({ color: 0xa0764f }));
         pants.position.y = -0.05;
         group.add(pants);
         
@@ -1617,7 +1619,7 @@ export class UnitModels {
         }
 
         // Head: Friendly face
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), getCachedLambert(0xffdbac));
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
         head.position.y = 0.78;
         group.add(head);
 
@@ -1664,7 +1666,7 @@ export class UnitModels {
         vilArmRightElbow.add(blade);
 
         // Blade rim (darker edge)
-        const bladeRim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 0.11), getCachedLambert(0x888888));
+        const bladeRim = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 0.11), new THREE.MeshLambertMaterial({ color: 0x888888 }));
         bladeRim.position.set(0.14, -0.12, 0.68);
         vilArmRightElbow.add(bladeRim);
 
@@ -1741,18 +1743,18 @@ export class UnitModels {
         trebGroup.position.y = -0.1;
 
         // ─── Materials ───
-        const mWoodDark = getCachedLambert(0x5d4037);
-        const mWoodMed = getCachedLambert(0x6d4c2a);
-        const mWoodLight = getCachedLambert(0x8B6914);
-        const mIron = getCachedLambert(0x555555);
-        const mIronDark = getCachedLambert(0x3a3a3a);
-        const mRope = getCachedLambert(0xc4a56a);
-        const mGold = getCachedLambert(0xd4a017);
-        const mTeam = getCachedLambert(playerColor);
-        const mSkin = getCachedLambert(0xffdbac);
-        const mLeather = getCachedLambert(0x6b5b45);
-        const mLeatherDark = getCachedLambert(0x4a3728);
-        const mBone = getCachedLambert(0xd7ccc8);
+        const mWoodDark = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+        const mWoodMed = new THREE.MeshLambertMaterial({ color: 0x6d4c2a });
+        const mWoodLight = new THREE.MeshLambertMaterial({ color: 0x8B6914 });
+        const mIron = new THREE.MeshLambertMaterial({ color: 0x555555 });
+        const mIronDark = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+        const mRope = new THREE.MeshLambertMaterial({ color: 0xc4a56a });
+        const mGold = new THREE.MeshLambertMaterial({ color: 0xd4a017 });
+        const mTeam = new THREE.MeshLambertMaterial({ color: playerColor });
+        const mSkin = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+        const mLeather = new THREE.MeshLambertMaterial({ color: 0x6b5b45 });
+        const mLeatherDark = new THREE.MeshLambertMaterial({ color: 0x4a3728 });
+        const mBone = new THREE.MeshLambertMaterial({ color: 0xd7ccc8 });
 
         const tg = trebGroup;
 
@@ -1936,7 +1938,7 @@ export class UnitModels {
         }
 
         // Boulder in sling
-        const boulder = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), getCachedLambert(0x888888));
+        const boulder = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), new THREE.MeshLambertMaterial({ color: 0x888888 }));
         boulder.position.set(0, 0.01, -0.88);
         armPivot.add(boulder);
 
@@ -1994,7 +1996,7 @@ export class UnitModels {
         tg.add(crateRim);
         // Spare boulders in crate
         for (const boff of [[-0.04, 0], [0.04, 0], [0, 0.04]] as [number, number][]) {
-          const spare = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), getCachedLambert(0x888888));
+          const spare = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), new THREE.MeshLambertMaterial({ color: 0x888888 }));
           spare.position.set(0.30 + boff[0], 0.54, -0.40 + boff[1]);
           tg.add(spare);
         }
@@ -2077,8 +2079,8 @@ export class UnitModels {
         tg.add(opHead);
 
         // Eyes (white surround + brown pupils)
-        const eyeWhiteMat = getCachedLambert(0xf0f0f0);
-        const eyePupilMat = getCachedLambert(0x3b2507);
+        const eyeWhiteMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0 });
+        const eyePupilMat = new THREE.MeshLambertMaterial({ color: 0x3b2507 });
         for (const ex of [-0.05, 0.05]) {
           const eWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.03), eyeWhiteMat);
           eWhite.position.set(ex, 0.80, opZ + 0.13);
@@ -2088,7 +2090,7 @@ export class UnitModels {
           tg.add(ePupil);
         }
         // Eyebrows (focused/determined — angled inward)
-        const browCol = getCachedLambert(0x3e2723);
+        const browCol = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
         const opBrowL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), browCol);
         opBrowL.position.set(-0.05, 0.835, opZ + 0.13);
         opBrowL.rotation.z = -0.15;
@@ -2102,7 +2104,7 @@ export class UnitModels {
         opNose.position.set(0, 0.78, opZ + 0.14);
         tg.add(opNose);
         // Mouth (thin line, slight grin)
-        const mouthMat = getCachedLambert(0x8d5524);
+        const mouthMat = new THREE.MeshLambertMaterial({ color: 0x8d5524 });
         const opMouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.015, 0.02), mouthMat);
         opMouth.position.set(0, 0.745, opZ + 0.13);
         tg.add(opMouth);
@@ -2111,7 +2113,7 @@ export class UnitModels {
         opChin.position.set(0, 0.72, opZ + 0.08);
         tg.add(opChin);
         // Stubble / beard shadow
-        const stubbleMat = getCachedLambert(0xc8a882);
+        const stubbleMat = new THREE.MeshLambertMaterial({ color: 0xc8a882 });
         const opStubble = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), stubbleMat);
         opStubble.position.set(0, 0.73, opZ + 0.10);
         tg.add(opStubble);
@@ -2211,21 +2213,21 @@ export class UnitModels {
         // === HEALER — Ornate cleric with flowing robes, healing staff, crystal focus ===
 
         // --- TORSO: layered white/ivory robes with green trim ---
-        const hRobe = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.65, 0.44), getCachedLambert(0xf5f5f0));
+        const hRobe = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.65, 0.44), new THREE.MeshLambertMaterial({ color: 0xf5f5f0 }));
         hRobe.position.y = 0.32;
         hRobe.castShadow = true;
         group.add(hRobe);
         // Inner robe layer (slightly darker, peeks at edges)
-        const hInner = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.38), getCachedLambert(0xe8e8e0));
+        const hInner = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.55, 0.38), new THREE.MeshLambertMaterial({ color: 0xe8e8e0 }));
         hInner.position.set(0, 0.32, 0.04);
         group.add(hInner);
         // Front robe panel — open collar showing inner layer
-        const hFrontPanel = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.06), getCachedLambert(0xe0e0d8));
+        const hFrontPanel = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.5, 0.06), new THREE.MeshLambertMaterial({ color: 0xe0e0d8 }));
         hFrontPanel.position.set(0, 0.34, 0.24);
         group.add(hFrontPanel);
         // Green trim lines down front opening
         for (const tx of [-0.1, 0.1]) {
-          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.52, 0.02), getCachedLambert(0x00c853));
+          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.52, 0.02), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
           trim.position.set(tx, 0.34, 0.26);
           group.add(trim);
         }
@@ -2237,100 +2239,100 @@ export class UnitModels {
         hCrossH.position.set(0, 0.44, 0.27);
         group.add(hCrossH);
         // Ornate belt with team color + gold buckle
-        const hBelt = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.08, 0.48), getCachedLambert(playerColor));
+        const hBelt = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.08, 0.48), new THREE.MeshLambertMaterial({ color: playerColor }));
         hBelt.position.set(0, 0.06, 0);
         group.add(hBelt);
-        const hBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.04), getCachedLambert(0xffd700));
+        const hBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.04), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         hBuckle.position.set(0, 0.06, 0.25);
         group.add(hBuckle);
         // Sash hanging from belt (team color, diagonal)
-        const hSash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.25, 0.04), getCachedLambert(playerColor));
+        const hSash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.25, 0.04), new THREE.MeshLambertMaterial({ color: playerColor }));
         hSash.position.set(0.12, -0.08, 0.2);
         hSash.rotation.z = -0.15;
         group.add(hSash);
         // Flowing robe skirt (wider at bottom)
-        const hSkirt = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.22, 0.5), getCachedLambert(0xf0f0e8));
+        const hSkirt = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.22, 0.5), new THREE.MeshLambertMaterial({ color: 0xf0f0e8 }));
         hSkirt.position.set(0, -0.08, 0);
         group.add(hSkirt);
-        const hSkirtBottom = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.54), getCachedLambert(0xe8e8e0));
+        const hSkirtBottom = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.54), new THREE.MeshLambertMaterial({ color: 0xe8e8e0 }));
         hSkirtBottom.position.set(0, -0.16, 0);
         group.add(hSkirtBottom);
         // Green trim at skirt hem
-        const hHemTrim = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.03, 0.56), getCachedLambert(0x00c853));
+        const hHemTrim = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.03, 0.56), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
         hHemTrim.position.set(0, -0.19, 0);
         group.add(hHemTrim);
 
         // --- BACK: robe detail, hood drape, embroidered symbol ---
-        const hBackPanel = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.06), getCachedLambert(0xe8e8e0));
+        const hBackPanel = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.4, 0.06), new THREE.MeshLambertMaterial({ color: 0xe8e8e0 }));
         hBackPanel.position.set(0, 0.36, -0.24);
         group.add(hBackPanel);
         // Embroidered green vine pattern on back (vertical + leaf accents)
-        const hBackVine = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.35, 0.02), getCachedLambert(0x00c853));
+        const hBackVine = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.35, 0.02), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
         hBackVine.position.set(0, 0.36, -0.28);
         group.add(hBackVine);
         for (const [lx, ly] of [[0.06, 0.48], [-0.06, 0.38], [0.06, 0.28], [-0.06, 0.18]] as [number, number][]) {
-          const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.02), getCachedLambert(0x00e676));
+          const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.02), new THREE.MeshLambertMaterial({ color: 0x00e676 }));
           leaf.position.set(lx, ly, -0.28);
           group.add(leaf);
         }
 
         // --- HEAD: warm, kind face with flowing hood ---
-        const hHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), getCachedLambert(0xffdbac));
+        const hHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
         hHead.position.y = 0.86;
         group.add(hHead);
         // Kind eyes — warm brown with white surround, gentle shape
         for (const ex of [-0.08, 0.08]) {
-          const hEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), getCachedLambert(0xf5f5f5));
+          const hEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), new THREE.MeshLambertMaterial({ color: 0xf5f5f5 }));
           hEyeWhite.position.set(ex, 0.89, 0.17);
           group.add(hEyeWhite);
-          const hEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), getCachedLambert(0x5d4037));
+          const hEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), new THREE.MeshLambertMaterial({ color: 0x5d4037 }));
           hEyePupil.position.set(ex, 0.89, 0.175);
           group.add(hEyePupil);
         }
         // Gentle eyebrows — slightly raised (kind expression)
         for (const [bx, bz] of [[-0.08, 0.05], [0.08, -0.05]] as [number, number][]) {
-          const hBrow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), getCachedLambert(0x8d6e4a));
+          const hBrow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0x8d6e4a }));
           hBrow.position.set(bx, 0.92, 0.17);
           hBrow.rotation.z = bz;
           group.add(hBrow);
         }
         // Nose — soft rounded ridge
-        const hNose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.04), getCachedLambert(0xf5d0a0));
+        const hNose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.04), new THREE.MeshLambertMaterial({ color: 0xf5d0a0 }));
         hNose.position.set(0, 0.86, 0.18);
         group.add(hNose);
         // Mouth — gentle smile (slightly upturned)
-        const hMouth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), getCachedLambert(0xc08060));
+        const hMouth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0xc08060 }));
         hMouth.position.set(0, 0.8, 0.17);
         group.add(hMouth);
         // Smile corners (tiny upward ticks)
         for (const mx of [-0.055, 0.055]) {
-          const corner = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02), getCachedLambert(0xc08060));
+          const corner = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0xc08060 }));
           corner.position.set(mx, 0.81, 0.17);
           group.add(corner);
         }
         // Chin
-        const hChin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), getCachedLambert(0xffdbac));
+        const hChin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.04, 0.04), new THREE.MeshLambertMaterial({ color: 0xffdbac }));
         hChin.position.set(0, 0.76, 0.14);
         group.add(hChin);
 
         // Hood — deep cowl shape with box layers
-        const hHoodMain = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.24, 0.4), getCachedLambert(0xf0f0e8));
+        const hHoodMain = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.24, 0.4), new THREE.MeshLambertMaterial({ color: 0xf0f0e8 }));
         hHoodMain.position.set(0, 0.99, 0.02);
         group.add(hHoodMain);
         // Hood peak
-        const hHoodPeak = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.32), getCachedLambert(0xf0f0e8));
+        const hHoodPeak = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.32), new THREE.MeshLambertMaterial({ color: 0xf0f0e8 }));
         hHoodPeak.position.set(0, 1.08, 0);
         group.add(hHoodPeak);
         // Hood brow overhang (casts shadow on face)
-        const hHoodBrow = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.12), getCachedLambert(0xe8e8e0));
+        const hHoodBrow = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.12), new THREE.MeshLambertMaterial({ color: 0xe8e8e0 }));
         hHoodBrow.position.set(0, 0.94, 0.2);
         group.add(hHoodBrow);
         // Hood back drape (falls behind neck)
-        const hHoodBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.1), getCachedLambert(0xe8e8e0));
+        const hHoodBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.1), new THREE.MeshLambertMaterial({ color: 0xe8e8e0 }));
         hHoodBack.position.set(0, 0.78, -0.22);
         group.add(hHoodBack);
         // Green hood trim (runs around edge)
-        const hHoodTrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.03, 0.42), getCachedLambert(0x00c853));
+        const hHoodTrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.03, 0.42), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
         hHoodTrim.position.y = 0.89;
         group.add(hHoodTrim);
 
@@ -2338,7 +2340,7 @@ export class UnitModels {
         const hArmL = makeArmGroup('arm-left', 0xf0f0e8, -0.3, 0.52);
         const hArmLElbow = hArmL.getObjectByName('arm-left-elbow')!;
         // Sleeve cuff trim (stays on arm)
-        const hCuffL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.16), getCachedLambert(0x00c853));
+        const hCuffL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.16), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
         hCuffL.position.set(0, -0.08, 0);
         hArmL.add(hCuffL);
         // Glowing orb floating above palm (emissive green sphere) — move to elbow
@@ -2363,7 +2365,7 @@ export class UnitModels {
         const hArmR = makeArmGroup('arm-right', 0xf0f0e8, 0.3, 0.52);
         const hArmRElbow = hArmR.getObjectByName('arm-right-elbow')!;
         // Sleeve cuff trim (stays on arm)
-        const hCuffR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.16), getCachedLambert(0x00c853));
+        const hCuffR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.16), new THREE.MeshLambertMaterial({ color: 0x00c853 }));
         hCuffR.position.set(0, -0.08, 0);
         hArmR.add(hCuffR);
         // Staff wrapper group — tilted forward 25° so it doesn't clip shoulder
@@ -2373,14 +2375,14 @@ export class UnitModels {
         // Staff shaft — dark wood
         const hStaff = new THREE.Mesh(
           new THREE.CylinderGeometry(0.025, 0.03, 1.3, 6),
-          getCachedLambert(0x5d4037)
+          new THREE.MeshLambertMaterial({ color: 0x5d4037 })
         );
         hStaff.position.set(0, 0.15, 0.1);
         hStaffGrp.add(hStaff);
         // Staff head — golden cradle/cage holding a crystal
         const hCradleRing = new THREE.Mesh(
           new THREE.TorusGeometry(0.08, 0.015, 6, 8),
-          getCachedLambert(0xffd700)
+          new THREE.MeshLambertMaterial({ color: 0xffd700 })
         );
         hCradleRing.position.set(0, 0.75, 0.1);
         hCradleRing.rotation.x = Math.PI / 2;
@@ -2388,7 +2390,7 @@ export class UnitModels {
         // Four gold prongs curving up to hold crystal
         for (let pi = 0; pi < 4; pi++) {
           const pAngle = (pi / 4) * Math.PI * 2;
-          const prong = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), getCachedLambert(0xffd700));
+          const prong = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           prong.position.set(Math.cos(pAngle) * 0.06, 0.82, 0.1 + Math.sin(pAngle) * 0.06);
           prong.rotation.x = Math.sin(pAngle) * 0.2;
           prong.rotation.z = -Math.cos(pAngle) * 0.2;
@@ -2414,7 +2416,7 @@ export class UnitModels {
         for (const gy of [-0.1, 0.15, 0.4]) {
           const band = new THREE.Mesh(
             new THREE.CylinderGeometry(0.035, 0.035, 0.03, 6),
-            getCachedLambert(0xffd700)
+            new THREE.MeshLambertMaterial({ color: 0xffd700 })
           );
           band.position.set(0, gy, 0.1);
           hStaffGrp.add(band);
@@ -2441,12 +2443,12 @@ export class UnitModels {
       case UnitType.ASSASSIN: {
         // === ASSASSIN — Slim, hooded rogue with daggers attached to arms ===
         // Slim torso — dark leather armor
-        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.55, 0.35), getCachedLambert(0x1a0033));
+        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.55, 0.35), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
         aBody.position.y = 0.28;
         aBody.castShadow = true;
         group.add(aBody);
         // Leather straps across chest (X pattern)
-        const strapMat = getCachedLambert(0x2d1b4e);
+        const strapMat = new THREE.MeshLambertMaterial({ color: 0x2d1b4e });
         const strapL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.45, 0.37), strapMat);
         strapL.position.set(0, 0.3, 0);
         strapL.rotation.z = 0.35;
@@ -2456,7 +2458,7 @@ export class UnitModels {
         strapR.rotation.z = -0.35;
         group.add(strapR);
         // Team color belt with poison vials
-        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.37), getCachedLambert(playerColor));
+        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.37), new THREE.MeshLambertMaterial({ color: playerColor }));
         aBelt.position.y = 0.05;
         group.add(aBelt);
         // Tiny poison vials on belt
@@ -2467,15 +2469,15 @@ export class UnitModels {
           group.add(vial);
         }
         // Hooded head — deep cowl
-        const aHoodBack = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.35, 0.38), getCachedLambert(0x0d001a));
+        const aHoodBack = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.35, 0.38), new THREE.MeshLambertMaterial({ color: 0x0d001a }));
         aHoodBack.position.y = 0.78;
         group.add(aHoodBack);
         // Hood peak (pointed front drape)
-        const hoodPeak = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.1), getCachedLambert(0x0d001a));
+        const hoodPeak = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.1), new THREE.MeshLambertMaterial({ color: 0x0d001a }));
         hoodPeak.position.set(0, 0.9, 0.2);
         group.add(hoodPeak);
         // Face shadow (dark recessed area under hood)
-        const faceShadow = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.04), getCachedLambert(0x050010));
+        const faceShadow = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.2, 0.04), new THREE.MeshLambertMaterial({ color: 0x050010 }));
         faceShadow.position.set(0, 0.78, 0.19);
         group.add(faceShadow);
         // Glowing eyes (sinister purple)
@@ -2487,14 +2489,14 @@ export class UnitModels {
         }
         // Team color shoulder pads
         for (const sx of [-0.22, 0.22]) {
-          const sPad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.15), getCachedLambert(playerColor));
+          const sPad = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.15), new THREE.MeshLambertMaterial({ color: playerColor }));
           sPad.position.set(sx, 0.55, 0);
           group.add(sPad);
         }
         // LEFT ARM with WICKED DAGGER
         const aArmL = makeArmGroup('arm-left', 0x1a0033, -0.24, 0.48);
         const aArmLElbow = aArmL.getObjectByName('arm-left-elbow')!;
-        const daggerBladeMat = getCachedLambert(0xd0d0d0);
+        const daggerBladeMat = new THREE.MeshLambertMaterial({ color: 0xd0d0d0 });
         const daggerPoisonMat = new THREE.MeshLambertMaterial({ color: 0x76ff03, emissive: 0x76ff03, emissiveIntensity: 0.3 });
         // Left dagger blade (extends forward from hand)
         const ldBlade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.4), daggerBladeMat);
@@ -2507,7 +2509,7 @@ export class UnitModels {
         ldPoison.position.set(-0.03, -0.16, 0.25);
         aArmLElbow.add(ldPoison);
         // Left grip
-        const ldGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), getCachedLambert(0x1a0033));
+        const ldGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
         ldGrip.name = 'dagger-grip-left';
         ldGrip.position.set(0, -0.16, 0.02);
         aArmLElbow.add(ldGrip);
@@ -2523,7 +2525,7 @@ export class UnitModels {
         rdPoison.name = 'dagger-poison-right';
         rdPoison.position.set(0.03, -0.16, 0.25);
         aArmRElbow.add(rdPoison);
-        const rdGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), getCachedLambert(0x1a0033));
+        const rdGrip = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a0033 }));
         rdGrip.name = 'dagger-grip-right';
         rdGrip.position.set(0, -0.16, 0.02);
         aArmRElbow.add(rdGrip);
@@ -2539,70 +2541,70 @@ export class UnitModels {
 
         // --- TORSO: layered plate armor ---
         // Inner breastplate
-        const sbChest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.55), getCachedLambert(0x78909c));
+        const sbChest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.55), new THREE.MeshLambertMaterial({ color: 0x78909c }));
         sbChest.position.y = 0.35;
         sbChest.castShadow = true;
         group.add(sbChest);
         // Front plate overlay (slightly protruding, lighter steel)
-        const sbFrontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), getCachedLambert(0x90a4ae));
+        const sbFrontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), new THREE.MeshLambertMaterial({ color: 0x90a4ae }));
         sbFrontPlate.position.set(0, 0.4, 0.28);
         group.add(sbFrontPlate);
         // Belt / waist guard
-        const sbBelt = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.1, 0.58), getCachedLambert(0x5d4037));
+        const sbBelt = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.1, 0.58), new THREE.MeshLambertMaterial({ color: 0x5d4037 }));
         sbBelt.position.set(0, 0.05, 0);
         group.add(sbBelt);
         // Belt buckle
-        const sbBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.05), getCachedLambert(0xffd700));
+        const sbBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.05), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         sbBuckle.position.set(0, 0.05, 0.3);
         group.add(sbBuckle);
         // Gorget (neck guard)
-        const sbGorget = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.48), getCachedLambert(0x607d8b));
+        const sbGorget = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.48), new THREE.MeshLambertMaterial({ color: 0x607d8b }));
         sbGorget.position.set(0, 0.72, 0);
         group.add(sbGorget);
 
         // --- SHOULDER PAULDRONS: big blocky layered plates (team color) ---
         for (const sx of [-0.38, 0.38]) {
           // Main pauldron block
-          const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.36), getCachedLambert(playerColor));
+          const pauldron = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.36), new THREE.MeshLambertMaterial({ color: playerColor }));
           pauldron.position.set(sx, 0.68, 0);
           group.add(pauldron);
           // Pauldron top ridge
-          const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.28), getCachedLambert(0xb0bec5));
+          const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.28), new THREE.MeshLambertMaterial({ color: 0xb0bec5 }));
           ridge.position.set(sx, 0.77, 0);
           group.add(ridge);
           // Pauldron edge trim (gold)
-          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.03, 0.38), getCachedLambert(0xffd700));
+          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.03, 0.38), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
           trim.position.set(sx, 0.62, 0);
           group.add(trim);
         }
 
         // --- HELMET: Great helm with T-visor, crest, and face plate ---
         // Main helm block
-        const sbHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.44, 0.46), getCachedLambert(0x546e7a));
+        const sbHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.44, 0.46), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
         sbHelm.position.y = 0.95;
         group.add(sbHelm);
         // Helm top crest / ridge (raised stripe on top)
-        const sbCrest = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), getCachedLambert(playerColor));
+        const sbCrest = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.4), new THREE.MeshLambertMaterial({ color: playerColor }));
         sbCrest.position.set(0, 1.2, 0);
         group.add(sbCrest);
         // Face plate (slightly forward, darker)
-        const sbFacePlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.08), getCachedLambert(0x455a64));
+        const sbFacePlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.08), new THREE.MeshLambertMaterial({ color: 0x455a64 }));
         sbFacePlate.position.set(0, 0.92, 0.25);
         group.add(sbFacePlate);
         // T-shaped visor slit (horizontal bar + vertical bar)
-        const sbVisorH = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), getCachedLambert(0x1a1a1a));
+        const sbVisorH = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
         sbVisorH.position.set(0, 0.95, 0.28);
         group.add(sbVisorH);
-        const sbVisorV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.09), getCachedLambert(0x1a1a1a));
+        const sbVisorV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.18, 0.09), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
         sbVisorV.position.set(0, 0.88, 0.28);
         group.add(sbVisorV);
         // Chin guard (protruding lower jaw plate)
-        const sbChin = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, 0.12), getCachedLambert(0x546e7a));
+        const sbChin = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, 0.12), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
         sbChin.position.set(0, 0.76, 0.24);
         group.add(sbChin);
         // Helm side cheek guards
         for (const hx of [-0.24, 0.24]) {
-          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.08), getCachedLambert(0x546e7a));
+          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.08), new THREE.MeshLambertMaterial({ color: 0x546e7a }));
           cheek.position.set(hx, 0.88, 0.22);
           group.add(cheek);
         }
@@ -2615,49 +2617,49 @@ export class UnitModels {
         shieldGroup.position.set(0.1450, -0.3750, 0.2900);
         shieldGroup.rotation.set(0.6584, 0.0184, -0.0716);
         // Main shield body — tall rectangle
-        const shMain = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.08), getCachedLambert(playerColor));
+        const shMain = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         shMain.position.set(0, 0.05, 0);
         shieldGroup.add(shMain);
         // Bottom point — two angled blocks forming the kite point
-        const shPointL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), getCachedLambert(playerColor));
+        const shPointL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         shPointL.position.set(-0.07, -0.32, 0);
         shPointL.rotation.z = -0.25;
         shieldGroup.add(shPointL);
-        const shPointR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), getCachedLambert(playerColor));
+        const shPointR = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.3, 0.08), new THREE.MeshLambertMaterial({ color: playerColor }));
         shPointR.position.set(0.07, -0.32, 0);
         shPointR.rotation.z = 0.25;
         shieldGroup.add(shPointR);
         // Steel rim — top edge
-        const shTopRim = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.1), getCachedLambert(0x607d8b));
+        const shTopRim = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.1), new THREE.MeshLambertMaterial({ color: 0x607d8b }));
         shTopRim.position.set(0, 0.35, 0);
         shieldGroup.add(shTopRim);
         // Steel rim — side edges
         for (const rx of [-0.28, 0.28]) {
-          const shRim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.1), getCachedLambert(0x607d8b));
+          const shRim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.1), new THREE.MeshLambertMaterial({ color: 0x607d8b }));
           shRim.position.set(rx, 0.05, 0);
           shieldGroup.add(shRim);
         }
         // Center boss (square, raised)
-        const shBoss = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), getCachedLambert(0xffd700));
+        const shBoss = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         shBoss.position.set(0, 0.05, 0.06);
         shieldGroup.add(shBoss);
         // Boss spike
-        const shSpike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.14), getCachedLambert(0xcccccc));
+        const shSpike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.14), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
         shSpike.position.set(0, 0.05, 0.15);
         shieldGroup.add(shSpike);
         // Gold chevron emblem (upper shield)
-        const chevron1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), getCachedLambert(0xffd700));
+        const chevron1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         chevron1.position.set(0, 0.2, 0.01);
         shieldGroup.add(chevron1);
-        const chevron2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.09), getCachedLambert(0xffd700));
+        const chevron2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         chevron2.position.set(0, -0.1, 0.01);
         shieldGroup.add(chevron2);
         // Diagonal cross on lower shield
-        const diagL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), getCachedLambert(0xffd700));
+        const diagL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         diagL.position.set(-0.06, -0.08, 0.01);
         diagL.rotation.z = 0.35;
         shieldGroup.add(diagL);
-        const diagR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), getCachedLambert(0xffd700));
+        const diagR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), new THREE.MeshLambertMaterial({ color: 0xffd700 }));
         diagR.position.set(0.06, -0.08, 0.01);
         diagR.rotation.z = -0.35;
         shieldGroup.add(diagR);
@@ -2674,7 +2676,7 @@ export class UnitModels {
         group.add(makeLegGroup('leg-right', 0x546e7a, 0.15, 0));
         // Knee guards
         for (const kx of [-0.15, 0.15]) {
-          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), getCachedLambert(0x607d8b));
+          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), new THREE.MeshLambertMaterial({ color: 0x607d8b }));
           knee.position.set(kx, 0.05, 0.08);
           group.add(knee);
         }
@@ -2686,23 +2688,23 @@ export class UnitModels {
         // dual bearded axes in tilted wrapper groups with blades facing correct chopping direction.
 
         // --- Shared materials ---
-        const bkSkinMat = getCachedLambert(0xd4a574); // weathered Norse skin
-        const bkSkinShadow = getCachedLambert(0xb8895a); // muscle shadow
-        const bkChainMat = getCachedLambert(0x6d6d6d); // chainmail
-        const bkChainDark = getCachedLambert(0x555555); // chainmail shadow
-        const bkFurMat = getCachedLambert(0x4e3b2a); // wolf pelt
-        const bkFurLight = getCachedLambert(0x6d5640); // lighter fur tufts
-        const bkFurDark = getCachedLambert(0x3e2d1c); // dark fur underside
-        const bkLeatherMat = getCachedLambert(0x5d4037); // leather straps
-        const bkLeatherDark = getCachedLambert(0x3e2723); // dark leather
-        const bkIronMat = getCachedLambert(0x78909c); // dark iron
-        const bkSteelMat = getCachedLambert(0xb0bec5); // polished steel edge
-        const bkBronzeMat = getCachedLambert(0xcd7f32); // bronze fittings
-        const bkBoneMat = getCachedLambert(0xe8dcc8); // bone/skull
-        const bkPaintMat = getCachedLambert(0x1565c0); // woad blue war paint
+        const bkSkinMat = new THREE.MeshLambertMaterial({ color: 0xd4a574 }); // weathered Norse skin
+        const bkSkinShadow = new THREE.MeshLambertMaterial({ color: 0xb8895a }); // muscle shadow
+        const bkChainMat = new THREE.MeshLambertMaterial({ color: 0x6d6d6d }); // chainmail
+        const bkChainDark = new THREE.MeshLambertMaterial({ color: 0x555555 }); // chainmail shadow
+        const bkFurMat = new THREE.MeshLambertMaterial({ color: 0x4e3b2a }); // wolf pelt
+        const bkFurLight = new THREE.MeshLambertMaterial({ color: 0x6d5640 }); // lighter fur tufts
+        const bkFurDark = new THREE.MeshLambertMaterial({ color: 0x3e2d1c }); // dark fur underside
+        const bkLeatherMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // leather straps
+        const bkLeatherDark = new THREE.MeshLambertMaterial({ color: 0x3e2723 }); // dark leather
+        const bkIronMat = new THREE.MeshLambertMaterial({ color: 0x78909c }); // dark iron
+        const bkSteelMat = new THREE.MeshLambertMaterial({ color: 0xb0bec5 }); // polished steel edge
+        const bkBronzeMat = new THREE.MeshLambertMaterial({ color: 0xcd7f32 }); // bronze fittings
+        const bkBoneMat = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 }); // bone/skull
+        const bkPaintMat = new THREE.MeshLambertMaterial({ color: 0x1565c0 }); // woad blue war paint
         const bkRuneMat = new THREE.MeshBasicMaterial({ color: 0x42a5f5, transparent: true, opacity: 0.8 }); // glowing rune
-        const bkTeamMat = getCachedLambert(playerColor);
-        const bkEyeMat = getCachedBasic(0xff1744); // rage eyes
+        const bkTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const bkEyeMat = new THREE.MeshBasicMaterial({ color: 0xff1744 }); // rage eyes
 
         // ─── PASS 1: SILHOUETTE — wide muscular torso, chainmail skirt ───
         // Chainmail skirt (Viking-era byrnie bottom)
@@ -2866,7 +2868,7 @@ export class UnitModels {
           group.add(hornTip);
         }
         // Wild beard (braided, hanging below chin)
-        const bkBeardMat = getCachedLambert(0x8d6e63);
+        const bkBeardMat = new THREE.MeshLambertMaterial({ color: 0x8d6e63 });
         const bkBeard = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.10), bkBeardMat);
         bkBeard.position.set(0, 0.74, 0.18);
         group.add(bkBeard);
@@ -3060,15 +3062,15 @@ export class UnitModels {
         // Design: layered plate + enchanted robes, glowing rune channels, ornate helm.
 
         // --- Shared materials ---
-        const bmPlateMat = getCachedLambert(0x263238); // dark gunmetal plate
-        const bmPlateHighMat = getCachedLambert(0x37474f); // lighter plate accent
-        const bmRobeMat = getCachedLambert(0x1a0066); // deep indigo fabric
-        const bmRobeDeepMat = getCachedLambert(0x0d0033); // darker robe shadow
-        const bmGoldMat = getCachedLambert(0xffd700); // gold trim
+        const bmPlateMat = new THREE.MeshLambertMaterial({ color: 0x263238 }); // dark gunmetal plate
+        const bmPlateHighMat = new THREE.MeshLambertMaterial({ color: 0x37474f }); // lighter plate accent
+        const bmRobeMat = new THREE.MeshLambertMaterial({ color: 0x1a0066 }); // deep indigo fabric
+        const bmRobeDeepMat = new THREE.MeshLambertMaterial({ color: 0x0d0033 }); // darker robe shadow
+        const bmGoldMat = new THREE.MeshLambertMaterial({ color: 0xffd700 }); // gold trim
         const bmRuneMat = new THREE.MeshLambertMaterial({ color: 0x7c4dff, emissive: 0x7c4dff, emissiveIntensity: 0.7 }); // glowing arcane purple
         const bmRuneDimMat = new THREE.MeshLambertMaterial({ color: 0x4a148c, emissive: 0x4a148c, emissiveIntensity: 0.3 }); // subtle rune glow
-        const bmTeamMat = getCachedLambert(playerColor);
-        const bmSkinMat = getCachedLambert(0xffdbac);
+        const bmTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const bmSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
 
         // ─── PASS 1: SILHOUETTE — wide robed bottom, armored torso ───
         // Lower robes — flared skirt (wizard silhouette)
@@ -3144,7 +3146,7 @@ export class UnitModels {
         // Buckle rune gem (glowing center)
         const bmBuckleGem = new THREE.Mesh(
           new THREE.SphereGeometry(0.03, 6, 6),
-          getCachedBasic(0xb388ff)
+          new THREE.MeshBasicMaterial({ color: 0xb388ff })
         );
         bmBuckleGem.position.set(0, 0.30, 0.29);
         bmBuckleGem.name = 'bm-buckle-gem';
@@ -3173,10 +3175,10 @@ export class UnitModels {
         group.add(bmTabBorder);
         // Belt pouches (spell components)
         for (const bpx of [-0.22, 0.24]) {
-          const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), getCachedLambert(0x3e2723));
+          const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), new THREE.MeshLambertMaterial({ color: 0x3e2723 }));
           pouch.position.set(bpx, 0.28, 0.18);
           group.add(pouch);
-          const pouchFlap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.09), getCachedLambert(0x4e342e));
+          const pouchFlap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.09), new THREE.MeshLambertMaterial({ color: 0x4e342e }));
           pouchFlap.position.set(bpx, 0.33, 0.18);
           group.add(pouchFlap);
         }
@@ -3198,7 +3200,7 @@ export class UnitModels {
         bmVisor.position.set(0, 0.96, 0.16);
         group.add(bmVisor);
         // Glowing eye slits (arcane energy visible through visor)
-        const bmEyeGlow = getCachedBasic(0xb388ff);
+        const bmEyeGlow = new THREE.MeshBasicMaterial({ color: 0xb388ff });
         for (const ex of [-0.07, 0.07]) {
           const eyeSlit = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.03, 0.02), bmEyeGlow);
           eyeSlit.position.set(ex, 0.92, 0.17);
@@ -3218,13 +3220,13 @@ export class UnitModels {
         // Central gem on circlet (glowing arcane)
         const bmCircletGem = new THREE.Mesh(
           new THREE.SphereGeometry(0.035, 6, 6),
-          getCachedBasic(0xd500f9)
+          new THREE.MeshBasicMaterial({ color: 0xd500f9 })
         );
         bmCircletGem.position.set(0, 0.98, 0.20);
         bmCircletGem.name = 'bm-circlet-gem';
         group.add(bmCircletGem);
         // Short beard visible below helm (grizzled battlemage)
-        const bmBeard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.10, 0.08), getCachedLambert(0x616161));
+        const bmBeard = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.10, 0.08), new THREE.MeshLambertMaterial({ color: 0x616161 }));
         bmBeard.position.set(0, 0.76, 0.15);
         group.add(bmBeard);
 
@@ -3237,7 +3239,7 @@ export class UnitModels {
         bmStaffGrp.rotation.x = 0.436; // 25 degrees forward tilt
         bmArmRElbow.add(bmStaffGrp);
         // Staff shaft (dark wood, vertical)
-        const bmStaffMat = getCachedLambert(0x3e2723);
+        const bmStaffMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
         const bmStaff = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.3, 0.06), bmStaffMat);
         bmStaff.name = 'staff-shaft';
         bmStaff.position.set(0, 0.20, 0.08);
@@ -3270,7 +3272,7 @@ export class UnitModels {
           bmStaffGrp.add(crossbar);
         }
         // Staff orb — large glowing arcane sphere at top
-        const bmOrbMat = getCachedBasic(0xb388ff);
+        const bmOrbMat = new THREE.MeshBasicMaterial({ color: 0xb388ff });
         const bmOrb = new THREE.Mesh(
           new THREE.SphereGeometry(0.08, 8, 8),
           bmOrbMat
@@ -3298,7 +3300,7 @@ export class UnitModels {
         // Palm rune (small glowing disc on hand)
         const bmPalmRune = new THREE.Mesh(
           new THREE.SphereGeometry(0.04, 6, 6),
-          getCachedBasic(0xb388ff)
+          new THREE.MeshBasicMaterial({ color: 0xb388ff })
         );
         bmPalmRune.position.set(0, -0.20, 0.05);
         bmPalmRune.name = 'bm-palm-rune';
@@ -3346,7 +3348,7 @@ export class UnitModels {
         // 4 orbiting arcane motes (purple/white alternating, named for animation)
         const moteColors = [0xb388ff, 0xe0e0ff, 0xd500f9, 0xe0e0ff];
         for (let mi = 0; mi < 4; mi++) {
-          const moteMat = getCachedBasic(moteColors[mi]);
+          const moteMat = new THREE.MeshBasicMaterial({ color: moteColors[mi] });
           const mote = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), moteMat);
           const phase = (mi / 4) * Math.PI * 2;
           mote.position.set(Math.cos(phase) * 0.55, 0.60, Math.sin(phase) * 0.55);
@@ -3385,16 +3387,16 @@ export class UnitModels {
         // The heaviest melee unit. Wide, imposing silhouette. Every surface is layered plate.
 
         // --- Shared materials ---
-        const gsPlateMat = getCachedLambert(0x455a64); // blue-grey steel
-        const gsPlateHiMat = getCachedLambert(0x546e7a); // lighter accent steel
-        const gsPlateDkMat = getCachedLambert(0x37474f); // dark steel
-        const gsGoldMat = getCachedLambert(0xb8860b); // dark gold / brass
-        const gsGoldBright = getCachedLambert(0xffd700); // bright gold trim
-        const gsLeatherMat = getCachedLambert(0x3e2723); // dark leather
-        const gsTeamMat = getCachedLambert(playerColor);
-        const gsBladeMat = getCachedLambert(0xe0e0e0); // polished steel blade
-        const gsEdgeMat = getCachedLambert(0xffffff); // razor edge highlight
-        const gsBlackMat = getCachedLambert(0x1a1a1a); // visor slits
+        const gsPlateMat = new THREE.MeshLambertMaterial({ color: 0x455a64 }); // blue-grey steel
+        const gsPlateHiMat = new THREE.MeshLambertMaterial({ color: 0x546e7a }); // lighter accent steel
+        const gsPlateDkMat = new THREE.MeshLambertMaterial({ color: 0x37474f }); // dark steel
+        const gsGoldMat = new THREE.MeshLambertMaterial({ color: 0xb8860b }); // dark gold / brass
+        const gsGoldBright = new THREE.MeshLambertMaterial({ color: 0xffd700 }); // bright gold trim
+        const gsLeatherMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 }); // dark leather
+        const gsTeamMat = new THREE.MeshLambertMaterial({ color: playerColor });
+        const gsBladeMat = new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }); // polished steel blade
+        const gsEdgeMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // razor edge highlight
+        const gsBlackMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a }); // visor slits
 
         // ─── PASS 1: SILHOUETTE — wide, tall, heavy ───
         // Core torso (widest of all melee units)
@@ -3470,7 +3472,7 @@ export class UnitModels {
         // Buckle gem
         const gsBuckleGem = new THREE.Mesh(
           new THREE.SphereGeometry(0.03, 6, 6),
-          getCachedLambert(0xb71c1c) // deep red garnet
+          new THREE.MeshLambertMaterial({ color: 0xb71c1c }) // deep red garnet
         );
         gsBuckleGem.position.set(0, 0.16, 0.30);
         group.add(gsBuckleGem);
@@ -3502,7 +3504,7 @@ export class UnitModels {
           const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.08), gsLeatherMat);
           pouch.position.set(bpx, 0.14, 0.18);
           group.add(pouch);
-          const pFlap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.09), getCachedLambert(0x4e342e));
+          const pFlap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.03, 0.09), new THREE.MeshLambertMaterial({ color: 0x4e342e }));
           pFlap.position.set(bpx, 0.19, 0.18);
           group.add(pFlap);
         }
@@ -3570,7 +3572,7 @@ export class UnitModels {
         clayBlade.position.set(0, 0.48, 0.08);
         claymoreGrp.add(clayBlade);
         // Fuller groove (recessed channel down blade center)
-        const clayFuller = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.05, 0.07), getCachedLambert(0x999999));
+        const clayFuller = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.05, 0.07), new THREE.MeshLambertMaterial({ color: 0x999999 }));
         clayFuller.position.set(0, 0.55, 0.08);
         claymoreGrp.add(clayFuller);
         // Blade edges (both sides, razor bright)
@@ -3608,7 +3610,7 @@ export class UnitModels {
         claymoreGrp.add(clayGrip);
         // Grip cross-wrap bands (leather lacing)
         for (let wi = 0; wi < 3; wi++) {
-          const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.09), getCachedLambert(0x4e342e));
+          const wrap = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.02, 0.09), new THREE.MeshLambertMaterial({ color: 0x4e342e }));
           wrap.position.set(0, -0.28 + wi * 0.08, 0.08);
           wrap.rotation.y = wi * 0.3;
           claymoreGrp.add(wrap);
@@ -3620,7 +3622,7 @@ export class UnitModels {
         // Pommel gem
         const pommelGem = new THREE.Mesh(
           new THREE.SphereGeometry(0.03, 6, 6),
-          getCachedLambert(0xb71c1c)
+          new THREE.MeshLambertMaterial({ color: 0xb71c1c })
         );
         pommelGem.position.set(0, -0.50, 0.16);
         claymoreGrp.add(pommelGem);
@@ -3697,14 +3699,14 @@ export class UnitModels {
         // === AGILE RANGER/SCOUT — Hooded cloak with layered armor, studded details, throwing knives ===
 
         // --- Shared Materials ---
-        const sLeatherMat = getCachedLambert(0x5d4037); // light leather
-        const sCloakMat = getCachedLambert(playerColor); // team color cloak
-        const sStudMat = getCachedLambert(0xb8860b); // brass studs
-        const sSkinMat = getCachedLambert(0xffdbac); // skin
-        const sBootMat = getCachedLambert(0x3e2723); // dark boot
-        const sMetalMat = getCachedLambert(0x909090); // tool steel
-        const sSilverMat = getCachedLambert(0xe0e0e0); // blade silver
-        const sRibbonMat = getCachedLambert(0xd4a574); // tan wrapping
+        const sLeatherMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // light leather
+        const sCloakMat = new THREE.MeshLambertMaterial({ color: playerColor }); // team color cloak
+        const sStudMat = new THREE.MeshLambertMaterial({ color: 0xb8860b }); // brass studs
+        const sSkinMat = new THREE.MeshLambertMaterial({ color: 0xffdbac }); // skin
+        const sBootMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 }); // dark boot
+        const sMetalMat = new THREE.MeshLambertMaterial({ color: 0x909090 }); // tool steel
+        const sSilverMat = new THREE.MeshLambertMaterial({ color: 0xe0e0e0 }); // blade silver
+        const sRibbonMat = new THREE.MeshLambertMaterial({ color: 0xd4a574 }); // tan wrapping
 
         // ─── TORSO: LAYERED LIGHT LEATHER ARMOR ───
         // Core body (lean, agile frame)
@@ -3769,19 +3771,19 @@ export class UnitModels {
         group.add(scoutFace);
         // Eyes — sharp, alert (dark brown with white surround)
         for (const ex of [-0.07, 0.07]) {
-          const eyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), getCachedLambert(0xf0f0f0));
+          const eyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), new THREE.MeshLambertMaterial({ color: 0xf0f0f0 }));
           eyeWhite.position.set(ex, 0.82, 0.16);
           group.add(eyeWhite);
-          const eyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), getCachedLambert(0x2e1a0e));
+          const eyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), new THREE.MeshLambertMaterial({ color: 0x2e1a0e }));
           eyePupil.position.set(ex, 0.82, 0.165);
           group.add(eyePupil);
         }
         // Eyebrows — furrowed, serious (angled inward)
-        const sBrowL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), getCachedLambert(0x3e2723));
+        const sBrowL = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0x3e2723 }));
         sBrowL.position.set(-0.07, 0.855, 0.16);
         sBrowL.rotation.z = 0.15;
         group.add(sBrowL);
-        const sBrowR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), getCachedLambert(0x3e2723));
+        const sBrowR = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0x3e2723 }));
         sBrowR.position.set(0.07, 0.855, 0.16);
         sBrowR.rotation.z = -0.15;
         group.add(sBrowR);
@@ -3790,7 +3792,7 @@ export class UnitModels {
         sNose.position.set(0, 0.78, 0.17);
         group.add(sNose);
         // Mouth — thin determined line
-        const sMouth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), getCachedLambert(0x8d5524));
+        const sMouth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), new THREE.MeshLambertMaterial({ color: 0x8d5524 }));
         sMouth.position.set(0, 0.73, 0.16);
         group.add(sMouth);
         // Chin — slight forward jut
@@ -3807,7 +3809,7 @@ export class UnitModels {
         hoodPeak.position.set(0, 1.02, 0.0);
         group.add(hoodPeak);
         // Hood brow shadow (dark overhang above eyes)
-        const hoodBrow = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.1), getCachedLambert(0x1a1a1a));
+        const hoodBrow = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.04, 0.1), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
         hoodBrow.position.set(0, 0.88, 0.14);
         group.add(hoodBrow);
         // Hood back drape (hangs behind)
@@ -3825,15 +3827,15 @@ export class UnitModels {
         group.add(quiverBody);
 
         // Arrow shafts (3 visible, different heights)
-        const arrow1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.02), getCachedLambert(0xd4a574));
+        const arrow1 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.22, 0.02), new THREE.MeshLambertMaterial({ color: 0xd4a574 }));
         arrow1.position.set(0.14, 0.45, 0.22);
         group.add(arrow1);
 
-        const arrow2 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.18, 0.02), getCachedLambert(0xd4a574));
+        const arrow2 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.18, 0.02), new THREE.MeshLambertMaterial({ color: 0xd4a574 }));
         arrow2.position.set(0.2, 0.42, 0.24);
         group.add(arrow2);
 
-        const arrow3 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 0.02), getCachedLambert(0xd4a574));
+        const arrow3 = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.2, 0.02), new THREE.MeshLambertMaterial({ color: 0xd4a574 }));
         arrow3.position.set(0.22, 0.43, 0.2);
         group.add(arrow3);
 
@@ -3848,7 +3850,7 @@ export class UnitModels {
         scoutArmRightElbow.add(scimBlade);
 
         // Blade edge highlight (sharp gleam)
-        const scimEdge = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.01, 0.56), getCachedLambert(0xffffff));
+        const scimEdge = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.01, 0.56), new THREE.MeshLambertMaterial({ color: 0xffffff }));
         scimEdge.position.set(0, -0.165, 0.32);
         scimEdge.rotation.y = 0.2;
         scoutArmRightElbow.add(scimEdge);
@@ -3859,7 +3861,7 @@ export class UnitModels {
         scoutArmRightElbow.add(scimGuard);
 
         // Guard accent (darker shadow)
-        const guardAccent = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.08), getCachedLambert(0x8B6914));
+        const guardAccent = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.02, 0.08), new THREE.MeshLambertMaterial({ color: 0x8B6914 }));
         guardAccent.position.set(0, -0.18, 0.04);
         scoutArmRightElbow.add(guardAccent);
 
@@ -3905,7 +3907,7 @@ export class UnitModels {
         group.add(spyglass);
 
         // Spyglass lens (small glass detail)
-        const spyglassLens = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), getCachedLambert(0x87ceeb));
+        const spyglassLens = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), new THREE.MeshLambertMaterial({ color: 0x87ceeb }));
         spyglassLens.position.set(-0.18, 0.15, 0.2);
         group.add(spyglassLens);
 
@@ -3930,13 +3932,13 @@ export class UnitModels {
         // PASS 1 — SILHOUETTE (flowing robed figure)
         const innerRobe = new THREE.Mesh(
           new THREE.BoxGeometry(0.48, 0.68, 0.42),
-          getCachedLambert(0x1a237e) // dark indigo inner robe
+          new THREE.MeshLambertMaterial({ color: 0x1a237e }) // dark indigo inner robe
         );
         innerRobe.position.y = 0.32; innerRobe.castShadow = true;
         group.add(innerRobe);
         const outerRobe = new THREE.Mesh(
           new THREE.BoxGeometry(0.52, 0.68, 0.46),
-          getCachedLambert(0x1565C0) // deep blue outer robe
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 }) // deep blue outer robe
         );
         outerRobe.position.y = 0.32; outerRobe.castShadow = true;
         group.add(outerRobe);
@@ -3944,7 +3946,7 @@ export class UnitModels {
         for (const sx of [-0.32, 0.32]) {
           const sidePanel = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.65, 0.48),
-            getCachedLambert(0x0D47A1) // darker blue for sides
+            new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker blue for sides
           );
           sidePanel.position.set(sx, 0.3, 0);
           group.add(sidePanel);
@@ -3952,14 +3954,14 @@ export class UnitModels {
         // Robe hem — wider at bottom with decorative trim, slight taper
         const robeHem = new THREE.Mesh(
           new THREE.BoxGeometry(0.62, 0.18, 0.56),
-          getCachedLambert(0x0D47A1) // darker hem
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker hem
         );
         robeHem.position.y = 0.05;
         group.add(robeHem);
         // Decorative trim at hem edge
         const hemTrim = new THREE.Mesh(
           new THREE.BoxGeometry(0.65, 0.03, 0.59),
-          getCachedLambert(0xc8a832) // brass trim
+          new THREE.MeshLambertMaterial({ color: 0xc8a832 }) // brass trim
         );
         hemTrim.position.y = 0.15;
         group.add(hemTrim);
@@ -3967,7 +3969,7 @@ export class UnitModels {
         // Leather chest harness
         const chestHarness = new THREE.Mesh(
           new THREE.BoxGeometry(0.48, 0.5, 0.38),
-          getCachedLambert(0x4e342e) // dark brown leather
+          new THREE.MeshLambertMaterial({ color: 0x4e342e }) // dark brown leather
         );
         chestHarness.position.y = 0.45;
         group.add(chestHarness);
@@ -3975,7 +3977,7 @@ export class UnitModels {
         for (let bi = 0; bi < 3; bi++) {
           const buckle = new THREE.Mesh(
             new THREE.BoxGeometry(0.06, 0.06, 0.02),
-            getCachedLambert(0xc8a832)
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
           );
           buckle.position.set(0, 0.65 - bi * 0.12, 0.21);
           group.add(buckle);
@@ -3983,13 +3985,13 @@ export class UnitModels {
         // Ornate belt with gold buckle
         const belt = new THREE.Mesh(
           new THREE.BoxGeometry(0.54, 0.08, 0.48),
-          getCachedLambert(0x4e342e) // dark brown belt
+          new THREE.MeshLambertMaterial({ color: 0x4e342e }) // dark brown belt
         );
         belt.position.y = 0.28;
         group.add(belt);
         const beltBuckle = new THREE.Mesh(
           new THREE.BoxGeometry(0.1, 0.08, 0.02),
-          getCachedLambert(0xFFD700) // gold buckle
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 }) // gold buckle
         );
         beltBuckle.position.set(0, 0.28, 0.25);
         group.add(beltBuckle);
@@ -3997,13 +3999,13 @@ export class UnitModels {
         for (const px of [-0.15, 0.15]) {
           const pouch = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.12, 0.08),
-            getCachedLambert(0x4e342e)
+            new THREE.MeshLambertMaterial({ color: 0x4e342e })
           );
           pouch.position.set(px, 0.18, 0.2);
           group.add(pouch);
           const pouchAccent = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.03, 0.08),
-            getCachedLambert(0xc8a832)
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
           );
           pouchAccent.position.set(px, 0.25, 0.2);
           group.add(pouchAccent);
@@ -4011,20 +4013,20 @@ export class UnitModels {
         // Decorative sash across chest in team color
         const sash = new THREE.Mesh(
           new THREE.BoxGeometry(0.52, 0.08, 0.47),
-          getCachedLambert(playerColor)
+          new THREE.MeshLambertMaterial({ color: playerColor })
         );
         sash.position.y = 0.5;
         group.add(sash);
         // Layered collar/cowl around neck area
         const collar = new THREE.Mesh(
           new THREE.BoxGeometry(0.4, 0.12, 0.38),
-          getCachedLambert(0x0D47A1) // darker shade
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // darker shade
         );
         collar.position.y = 0.7;
         group.add(collar);
         const innerCollar = new THREE.Mesh(
           new THREE.BoxGeometry(0.35, 0.08, 0.33),
-          getCachedLambert(0x1565C0)
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
         );
         innerCollar.position.y = 0.68;
         group.add(innerCollar);
@@ -4032,7 +4034,7 @@ export class UnitModels {
         for (const cx of [-0.27, 0.27]) {
           const cuff = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.68, 0.02),
-            getCachedLambert(0xFFD700)
+            new THREE.MeshLambertMaterial({ color: 0xFFD700 })
           );
           cuff.position.set(cx, 0.32, 0.24);
           group.add(cuff);
@@ -4040,7 +4042,7 @@ export class UnitModels {
         // PASS 3 — HEAD (mysterious wizard)
         const mageHead = new THREE.Mesh(
           new THREE.BoxGeometry(0.3, 0.3, 0.3),
-          getCachedLambert(0xffdbac) // skin tone
+          new THREE.MeshLambertMaterial({ color: 0xffdbac }) // skin tone
         );
         mageHead.position.y = 0.82;
         group.add(mageHead);
@@ -4048,7 +4050,7 @@ export class UnitModels {
         for (const ex of [-0.08, 0.08]) {
           const eye = new THREE.Mesh(
             new THREE.BoxGeometry(0.04, 0.04, 0.02),
-            getCachedLambert(0x000000)
+            new THREE.MeshLambertMaterial({ color: 0x000000 })
           );
           eye.position.set(ex, 0.88, 0.16);
           group.add(eye);
@@ -4056,35 +4058,35 @@ export class UnitModels {
         // Short beard — pointed goatee
         const goatee = new THREE.Mesh(
           new THREE.BoxGeometry(0.08, 0.12, 0.06),
-          getCachedLambert(0x5d4037) // beard brown
+          new THREE.MeshLambertMaterial({ color: 0x5d4037 }) // beard brown
         );
         goatee.position.set(0, 0.72, 0.18);
         group.add(goatee);
         // ELABORATE WIZARD HAT — tall, dramatic, with bends/tilts
         const hatBrim = new THREE.Mesh(
           new THREE.BoxGeometry(0.54, 0.05, 0.54),
-          getCachedLambert(0x0D47A1) // dark blue brim
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // dark blue brim
         );
         hatBrim.position.y = 0.98;
         group.add(hatBrim);
         // Wide cone base
         const hatConeLower = new THREE.Mesh(
           new THREE.BoxGeometry(0.32, 0.25, 0.32),
-          getCachedLambert(0x1565C0)
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
         );
         hatConeLower.position.y = 1.18;
         group.add(hatConeLower);
         // Tall cone upper section
         const hatConeUpper = new THREE.Mesh(
           new THREE.BoxGeometry(0.22, 0.35, 0.22),
-          getCachedLambert(0x1565C0)
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
         );
         hatConeUpper.position.y = 1.48;
         group.add(hatConeUpper);
         // Drooping tip (bends/tilts slightly)
         const hatTip = new THREE.Mesh(
           new THREE.BoxGeometry(0.14, 0.18, 0.14),
-          getCachedLambert(0x0D47A1)
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
         );
         hatTip.position.set(0.08, 1.72, 0.06);
         hatTip.rotation.z = 0.3; // slight tilt
@@ -4092,14 +4094,14 @@ export class UnitModels {
         // Gold band around hat base
         const hatBand = new THREE.Mesh(
           new THREE.BoxGeometry(0.54, 0.04, 0.54),
-          getCachedLambert(0xFFD700)
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
         );
         hatBand.position.y = 1.02;
         group.add(hatBand);
         // Small star/rune on front of hat
         const hatRune = new THREE.Mesh(
           new THREE.BoxGeometry(0.1, 0.1, 0.03),
-          getCachedBasic(0xFFD700)
+          new THREE.MeshBasicMaterial({ color: 0xFFD700 })
         );
         hatRune.position.set(0, 1.2, 0.17);
         group.add(hatRune);
@@ -4107,7 +4109,7 @@ export class UnitModels {
         // Tall staff with twisted/gnarled appearance
         const staffShaft = new THREE.Mesh(
           new THREE.BoxGeometry(0.06, 1.0, 0.06),
-          getCachedLambert(0x4a2e1a) // dark wood
+          new THREE.MeshLambertMaterial({ color: 0x4a2e1a }) // dark wood
         );
         staffShaft.name = 'staff-shaft';
         staffShaft.position.set(0, 0.1, 0);
@@ -4116,7 +4118,7 @@ export class UnitModels {
         for (let gi = 0; gi < 5; gi++) {
           const gnarl = new THREE.Mesh(
             new THREE.BoxGeometry(0.09, 0.08, 0.09),
-            getCachedLambert(0x3e2723) // darker wood
+            new THREE.MeshLambertMaterial({ color: 0x3e2723 }) // darker wood
           );
           gnarl.position.y = 0.15 + gi * 0.18;
           staffShaft.add(gnarl);
@@ -4125,7 +4127,7 @@ export class UnitModels {
         for (let bi = 0; bi < 4; bi++) {
           const band = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.05, 0.08),
-            getCachedLambert(0xc8a832)
+            new THREE.MeshLambertMaterial({ color: 0xc8a832 })
           );
           band.position.y = 0.2 + bi * 0.25;
           staffShaft.add(band);
@@ -4134,7 +4136,7 @@ export class UnitModels {
         for (let ri = 1; ri < 5; ri++) {
           const rune = new THREE.Mesh(
             new THREE.BoxGeometry(0.03, 0.03, 0.02),
-            getCachedBasic(0xFFD700)
+            new THREE.MeshBasicMaterial({ color: 0xFFD700 })
           );
           rune.position.set(0.04, 0.2 + ri * 0.2, 0.04);
           staffShaft.add(rune);
@@ -4150,7 +4152,7 @@ export class UnitModels {
         for (let pi = 0; pi < 4; pi++) {
           const prong = new THREE.Mesh(
             new THREE.BoxGeometry(0.03, 0.18, 0.03),
-            getCachedLambert(0xFFD700)
+            new THREE.MeshLambertMaterial({ color: 0xFFD700 })
           );
           const pAngle = (pi / 4) * Math.PI * 2;
           prong.position.set(Math.cos(pAngle) * 0.08, 0.55, Math.sin(pAngle) * 0.08);
@@ -4192,39 +4194,39 @@ export class UnitModels {
         // Arcane bracelet/cuff on forearm (gold)
         const forearmCuff = new THREE.Mesh(
           new THREE.BoxGeometry(0.12, 0.06, 0.1),
-          getCachedLambert(0xFFD700)
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 })
         );
         forearmCuff.position.set(-0.32, 0.4, 0);
         group.add(forearmCuff);
         // PASS 6 — BACK DETAIL (cape/cloak)
         const capeLayer1 = new THREE.Mesh(
           new THREE.BoxGeometry(0.4, 0.65, 0.08),
-          getCachedLambert(0x0D47A1) // dark blue
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 }) // dark blue
         );
         capeLayer1.position.set(0, 0.4, -0.28);
         group.add(capeLayer1);
         const capeLayer2 = new THREE.Mesh(
           new THREE.BoxGeometry(0.4, 0.65, 0.06),
-          getCachedLambert(0x1565C0)
+          new THREE.MeshLambertMaterial({ color: 0x1565C0 })
         );
         capeLayer2.position.set(0, 0.4, -0.34);
         group.add(capeLayer2);
         const capeLayer3 = new THREE.Mesh(
           new THREE.BoxGeometry(0.4, 0.65, 0.05),
-          getCachedLambert(0x0D47A1)
+          new THREE.MeshLambertMaterial({ color: 0x0D47A1 })
         );
         capeLayer3.position.set(0, 0.4, -0.39);
         group.add(capeLayer3);
         // Small scroll/tome strapped to back (brown)
         const backTome = new THREE.Mesh(
           new THREE.BoxGeometry(0.12, 0.16, 0.04),
-          getCachedLambert(0x5d4037) // brown
+          new THREE.MeshLambertMaterial({ color: 0x5d4037 }) // brown
         );
         backTome.position.set(0, 0.45, -0.27);
         group.add(backTome);
         const tomeAccent = new THREE.Mesh(
           new THREE.BoxGeometry(0.12, 0.14, 0.02),
-          getCachedLambert(0xFFD700) // gold clasp
+          new THREE.MeshLambertMaterial({ color: 0xFFD700 }) // gold clasp
         );
         tomeAccent.position.set(0, 0.45, -0.29);
         group.add(tomeAccent);
@@ -4235,13 +4237,13 @@ export class UnitModels {
       }
       case UnitType.OGRE: {
         // ═══ OGRE — Fearsome brute with tribal decorations ═══
-        const ogreSkin = getCachedLambert(0x6d4c41);
-        const ogreBone = getCachedLambert(0xd7ccc8);
-        const ogreArmor = getCachedLambert(0x4e342e);
-        const ogreTeam = getCachedLambert(playerColor);
-        const ogreWood = getCachedLambert(0x5d4037);
-        const ogreMetal = getCachedLambert(0x616161);
-        const ogreTattoo = getCachedLambert(playerColor);
+        const ogreSkin = new THREE.MeshLambertMaterial({ color: 0x6d4c41 });
+        const ogreBone = new THREE.MeshLambertMaterial({ color: 0xd7ccc8 });
+        const ogreArmor = new THREE.MeshLambertMaterial({ color: 0x4e342e });
+        const ogreTeam = new THREE.MeshLambertMaterial({ color: playerColor });
+        const ogreWood = new THREE.MeshLambertMaterial({ color: 0x5d4037 });
+        const ogreMetal = new THREE.MeshLambertMaterial({ color: 0x616161 });
+        const ogreTattoo = new THREE.MeshLambertMaterial({ color: playerColor });
 
         // --- Core body with scarred skin texture ---
         const oBody = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.75, 0.55), ogreSkin);
@@ -4251,7 +4253,7 @@ export class UnitModels {
 
         // Scarred skin detail (offset color strips for texture)
         for (let si = 0; si < 3; si++) {
-          const scar = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.56), getCachedLambert(0x5a3f36));
+          const scar = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.56), new THREE.MeshLambertMaterial({ color: 0x5a3f36 }));
           scar.position.y = 0.55 - si * 0.20;
           group.add(scar);
         }
@@ -4311,12 +4313,12 @@ export class UnitModels {
         browRidge.position.set(0, 1.04, 0.15);
         group.add(browRidge);
         // Scarred face detail
-        const faceScars = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.34), getCachedLambert(0x5a3f36));
+        const faceScars = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.06, 0.34), new THREE.MeshLambertMaterial({ color: 0x5a3f36 }));
         faceScars.position.set(0, 0.95, 0);
         group.add(faceScars);
 
         // ─── EYE SOCKETS (deep recesses) ───
-        const socketMat = getCachedLambert(0x3e2215);
+        const socketMat = new THREE.MeshLambertMaterial({ color: 0x3e2215 });
         const oSocketL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.04), socketMat);
         oSocketL.position.set(-0.09, 0.98, 0.17);
         group.add(oSocketL);
@@ -4325,7 +4327,7 @@ export class UnitModels {
         group.add(oSocketR);
 
         // ─── EYES (orange glow with dark pupils) ───
-        const oEyeMat = getCachedLambert(0xff6f00);
+        const oEyeMat = new THREE.MeshLambertMaterial({ color: 0xff6f00 });
         const oEyeL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.04), oEyeMat);
         oEyeL.position.set(-0.09, 0.98, 0.19);
         group.add(oEyeL);
@@ -4333,7 +4335,7 @@ export class UnitModels {
         oEyeR.position.set(0.09, 0.98, 0.19);
         group.add(oEyeR);
         // Pupils (dark slits)
-        const pupilMat = getCachedLambert(0x1a0800);
+        const pupilMat = new THREE.MeshLambertMaterial({ color: 0x1a0800 });
         const oPupilL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.02), pupilMat);
         oPupilL.position.set(-0.09, 0.98, 0.215);
         group.add(oPupilL);
@@ -4341,7 +4343,7 @@ export class UnitModels {
         oPupilR.position.set(0.09, 0.98, 0.215);
         group.add(oPupilR);
         // Angry eyebrows (thick, angled sharply inward)
-        const browMat = getCachedLambert(0x2e1a0e);
+        const browMat = new THREE.MeshLambertMaterial({ color: 0x2e1a0e });
         const oBrowL = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.03, 0.04), browMat);
         oBrowL.position.set(-0.09, 1.03, 0.19);
         oBrowL.rotation.z = -0.25;
@@ -4356,7 +4358,7 @@ export class UnitModels {
         oNose.position.set(0, 0.92, 0.20);
         group.add(oNose);
         // Nostrils (dark recesses)
-        const nostrilMat = getCachedLambert(0x3e2215);
+        const nostrilMat = new THREE.MeshLambertMaterial({ color: 0x3e2215 });
         const nostrilL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.03), nostrilMat);
         nostrilL.position.set(-0.03, 0.90, 0.24);
         group.add(nostrilL);
@@ -4369,13 +4371,13 @@ export class UnitModels {
         oJaw.position.set(0, 0.81, 0.06);
         group.add(oJaw);
         // Lower lip / gum line (darker flesh showing teeth)
-        const gumMat = getCachedLambert(0x8b3a3a);
+        const gumMat = new THREE.MeshLambertMaterial({ color: 0x8b3a3a });
         const gumLine = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.04, 0.06), gumMat);
         gumLine.position.set(0, 0.84, 0.20);
         group.add(gumLine);
 
         // ─── TEETH (snarling row of jagged teeth) ───
-        const toothMat = getCachedLambert(0xe8dcc8);
+        const toothMat = new THREE.MeshLambertMaterial({ color: 0xe8dcc8 });
         // Upper teeth (hanging down from upper jaw)
         for (let ti = -2; ti <= 2; ti++) {
           const uTooth = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.04, 0.03), toothMat);
@@ -4449,7 +4451,7 @@ export class UnitModels {
         }
 
         // Hair with bones and feathers woven in
-        const hairBase = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.40), getCachedLambert(0x3e2723));
+        const hairBase = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.40), new THREE.MeshLambertMaterial({ color: 0x3e2723 }));
         hairBase.position.y = 1.18;
         group.add(hairBase);
         // Bone ornaments in hair
@@ -4537,7 +4539,7 @@ export class UnitModels {
 
         // Embedded stones in club head
         for (let si = 0; si < 3; si++) {
-          const stone = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), getCachedLambert(0x757575));
+          const stone = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 6), new THREE.MeshLambertMaterial({ color: 0x757575 }));
           stone.position.set(-0.08 + si * 0.08, -0.62, 0);
           clubGrp.add(stone);
         }
@@ -4648,7 +4650,7 @@ export class UnitModels {
         }
 
         // Fur pelt draped over one shoulder
-        const furPelt = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.25, 0.08), getCachedLambert(0x3e2723));
+        const furPelt = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.25, 0.08), new THREE.MeshLambertMaterial({ color: 0x3e2723 }));
         furPelt.position.set(-0.28, 0.68, -0.25);
         furPelt.rotation.z = 0.3;
         group.add(furPelt);
@@ -4683,7 +4685,7 @@ export class UnitModels {
         // Generic unit: simple body + head + limbs + team color shoulder marks
         const unitColor = UNIT_COLORS[type] || 0xffffff;
         const bodyGeo = new THREE.BoxGeometry(0.5, 0.6, 0.5);
-        const bodyMat = getCachedLambert(unitColor);
+        const bodyMat = new THREE.MeshLambertMaterial({ color: unitColor });
         const body = new THREE.Mesh(bodyGeo, bodyMat);
         body.position.y = 0.3;
         body.castShadow = true;
@@ -4691,14 +4693,14 @@ export class UnitModels {
 
         for (const sx of [-0.27, 0.27]) {
           const markGeo = new THREE.BoxGeometry(0.12, 0.08, 0.2);
-          const markMat = getCachedLambert(playerColor);
+          const markMat = new THREE.MeshLambertMaterial({ color: playerColor });
           const mark = new THREE.Mesh(markGeo, markMat);
           mark.position.set(sx, 0.58, 0);
           group.add(mark);
         }
 
         const headGeo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
-        const headMat = getCachedLambert(0xffdbac);
+        const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
         const head = new THREE.Mesh(headGeo, headMat);
         head.position.y = 0.8;
         group.add(head);

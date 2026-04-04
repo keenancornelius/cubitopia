@@ -28,6 +28,10 @@
 import { Unit, UnitType, ElementType } from '../../types';
 import { GAME_CONFIG } from '../GameConfig';
 import { GameRNG } from '../SeededRandom';
+import { UnitAI } from './UnitAI';
+
+/** Convert seconds to deterministic game frames (~60fps). */
+const secToFrames = (s: number) => Math.round(s * 60);
 
 export interface StatusEvent {
   type: 'status:applied' | 'status:consumed' | 'status:tick' | 'status:interaction';
@@ -52,19 +56,19 @@ export class StatusEffectSystem {
   static applyMageElement(
     attacker: Unit, target: Unit, element: ElementType, allUnits: Unit[]
   ): StatusEvent[] {
-    const now = performance.now();
+    const gf = UnitAI.gameFrame;
     const events: StatusEvent[] = [];
     const cfg = GAME_CONFIG.combat.statusEffects;
 
     // If target has Cleanse Linger (immunity), skip all status applications
-    if (target._cleanseLinger && now < target._cleanseLinger) {
+    if (target._cleanseLinger && gf < target._cleanseLinger) {
       return events; // immune — no status applied
     }
 
     switch (element) {
       case ElementType.WATER: {
         // Check anti-synergy first: Water + Ablaze → Soothe
-        if (target._statusAblaze && now < target._statusAblaze) {
+        if (target._statusAblaze && gf < target._statusAblaze) {
           // Consume Ablaze, heal the target
           target._statusAblaze = 0;
           target._ablazeDPS = 0;
@@ -74,7 +78,7 @@ export class StatusEffectSystem {
           events.push({ type: 'status:interaction', unitId: target.id, effect: 'soothe', heal });
         } else {
           // Apply Wet
-          target._statusWet = now + cfg.wet.duration * 1000;
+          target._statusWet = gf + secToFrames(cfg.wet.duration);
           events.push({ type: 'status:applied', unitId: target.id, effect: 'wet' });
         }
         break;
@@ -82,7 +86,7 @@ export class StatusEffectSystem {
 
       case ElementType.FIRE: {
         // Apply Ablaze (burn tick)
-        target._statusAblaze = now + cfg.ablaze.duration * 1000;
+        target._statusAblaze = gf + secToFrames(cfg.ablaze.duration);
         target._ablazeDPS = cfg.ablaze.dps;
         target._ablazeSource = attacker.id;
         events.push({ type: 'status:applied', unitId: target.id, effect: 'ablaze' });
@@ -91,7 +95,7 @@ export class StatusEffectSystem {
 
       case ElementType.LIGHTNING: {
         // Check interaction: Arcane + Lightning → Kamehameha laser beam
-        if (target._statusArcane && now < target._statusArcane) {
+        if (target._statusArcane && gf < target._statusArcane) {
           target._statusArcane = 0;
           events.push({ type: 'status:consumed', unitId: target.id, effect: 'arcane' });
 
@@ -135,7 +139,7 @@ export class StatusEffectSystem {
           });
         }
         // Check interaction: Wet + Lightning → Electrocute Crit
-        else if (target._statusWet && now < target._statusWet) {
+        else if (target._statusWet && gf < target._statusWet) {
           // Consume Wet status
           target._statusWet = 0;
           events.push({ type: 'status:consumed', unitId: target.id, effect: 'wet' });
@@ -171,7 +175,7 @@ export class StatusEffectSystem {
 
       case ElementType.WIND: {
         // Check interaction: Ablaze + Wind → Inferno
-        if (target._statusAblaze && now < target._statusAblaze) {
+        if (target._statusAblaze && gf < target._statusAblaze) {
           // Consume Ablaze
           target._statusAblaze = 0;
           target._ablazeDPS = 0;
@@ -194,7 +198,7 @@ export class StatusEffectSystem {
             if (dist > infCfg.spreadRadius) break;
             if (spreadTo.length >= infCfg.spreadCount) break;
             // Spread Ablaze to nearby enemies
-            unit._statusAblaze = now + cfg.ablaze.duration * 1000;
+            unit._statusAblaze = gf + secToFrames(cfg.ablaze.duration);
             unit._ablazeDPS = cfg.ablaze.dps;
             unit._ablazeSource = attacker.id;
             spreadTo.push(unit.id);
@@ -224,7 +228,7 @@ export class StatusEffectSystem {
   static applyBattlemageElement(
     attacker: Unit, target: Unit, element: ElementType
   ): StatusEvent[] {
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     const events: StatusEvent[] = [];
     const cfg = GAME_CONFIG.combat.statusEffects;
 
@@ -236,31 +240,31 @@ export class StatusEffectSystem {
     switch (element) {
       case ElementType.WATER:
         // Battlemage Water AoE → Wet (same status as Mage, sets up Electrocute)
-        target._statusWet = now + cfg.wet.duration * 1000;
+        target._statusWet = now + secToFrames(cfg.wet.duration);
         events.push({ type: 'status:applied', unitId: target.id, effect: 'wet' });
         break;
 
       case ElementType.WIND:
         // Battlemage Wind AoE → Knockup CC (brief airborne, can't act)
-        target._knockupUntil = now + cfg.knockup.duration * 1000;
+        target._knockupUntil = now + secToFrames(cfg.knockup.duration);
         events.push({ type: 'status:applied', unitId: target.id, effect: 'knockup' });
         break;
 
       case ElementType.LIGHTNING:
         // Battlemage Lightning AoE → High Voltage (consumed by Electrocute chains for arc cascade + stun)
-        target._statusHighVoltage = now + cfg.highVoltage.duration * 1000;
+        target._statusHighVoltage = now + secToFrames(cfg.highVoltage.duration);
         events.push({ type: 'status:applied', unitId: target.id, effect: 'high_voltage' });
         break;
 
       case ElementType.EARTH:
         // Battlemage Earth AoE → Arcane (more chances to set up Kamehameha)
-        target._statusArcane = now + cfg.arcane.duration * 1000;
+        target._statusArcane = now + secToFrames(cfg.arcane.duration);
         events.push({ type: 'status:applied', unitId: target.id, effect: 'arcane' });
         break;
 
       case ElementType.FIRE:
         // Battlemage Fire AoE → Ablaze (same burn as Mage, benefits from same interactions)
-        target._statusAblaze = now + cfg.ablaze.duration * 1000;
+        target._statusAblaze = now + secToFrames(cfg.ablaze.duration);
         target._ablazeDPS = cfg.ablaze.dps;
         target._ablazeSource = attacker.id;
         events.push({ type: 'status:applied', unitId: target.id, effect: 'ablaze' });
@@ -279,7 +283,7 @@ export class StatusEffectSystem {
     healer: Unit, allUnits: Unit[], delta: number
   ): StatusEvent[] {
     if (healer.type !== UnitType.HEALER || healer.currentHealth <= 0) return [];
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     const cfg = GAME_CONFIG.combat.statusEffects.cleanse;
 
     // Cooldown
@@ -315,7 +319,7 @@ export class StatusEffectSystem {
     if (!bestTarget || bestDebuffCount === 0) return [];
 
     // Set cooldown
-    healer._cleanseCooldown = now + cfg.cooldown * 1000;
+    healer._cleanseCooldown = now + secToFrames(cfg.cooldown);
 
     // Clear all debuffs
     bestTarget._statusWet = 0;
@@ -329,11 +333,11 @@ export class StatusEffectSystem {
     bestTarget._slowFactor = undefined;
 
     // Apply speed boost
-    bestTarget._speedBoostUntil = now + cfg.speedBoostDuration * 1000;
+    bestTarget._speedBoostUntil = now + secToFrames(cfg.speedBoostDuration);
     bestTarget._speedBoostFactor = cfg.speedBoostFactor;
 
     // Apply Cleanse Linger — immunity to status effects
-    bestTarget._cleanseLinger = now + cfg.lingerDuration * 1000;
+    bestTarget._cleanseLinger = now + secToFrames(cfg.lingerDuration);
 
     return [{
       type: 'status:interaction', unitId: bestTarget.id, effect: 'cleanse',
@@ -346,7 +350,7 @@ export class StatusEffectSystem {
    * Called once per frame from UnitAI.update().
    */
   static tickStatusEffects(allUnits: Unit[], delta: number): StatusEvent[] {
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     const events: StatusEvent[] = [];
 
     for (const unit of allUnits) {
@@ -409,7 +413,7 @@ export class StatusEffectSystem {
    * Check if a unit is currently knocked up (airborne CC) and should skip its turn.
    */
   static isKnockedUp(unit: Unit): boolean {
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     return !!(unit._knockupUntil && now < unit._knockupUntil);
   }
 
@@ -417,7 +421,7 @@ export class StatusEffectSystem {
    * Get the effective speed multiplier for a unit (speed boost from cleanse).
    */
   static getSpeedMultiplier(unit: Unit): number {
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     if (unit._speedBoostUntil && now < unit._speedBoostUntil && unit._speedBoostFactor) {
       return unit._speedBoostFactor;
     }
@@ -428,7 +432,7 @@ export class StatusEffectSystem {
    * Check if a unit has any active status effect (for VFX rendering).
    */
   static getActiveStatuses(unit: Unit): string[] {
-    const now = performance.now();
+    const now = UnitAI.gameFrame;
     const active: string[] = [];
     if (unit._statusWet && now < unit._statusWet) active.push('wet');
     if (unit._statusAblaze && now < unit._statusAblaze) active.push('ablaze');

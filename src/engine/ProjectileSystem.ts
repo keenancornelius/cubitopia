@@ -30,6 +30,15 @@ export class ProjectileSystem {
     return this.getUnitMeshesRef();
   }
 
+  // ─── Cannon turret tracking ───
+  // Map<buildingKey, { turretGroup, barrelPivot, targetPos }>
+  private cannonTurrets = new Map<string, {
+    turretGroup: THREE.Group;
+    barrelPivot: THREE.Group;
+    targetPos: THREE.Vector3 | null;
+    lastFireTime: number;
+  }>();
+
   // Active trail emitters (attached to projectiles)
   private trailParticles: Array<{
     mesh: THREE.Mesh;
@@ -109,6 +118,274 @@ export class ProjectileSystem {
     const startPos = new THREE.Vector3(fromPos.x, fromPos.y + 0.5, fromPos.z);
     const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.5, toPos.z);
     this.projectiles.push({ mesh: group as any, startPos, endPos, startTime: performance.now() / 1000, duration: 0.5, targetUnitId, onImpact });
+  }
+
+  /**
+   * Fire a volley of arrows from a garrisoned building.
+   * Spawns N arrows with slight random spread to simulate multiple archers.
+   * @param fromPos  Building world position (arrows originate from roof)
+   * @param toPos    Target world position
+   * @param count    Number of arrows in the volley (scales with garrisoned units)
+   * @param onImpact Optional callback fired when the FIRST arrow lands
+   */
+  fireArrowVolley(
+    fromPos: { x: number; y: number; z: number },
+    toPos: { x: number; y: number; z: number },
+    count: number,
+    onImpact?: () => void,
+  ): void {
+    const clampedCount = Math.min(Math.max(count, 1), 8);
+    for (let i = 0; i < clampedCount; i++) {
+      // Stagger launch: 0-80ms random delay per arrow
+      const delay = i * (30 + Math.random() * 50);
+
+      setTimeout(() => {
+        const group = new THREE.Group();
+
+        // Shaft (slightly thinner than single arrow for visual density)
+        const shaft = new THREE.Mesh(
+          new THREE.BoxGeometry(0.025, 0.025, 0.30),
+          new THREE.MeshLambertMaterial({ color: 0x8B4513 })
+        );
+        group.add(shaft);
+
+        // Arrowhead
+        const head = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.05, 0.07),
+          new THREE.MeshLambertMaterial({ color: 0x555555 })
+        );
+        head.position.z = 0.17;
+        group.add(head);
+
+        // Fletching (2 fins for volley arrows — lighter geometry)
+        for (let f = 0; f < 2; f++) {
+          const fin = new THREE.Mesh(
+            new THREE.BoxGeometry(0.05, 0.01, 0.05),
+            new THREE.MeshBasicMaterial({ color: 0xFF8800, transparent: true, opacity: 0.85 })
+          );
+          fin.position.z = -0.13;
+          fin.rotation.z = (f / 2) * Math.PI;
+          group.add(fin);
+        }
+
+        // Random spread: arrows fan out slightly from the building
+        const spreadX = (Math.random() - 0.5) * 0.6;
+        const spreadZ = (Math.random() - 0.5) * 0.6;
+        const spreadY = Math.random() * 0.3;
+
+        const ox = fromPos.x + spreadX * 0.3; // slight origin jitter
+        const oy = fromPos.y + 0.3 + spreadY * 0.2;
+        const oz = fromPos.z + spreadZ * 0.3;
+
+        group.position.set(ox, oy, oz);
+        this.scene.add(group);
+
+        const startPos = new THREE.Vector3(ox, oy, oz);
+        const endPos = new THREE.Vector3(
+          toPos.x + spreadX,
+          toPos.y + 0.5,
+          toPos.z + spreadZ,
+        );
+
+        // Higher arc for volley (raining down on target area)
+        const dist = startPos.distanceTo(endPos);
+        const arcHeight = 1.5 + dist * 0.3;
+        const duration = 0.4 + dist * 0.06; // slightly variable flight time
+
+        this.projectiles.push({
+          mesh: group as any,
+          startPos,
+          endPos,
+          startTime: performance.now() / 1000,
+          duration,
+          arcHeight,
+          targetUnitId: undefined,
+          onImpact: i === 0 ? onImpact : undefined, // only first arrow triggers callback
+        });
+      }, delay);
+    }
+  }
+
+  /**
+   * Fire a cannonball from a gate/tower turret.
+   * Heavy projectile with smoke trail + ground impact explosion VFX.
+   */
+  fireCannonball(
+    fromPos: { x: number; y: number; z: number },
+    toPos: { x: number; y: number; z: number },
+    onImpact?: () => void,
+  ): void {
+    // ── Cannonball mesh ──
+    const ball = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 0.18, 0.18),
+      new THREE.MeshLambertMaterial({ color: 0x222222 })
+    );
+    ball.position.set(fromPos.x, fromPos.y, fromPos.z);
+    this.scene.add(ball);
+
+    // Muzzle flash at origin
+    const flash = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.5, 0.5),
+      new THREE.MeshBasicMaterial({ color: 0xFFDD44, transparent: true, opacity: 0.9 })
+    );
+    flash.position.set(fromPos.x, fromPos.y, fromPos.z);
+    this.scene.add(flash);
+
+    // Flash fades quickly
+    const flashStart = performance.now() / 1000;
+    const flashDuration = 0.15;
+    this.trailParticles.push({
+      mesh: flash,
+      velocity: { x: 0, y: 0.5, z: 0 },
+      startTime: flashStart,
+      duration: flashDuration,
+    });
+
+    // Smoke puff at muzzle (3 grey particles)
+    for (let i = 0; i < 3; i++) {
+      const smoke = this.getPooledParticle(0x999999, 0.6);
+      smoke.position.set(
+        fromPos.x + (Math.random() - 0.5) * 0.3,
+        fromPos.y + Math.random() * 0.2,
+        fromPos.z + (Math.random() - 0.5) * 0.3,
+      );
+      smoke.scale.set(1.5, 1.5, 1.5);
+      this.scene.add(smoke);
+      this.trailParticles.push({
+        mesh: smoke,
+        velocity: { x: (Math.random() - 0.5) * 0.5, y: 0.8 + Math.random() * 0.5, z: (Math.random() - 0.5) * 0.5 },
+        startTime: performance.now() / 1000,
+        duration: 0.5 + Math.random() * 0.3,
+      });
+    }
+
+    const startPos = new THREE.Vector3(fromPos.x, fromPos.y, fromPos.z);
+    const endPos = new THREE.Vector3(toPos.x, toPos.y + 0.3, toPos.z);
+    const dist = startPos.distanceTo(endPos);
+    const duration = 0.35 + dist * 0.04; // cannonballs are fast
+
+    // Smoke trail spawner — spawn grey puffs along the flight path
+    const trailInterval = setInterval(() => {
+      if (!ball.parent) { clearInterval(trailInterval); return; }
+      const trail = this.getPooledParticle(0x888888, 0.4);
+      trail.position.copy(ball.position);
+      trail.scale.set(0.8, 0.8, 0.8);
+      this.scene.add(trail);
+      this.trailParticles.push({
+        mesh: trail,
+        velocity: { x: (Math.random() - 0.5) * 0.2, y: 0.3 + Math.random() * 0.3, z: (Math.random() - 0.5) * 0.2 },
+        startTime: performance.now() / 1000,
+        duration: 0.4 + Math.random() * 0.2,
+      });
+    }, 40);
+
+    // Wrap onImpact to add explosion VFX
+    const wrappedImpact = () => {
+      clearInterval(trailInterval);
+      if (onImpact) onImpact();
+      this.spawnCannonImpact(toPos);
+    };
+
+    this.projectiles.push({
+      mesh: ball,
+      startPos,
+      endPos,
+      startTime: performance.now() / 1000,
+      duration,
+      arcHeight: 0.8 + dist * 0.15, // moderate arc
+      onImpact: wrappedImpact,
+    });
+  }
+
+  /**
+   * Spawn cannon impact explosion — ground burst + debris + shockwave ring.
+   */
+  private spawnCannonImpact(pos: { x: number; y: number; z: number }): void {
+    const now = performance.now() / 1000;
+
+    // Central flash (orange-yellow)
+    const flash = new THREE.Mesh(
+      new THREE.BoxGeometry(0.6, 0.6, 0.6),
+      new THREE.MeshBasicMaterial({ color: 0xFF8833, transparent: true, opacity: 1.0 })
+    );
+    flash.position.set(pos.x, pos.y + 0.3, pos.z);
+    this.scene.add(flash);
+    this.trailParticles.push({
+      mesh: flash,
+      velocity: { x: 0, y: 1.0, z: 0 },
+      startTime: now,
+      duration: 0.2,
+    });
+
+    // Expanding shockwave ring (flat disc)
+    const ring = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.02, 0.3),
+      new THREE.MeshBasicMaterial({ color: 0xFFAA44, transparent: true, opacity: 0.7 })
+    );
+    ring.position.set(pos.x, pos.y + 0.1, pos.z);
+    this.scene.add(ring);
+
+    const ringStart = now;
+    const ringDur = 0.35;
+    const ringUpdate = () => {
+      const t = (performance.now() / 1000 - ringStart) / ringDur;
+      if (t >= 1) {
+        ring.geometry.dispose();
+        (ring.material as THREE.Material).dispose();
+        this.scene.remove(ring);
+        return;
+      }
+      const scale = 1 + t * 6;
+      ring.scale.set(scale, 1, scale);
+      (ring.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - t);
+      requestAnimationFrame(ringUpdate);
+    };
+    requestAnimationFrame(ringUpdate);
+
+    // Debris burst (8 particles — stone grey + orange)
+    const debrisColors = [0x666666, 0x888888, 0x555555, 0xFF6622, 0xCC5500, 0x777777, 0x999999, 0xFF8833];
+    for (let i = 0; i < 8; i++) {
+      const p = this.getPooledParticle(debrisColors[i], 0.9);
+      p.position.set(pos.x, pos.y + 0.2, pos.z);
+      const scale = 0.6 + Math.random() * 0.8;
+      p.scale.set(scale, scale, scale);
+      this.scene.add(p);
+
+      const angle = (i / 8) * Math.PI * 2 + Math.random() * 0.4;
+      const speed = 1.5 + Math.random() * 2.0;
+      this.trailParticles.push({
+        mesh: p,
+        velocity: {
+          x: Math.cos(angle) * speed,
+          y: 2.0 + Math.random() * 2.5,
+          z: Math.sin(angle) * speed,
+        },
+        startTime: now,
+        duration: 0.5 + Math.random() * 0.3,
+      });
+    }
+
+    // Smoke cloud (4 rising grey puffs)
+    for (let i = 0; i < 4; i++) {
+      const smoke = this.getPooledParticle(0xAAAAAA, 0.5);
+      smoke.position.set(
+        pos.x + (Math.random() - 0.5) * 0.4,
+        pos.y + 0.3,
+        pos.z + (Math.random() - 0.5) * 0.4,
+      );
+      smoke.scale.set(1.2, 1.2, 1.2);
+      this.scene.add(smoke);
+      this.trailParticles.push({
+        mesh: smoke,
+        velocity: {
+          x: (Math.random() - 0.5) * 0.3,
+          y: 0.6 + Math.random() * 0.4,
+          z: (Math.random() - 0.5) * 0.3,
+        },
+        startTime: now,
+        duration: 0.7 + Math.random() * 0.4,
+      });
+    }
   }
 
   /**

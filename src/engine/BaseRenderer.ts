@@ -70,7 +70,9 @@ export class BaseRenderer {
 
     // Build the castle geometry based on tier
     let topY: number;
-    if (tier === BaseTier.CASTLE) {
+    if (tier === BaseTier.CITADEL) {
+      topY = this.buildCitadelTier(group, colors, base.owner);
+    } else if (tier === BaseTier.CASTLE) {
       topY = this.buildCastleTier(group, colors, base.owner);
     } else if (tier === BaseTier.FORT) {
       topY = this.buildFortTier(group, colors, base.owner);
@@ -570,6 +572,248 @@ export class BaseRenderer {
     }
 
     return 5.6; // topY for health bar
+  }
+
+  // ====================================================================
+  //  TIER 3: CITADEL — Palace-fortress with grand cathedral spire,
+  //  inner & outer curtain walls, throne room, and arcane beacon
+  // ====================================================================
+  private buildCitadelTier(group: THREE.Group, colors: typeof PLAYER_BASE_COLORS[0], owner: number): number {
+    const flagM = new THREE.MeshLambertMaterial({ color: colors.flag, side: THREE.DoubleSide });
+    const wallM = mat(colors.wall); const towerM = mat(colors.tower); const accentM = mat(colors.accent);
+    const darkStone = mat(0x6a6a5a); const goldTrim = mat(0xd4a44a); const poleMat = mat(0x8B4513);
+    const ironM = mat(0x5a5a5a); const marble = mat(0xf8f4f0); const richWood = mat(0x5a3a1a);
+    const royalPurple = mat(0x6a2fa0); const crystalBlue = glow(0x44aaff, 0.6);
+
+    // ====== PASS 1: SILHOUETTE — Massive tiered platform ======
+    // Outer earthwork ring
+    group.add(bm(new THREE.BoxGeometry(3.4, 0.08, 3.4), mat(0x5a6a4a), 0, 0.04, 0));
+    // Four-course stone platform ascending
+    group.add(bm(new THREE.BoxGeometry(3.2, 0.12, 3.2), darkStone, 0, 0.1, 0));
+    group.add(bm(new THREE.BoxGeometry(3.0, 0.12, 3.0), mat(0x7f8c8d), 0, 0.22, 0));
+    group.add(bm(new THREE.BoxGeometry(2.8, 0.1, 2.8), mat(0x8a8a80), 0, 0.32, 0));
+    group.add(bm(new THREE.BoxGeometry(2.6, 0.08, 2.6), marble, 0, 0.41, 0));
+    // Gold trim on all platform edges
+    for (const side of [-1.3, 1.3]) {
+      group.add(bm(new THREE.BoxGeometry(2.65, 0.05, 0.05), goldTrim, 0, 0.38, side));
+      group.add(bm(new THREE.BoxGeometry(0.05, 0.05, 2.65), goldTrim, side, 0.38, 0));
+    }
+    // Grand stairway — 5-tier ceremonial approach
+    for (let i = 0; i < 5; i++) {
+      group.add(bm(new THREE.BoxGeometry(0.9 - i * 0.06, 0.06, 0.12), i < 3 ? darkStone : marble,
+        0, 0.1 + i * 0.07, 1.4 + i * 0.12));
+    }
+
+    // ====== PASS 2: OUTER CURTAIN — 8 towers + thick walls ======
+    const outerR = 1.35;
+    const towerAngles = [0, 45, 90, 135, 180, 225, 270, 315];
+    for (const deg of towerAngles) {
+      const a = (deg * Math.PI) / 180;
+      const tx = Math.sin(a) * outerR;
+      const tz = Math.cos(a) * outerR;
+      const isGate = deg === 0; // front gate tower
+      const tH = isGate ? 3.2 : 2.8;
+      // Tower body
+      group.add(bm(new THREE.CylinderGeometry(0.22, 0.28, tH, 8), towerM, tx, tH / 2 + 0.45, tz));
+      // Stone banding
+      for (const y of [0.8, 1.4, 2.0]) {
+        group.add(bm(new THREE.CylinderGeometry(0.25, 0.25, 0.04, 8), darkStone, tx, y, tz));
+      }
+      // Machicolation + merlons
+      group.add(bm(new THREE.CylinderGeometry(0.3, 0.24, 0.1, 8), accentM, tx, tH + 0.42, tz));
+      for (let j = 0; j < 6; j++) {
+        const ma = (j / 6) * Math.PI * 2;
+        group.add(bm(new THREE.BoxGeometry(0.06, 0.12, 0.06), wallM,
+          tx + Math.cos(ma) * 0.26, tH + 0.55, tz + Math.sin(ma) * 0.26));
+      }
+      // Conical roof
+      group.add(bm(new THREE.ConeGeometry(0.3, 0.45, 8), mat(0x4a3a2a), tx, tH + 0.68, tz));
+      // Gold finial
+      group.add(bm(new THREE.SphereGeometry(0.03, 6, 4), goldTrim, tx, tH + 0.93, tz));
+      // Arrow slits
+      for (let j = 0; j < 2; j++) {
+        const sa = a + (j === 0 ? 0.5 : -0.5);
+        group.add(bm(new THREE.BoxGeometry(0.03, 0.12, 0.025), mat(0x1a1a1a),
+          tx + Math.cos(sa) * 0.26, 1.5, tz + Math.sin(sa) * 0.26));
+      }
+    }
+    // Outer curtain walls between towers
+    for (let i = 0; i < 8; i++) {
+      const a1 = (towerAngles[i] * Math.PI) / 180;
+      const a2 = (towerAngles[(i + 1) % 8] * Math.PI) / 180;
+      const x1 = Math.sin(a1) * outerR, z1 = Math.cos(a1) * outerR;
+      const x2 = Math.sin(a2) * outerR, z2 = Math.cos(a2) * outerR;
+      const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+      const wLen = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2) + 0.15;
+      const wAngle = Math.atan2(x2 - x1, z2 - z1);
+      const wall = bm(new THREE.BoxGeometry(0.16, 1.8, wLen), wallM, mx, 1.35, mz);
+      wall.rotation.y = -wAngle;
+      group.add(wall);
+      // Walkway
+      const walkway = bm(new THREE.BoxGeometry(0.22, 0.04, wLen), darkStone, mx, 2.28, mz);
+      walkway.rotation.y = -wAngle;
+      group.add(walkway);
+    }
+
+    // ====== PASS 3: INNER KEEP — Grand central tower complex ======
+    // Main keep — massive square tower with marble facing
+    group.add(bm(new THREE.BoxGeometry(1.1, 3.8, 1.1), towerM, 0, 2.35, 0));
+    // Marble facing strips
+    for (const face of [-0.56, 0.56]) {
+      group.add(bm(new THREE.BoxGeometry(1.12, 3.8, 0.02), marble, 0, 2.35, face));
+      group.add(bm(new THREE.BoxGeometry(0.02, 3.8, 1.12), marble, face, 2.35, 0));
+    }
+    // Stone course bands on keep
+    for (const y of [1.0, 1.6, 2.2, 2.8, 3.4, 4.0]) {
+      group.add(bm(new THREE.BoxGeometry(1.14, 0.04, 1.14), darkStone, 0, y, 0));
+    }
+    // Stepped buttresses on all corners
+    for (const [bx, bz] of [[-0.48, -0.48], [0.48, -0.48], [-0.48, 0.48], [0.48, 0.48]]) {
+      group.add(bm(new THREE.BoxGeometry(0.16, 3.8, 0.16), accentM, bx, 2.35, bz));
+      group.add(bm(new THREE.BoxGeometry(0.18, 0.06, 0.18), darkStone, bx, 4.28, bz));
+    }
+    // Machicolation overhang
+    group.add(bm(new THREE.BoxGeometry(1.3, 0.1, 1.3), accentM, 0, 4.3, 0));
+    for (const [bx, bz] of [[-0.55, 0], [0.55, 0], [0, -0.55], [0, 0.55]]) {
+      group.add(bm(new THREE.BoxGeometry(0.08, 0.12, 0.08), darkStone, bx, 4.22, bz));
+    }
+    // Keep parapet with merlons
+    for (let i = 0; i < 5; i++) {
+      for (const face of [-0.58, 0.58]) {
+        const v = -0.45 + i * 0.22;
+        group.add(bm(new THREE.BoxGeometry(0.09, 0.16, 0.09), wallM, v, 4.43, face));
+        group.add(bm(new THREE.BoxGeometry(0.09, 0.16, 0.09), wallM, face, 4.43, v));
+      }
+    }
+
+    // ====== PASS 4: CATHEDRAL SPIRE — Multi-stage with arcane beacon ======
+    // Octagonal spire base
+    group.add(bm(new THREE.CylinderGeometry(0.45, 0.55, 0.35, 8), darkStone, 0, 4.55, 0));
+    // Flying buttresses from keep corners to spire
+    for (const [bx, bz] of [[-0.4, -0.4], [0.4, -0.4], [-0.4, 0.4], [0.4, 0.4]]) {
+      const butt = bm(new THREE.BoxGeometry(0.06, 0.8, 0.06), darkStone, bx * 0.6, 4.6, bz * 0.6);
+      butt.rotation.set(bz > 0 ? -0.3 : 0.3, 0, bx > 0 ? 0.3 : -0.3);
+      group.add(butt);
+    }
+    // Main cathedral spire — triple-layered
+    group.add(bm(new THREE.ConeGeometry(0.5, 1.8, 8), mat(0x4a3528), 0, 5.65, 0));
+    group.add(bm(new THREE.ConeGeometry(0.35, 1.3, 8), mat(0x3a2518), 0, 5.9, 0));
+    group.add(bm(new THREE.ConeGeometry(0.2, 0.7, 8), mat(0x2a1a10), 0, 6.15, 0));
+    // Gold crown ring at spire base
+    group.add(bm(new THREE.TorusGeometry(0.35, 0.025, 6, 12), goldTrim, 0, 4.75, 0));
+    // Gold trim rings ascending
+    group.add(bm(new THREE.TorusGeometry(0.22, 0.015, 6, 10), goldTrim, 0, 5.8, 0));
+    group.add(bm(new THREE.TorusGeometry(0.12, 0.01, 6, 8), goldTrim, 0, 6.3, 0));
+
+    // ====== ARCANE BEACON — Animated crystal at peak ======
+    // Crystal pillar
+    group.add(bm(new THREE.CylinderGeometry(0.015, 0.015, 0.4, 4), goldTrim, 0, 6.7, 0));
+    // Floating crystal (octahedral — two cones tip-to-tip)
+    group.add(bm(new THREE.ConeGeometry(0.06, 0.12, 4), crystalBlue, 0, 6.98, 0));
+    const crystBot = bm(new THREE.ConeGeometry(0.06, 0.12, 4), crystalBlue, 0, 6.86, 0);
+    crystBot.rotation.x = Math.PI; group.add(crystBot);
+    // Triple glow halos
+    group.add(bm(new THREE.SphereGeometry(0.12, 8, 6), glow(0x44aaff, 0.8), 0, 6.92, 0));
+    group.add(bm(new THREE.SphereGeometry(0.08, 6, 4), glow(0x88ccff, 0.6), 0, 6.92, 0));
+    group.add(bm(new THREE.SphereGeometry(0.2, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0x44aaff, emissive: 0x44aaff, emissiveIntensity: 0.3, transparent: true, opacity: 0.25 }),
+      0, 6.92, 0));
+
+    // ====== PASS 5: ORNAMENTATION — Windows, shield, throne room ======
+    // Grand stained glass on all 4 keep faces
+    const stainedGlass = glow(0xff8800, 0.4);
+    const blueGlass = glow(0x4488ff, 0.4);
+    const purpleGlass = glow(0xaa44ff, 0.4);
+    for (const [fx, fz, rot] of [[0, 0.57, false], [0, -0.57, false], [0.57, 0, true], [-0.57, 0, true]] as [number, number, boolean][]) {
+      // Large pointed arch window
+      const wGeo = rot ? new THREE.BoxGeometry(0.03, 0.28, 0.14) : new THREE.BoxGeometry(0.14, 0.28, 0.03);
+      group.add(bm(wGeo, stainedGlass, fx, 2.0, fz));
+      // Upper window
+      const uGeo = rot ? new THREE.BoxGeometry(0.03, 0.2, 0.1) : new THREE.BoxGeometry(0.1, 0.2, 0.03);
+      group.add(bm(uGeo, blueGlass, fx, 3.0, fz));
+      // Rose window
+      const rGeo = rot ? new THREE.BoxGeometry(0.03, 0.14, 0.14) : new THREE.BoxGeometry(0.14, 0.14, 0.03);
+      group.add(bm(rGeo, purpleGlass, fx, 3.8, fz));
+    }
+
+    // Heraldic shield above grand gate — oversized
+    group.add(bm(new THREE.BoxGeometry(0.35, 0.42, 0.06), flagM, 0, 2.2, 1.42));
+    group.add(bm(new THREE.BoxGeometry(0.06, 0.34, 0.05), goldTrim, 0, 2.2, 1.44));
+    group.add(bm(new THREE.BoxGeometry(0.27, 0.06, 0.05), goldTrim, 0, 2.2, 1.44));
+    // Crown above shield
+    group.add(bm(new THREE.BoxGeometry(0.26, 0.08, 0.05), goldTrim, 0, 2.46, 1.42));
+    for (const cx of [-0.08, 0, 0.08]) {
+      group.add(bm(new THREE.BoxGeometry(0.04, 0.08, 0.04), goldTrim, cx, 2.54, 1.43));
+    }
+
+    // Gatehouse arch — grand double arch
+    group.add(bm(new THREE.BoxGeometry(0.45, 1.0, 0.1), mat(0x0a0a08), 0, 0.95, 1.37));
+    // Portcullis bars
+    for (let i = 0; i < 5; i++) {
+      group.add(bm(new THREE.BoxGeometry(0.015, 0.9, 0.015), ironM, -0.14 + i * 0.07, 0.9, 1.38));
+    }
+    for (const y of [0.6, 0.85, 1.1]) {
+      group.add(bm(new THREE.BoxGeometry(0.35, 0.015, 0.015), ironM, 0, y, 1.38));
+    }
+
+    // Torch sconces around courtyard
+    const torchGlow = glow(0xff8800, 0.5);
+    const torchPositions: [number, number, number][] = [
+      [0.4, 1.5, 1.0], [-0.4, 1.5, 1.0], [1.0, 1.5, 0.4], [1.0, 1.5, -0.4],
+      [-1.0, 1.5, 0.4], [-1.0, 1.5, -0.4], [0.4, 1.5, -1.0], [-0.4, 1.5, -1.0],
+    ];
+    for (const [tx2, ty2, tz2] of torchPositions) {
+      group.add(bm(new THREE.BoxGeometry(0.025, 0.14, 0.025), poleMat, tx2, ty2, tz2));
+      group.add(bm(new THREE.SphereGeometry(0.035, 5, 3), torchGlow, tx2, ty2 + 0.09, tz2));
+    }
+
+    // ====== PASS 6: COURTYARD DETAILS ======
+    // Throne room extension (front of keep, glass roof)
+    group.add(bm(new THREE.BoxGeometry(0.7, 1.2, 0.5), towerM, 0, 1.05, 0.55));
+    group.add(bm(new THREE.BoxGeometry(0.72, 0.04, 0.52), goldTrim, 0, 1.67, 0.55));
+    // Glass skylight on throne room
+    group.add(bm(new THREE.BoxGeometry(0.5, 0.03, 0.3), glow(0x88ccff, 0.3), 0, 1.69, 0.55));
+
+    // Courtyard fountain
+    group.add(bm(new THREE.CylinderGeometry(0.14, 0.18, 0.15, 8), marble, 0.45, 0.53, -0.3));
+    group.add(bm(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 6), darkStone, 0.45, 0.66, -0.3));
+    group.add(bm(new THREE.SphereGeometry(0.04, 6, 4), glow(0x44aaff, 0.3), 0.45, 0.78, -0.3));
+
+    // Armory / smithy wing
+    group.add(bm(new THREE.BoxGeometry(0.5, 1.0, 0.4), wallM, -0.55, 0.95, -0.45));
+    group.add(bm(new THREE.BoxGeometry(0.08, 0.6, 0.08), mat(0x555555), -0.35, 1.75, -0.52)); // chimney
+    group.add(bm(new THREE.SphereGeometry(0.03, 5, 3), glow(0xff6600, 0.5), -0.35, 2.08, -0.52)); // forge glow
+
+    // Barracks quarters
+    group.add(bm(new THREE.BoxGeometry(0.4, 0.8, 0.5), wallM, 0.55, 0.85, -0.4));
+    // Peaked roof
+    for (const side of [-1, 1]) {
+      const roof = bm(new THREE.BoxGeometry(0.5, 0.05, 0.55), mat(0x5a3a2a), 0.55 + side * 0.1, 1.32, -0.4);
+      roof.rotation.z = side * 0.35; group.add(roof);
+    }
+
+    // ====== FLAGS — Multiple grand banners ======
+    // Main spire banner — tallest
+    group.add(bm(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 6), poleMat, 0, 7.2, 0));
+    const mainFlag = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.6), flagM);
+    mainFlag.position.set(0.55, 7.3, 0); mainFlag.name = 'main-flag'; group.add(mainFlag);
+
+    // Keep parapet flags (4 corners)
+    for (const [fx2, fz2] of [[-0.48, -0.48], [0.48, -0.48], [-0.48, 0.48], [0.48, 0.48]]) {
+      group.add(bm(new THREE.CylinderGeometry(0.012, 0.012, 0.3, 4), poleMat, fx2, 4.6, fz2));
+      group.add(bm(new THREE.PlaneGeometry(0.16, 0.1), flagM, fx2 + 0.1, 4.7, fz2));
+    }
+
+    // Outer tower flags (alternating, every other tower)
+    for (let i = 0; i < 8; i += 2) {
+      const a = (towerAngles[i] * Math.PI) / 180;
+      const tx = Math.sin(a) * outerR;
+      const tz = Math.cos(a) * outerR;
+      group.add(bm(new THREE.CylinderGeometry(0.012, 0.012, 0.25, 4), poleMat, tx, 3.55, tz));
+      group.add(bm(new THREE.PlaneGeometry(0.14, 0.08), flagM, tx + 0.09, 3.62, tz));
+    }
+
+    return 7.5; // topY for health bar
   }
 
   // ==================================================================

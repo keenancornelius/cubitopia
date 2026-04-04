@@ -496,6 +496,14 @@ export class UnitRenderer {
     this.projectileSystem.fireKamehamehaBeam(fromPos, toPos, piercedPositions);
   }
 
+  fireArrowVolley(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, count: number, onImpact?: () => void): void {
+    this.projectileSystem.fireArrowVolley(fromPos, toPos, count, onImpact);
+  }
+
+  fireCannonball(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, onImpact?: () => void): void {
+    this.projectileSystem.fireCannonball(fromPos, toPos, onImpact);
+  }
+
   spawnElectrocuteEffect(unitId: string): void {
     this.projectileSystem.spawnElectrocuteEffect(unitId);
   }

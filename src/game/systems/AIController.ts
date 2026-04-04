@@ -192,13 +192,17 @@ export default class AIController {
           const pb = this.buildOps.registerBuilding('forestry', ownerId, pos, mesh);
           st.forestry = { position: pos, worldPosition: pb.worldPosition };
           st.meshes.push(mesh);
+          // Register forestry as lumberjack drop-off point
+          const arr = UnitAI.forestryPositions.get(ownerId) ?? [];
+          arr.push(pos);
+          UnitAI.forestryPositions.set(ownerId, arr);
         }
       }
       if (st.forestry) st.buildPhase = 1;
     }
 
     // --- PHASE 1: Build Barracks ---
-    if (st.buildPhase === 1) {
+    else if (st.buildPhase === 1) {
       if (!st.barracks && wood >= GAME_CONFIG.buildings.barracks.cost.ai.wood) {
         const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, 0);
         if (pos) {
@@ -215,7 +219,7 @@ export default class AIController {
     }
 
     // --- PHASE 2: Build Masonry ---
-    if (st.buildPhase === 2) {
+    else if (st.buildPhase === 2) {
       if (!st.masonry && wood >= GAME_CONFIG.buildings.masonry.cost.ai.wood) {
         const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, toward, 2);
         if (pos) {
@@ -231,7 +235,7 @@ export default class AIController {
     }
 
     // --- PHASE 3: Build Farmhouse ---
-    if (st.buildPhase === 3) {
+    else if (st.buildPhase === 3) {
       if (!st.farmhouse && wood >= GAME_CONFIG.buildings.farmhouse.cost.ai.wood) {
         const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, 0, toward);
         if (pos) {
@@ -248,7 +252,7 @@ export default class AIController {
     }
 
     // --- PHASE 4: Build Workshop ---
-    if (st.buildPhase === 4) {
+    else if (st.buildPhase === 4) {
       if (!st.workshop
           && wood >= GAME_CONFIG.buildings.workshop.cost.ai.wood
           && stone >= GAME_CONFIG.buildings.workshop.cost.ai.stone) {
@@ -268,7 +272,7 @@ export default class AIController {
     }
 
     // --- PHASE 5: Build Silo ---
-    if (st.buildPhase === 5) {
+    else if (st.buildPhase === 5) {
       if (!st.silo && wood >= GAME_CONFIG.buildings.silo.cost.ai.wood) {
         const pos = this.buildOps.aiFindBuildTile(base.position.q, base.position.r, 0, -toward);
         if (pos) {
@@ -285,7 +289,7 @@ export default class AIController {
     }
 
     // --- PHASE 6: Build Smelter ---
-    if (st.buildPhase === 6) {
+    else if (st.buildPhase === 6) {
       if (!st.smelter
           && wood >= GAME_CONFIG.buildings.smelter.cost.ai.wood
           && stone >= GAME_CONFIG.buildings.smelter.cost.ai.stone) {
@@ -305,7 +309,7 @@ export default class AIController {
     }
 
     // --- PHASE 7: Build Armory ---
-    if (st.buildPhase === 7) {
+    else if (st.buildPhase === 7) {
       if (!st.armory
           && wood >= GAME_CONFIG.buildings.armory.cost.ai.wood
           && stone >= GAME_CONFIG.buildings.armory.cost.ai.stone) {
@@ -330,7 +334,7 @@ export default class AIController {
     }
 
     // --- PHASE 8: Build Wizard Tower ---
-    if (st.buildPhase === 8) {
+    else if (st.buildPhase === 8) {
       if (!st.wizard_tower
           && wood >= GAME_CONFIG.buildings.wizard_tower.cost.ai.wood
           && stone >= GAME_CONFIG.buildings.wizard_tower.cost.ai.stone) {
@@ -798,10 +802,10 @@ export default class AIController {
         if (dist <= 5) {
           // Graduate — close enough to join the formation
           u._squadJoining = false;
-          // Match the squad's march speed (25th percentile based)
+          // Match the squad's march speed (15th percentile based for tighter cohesion)
           const grpSpeeds = [...core, u].map(m => m.moveSpeed).sort((a, b) => a - b);
-          const gp25 = grpSpeeds[Math.max(0, Math.floor(grpSpeeds.length * 0.25))];
-          u._squadSpeed = gp25 + (u.moveSpeed - gp25) * 0.3;
+          const gp15 = grpSpeeds[Math.max(0, Math.floor(grpSpeeds.length * 0.15))];
+          u._squadSpeed = gp15 + (u.moveSpeed - gp15) * 0.25;
           if (sq.target && this.ctx.currentMap) UnitAI.commandMove(u, sq.target, this.ctx.currentMap);
           if (this.tacticalGroupManager) {
             const tgm = core.find(m => m._tacticalGroupId != null);
@@ -846,9 +850,12 @@ export default class AIController {
         else if (sq.objective === 'DEFEND') valid = enemyUnits.some(u => Pathfinder.heuristic(u.position, sq.target!) <= 6);
       }
 
-      // Also detect stalled squads: majority IDLE, far from objective
-      const idleCount = members.filter(u => u.state === UnitState.IDLE).length;
-      const stalled = !atObj && idleCount > members.length * 0.5 && Pathfinder.heuristic(centroid, sq.target!) > 5;
+      // Detect stalled squads: majority IDLE or non-progressing, far from objective
+      // Count both idle AND gathering (workers that wandered off) as non-combat-progressing
+      const nonprogressCount = members.filter(u =>
+        u.state === UnitState.IDLE || u.state === UnitState.GATHERING || u.state === UnitState.RETURNING
+      ).length;
+      const stalled = !atObj && nonprogressCount > members.length * 0.4 && Pathfinder.heuristic(centroid, sq.target!) > 4;
 
       if (stale || atObj || !valid) {
         const taken = new Set(st.squads.filter(s => s.id !== sq.id && s.target).map(s => `${s.target!.q},${s.target!.r}`));
@@ -1026,11 +1033,11 @@ export default class AIController {
     // Already near squad or first member — normal assignment
     unit._squadJoining = false;
     const allSquadUnits = player?.units.filter(u => u._squadId === sq.id && !UnitAI.isDead(u)) ?? [];
-    // Use 25th percentile speed so one slow unit doesn't drag everyone
+    // Use 15th percentile speed — tighter cohesion, combined with leash throttle
     const squadSpeeds = allSquadUnits.map(u => u.moveSpeed).sort((a, b) => a - b);
-    const p25 = squadSpeeds[Math.max(0, Math.floor(squadSpeeds.length * 0.25))];
+    const p15 = squadSpeeds[Math.max(0, Math.floor(squadSpeeds.length * 0.15))];
     const fastest = squadSpeeds[squadSpeeds.length - 1] ?? unit.moveSpeed;
-    const marchSpeed = p25 + (fastest - p25) * 0.3;
+    const marchSpeed = p15 + (fastest - p15) * 0.25;
     unit._squadSpeed = marchSpeed;
 
     // Command to move to squad target
@@ -1067,10 +1074,11 @@ export default class AIController {
 
     const slots = this.generateFormationTyped(sq.target, sorted.length, formation);
 
-    // Compute march speed using 25th percentile — prevents one slow unit dragging everyone
+    // Compute march speed using 20th percentile — keeps squad tight while moving.
+    // Combined with tighter leash (3.0 world units), squads stay cohesive.
     const speeds = sorted.map(u => u.moveSpeed).sort((a, b) => a - b);
-    const p25Idx = Math.max(0, Math.floor(speeds.length * 0.25));
-    const baseSpeed = speeds[p25Idx];
+    const p20Idx = Math.max(0, Math.floor(speeds.length * 0.20));
+    const baseSpeed = speeds[p20Idx];
     const fastestSpeed = speeds[speeds.length - 1];
     const marchSpeed = baseSpeed + (fastestSpeed - baseSpeed) * GAME_CONFIG.formation.aiMarchSpeedCatchupFactor;
 

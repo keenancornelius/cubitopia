@@ -7,6 +7,7 @@ import { MapType } from '../types';
 import { MAP_PRESETS } from '../game/MapPresets';
 import { MUSIC_GENRES, type MusicGenre } from '../engine/ProceduralMusic';
 import { UI, COLORS, FONT, BORDER, SHADOW, getCurrentSkin, setSkin, loadSavedSkin, type ThemeSkin } from './UITheme';
+import { showDevKanban } from './DevKanban';
 
 export interface GameOverStats {
   gameDuration: number;        // seconds
@@ -167,9 +168,9 @@ export default class MenuController {
     const MAP_ICONS: Record<string, string> = {
       [MapType.STANDARD]: '\u26f0\ufe0f',   // mountain
       [MapType.ARENA]: '\u2694\ufe0f',       // swords
-      [MapType.HIGHLAND]: '\ud83c\udfd4\ufe0f', // mountain snow
+      [MapType.SUNKEN_RUINS]: '\ud83c\udfd4\ufe0f', // temple
       [MapType.ARCHIPELAGO]: '\ud83c\udf0a',   // wave
-      [MapType.FLATLAND]: '\ud83c\udf3e',      // rice
+      [MapType.BADLANDS]: '\ud83c\udf3c',      // desert
       [MapType.DESERT_TUNNELS]: '\ud83c\udfdc\ufe0f', // desert
       [MapType.VOLCANIC]: '\ud83c\udf0b',      // volcano
       [MapType.TUNDRA]: '\u2744\ufe0f',        // snowflake
@@ -347,6 +348,29 @@ export default class MenuController {
     }
     overlay.appendChild(skinRow);
 
+    // --- "Working on..." Dev Progress Button ---
+    const devBtn = document.createElement('button');
+    devBtn.style.cssText = `
+      background: transparent; color: ${COLORS.textMuted}; border: ${BORDER.thin} solid rgba(255,255,255,0.1);
+      padding: 6px 18px; font-size: 11px; font-family: ${FONT.family};
+      border-radius: ${BORDER.radius.sm}; cursor: pointer; letter-spacing: 2px;
+      text-transform: uppercase; transition: all 0.2s; margin-bottom: 24px;
+    `;
+    devBtn.textContent = '\u{1F6A7} WORKING ON...';
+    devBtn.addEventListener('mouseenter', () => {
+      devBtn.style.borderColor = 'rgba(255,255,255,0.3)';
+      devBtn.style.color = COLORS.textSecondary;
+    });
+    devBtn.addEventListener('mouseleave', () => {
+      devBtn.style.borderColor = 'rgba(255,255,255,0.1)';
+      devBtn.style.color = COLORS.textMuted;
+    });
+    devBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showDevKanban();
+    });
+    overlay.appendChild(devBtn);
+
     // --- Start Button ---
     const startBtn = document.createElement('button');
     startBtn.style.cssText = `
@@ -426,7 +450,7 @@ export default class MenuController {
     // Build stats section
     let statsHTML = '';
     if (stats) {
-      const TIER_NAMES = ['Camp', 'Fort', 'Castle'];
+      const TIER_NAMES = ['Camp', 'Fort', 'Castle', 'Citadel'];
       const tierName = TIER_NAMES[stats.playerBaseTier] ?? 'Camp';
       statsHTML = `
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px 40px;

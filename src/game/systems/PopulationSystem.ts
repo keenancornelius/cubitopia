@@ -12,6 +12,10 @@ import { GAME_CONFIG } from '../GameConfig';
 export const FOOD_PER_COMBAT_UNIT = GAME_CONFIG.population.foodPerCombatUnit;
 export const STARTING_FOOD = GAME_CONFIG.population.startingFood;
 export const BASE_FOOD_BONUS = GAME_CONFIG.population.baseFoodBonus;
+export const FARMHOUSE_FOOD_BONUS = GAME_CONFIG.population.farmhouseFoodBonus;
+
+// --- Morale constants ---
+const MORALE = GAME_CONFIG.population.morale;
 
 /** Unit types that DON'T count toward population cap (workers) */
 const FREE_UNIT_TYPES: Set<UnitType> = new Set([
@@ -24,12 +28,17 @@ const FREE_UNIT_TYPES: Set<UnitType> = new Set([
 const WARNING_THRESHOLD = 0.7;
 const CRITICAL_THRESHOLD = 0.9;
 
+/** Morale state for HUD display and gameplay effects */
+export type MoraleState = 'starving' | 'hungry' | 'normal' | 'well_fed';
+
 /** Slim ops interface — getAllUnits returns the master array (no allocation) */
 export interface PopulationOps {
   getFoodStockpile(owner: number): number;
   getAllUnits(): Unit[];
   /** Optional: get base tier for bonus food capacity (0=Camp, 1=Fort, 2=Castle) */
   getBaseTier?(owner: number): number;
+  /** Optional: count farmhouses for bonus food storage */
+  getFarmhouseCount?(owner: number): number;
 }
 
 /** Detailed population info for HUD display */
@@ -42,6 +51,9 @@ export interface PopulationInfo {
   warning: 'ok' | 'warning' | 'critical';
   headroom: number;   // How many more combat units can spawn
   baseTierBonus: number; // Bonus food from base tier
+  farmhouseBonus: number; // Bonus food from farmhouses
+  morale: MoraleState;   // Current morale state
+  moraleModifier: number; // Attack/move speed multiplier from morale
 }
 
 export class PopulationSystem {
@@ -90,9 +102,15 @@ export class PopulationSystem {
     return tier * BASE_FOOD_BONUS;
   }
 
-  /** Effective food for cap calculation = stockpile + base tier bonus */
+  /** Get bonus food from farmhouses */
+  getFarmhouseBonus(owner: number): number {
+    if (!this.ops.getFarmhouseCount) return 0;
+    return this.ops.getFarmhouseCount(owner) * FARMHOUSE_FOOD_BONUS;
+  }
+
+  /** Effective food for cap calculation = stockpile + base tier bonus + farmhouse bonus */
   getEffectiveFood(owner: number): number {
-    return this.ops.getFoodStockpile(owner) + this.getBaseTierBonus(owner);
+    return this.ops.getFoodStockpile(owner) + this.getBaseTierBonus(owner) + this.getFarmhouseBonus(owner);
   }
 
   /** Max combat units allowed based on food stockpile + base tier bonus */
@@ -167,6 +185,9 @@ export class PopulationSystem {
       warning: this.getWarningLevel(owner),
       headroom: Math.max(0, cap - current),
       baseTierBonus,
+      farmhouseBonus: this.getFarmhouseBonus(owner),
+      morale: this.getMoraleState(owner),
+      moraleModifier: this.getMoraleModifier(owner),
     };
   }
 
@@ -176,6 +197,61 @@ export class PopulationSystem {
     const effectiveFood = this.getEffectiveFood(owner);
     const neededForNext = (current + 1) * FOOD_PER_COMBAT_UNIT;
     return Math.max(0, neededForNext - effectiveFood);
+  }
+
+  // ============================================
+  // MORALE SYSTEM — food ratio drives combat effectiveness
+  // ============================================
+
+  /** Get food ratio: effectiveFood / foodNeeded. >1 = surplus, <1 = deficit */
+  getFoodRatio(owner: number): number {
+    const combatUnits = this.getCombatUnitCount(owner);
+    if (combatUnits <= 0) return 2.0; // No combat units = well-fed by default
+    const foodNeeded = combatUnits * FOOD_PER_COMBAT_UNIT;
+    const effectiveFood = this.getEffectiveFood(owner);
+    return effectiveFood / foodNeeded;
+  }
+
+  /** Get morale state based on food ratio */
+  getMoraleState(owner: number): MoraleState {
+    const ratio = this.getFoodRatio(owner);
+    if (ratio < MORALE.starvingThreshold) return 'starving';
+    if (ratio < MORALE.hungryThreshold) return 'hungry';
+    if (ratio >= MORALE.wellFedThreshold) return 'well_fed';
+    return 'normal';
+  }
+
+  /** Get morale modifier — multiplier for attack speed and move speed */
+  getMoraleModifier(owner: number): number {
+    const state = this.getMoraleState(owner);
+    switch (state) {
+      case 'starving': return MORALE.starvingModifier;
+      case 'hungry': return MORALE.hungryModifier;
+      case 'well_fed': return MORALE.wellFedModifier;
+      default: return MORALE.normalModifier;
+    }
+  }
+
+  /**
+   * Apply starvation damage to combat units when starving.
+   * Called once per game tick. Returns total damage dealt for HUD feedback.
+   */
+  applyStarvationDrain(owner: number, delta: number): number {
+    if (this.getMoraleState(owner) !== 'starving') return 0;
+    const drainPerSec = MORALE.starvingHealthDrain;
+    const drain = drainPerSec * delta;
+    let totalDamage = 0;
+
+    const units = this.ops.getAllUnits();
+    for (let i = 0, len = units.length; i < len; i++) {
+      const u = units[i];
+      if (u.owner !== owner) continue;
+      if (u.currentHealth <= 0 || u.state === UnitState.DEAD) continue;
+      if (FREE_UNIT_TYPES.has(u.type)) continue; // Workers don't starve
+      u.currentHealth = Math.max(1, u.currentHealth - drain); // Don't kill, leave at 1 HP
+      totalDamage += drain;
+    }
+    return totalDamage;
   }
 
   cleanup(): void {

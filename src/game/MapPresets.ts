@@ -28,11 +28,11 @@ const ALL_MAP_PRESETS: MapPreset[] = [
     color: '#e74c3c',
   },
   {
-    type: MapType.HIGHLAND,
-    label: 'HIGHLAND',
-    description: 'Elevated terrain with steep ridges and narrow passes',
+    type: MapType.SUNKEN_RUINS,
+    label: 'SUNKEN RUINS',
+    description: 'Ancient overgrown temple ruins — crumbling walls and mossy pillars',
     size: 50,
-    color: '#8e44ad',
+    color: '#5a7a5a',
   },
   {
     type: MapType.ARCHIPELAGO,
@@ -42,11 +42,11 @@ const ALL_MAP_PRESETS: MapPreset[] = [
     color: '#1abc9c',
   },
   {
-    type: MapType.FLATLAND,
-    label: 'FLATLAND',
-    description: 'Wide open plains with sparse cover — fast aggression',
+    type: MapType.BADLANDS,
+    label: 'SCORCHED BADLANDS',
+    description: 'Red clay mesas and cracked earth — control the high ground or burn',
     size: 50,
-    color: '#f39c12',
+    color: '#b5472a',
   },
   {
     type: MapType.DESERT_TUNNELS,
@@ -224,7 +224,7 @@ export interface MapGenParams {
 }
 
 export const MAP_GEN_PARAMS: Partial<Record<MapType, MapGenParams>> = {
-  [MapType.HIGHLAND]: {
+  [MapType.SUNKEN_RUINS]: {
     elevScale: [0.06, 0.10],
     mountainWeight: [0.30, 0.50],
     valleyWeight: [0.05, 0.15],
@@ -239,7 +239,7 @@ export const MAP_GEN_PARAMS: Partial<Record<MapType, MapGenParams>> = {
     mountainClusters: [1, 3],
     riverCount: [0, 1],
   },
-  [MapType.FLATLAND]: {
+  [MapType.BADLANDS]: {
     elevScale: [0.04, 0.08],
     mountainWeight: [0.05, 0.10],
     valleyWeight: [0.05, 0.10],
@@ -2049,4 +2049,710 @@ export function generateArchipelagoMap(size: number, seed?: number, playerCount:
     width: size, height: size, tiles, seed: actualSeed, mapType: MapType.ARCHIPELAGO,
     islands,
   };
+}
+
+// ============================================
+// TUNDRA / FROZEN WASTE MAP GENERATOR
+// Barren frozen landscape: windswept snow plains, frozen lakes,
+// icy ridges, sparse pine groves, and scarce resources.
+// ============================================
+
+export interface TundraMap extends GameMap {
+  frozenLakes: Array<{ center: { q: number; r: number }; radius: number }>;
+}
+
+class TundraRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 1103515245 + 12345) & 0x7fffffff;
+    return this.state / 0x7fffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class TundraNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 12345) & 0x7fffffff;
+      this.perm.push(i);
+    }
+    for (let i = 255; i > 0; i--) {
+      s = (s * 16807 + 12345) & 0x7fffffff;
+      const j = s % (i + 1);
+      [this.perm[i], this.perm[j]] = [this.perm[j], this.perm[i]];
+    }
+  }
+  private fade(t: number) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  private lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+  private grad(hash: number, x: number, y: number) {
+    const h = hash & 3;
+    const u = h < 2 ? x : y;
+    const v = h < 2 ? y : x;
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+  }
+  noise2d(x: number, y: number): number {
+    const X = Math.floor(x) & 255;
+    const Y = Math.floor(y) & 255;
+    const xf = x - Math.floor(x);
+    const yf = y - Math.floor(y);
+    const u = this.fade(xf);
+    const v = this.fade(yf);
+    const aa = this.perm[(this.perm[X] + Y) & 255];
+    const ab = this.perm[(this.perm[X] + Y + 1) & 255];
+    const ba = this.perm[(this.perm[(X + 1) & 255] + Y) & 255];
+    const bb = this.perm[(this.perm[(X + 1) & 255] + Y + 1) & 255];
+    return this.lerp(
+      this.lerp(this.grad(aa, xf, yf), this.grad(ba, xf - 1, yf), u),
+      this.lerp(this.grad(ab, xf, yf - 1), this.grad(bb, xf - 1, yf - 1), u),
+      v,
+    );
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp;
+      amp *= 0.5;
+      freq *= 2;
+    }
+    return (val / max + 1) * 0.5; // normalise to 0..1
+  }
+}
+
+export function generateTundraMap(size: number, seed?: number, playerCount: number = 2): TundraMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new TundraRng(actualSeed);
+  const noise = new TundraNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+  const offsets = [-0.5, 0, 0.5];
+
+  // ── Step 1: Generate base terrain ──
+  // Mostly flat with gentle rolling hills and occasional sharp ridges
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const nx = q * 0.08;
+      const ny = r * 0.08;
+
+      // Base elevation: gentle rolling tundra
+      const baseElev = noise.fbm(nx, ny, 3);
+      // Ridge noise: sharp icy ridges cutting through the landscape
+      const ridgeRaw = noise.fbm(q * 0.04 + 200, r * 0.04 + 200, 2);
+      const ridgeFactor = Math.pow(Math.abs(ridgeRaw * 2 - 1), 0.5) * 0.4;
+
+      let elev = Math.round(baseElev * 5 + ridgeFactor * 4 + 2);
+      elev = Math.max(2, Math.min(elev, 10));
+
+      // Determine terrain type using noise layers
+      const moistureNoise = noise.fbm(q * 0.12 + 50, r * 0.12 + 50, 2);
+      const forestNoise = noise.fbm(q * 0.15 + 150, r * 0.15 + 150, 2);
+
+      let terrain: TerrainType;
+      let topBlock: BlockType;
+      let subBlock: BlockType;
+      let resource: ResourceType | null = null;
+
+      if (elev >= 7 && ridgeFactor > 0.15) {
+        // ── Icy ridge peaks ──
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = BlockType.ICE;
+        subBlock = BlockType.STONE;
+        if (rng.next() < 0.08) resource = ResourceType.CRYSTAL;
+        else if (rng.next() < 0.06) resource = ResourceType.IRON;
+      } else if (elev >= 6) {
+        // ── Snowy highlands ──
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = BlockType.PACKED_SNOW;
+        subBlock = BlockType.STONE;
+        if (rng.next() < 0.06) resource = ResourceType.STONE;
+        else if (rng.next() < 0.04) resource = ResourceType.IRON;
+      } else if (forestNoise > 0.58 && elev >= 3 && elev <= 5) {
+        // ── Sparse pine forest ──
+        terrain = TerrainType.FOREST;
+        topBlock = BlockType.PACKED_SNOW;
+        subBlock = BlockType.FROZEN_DIRT;
+        if (rng.next() < 0.12) resource = ResourceType.WOOD;
+      } else if (moistureNoise < 0.32 && elev <= 3) {
+        // ── Frozen lake beds (will be overridden in Step 2) ──
+        terrain = TerrainType.PLAINS;
+        topBlock = BlockType.PACKED_SNOW;
+        subBlock = BlockType.FROZEN_DIRT;
+      } else {
+        // ── Open snow plains ──
+        terrain = TerrainType.PLAINS;
+        topBlock = rng.next() < 0.7 ? BlockType.SNOW : BlockType.PACKED_SNOW;
+        subBlock = BlockType.FROZEN_DIRT;
+        if (rng.next() < 0.04) resource = ResourceType.FOOD;
+        else if (rng.next() < 0.02) resource = ResourceType.GOLD;
+      }
+
+      // Build voxel column
+      const blocks: VoxelBlock[] = [];
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          for (let y = 0; y < elev; y++) {
+            let blockType: BlockType;
+            if (y === elev - 1) {
+              blockType = topBlock;
+            } else if (y >= elev - 3) {
+              blockType = subBlock;
+            } else {
+              blockType = BlockType.STONE;
+            }
+            blocks.push({
+              localPosition: { x: lx, y, z: lz },
+              type: blockType, health: 100, maxHealth: 100,
+            });
+          }
+        }
+      }
+
+      tiles.set(`${q},${r}`, {
+        position: { q, r },
+        terrain,
+        elevation: elev,
+        walkableFloor: elev,
+        resource,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: true, heightMap: [[elev]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 2: Stamp frozen lakes ──
+  const frozenLakes: Array<{ center: { q: number; r: number }; radius: number }> = [];
+  const lakeCount = rng.range(3, 6);
+  for (let i = 0; i < lakeCount; i++) {
+    const lq = rng.range(8, size - 9);
+    const lr = rng.range(8, size - 9);
+    // Don't place too close to other lakes
+    const tooClose = frozenLakes.some(lake => {
+      const d = Math.sqrt((lq - lake.center.q) ** 2 + (lr - lake.center.r) ** 2);
+      return d < lake.radius + 6;
+    });
+    if (tooClose) continue;
+
+    const lakeRadius = rng.range(3, 6);
+    frozenLakes.push({ center: { q: lq, r: lr }, radius: lakeRadius });
+
+    for (let dq = -lakeRadius - 1; dq <= lakeRadius + 1; dq++) {
+      for (let dr = -lakeRadius - 1; dr <= lakeRadius + 1; dr++) {
+        const q = lq + dq;
+        const r = lr + dr;
+        if (q < 0 || r < 0 || q >= size || r >= size) continue;
+
+        const dist = Math.sqrt(dq * dq + dr * dr);
+        const edgeNoise = noise.fbm(q * 0.4 + 300, r * 0.4 + 300, 2);
+        const effectiveRadius = lakeRadius * (0.8 + edgeNoise * 0.4);
+
+        if (dist > effectiveRadius) continue;
+
+        const key = `${q},${r}`;
+        const lakeElev = 2;
+
+        // Frozen lake: flat ice surface
+        const blocks: VoxelBlock[] = [];
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = 0; y < lakeElev; y++) {
+              blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: y === lakeElev - 1 ? BlockType.ICE : BlockType.FROZEN_DIRT,
+                health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+
+        // Edge tiles get a snowy shore
+        const isEdge = dist > effectiveRadius - 1.2;
+
+        tiles.set(key, {
+          position: { q, r },
+          terrain: isEdge ? TerrainType.PLAINS : TerrainType.WATER,
+          elevation: lakeElev,
+          walkableFloor: lakeElev, // frozen = walkable!
+          resource: (rng.next() < 0.06 && !isEdge) ? ResourceType.GOLD : null,
+          improvement: null,
+          unit: null,
+          owner: null,
+          voxelData: { blocks, destructible: false, heightMap: [[lakeElev]] },
+          visible: true,
+          explored: true,
+        });
+      }
+    }
+  }
+
+  // ── Step 3: Place resource clusters (scarce!) ──
+  // Crystal veins near ridges
+  const crystalClusters = rng.range(2, 4);
+  for (let c = 0; c < crystalClusters; c++) {
+    const cq = rng.range(5, size - 6);
+    const cr = rng.range(5, size - 6);
+    for (let dq = -1; dq <= 1; dq++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        if (rng.next() > 0.6) continue;
+        const key = `${cq + dq},${cr + dr}`;
+        const tile = tiles.get(key);
+        if (tile && tile.terrain === TerrainType.MOUNTAIN) {
+          tile.resource = ResourceType.CRYSTAL;
+          // Inject crystal blocks into subsurface
+          for (const b of tile.voxelData.blocks) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tile.elevation - 2 && rng.next() < 0.3) {
+              b.type = BlockType.CRYSTAL;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Iron deposits in highlands
+  const ironClusters = rng.range(3, 5);
+  for (let c = 0; c < ironClusters; c++) {
+    const iq = rng.range(5, size - 6);
+    const ir = rng.range(5, size - 6);
+    for (let dq = -1; dq <= 1; dq++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        if (rng.next() > 0.5) continue;
+        const key = `${iq + dq},${ir + dr}`;
+        const tile = tiles.get(key);
+        if (tile && (tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.PLAINS)) {
+          tile.resource = ResourceType.IRON;
+          for (const b of tile.voxelData.blocks) {
+            if (b.type === BlockType.STONE && rng.next() < 0.25) {
+              b.type = BlockType.IRON;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Compute shell blocks so terrain has proper underground depth
+  // (reskinTundra in MapInitializer swaps GRASS/DIRT → frozen variants afterward)
+  const tundraMap: TundraMap = {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.TUNDRA,
+    frozenLakes,
+  };
+  const shellGen = new MapGenerator();
+  shellGen.computeShellBlocks(tundraMap, size, size);
+
+  return tundraMap;
+}
+
+// ============================================
+// SUNKEN RUINS MAP GENERATOR
+// Ancient overgrown civilization with temple ruins
+// ============================================
+
+class RuinsRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 16807 + 0) % 2147483647;
+    return (this.state & 0xffffff) / 0xffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class RuinsNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 0) % 2147483647;
+      this.perm.push(s);
+    }
+  }
+  noise2d(x: number, y: number): number {
+    const ix = Math.floor(x) & 255;
+    const iy = Math.floor(y) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
+    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
+           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp; amp *= 0.5; freq *= 2;
+    }
+    return val / max;
+  }
+}
+
+export function generateSunkenRuinsMap(size: number, seed?: number, playerCount: number = 2): GameMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new RuinsRng(actualSeed);
+  const noise = new RuinsNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+  const offsets = [-0.5, 0, 0.5];
+
+  // ── Step 1: Base terrain with multi-layered ruins and elevation variety ──
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const ruinsNoise = noise.fbm(q * 0.08, r * 0.08, 3);
+      const platformNoise = noise.fbm(q * 0.06 + 100, r * 0.06 + 100, 2);
+      const lushNoise = noise.fbm(q * 0.1 + 200, r * 0.1 + 200, 2);
+
+      // Base elevation with platform zones
+      let elev = Math.round(ruinsNoise * 5 + platformNoise * 3 + 2);
+      elev = Math.max(2, Math.min(elev, 10));
+
+      let terrain: TerrainType;
+      let topBlock: BlockType;
+      let subBlock: BlockType;
+      let resource: ResourceType | null = null;
+
+      if (ruinsNoise > 0.65) {
+        // High noise = ruins zones with stone and ancient brick
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = rng.next() < 0.6 ? BlockType.MOSSY_STONE : BlockType.ANCIENT_BRICK;
+        subBlock = BlockType.ANCIENT_BRICK;
+        if (rng.next() < 0.08) resource = ResourceType.CRYSTAL;
+        else if (rng.next() < 0.06) resource = ResourceType.STONE;
+      } else if (ruinsNoise > 0.4) {
+        // Medium noise = overgrown floor
+        terrain = TerrainType.FOREST;
+        topBlock = BlockType.MOSSY_STONE;
+        subBlock = BlockType.DIRT;
+        if (rng.next() < 0.06) resource = ResourceType.IRON;
+      } else {
+        // Low noise = vine-covered paths
+        terrain = TerrainType.FOREST;
+        topBlock = BlockType.GRASS;
+        subBlock = BlockType.DIRT;
+        if (rng.next() < 0.04) resource = ResourceType.FOOD;
+      }
+
+      // Build voxel column
+      const blocks: VoxelBlock[] = [];
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          for (let y = 0; y < elev; y++) {
+            let blockType: BlockType;
+            if (y === elev - 1) blockType = topBlock;
+            else if (y >= elev - 2) blockType = subBlock;
+            else blockType = BlockType.STONE;
+            blocks.push({
+              localPosition: { x: lx, y, z: lz },
+              type: blockType, health: 100, maxHealth: 100,
+            });
+          }
+        }
+      }
+
+      tiles.set(`${q},${r}`, {
+        position: { q, r },
+        terrain,
+        elevation: elev,
+        walkableFloor: elev,
+        resource,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: true, heightMap: [[elev]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 2: Scatter ruin structures (pillars and walls) ──
+  const numStructures = rng.range(8, 15);
+  for (let s = 0; s < numStructures; s++) {
+    const sq = rng.range(6, size - 7);
+    const sr = rng.range(6, size - 7);
+    const key = `${sq},${sr}`;
+    const centerTile = tiles.get(key);
+    if (!centerTile) continue;
+
+    if (rng.next() < 0.5) {
+      // Pillar: 2x2 area of RUIN_PILLAR going up 2-4 above surface
+      const pillarHeight = centerTile.elevation + rng.range(2, 4);
+      for (let dq = 0; dq <= 1; dq++) {
+        for (let dr = 0; dr <= 1; dr++) {
+          const pq = sq + dq;
+          const pr = sr + dr;
+          const pk = `${pq},${pr}`;
+          const tile = tiles.get(pk);
+          if (!tile) continue;
+          // Add pillar blocks
+          for (const lx of offsets) {
+            for (const lz of offsets) {
+              for (let y = tile.elevation; y < pillarHeight; y++) {
+                tile.voxelData.blocks.push({
+                  localPosition: { x: lx, y, z: lz },
+                  type: BlockType.RUIN_PILLAR,
+                  health: 100, maxHealth: 100,
+                });
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Wall segment: line of ANCIENT_BRICK
+      const wallLength = rng.range(3, 6);
+      const isHorizontal = rng.next() < 0.5;
+      const wallHeight = rng.range(1, 3);
+      for (let w = 0; w < wallLength; w++) {
+        const wq = sq + (isHorizontal ? w : 0);
+        const wr = sr + (isHorizontal ? 0 : w);
+        const wk = `${wq},${wr}`;
+        const tile = tiles.get(wk);
+        if (!tile) continue;
+        for (const lx of offsets) {
+          for (const lz of offsets) {
+            for (let y = tile.elevation; y < tile.elevation + wallHeight; y++) {
+              tile.voxelData.blocks.push({
+                localPosition: { x: lx, y, z: lz },
+                type: BlockType.ANCIENT_BRICK,
+                health: 100, maxHealth: 100,
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Step 3: Place base areas with flattening ──
+  const BASE_INSET = 5;
+  const basePositions = [
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },
+  ];
+  for (const bp of basePositions) {
+    for (let dq = -4; dq <= 4; dq++) {
+      for (let dr = -4; dr <= 4; dr++) {
+        if (Math.abs(dq) + Math.abs(dr) > 5) continue;
+        const bq = bp.q + dq;
+        const br = bp.r + dr;
+        const bk = `${bq},${br}`;
+        const tile = tiles.get(bk);
+        if (tile) {
+          tile.elevation = 3;
+          tile.walkableFloor = 3;
+          tile.terrain = TerrainType.FOREST;
+          tile.voxelData.blocks = [];
+          for (const lx of offsets) {
+            for (const lz of offsets) {
+              for (let y = 0; y < 3; y++) {
+                tile.voxelData.blocks.push({
+                  localPosition: { x: lx, y, z: lz },
+                  type: y === 2 ? BlockType.MOSSY_STONE : BlockType.STONE,
+                  health: 100, maxHealth: 100,
+                });
+              }
+            }
+          }
+          tile.voxelData.heightMap = [[3]];
+        }
+      }
+    }
+  }
+
+  const ruinsMap: GameMap = {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.SUNKEN_RUINS,
+  };
+  const shellGen = new MapGenerator();
+  shellGen.computeShellBlocks(ruinsMap, size, size);
+
+  return ruinsMap;
+}
+
+// ============================================
+// BADLANDS MAP GENERATOR
+// Scorched red clay with mesas and riverbeds
+// ============================================
+
+class BadlandsRng {
+  private state: number;
+  constructor(seed: number) { this.state = seed; }
+  next(): number {
+    this.state = (this.state * 16807 + 0) % 2147483647;
+    return (this.state & 0xffffff) / 0xffffff;
+  }
+  range(min: number, max: number): number {
+    return min + Math.floor(this.next() * (max - min + 1));
+  }
+}
+
+class BadlandsNoise {
+  private perm: number[];
+  constructor(seed: number) {
+    this.perm = [];
+    let s = seed;
+    for (let i = 0; i < 256; i++) {
+      s = (s * 16807 + 0) % 2147483647;
+      this.perm.push(s);
+    }
+  }
+  noise2d(x: number, y: number): number {
+    const ix = Math.floor(x) & 255;
+    const iy = Math.floor(y) & 255;
+    const fx = x - Math.floor(x);
+    const fy = y - Math.floor(y);
+    const sx = fx * fx * (3 - 2 * fx);
+    const sy = fy * fy * (3 - 2 * fy);
+    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
+    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
+           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+  }
+  fbm(x: number, y: number, octaves: number): number {
+    let val = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < octaves; i++) {
+      val += this.noise2d(x * freq, y * freq) * amp;
+      max += amp; amp *= 0.5; freq *= 2;
+    }
+    return val / max;
+  }
+}
+
+export function generateBadlandsMap(size: number, seed?: number, playerCount: number = 2): GameMap {
+  const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
+  const rng = new BadlandsRng(actualSeed);
+  const noise = new BadlandsNoise(actualSeed);
+  const tiles = new Map<string, Tile>();
+  const offsets = [-0.5, 0, 0.5];
+
+  // ── Step 1: Base terrain with mesa formations ──
+  for (let q = 0; q < size; q++) {
+    for (let r = 0; r < size; r++) {
+      const mesaNoise = noise.fbm(q * 0.06, r * 0.06, 2);
+      const riverNoise = noise.fbm(q * 0.08 + 100, r * 0.08 + 100, 2);
+      const terrainNoise = noise.fbm(q * 0.1 + 200, r * 0.1 + 200, 2);
+
+      let elev = 2;
+      let terrain: TerrainType;
+      let topBlock: BlockType;
+      let subBlock: BlockType;
+      let resource: ResourceType | null = null;
+
+      // Mesa formation logic
+      if (mesaNoise > 0.72) {
+        // Very high noise = mesa top with steep cliff sides
+        elev = 6 + Math.floor((mesaNoise - 0.72) * 20);
+        elev = Math.min(8, elev);
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = BlockType.RED_CLAY;
+        subBlock = BlockType.MESA_STONE;
+        if (rng.next() < 0.12) resource = ResourceType.IRON;
+      } else if (mesaNoise > 0.55) {
+        // High noise = mesa slope (steep terrain between mesa and floor)
+        elev = 4 + Math.floor((mesaNoise - 0.55) * 10);
+        terrain = TerrainType.MOUNTAIN;
+        topBlock = BlockType.MESA_STONE;
+        subBlock = BlockType.MESA_STONE;
+      } else if (riverNoise < 0.3 && terrainNoise > 0.5) {
+        // Dried riverbeds at lowest elevation
+        elev = 1;
+        terrain = TerrainType.DESERT;
+        topBlock = BlockType.SAND;
+        subBlock = BlockType.CRACKED_EARTH;
+        if (rng.next() < 0.10) resource = ResourceType.GOLD;
+      } else {
+        // Flat desert floor
+        elev = 2;
+        terrain = TerrainType.PLAINS;
+        topBlock = BlockType.CRACKED_EARTH;
+        subBlock = BlockType.RED_CLAY;
+        if (rng.next() < 0.08) resource = ResourceType.STONE;
+      }
+
+      // Build voxel column
+      const blocks: VoxelBlock[] = [];
+      for (const lx of offsets) {
+        for (const lz of offsets) {
+          for (let y = 0; y < elev; y++) {
+            let blockType: BlockType;
+            if (y === elev - 1) blockType = topBlock;
+            else if (y >= elev - 2) blockType = subBlock;
+            else blockType = BlockType.STONE;
+            blocks.push({
+              localPosition: { x: lx, y, z: lz },
+              type: blockType, health: 100, maxHealth: 100,
+            });
+          }
+        }
+      }
+
+      tiles.set(`${q},${r}`, {
+        position: { q, r },
+        terrain,
+        elevation: elev,
+        walkableFloor: elev,
+        resource,
+        improvement: null,
+        unit: null,
+        owner: null,
+        voxelData: { blocks, destructible: true, heightMap: [[elev]] },
+        visible: true,
+        explored: true,
+      });
+    }
+  }
+
+  // ── Step 2: Place base areas with flattening ──
+  const BASE_INSET = 5;
+  const basePositions = [
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },
+  ];
+  for (const bp of basePositions) {
+    for (let dq = -4; dq <= 4; dq++) {
+      for (let dr = -4; dr <= 4; dr++) {
+        if (Math.abs(dq) + Math.abs(dr) > 5) continue;
+        const bq = bp.q + dq;
+        const br = bp.r + dr;
+        const bk = `${bq},${br}`;
+        const tile = tiles.get(bk);
+        if (tile) {
+          tile.elevation = 2;
+          tile.walkableFloor = 2;
+          tile.terrain = TerrainType.PLAINS;
+          tile.voxelData.blocks = [];
+          for (const lx of offsets) {
+            for (const lz of offsets) {
+              for (let y = 0; y < 2; y++) {
+                tile.voxelData.blocks.push({
+                  localPosition: { x: lx, y, z: lz },
+                  type: y === 1 ? BlockType.CRACKED_EARTH : BlockType.RED_CLAY,
+                  health: 100, maxHealth: 100,
+                });
+              }
+            }
+          }
+          tile.voxelData.heightMap = [[2]];
+        }
+      }
+    }
+  }
+
+  const badlandsMap: GameMap = {
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.BADLANDS,
+  };
+  const shellGen = new MapGenerator();
+  shellGen.computeShellBlocks(badlandsMap, size, size);
+
+  return badlandsMap;
 }

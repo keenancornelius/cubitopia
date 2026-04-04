@@ -15,9 +15,10 @@ import { StrategyCamera } from '../engine/Camera';
 import { EngineConfig, HexCoord, TerrainType, UnitStance, FormationType, MapType, PlacedBuilding, Base, ElementType, UnitType, Unit } from '../types';
 import WallSystem from './systems/WallSystem';
 
-// The Cubitopia main game class — imported as a type to avoid circular deps
-// (Cubitopia is default export, so we import as type-only to break circular dependency)
-type Cubitopia = any; // Circular dependency - use any for now
+// The Cubitopia main game class — tightly coupled by design (80+ property accesses).
+// Using `any` because InputManager needs access to private members and extracting an
+// Ops interface for 80+ methods is impractical until main.ts is further decomposed.
+type Cubitopia = any;
 
 export class InputManager {
 
@@ -261,22 +262,12 @@ export class InputManager {
         const preferUnderground =
           this.game.commandYLevel !== null && this.game.commandYLevel < 0;
 
-        // Issue attack-move command: units move to position but re-aggro on enemies in range
-        for (const unit of selected) {
-          unit._playerCommanded = true;
-          unit._forceMove = false; // Attack-move must NOT force-move — units need to react to enemies
-          unit._focusTarget = undefined;
-          unit.stance = UnitStance.AGGRESSIVE; // A-click auto-sets aggressive stance
-          unit._attackMoveClickPoint = hexCoord; // Store click point for targeting bias
-          unit._moveDestination = hexCoord; // Store destination for post-combat resume
-          UnitAI.commandAttack(
-            unit,
-            hexCoord,
-            null,
-            this.game.currentMap!,
-            preferUnderground
-          );
-        }
+        // Issue attack-move command via CommandQueue for multiplayer determinism
+        // All unit state mutations now happen in CommandBridge.processCommand()
+        this.game.enqueueCommand('attack_move', {
+          unitIds: selected.map((u: Unit) => u.id),
+          target: hexCoord,
+        });
 
         // Show attack-move indicator (orange flag)
         this.hud.showNotification('Attack-moving!', '#ff9800');
@@ -433,11 +424,13 @@ export class InputManager {
             const targetElement = SPELL_KEYS[keyUp]!;
             // Toggle: if all mages are already locked to this element, unlock them
             const allLocked = mages.every((m: Unit) => m._lockedElement === targetElement);
+            const mageIds = mages.map((m: Unit) => m.id);
             if (allLocked) {
-              for (const m of mages) {
-                m._lockedElement = undefined;
-                // Restore cycle index so they resume natural rotation
-              }
+              // Unlock — route through CommandQueue
+              this.game.enqueueCommand('unlock_element', {
+                unitIds: mageIds,
+                element: null,
+              });
               const ELEMENT_NAMES: Record<string, string> = {
                 fire: 'FIRE', water: 'WATER', lightning: 'LIGHTNING', wind: 'WIND', earth: 'EARTH'
               };
@@ -446,13 +439,11 @@ export class InputManager {
                 '#aaaaaa'
               );
             } else {
-              for (const m of mages) {
-                m._lockedElement = targetElement;
-                m.element = targetElement;
-                // Set cycle index to match so HUD display is correct
-                const ELEMENT_CYCLE = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
-                m._elementCycleIndex = ELEMENT_CYCLE.indexOf(targetElement);
-              }
+              // Lock — route through CommandQueue
+              this.game.enqueueCommand('lock_element', {
+                unitIds: mageIds,
+                element: targetElement,
+              });
               const ELEMENT_COLORS: Record<string, string> = {
                 fire: '#ff4400', water: '#4488ff', lightning: '#00e5ff', wind: '#88ff88', earth: '#9944ff'
               };

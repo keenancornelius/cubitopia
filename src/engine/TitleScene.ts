@@ -12,6 +12,7 @@ import { UnitType, UnitState, HexCoord, Unit, TerrainType, ElementType } from '.
 import { UnitFactory, UNIT_CONFIG } from '../game/entities/UnitFactory';
 import { CombatSystem } from '../game/systems/CombatSystem';
 import { Pathfinder } from '../game/systems/Pathfinder';
+import { hexDist } from '../game/HexMath';
 
 // ── Arena config ─────────────────────────────────────────
 const ARENA_RADIUS = 10;        // hex tiles from center
@@ -88,15 +89,6 @@ interface ArenaTile {
   voxelData: any;
   visible: boolean;
   explored: boolean;
-}
-
-function hexDist(a: HexCoord, b: HexCoord): number {
-  const aq = a.q, ar = a.r;
-  const bq = b.q, br = b.r;
-  // offset coords → cube coords then manhattan/2
-  const ac = aq; const af = ar - (aq - (aq & 1)) / 2; const ae = -ac - af;
-  const bc = bq; const bf = br - (bq - (bq & 1)) / 2; const be = -bc - bf;
-  return Math.max(Math.abs(ac - bc), Math.abs(af - bf), Math.abs(ae - be));
 }
 
 function hexToWorld(coord: HexCoord, elevation = 0): THREE.Vector3 {

@@ -24,7 +24,14 @@ type SoundName =
   | 'battle_start' | 'level_up'
   | 'queue_confirm' | 'queue_error' | 'craft_confirm'
   | 'unit_spawn' | 'shield_deflect' | 'heal_cast'
-  | 'ogre_whomp';
+  | 'ogre_whomp'
+  // New sounds — Stream F additions
+  | 'victory' | 'defeat'
+  | 'zone_captured' | 'tier_upgrade'
+  | 'wall_build' | 'wall_destroy'
+  | 'resource_wood' | 'resource_stone' | 'resource_food'
+  | 'garrison_enter' | 'garrison_exit'
+  | 'combo_electrocute' | 'combo_inferno' | 'combo_kamehameha';
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
@@ -103,6 +110,21 @@ export default class SoundManager {
       case 'shield_deflect': this.synthShieldDeflect(vol); break;
       case 'heal_cast': this.synthHealCast(vol); break;
       case 'ogre_whomp': this.synthOgreWhomp(vol); break;
+      // Stream F additions
+      case 'victory': this.synthVictory(vol); break;
+      case 'defeat': this.synthDefeat(vol); break;
+      case 'zone_captured': this.synthZoneCaptured(vol); break;
+      case 'tier_upgrade': this.synthTierUpgrade(vol); break;
+      case 'wall_build': this.synthWallBuild(vol); break;
+      case 'wall_destroy': this.synthWallDestroy(vol); break;
+      case 'resource_wood': this.synthResourceWood(vol); break;
+      case 'resource_stone': this.synthResourceStone(vol); break;
+      case 'resource_food': this.synthResourceFood(vol); break;
+      case 'garrison_enter': this.synthGarrisonEnter(vol); break;
+      case 'garrison_exit': this.synthGarrisonExit(vol); break;
+      case 'combo_electrocute': this.synthComboElectrocute(vol); break;
+      case 'combo_inferno': this.synthComboInferno(vol); break;
+      case 'combo_kamehameha': this.synthComboKamehameha(vol); break;
     }
   }
 
@@ -1016,7 +1038,482 @@ export default class SoundManager {
     this.envTone(98, 'sine', vol * 0.15, 0.005, 0.2);
   }
 
+  // ==================== Game Event Sounds (Stream F) ====================
+
+  /** Victory fanfare — triumphant brass stab → ascending major chord → sparkle resolution */
+  private synthVictory(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Phase 1: Power chord stab (C major — C4, E4, G4)
+    [262, 330, 392].forEach((freq, i) => {
+      this.envTone(freq, 'triangle', vol * 0.25, 0.005, 0.4);
+      this.envTone(freq * 2, 'sine', vol * 0.1, 0.005, 0.35); // octave harmonic
+    });
+    // Phase 2: Ascending arpeggio (G4→B4→D5→G5)
+    [392, 494, 587, 784].forEach((freq, i) => {
+      const delay = 0.3 + i * 0.08;
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t + delay);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + delay);
+      g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.3);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + delay + 0.35);
+    });
+    // Phase 3: Held resolution chord (C5 major, sustained)
+    [523, 659, 784].forEach(freq => {
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + 0.65);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + 0.65);
+      g.gain.linearRampToValueAtTime(vol * 0.18, t + 0.68);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + 1.55);
+    });
+    // Sparkle shimmer on top
+    this.envTone(this.vary(2637), 'sine', vol * 0.06, 0.01, 0.6); // E7
+    this.filteredNoise('bandpass', 3000, 2, vol * 0.03, 0.01, 0.8);
+  }
+
+  /** Defeat — somber descending minor chord with low rumble */
+  private synthDefeat(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Descending minor triad (A minor: A4→E4→C4)
+    [440, 330, 262].forEach((freq, i) => {
+      const delay = i * 0.25;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, t + delay);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.92, t + delay + 0.6); // slight droop
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + delay);
+      g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.7);
+      osc.connect(g).connect(ctx.destination);
+      osc.start(); osc.stop(t + delay + 0.75);
+    });
+    // Low rumble undertone
+    this.envTone(55, 'sine', vol * 0.2, 0.01, 1.0, { freqEnd: 35 });
+    // Somber noise breath
+    this.filteredNoise('lowpass', 500, 1, vol * 0.06, 0.05, 0.8);
+  }
+
+  /** Zone captured — rising whoosh + triumphant bell chime */
+  private synthZoneCaptured(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Rising whoosh sweep
+    this.envTone(this.vary(200), 'sawtooth', vol * 0.12, 0.01, 0.3, {
+      freqEnd: 1200, filterType: 'lowpass', filterFreq: 2000, filterQ: 2,
+    });
+    // Bell chime — two detuned sines for shimmer
+    this.envTone(this.vary(880), 'sine', vol * 0.2, 0.003, 0.5);
+    this.envTone(this.vary(886), 'sine', vol * 0.15, 0.003, 0.45); // slight detune = shimmer
+    // Octave harmonic
+    this.envTone(this.vary(1760), 'sine', vol * 0.08, 0.003, 0.3);
+    // Sub thud for weight
+    this.envTone(this.vary(110), 'sine', vol * 0.15, 0.005, 0.2);
+  }
+
+  /** Base tier upgrade — deep drum hit + ascending brass fanfare + crowd roar texture */
+  private synthTierUpgrade(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Deep drum impact
+    this.envTone(this.vary(80), 'sine', vol * 0.3, 0.003, 0.3, { freqEnd: 40 });
+    this.filteredNoise('lowpass', 400, 1, vol * 0.2, 0.003, 0.15);
+    // Ascending brass (C4→E4→G4→C5, staggered)
+    [262, 330, 392, 523].forEach((freq, i) => {
+      const delay = 0.1 + i * 0.1;
+      this.envTone(freq, 'triangle', vol * 0.15, 0.005, 0.35);
+    });
+    // Crowd roar texture (filtered noise swell)
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer!;
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'bandpass';
+    lpf.frequency.setValueAtTime(800, t);
+    lpf.Q.setValueAtTime(0.5, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t + 0.2);
+    g.gain.linearRampToValueAtTime(vol * 0.08, t + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
+    src.connect(lpf).connect(g).connect(ctx.destination);
+    src.start(); src.stop(t + 1.3);
+  }
+
+  /** Wall build — stone click + mortar scrape */
+  private synthWallBuild(vol: number): void {
+    // Stone clack
+    this.envTone(this.vary(800), 'square', vol * 0.15, 0.001, 0.06, {
+      filterType: 'bandpass', filterFreq: 900, filterQ: 3,
+    });
+    // Lower thud
+    this.envTone(this.vary(180), 'sine', vol * 0.15, 0.002, 0.1);
+    // Gritty mortar texture
+    this.filteredNoise('bandpass', 2000, 3, vol * 0.1, 0.002, 0.08);
+  }
+
+  /** Wall destroy — crumbling impact with debris scatter */
+  private synthWallDestroy(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Heavy impact thud
+    this.envTone(this.vary(60), 'sine', vol * 0.3, 0.003, 0.25, { freqEnd: 30 });
+    // Stone cracking (mid-freq noise burst)
+    this.filteredNoise('bandpass', 1500, 2, vol * 0.25, 0.002, 0.1);
+    // Debris scatter — descending noise tail
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer!;
+    const lpf = ctx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.setValueAtTime(3000, t);
+    lpf.frequency.exponentialRampToValueAtTime(300, t + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t + 0.05);
+    g.gain.linearRampToValueAtTime(vol * 0.12, t + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    src.connect(lpf).connect(g).connect(ctx.destination);
+    src.start(); src.stop(t + 0.55);
+  }
+
+  /** Wood chop — sharp crack + woody resonance */
+  private synthResourceWood(vol: number): void {
+    // Sharp transient crack
+    this.filteredNoise('highpass', 1200, 2, vol * 0.15, 0.001, 0.03);
+    // Woody body resonance
+    this.envTone(this.vary(320), 'triangle', vol * 0.12, 0.002, 0.12);
+    this.envTone(this.vary(480), 'sine', vol * 0.06, 0.002, 0.08);
+    // Low thud
+    this.envTone(this.vary(120), 'sine', vol * 0.1, 0.003, 0.1);
+  }
+
+  /** Stone mining — hard click + metallic ring + gravel */
+  private synthResourceStone(vol: number): void {
+    // Pickaxe impact — high metallic click
+    this.envTone(this.vary(2200), 'square', vol * 0.1, 0.001, 0.04, {
+      filterType: 'bandpass', filterFreq: 2500, filterQ: 5,
+    });
+    // Metallic ring
+    this.envTone(this.vary(900), 'sine', vol * 0.12, 0.002, 0.15);
+    // Stone crunch
+    this.filteredNoise('bandpass', 1800, 3, vol * 0.12, 0.001, 0.05);
+    // Low rock thud
+    this.envTone(this.vary(150), 'sine', vol * 0.1, 0.002, 0.08);
+  }
+
+  /** Food harvest — soft rustle + gentle pluck */
+  private synthResourceFood(vol: number): void {
+    // Gentle pluck (high sine tap)
+    this.envTone(this.vary(600), 'sine', vol * 0.08, 0.001, 0.08);
+    this.envTone(this.vary(900), 'sine', vol * 0.05, 0.001, 0.06);
+    // Leaf rustle
+    this.filteredNoise('bandpass', 4000, 2, vol * 0.06, 0.005, 0.1);
+    // Soft body
+    this.envTone(this.vary(200), 'triangle', vol * 0.05, 0.003, 0.1);
+  }
+
+  /** Garrison enter — armored footsteps descending + door thud */
+  private synthGarrisonEnter(vol: number): void {
+    // Armor clank
+    this.envTone(this.vary(1100), 'square', vol * 0.08, 0.001, 0.04, {
+      filterType: 'bandpass', filterFreq: 1200, filterQ: 4,
+    });
+    // Door thud (delayed)
+    this.envTone(this.vary(100), 'sine', vol * 0.15, 0.005, 0.15);
+    // Wood creak
+    this.envTone(this.vary(400), 'sawtooth', vol * 0.04, 0.01, 0.08, {
+      freqEnd: 350, filterType: 'bandpass', filterFreq: 500, filterQ: 3,
+    });
+  }
+
+  /** Garrison exit — door opening + armored emergence */
+  private synthGarrisonExit(vol: number): void {
+    // Door opening creak (rising pitch)
+    this.envTone(this.vary(300), 'sawtooth', vol * 0.05, 0.005, 0.12, {
+      freqEnd: 450, filterType: 'bandpass', filterFreq: 500, filterQ: 3,
+    });
+    // Armor clank
+    this.envTone(this.vary(1000), 'square', vol * 0.08, 0.001, 0.04, {
+      filterType: 'bandpass', filterFreq: 1100, filterQ: 4,
+    });
+    // Step thud
+    this.envTone(this.vary(130), 'sine', vol * 0.1, 0.005, 0.1);
+  }
+
+  // ==================== Elemental Combo Sounds ====================
+
+  /** Electrocute combo — crackling electric burst with zap + chain arc */
+  private synthComboElectrocute(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Electric zap (fast freq sweep)
+    this.envTone(this.vary(3000), 'sawtooth', vol * 0.15, 0.001, 0.08, {
+      freqEnd: 200, filterType: 'lowpass', filterFreq: 4000, filterQ: 2,
+    });
+    // Crackling burst (rapid noise gates)
+    for (let i = 0; i < 5; i++) {
+      const delay = i * 0.03;
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer!;
+      const hpf = ctx.createBiquadFilter();
+      hpf.type = 'highpass';
+      hpf.frequency.setValueAtTime(2000, t + delay);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.setValueAtTime(0.001, t + delay);
+      g.gain.linearRampToValueAtTime(vol * 0.1, t + delay + 0.002);
+      g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.025);
+      src.connect(hpf).connect(g).connect(ctx.destination);
+      src.start(t + delay); src.stop(t + delay + 0.03);
+    }
+    // Electric bass undertone
+    this.envTone(this.vary(80), 'sine', vol * 0.15, 0.003, 0.15);
+    // High overtone shimmer
+    this.envTone(this.vary(4400), 'sine', vol * 0.06, 0.002, 0.1);
+  }
+
+  /** Inferno combo — whooshing fire roar + crackle */
+  private synthComboInferno(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Fire roar — rising then falling noise through bandpass
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer!;
+    const bpf = ctx.createBiquadFilter();
+    bpf.type = 'bandpass';
+    bpf.frequency.setValueAtTime(400, t);
+    bpf.frequency.linearRampToValueAtTime(2000, t + 0.15);
+    bpf.frequency.exponentialRampToValueAtTime(300, t + 0.6);
+    bpf.Q.setValueAtTime(1, t);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.linearRampToValueAtTime(vol * 0.2, t + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+    src.connect(bpf).connect(g).connect(ctx.destination);
+    src.start(); src.stop(t + 0.65);
+    // Fire crackle (staccato noise bursts)
+    for (let i = 0; i < 4; i++) {
+      const d = 0.08 + i * 0.06 + Math.random() * 0.03;
+      this.filteredNoise('highpass', 1500, 2, vol * 0.08, 0.001, 0.02);
+    }
+    // Low flame body
+    this.envTone(this.vary(100), 'sawtooth', vol * 0.1, 0.01, 0.4, {
+      filterType: 'lowpass', filterFreq: 300, filterQ: 1,
+    });
+    // Bright flash overtone
+    this.envTone(this.vary(1200), 'sine', vol * 0.08, 0.002, 0.15);
+  }
+
+  /** Kamehameha combo — energy charge whine + massive bass beam + electric sizzle */
+  private synthComboKamehameha(vol: number): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    // Phase 1: Charge-up whine (rising pitch, 0-300ms)
+    const chargeOsc = ctx.createOscillator();
+    chargeOsc.type = 'sawtooth';
+    chargeOsc.frequency.setValueAtTime(200, t);
+    chargeOsc.frequency.exponentialRampToValueAtTime(2000, t + 0.3);
+    const chargeLpf = ctx.createBiquadFilter();
+    chargeLpf.type = 'lowpass';
+    chargeLpf.frequency.setValueAtTime(1000, t);
+    chargeLpf.frequency.linearRampToValueAtTime(4000, t + 0.3);
+    const chargeG = ctx.createGain();
+    chargeG.gain.setValueAtTime(0.001, t);
+    chargeG.gain.linearRampToValueAtTime(vol * 0.15, t + 0.25);
+    chargeG.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+    chargeOsc.connect(chargeLpf).connect(chargeG).connect(ctx.destination);
+    chargeOsc.start(); chargeOsc.stop(t + 0.35);
+
+    // Phase 2: Beam fire — massive bass + mid presence (300-800ms)
+    const beamStart = 0.3;
+    // Sub bass beam core
+    const beamOsc = ctx.createOscillator();
+    beamOsc.type = 'sine';
+    beamOsc.frequency.setValueAtTime(55, t + beamStart);
+    const beamG = ctx.createGain();
+    beamG.gain.setValueAtTime(0.001, t);
+    beamG.gain.setValueAtTime(0.001, t + beamStart);
+    beamG.gain.linearRampToValueAtTime(vol * 0.3, t + beamStart + 0.02);
+    beamG.gain.setValueAtTime(vol * 0.3, t + beamStart + 0.3);
+    beamG.gain.exponentialRampToValueAtTime(0.001, t + beamStart + 0.5);
+    beamOsc.connect(beamG).connect(ctx.destination);
+    beamOsc.start(); beamOsc.stop(t + beamStart + 0.55);
+
+    // Mid presence (purple energy hum)
+    this.envTone(this.vary(220), 'sawtooth', vol * 0.1, 0.005, 0.4, {
+      filterType: 'bandpass', filterFreq: 500, filterQ: 2,
+    });
+
+    // Noise beam texture
+    const beamNoise = ctx.createBufferSource();
+    beamNoise.buffer = this.noiseBuffer!;
+    const bpf = ctx.createBiquadFilter();
+    bpf.type = 'bandpass';
+    bpf.frequency.setValueAtTime(1500, t + beamStart);
+    bpf.Q.setValueAtTime(1, t);
+    const bng = ctx.createGain();
+    bng.gain.setValueAtTime(0.001, t);
+    bng.gain.setValueAtTime(0.001, t + beamStart);
+    bng.gain.linearRampToValueAtTime(vol * 0.12, t + beamStart + 0.03);
+    bng.gain.exponentialRampToValueAtTime(0.001, t + beamStart + 0.5);
+    beamNoise.connect(bpf).connect(bng).connect(ctx.destination);
+    beamNoise.start(); beamNoise.stop(t + beamStart + 0.55);
+
+    // Phase 3: Electric sizzle tail
+    this.filteredNoise('highpass', 3000, 2, vol * 0.08, 0.01, 0.3);
+    // High shimmer overtone
+    this.envTone(this.vary(3500), 'sine', vol * 0.04, 0.005, 0.25);
+  }
+
+  // ==================== Ambient Sound System ====================
+
+  private ambientWindNode: AudioBufferSourceNode | null = null;
+  private ambientWindGain: GainNode | null = null;
+  private ambientBirdInterval: ReturnType<typeof setInterval> | null = null;
+  private ambientCombatNode: AudioBufferSourceNode | null = null;
+  private ambientCombatGain: GainNode | null = null;
+  private ambientActive = false;
+
+  /** Start the ambient sound layer — wind, birds, and distant combat */
+  startAmbient(): void {
+    if (!this.ctx || this.ambientActive) return;
+    this.ambientActive = true;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const masterVol = this.config.sfxVolume * this.config.masterVolume * 0.3;
+
+    // === Wind layer — filtered noise with slow LFO modulation ===
+    const windSrc = ctx.createBufferSource();
+    windSrc.buffer = this.noiseBuffer!;
+    windSrc.loop = true;
+
+    const windLpf = ctx.createBiquadFilter();
+    windLpf.type = 'lowpass';
+    windLpf.frequency.setValueAtTime(800, t);
+    windLpf.Q.setValueAtTime(0.5, t);
+
+    // Wind gust LFO — modulates filter frequency for natural variation
+    const windLfo = ctx.createOscillator();
+    windLfo.type = 'sine';
+    windLfo.frequency.setValueAtTime(0.15, t); // very slow
+    const windLfoGain = ctx.createGain();
+    windLfoGain.gain.setValueAtTime(400, t);
+    windLfo.connect(windLfoGain).connect(windLpf.frequency);
+    windLfo.start();
+
+    this.ambientWindGain = ctx.createGain();
+    this.ambientWindGain.gain.setValueAtTime(0.001, t);
+    this.ambientWindGain.gain.linearRampToValueAtTime(masterVol * 0.15, t + 2);
+
+    windSrc.connect(windLpf).connect(this.ambientWindGain).connect(ctx.destination);
+    windSrc.start();
+    this.ambientWindNode = windSrc;
+
+    // === Bird chirps — intermittent synthesized bird calls ===
+    this.ambientBirdInterval = setInterval(() => {
+      if (this.config.muted || !this.ctx) return;
+      // Random chance — birds aren't constant
+      if (Math.random() > 0.3) return;
+      const bVol = masterVol * 0.1;
+      const bCtx = this.ctx;
+      const bt = bCtx.currentTime;
+      // Quick descending chirp
+      const chirpFreq = 2000 + Math.random() * 2000;
+      const chirpOsc = bCtx.createOscillator();
+      chirpOsc.type = 'sine';
+      chirpOsc.frequency.setValueAtTime(chirpFreq, bt);
+      chirpOsc.frequency.exponentialRampToValueAtTime(chirpFreq * 0.6, bt + 0.08);
+      const cg = bCtx.createGain();
+      cg.gain.setValueAtTime(0.001, bt);
+      cg.gain.linearRampToValueAtTime(bVol, bt + 0.005);
+      cg.gain.exponentialRampToValueAtTime(0.001, bt + 0.1);
+      chirpOsc.connect(cg).connect(bCtx.destination);
+      chirpOsc.start(); chirpOsc.stop(bt + 0.12);
+      // Second note (higher, shorter) — 60% chance
+      if (Math.random() < 0.6) {
+        const f2 = chirpFreq * 1.3;
+        const osc2 = bCtx.createOscillator();
+        osc2.type = 'sine';
+        osc2.frequency.setValueAtTime(f2, bt + 0.12);
+        osc2.frequency.exponentialRampToValueAtTime(f2 * 0.7, bt + 0.18);
+        const g2 = bCtx.createGain();
+        g2.gain.setValueAtTime(0.001, bt);
+        g2.gain.setValueAtTime(0.001, bt + 0.12);
+        g2.gain.linearRampToValueAtTime(bVol * 0.7, bt + 0.125);
+        g2.gain.exponentialRampToValueAtTime(0.001, bt + 0.2);
+        osc2.connect(g2).connect(bCtx.destination);
+        osc2.start(); osc2.stop(bt + 0.22);
+      }
+    }, 3000 + Math.random() * 4000); // every 3-7 seconds
+  }
+
+  /** Set the ambient distant-combat intensity (0 = peaceful, 1 = heavy battle nearby) */
+  setAmbientCombatIntensity(intensity: number): void {
+    if (!this.ctx || !this.ambientActive) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const masterVol = this.config.sfxVolume * this.config.masterVolume * 0.3;
+
+    if (intensity > 0.05 && !this.ambientCombatNode) {
+      // Start distant combat rumble
+      const src = ctx.createBufferSource();
+      src.buffer = this.noiseBuffer!;
+      src.loop = true;
+      const lpf = ctx.createBiquadFilter();
+      lpf.type = 'lowpass';
+      lpf.frequency.setValueAtTime(300, t);
+      lpf.Q.setValueAtTime(0.5, t);
+      this.ambientCombatGain = ctx.createGain();
+      this.ambientCombatGain.gain.setValueAtTime(0.001, t);
+      src.connect(lpf).connect(this.ambientCombatGain).connect(ctx.destination);
+      src.start();
+      this.ambientCombatNode = src;
+    }
+
+    if (this.ambientCombatGain) {
+      const targetVol = Math.min(intensity, 1) * masterVol * 0.2;
+      this.ambientCombatGain.gain.setTargetAtTime(Math.max(0.001, targetVol), t, 0.5);
+    }
+
+    // Reduce bird frequency during combat
+    // (Birds handled by interval — they check muted state which we don't change,
+    //  but we fade wind slightly during heavy combat for mix clarity)
+    if (this.ambientWindGain) {
+      const windTarget = masterVol * 0.15 * (1 - intensity * 0.4);
+      this.ambientWindGain.gain.setTargetAtTime(Math.max(0.001, windTarget), t, 0.3);
+    }
+  }
+
+  /** Stop all ambient sounds */
+  stopAmbient(): void {
+    this.ambientActive = false;
+    if (this.ambientWindNode) {
+      try { this.ambientWindNode.stop(); } catch {}
+      this.ambientWindNode = null;
+    }
+    this.ambientWindGain = null;
+    if (this.ambientBirdInterval) {
+      clearInterval(this.ambientBirdInterval);
+      this.ambientBirdInterval = null;
+    }
+    if (this.ambientCombatNode) {
+      try { this.ambientCombatNode.stop(); } catch {}
+      this.ambientCombatNode = null;
+    }
+    this.ambientCombatGain = null;
+  }
+
   cleanup(): void {
+    this.stopAmbient();
     if (this.ctx) {
       this.ctx.close();
       this.ctx = null;

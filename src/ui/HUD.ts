@@ -61,6 +61,67 @@ export class HUD {
   onHelpOpen(cb: () => void) { this._onHelpOpen = cb; }
   onHelpClose(cb: () => void) { this._onHelpClose = cb; }
 
+  // ── Minimize / Collapse State ─────────────────────────────────
+  private _minimized: Record<string, boolean> = {};
+
+  /** Load minimized states from localStorage */
+  private loadMinimizedStates(): void {
+    try {
+      const saved = localStorage.getItem('cubitopia_minimized');
+      if (saved) this._minimized = JSON.parse(saved);
+    } catch {}
+  }
+
+  /** Persist minimized states to localStorage */
+  private saveMinimizedStates(): void {
+    try { localStorage.setItem('cubitopia_minimized', JSON.stringify(this._minimized)); } catch {}
+  }
+
+  /** Toggle a panel's minimized state and update its DOM */
+  private toggleMinimize(key: string, panel: HTMLElement, contentEls: HTMLElement[], btn: HTMLElement): void {
+    this._minimized[key] = !this._minimized[key];
+    this.saveMinimizedStates();
+    const collapsed = this._minimized[key];
+    btn.textContent = collapsed ? '+' : '−';
+    btn.title = collapsed ? 'Expand' : 'Minimize';
+    for (const el of contentEls) {
+      el.style.display = collapsed ? 'none' : '';
+    }
+  }
+
+  /** Create a minimize button and wire it up to a panel.
+   *  Returns { btn, header } — caller appends header to panel top. */
+  private makeMinimizeHeader(key: string, title: string, panel: HTMLElement, contentEls: HTMLElement[]): { header: HTMLElement; btn: HTMLElement } {
+    const header = document.createElement('div');
+    header.style.cssText = `display:flex; align-items:center; justify-content:space-between; gap:6px; cursor:pointer; user-select:none; pointer-events:auto;`;
+
+    const label = document.createElement('span');
+    label.style.cssText = `${UI.sectionHeader()}; margin:0; flex:1;`;
+    label.textContent = title;
+
+    const btn = document.createElement('span');
+    const collapsed = !!this._minimized[key];
+    btn.style.cssText = UI.minimizeBtn();
+    btn.textContent = collapsed ? '+' : '−';
+    btn.title = collapsed ? 'Expand' : 'Minimize';
+
+    // Apply initial state
+    if (collapsed) {
+      for (const el of contentEls) el.style.display = 'none';
+    }
+
+    const toggle = (e: Event) => {
+      e.stopPropagation();
+      e.preventDefault();
+      this.toggleMinimize(key, panel, contentEls, btn);
+    };
+    header.addEventListener('click', toggle);
+
+    header.appendChild(label);
+    header.appendChild(btn);
+    return { header, btn };
+  }
+
   /** Show/hide the entire HUD (used to hide during title screen). */
   setVisible(visible: boolean): void {
     this.container.style.display = visible ? '' : 'none';
@@ -120,6 +181,7 @@ export class HUD {
   }
 
   constructor() {
+    this.loadMinimizedStates();
     this.container = this.createHUDContainer();
     this.elements = this.createElements();
     this.buildModeIndicator = this.createBuildModeIndicator();
@@ -309,22 +371,26 @@ export class HUD {
       return header;
     };
 
+    // Wrap all content in a collapsible container
+    const ctrlContent = document.createElement('div');
+    ctrlContent.style.cssText = 'display:flex; flex-direction:column; gap:2px;';
+
     // MENU CATEGORIES — top-level buttons
-    panel.appendChild(makeHeaderBtn('🏗️ MENUS'));
+    ctrlContent.appendChild(makeHeaderBtn('🏗️ MENUS'));
     const menuRow = document.createElement('div');
     menuRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
     menuRow.appendChild(makeBtn('Combat', '1', '#c0392b', () => this._onMenuCategory?.(1)));
     menuRow.appendChild(makeBtn('Economy', '2', '#27ae60', () => this._onMenuCategory?.(2)));
     menuRow.appendChild(makeBtn('Crafting', '3', '#f39c12', () => this._onMenuCategory?.(3)));
-    panel.appendChild(menuRow);
+    ctrlContent.appendChild(menuRow);
 
     // Dynamic menu content area (populated by updateNestedMenu)
     this.menuContentArea = document.createElement('div');
     this.menuContentArea.id = 'nested-menu-content';
-    panel.appendChild(this.menuContentArea);
+    ctrlContent.appendChild(this.menuContentArea);
 
     // GLOBAL ACTIONS — always visible
-    panel.appendChild(makeHeaderBtn('🎯 ACTIONS'));
+    ctrlContent.appendChild(makeHeaderBtn('🎯 ACTIONS'));
     const actionsRow = document.createElement('div');
     actionsRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
     actionsRow.appendChild(makeBtn('Walls', 'B', '#2980b9', () => this._onBuildWalls?.()));
@@ -332,14 +398,19 @@ export class HUD {
     actionsRow.appendChild(makeBtn('Mine', 'N', '#ff8c00', () => this._onMine?.()));
     actionsRow.appendChild(makeBtn('Farm', 'J', '#8bc34a', () => this._onFarmPatch?.()));
     actionsRow.appendChild(makeBtn('Sell', 'G', '#f39c12', () => this._onSellWood?.()));
-    panel.appendChild(actionsRow);
+    ctrlContent.appendChild(actionsRow);
 
     // HELP section
-    panel.appendChild(makeHeaderBtn('❓ HELP'));
+    ctrlContent.appendChild(makeHeaderBtn('❓ HELP'));
     const helpRow = document.createElement('div');
     helpRow.style.cssText = 'display: flex; gap: 3px;';
     helpRow.appendChild(makeBtn('Help', '?', '#7f8c8d', () => this._onHelp?.()));
-    panel.appendChild(helpRow);
+    ctrlContent.appendChild(helpRow);
+
+    // Minimize header for entire control panel
+    const { header: ctrlHeader } = this.makeMinimizeHeader('ctrlPanel', '⚙️ CONTROLS', panel, [ctrlContent]);
+    panel.appendChild(ctrlHeader);
+    panel.appendChild(ctrlContent);
 
     this.container.appendChild(panel);
     return panel;
@@ -637,11 +708,20 @@ export class HUD {
     return t !== UnitType.BUILDER && t !== UnitType.LUMBERJACK && t !== UnitType.VILLAGER;
   }
 
+  // Minimize refs for resource bars
+  private resBarContent: HTMLElement | null = null;
+  private enemyResBarContent: HTMLElement | null = null;
+
   /** Build the resource bar DOM once so event listeners survive updates */
   private buildResourceBarDOM(bar: HTMLElement): void {
     bar.innerHTML = '';
+
+    // Minimize header
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+    this.resBarContent = row;
+    const { header } = this.makeMinimizeHeader('resBar', '📦 RESOURCES', bar, [row]);
+    bar.appendChild(header);
 
     const mkRes = (emoji: string, color: string): { wrapper: HTMLElement; val: HTMLElement } => {
       const w = document.createElement('span');
@@ -880,6 +960,9 @@ export class HUD {
     bar.innerHTML = '';
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+    this.enemyResBarContent = row;
+    const { header } = this.makeMinimizeHeader('enemyResBar', '🔴 ENEMY', bar, [row]);
+    bar.appendChild(header);
 
     const mkRes = (emoji: string, color: string): { wrapper: HTMLElement; val: HTMLElement } => {
       const w = document.createElement('span');
@@ -1118,12 +1201,14 @@ export class HUD {
   static readonly TEAM_COLORS: string[] = ['#3498db', '#e74c3c', '#d4af37', '#2ecc71', '#9b59b6', '#e67e22'];
   static readonly TEAM_NAMES: string[] = ['Blue', 'Red', 'Gold', 'Green', 'Purple', 'Orange'];
 
+  private armyStrengthContent: HTMLElement | null = null;
+
   /** Create the army strength comparison bar — shows relative military power for N players */
   private createArmyStrengthBar(): HTMLElement {
     const wrap = document.createElement('div');
     wrap.style.cssText = `
       position:absolute; top:86px; left:50%; transform:translateX(-50%);
-      width:280px; z-index:100; pointer-events:none;
+      width:280px; z-index:100; pointer-events:auto;
       font-family:${FONT.family};
     `;
 
@@ -1133,7 +1218,6 @@ export class HUD {
       letter-spacing:1.5px;
     `;
     this.armyStrengthLabel.textContent = 'ARMY POWER';
-    wrap.appendChild(this.armyStrengthLabel);
 
     // Segmented bar container
     this.armyStrengthFill = document.createElement('div');
@@ -1141,7 +1225,14 @@ export class HUD {
       ${UI.barWrap('8px')}; display:flex; overflow:hidden;
       border: ${BORDER.thin} solid rgba(255,255,255,0.08);
     `;
-    wrap.appendChild(this.armyStrengthFill);
+
+    // Content wrapper for minimize
+    this.armyStrengthContent = document.createElement('div');
+    this.armyStrengthContent.appendChild(this.armyStrengthFill);
+
+    const { header } = this.makeMinimizeHeader('armyBar', 'ARMY POWER', wrap, [this.armyStrengthContent]);
+    wrap.appendChild(header);
+    wrap.appendChild(this.armyStrengthContent);
 
     this.armyStrengthBar = wrap;
     return wrap;
@@ -1361,6 +1452,7 @@ export class HUD {
   private forestrySpawnQueueDisplay: HTMLElement | null = null;  // legacy
   private masonrySpawnQueueDisplay: HTMLElement | null = null;  // legacy
   private unifiedQueuePanel: HTMLElement | null = null;
+  private _queueContent: HTMLElement | null = null;
 
   setBarracksMode(active: boolean): void {
     if (!this.barracksModeIndicator) {
@@ -1571,9 +1663,15 @@ export class HUD {
       this.unifiedQueuePanel.style.cssText = `
         position: absolute; bottom: 90px; right: 12px;
         display: flex; flex-direction: column; gap: 6px;
-        pointer-events: none; z-index: 50;
+        pointer-events: auto; z-index: 50;
         max-height: 60vh; overflow-y: auto;
       `;
+      // Collapsible content
+      this._queueContent = document.createElement('div');
+      this._queueContent.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+      const { header: qHeader } = this.makeMinimizeHeader('spawnQueue', '🏗️ SPAWN QUEUE', this.unifiedQueuePanel, [this._queueContent]);
+      this.unifiedQueuePanel.appendChild(qHeader);
+      this.unifiedQueuePanel.appendChild(this._queueContent);
       this.container.appendChild(this.unifiedQueuePanel);
     }
 
@@ -1664,7 +1762,11 @@ export class HUD {
       }
     }
 
-    this.unifiedQueuePanel.innerHTML = html;
+    if (this._queueContent) {
+      this._queueContent.innerHTML = html;
+    } else {
+      this.unifiedQueuePanel.innerHTML = html;
+    }
   }
 
   setRallyPointMode(active: boolean, buildingKey?: string): void {
@@ -1714,6 +1816,7 @@ export class HUD {
 
   // === Capture Zone HUD ===
   private captureZoneContainer: HTMLElement | null = null;
+  private _czCardsWrap: HTMLElement | null = null;
   private _czStyle: HTMLStyleElement | null = null;
 
   /** Inject capture-zone CSS animations once */
@@ -1781,22 +1884,29 @@ export class HUD {
       this.captureZoneContainer.style.cssText = `
         position:absolute; top:64px; right:10px;
         display:flex; flex-direction:column; gap:4px; align-items:flex-end;
-        pointer-events:none; z-index:500;
+        pointer-events:auto; z-index:500;
       `;
+      // Capture zone cards content wrapper
+      this._czCardsWrap = document.createElement('div');
+      this._czCardsWrap.style.cssText = 'display:flex; flex-direction:column; gap:4px; align-items:flex-end;';
+      const { header: czHeader } = this.makeMinimizeHeader('czCards', '🏴 ZONES', this.captureZoneContainer, [this._czCardsWrap]);
+      this.captureZoneContainer.appendChild(czHeader);
+      this.captureZoneContainer.appendChild(this._czCardsWrap);
       this.container.appendChild(this.captureZoneContainer);
     }
 
     this.captureZoneContainer.style.display = 'flex';
+    const cardsWrap = this._czCardsWrap!;
 
     // Reuse existing cards where possible to avoid DOM thrashing
-    const existing = this.captureZoneContainer.children;
+    const existing = cardsWrap.children;
     while (existing.length > allZones.length) {
-      this.captureZoneContainer.removeChild(existing[existing.length - 1]);
+      cardsWrap.removeChild(existing[existing.length - 1]);
     }
     while (existing.length < allZones.length) {
       const card = document.createElement('div');
       card.className = 'cz-card';
-      this.captureZoneContainer.appendChild(card);
+      cardsWrap.appendChild(card);
     }
 
     // Dynamic team colors — supports N players + neutral (owner 2)
@@ -1824,8 +1934,8 @@ export class HUD {
       card.className = isCapturing ? 'cz-card cz-active' : 'cz-card';
 
       // Labels — include base tier if available
-      const TIER_NAMES = ['Camp', 'Fort', 'Castle'];
-      const TIER_ICONS = ['🏕️', '🏰', '👑'];
+      const TIER_NAMES = ['Camp', 'Fort', 'Castle', 'Citadel'];
+      const TIER_ICONS = ['🏕️', '🏰', '👑', '🔮'];
       const tier = zone.base.tier ?? 0;
       const tierStr = TIER_NAMES[tier] ?? 'Camp';
       const typeStr = zone.isMainBase ? 'Capital' : 'Outpost';
@@ -2267,6 +2377,13 @@ export class HUD {
     this.selectionCommandPanel.style.display = 'flex';
     this.selectionCommandPanel.innerHTML = '';
 
+    // Collapsible content wrapper
+    const cmdContent = document.createElement('div');
+    cmdContent.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+    const { header: cmdHeader } = this.makeMinimizeHeader('selCmd', '🎖️ COMMANDS', this.selectionCommandPanel, [cmdContent]);
+    this.selectionCommandPanel.appendChild(cmdHeader);
+    this.selectionCommandPanel.appendChild(cmdContent);
+
     const makeSmallBtn = (label: string, color: string, active: boolean, cb: () => void): HTMLElement => {
       const btn = document.createElement('button');
       btn.style.cssText = `
@@ -2300,7 +2417,7 @@ export class HUD {
       const currentStance = combatUnit?.stance ?? UnitStance.DEFENSIVE;
 
       // STANCE section
-      this.selectionCommandPanel.appendChild(makeHeader('🎯 Stance'));
+      cmdContent.appendChild(makeHeader('🎯 Stance'));
       const stanceRow = document.createElement('div');
       stanceRow.style.cssText = 'display: flex; gap: 3px;';
       const passiveBtn = makeSmallBtn('Passive', '#7f8c8d', currentStance === UnitStance.PASSIVE,
@@ -2318,10 +2435,10 @@ export class HUD {
       aggressiveBtn.setAttribute('data-stance', UnitStance.AGGRESSIVE);
       aggressiveBtn.title = 'Aggressive — Chase and attack enemies in detection range. Auto-patrols area.';
       stanceRow.appendChild(aggressiveBtn);
-      this.selectionCommandPanel.appendChild(stanceRow);
+      cmdContent.appendChild(stanceRow);
 
       // FORMATION section
-      this.selectionCommandPanel.appendChild(makeHeader('📐 Formation'));
+      cmdContent.appendChild(makeHeader('📐 Formation'));
       const formRow = document.createElement('div');
       formRow.style.cssText = 'display: flex; gap: 3px;';
       const lineBtn = makeSmallBtn('Line', '#27ae60', false,
@@ -2344,7 +2461,7 @@ export class HUD {
       circleBtn.setAttribute('data-formation', FormationType.CIRCLE);
       circleBtn.title = 'Circle — Defensive ring. Protects from all sides.';
       formRow.appendChild(circleBtn);
-      this.selectionCommandPanel.appendChild(formRow);
+      cmdContent.appendChild(formRow);
     }
 
     // OBJECTIVE section (autonomous squad behavior — combat units only)
@@ -2354,7 +2471,7 @@ export class HUD {
       const currentObj = combatUnits.length > 0 && combatUnits.every(u => u._playerObjective === combatUnits[0]._playerObjective)
         ? combatUnits[0]._playerObjective ?? null : null;
 
-      this.selectionCommandPanel.appendChild(makeHeader('🏴 Objective'));
+      cmdContent.appendChild(makeHeader('🏴 Objective'));
       const objRow = document.createElement('div');
       objRow.style.cssText = 'display: flex; gap: 3px;';
 
@@ -2376,18 +2493,18 @@ export class HUD {
       clearBtn.title = 'Manual — Clear objective, return to manual control.';
       objRow.appendChild(clearBtn);
 
-      this.selectionCommandPanel.appendChild(objRow);
+      cmdContent.appendChild(objRow);
     }
 
     // ACTIONS section (always show for selected units)
-    this.selectionCommandPanel.appendChild(makeHeader('⚡ Actions'));
+    cmdContent.appendChild(makeHeader('⚡ Actions'));
     const actionRow = document.createElement('div');
     actionRow.style.cssText = 'display: flex; gap: 3px; flex-wrap: wrap;';
     const killBtn = makeSmallBtn('Kill', '#e74c3c', false,
       () => this._onRespawnUnits?.());
     killBtn.title = 'Kill the selected units (permanently removes them).';
     actionRow.appendChild(killBtn);
-    this.selectionCommandPanel.appendChild(actionRow);
+    cmdContent.appendChild(actionRow);
   }
 
   showUnitInfo(unit: Unit): void {

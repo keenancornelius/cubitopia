@@ -5,6 +5,20 @@ export const GAME_CONFIG = {
     foodPerCombatUnit: 2,   // 2 food per combat unit (was 3 — lets early armies feel larger)
     startingFood: 10,       // Starting food — enough for 5 combat units
     baseFoodBonus: 4,       // Bonus food from base tier (Camp=0, Fort=4, Castle=8)
+    farmhouseFoodBonus: 3,  // Each farmhouse adds +3 to effective food storage
+    farmhouseYieldBonus: 1, // Each farmhouse adds +1 food yield to nearby farm patches
+    farmhouseRadius: 6,     // Hex radius for farmhouse yield bonus
+    // Morale thresholds — food ratio = effectiveFood / foodNeeded
+    morale: {
+      starvingThreshold: 0.5,   // Below 50% food ratio → starving (heavy debuff)
+      hungryThreshold: 0.8,     // Below 80% food ratio → hungry (mild debuff)
+      wellFedThreshold: 1.5,    // Above 150% food ratio → well-fed (bonus)
+      starvingModifier: 0.7,    // 30% penalty to attack/move speed when starving
+      hungryModifier: 0.85,     // 15% penalty when hungry
+      wellFedModifier: 1.1,     // 10% bonus when well-fed
+      normalModifier: 1.0,      // No change in normal range
+      starvingHealthDrain: 0.5, // HP/sec drain on combat units when starving
+    },
   },
 
   defenses: {
@@ -406,7 +420,7 @@ export const GAME_CONFIG = {
       combatSpawn: 5,
       workerSpawn: 4,
       autoMarchStart: 3,
-      commanderTick: 1.5,
+      commanderTick: 1.0,
     },
     nature: {
       maxHarvests: 3,
@@ -415,6 +429,15 @@ export const GAME_CONFIG = {
       treeSproutInterval: 5,
       treeSproutChance: 0.2,
       regrowHarvestScale: 0.5,
+      /** Forestry building aura */
+      forestryAuraRadius: 8,         // hex distance — tiles within this of a forestry get bonuses
+      forestryRegrowMultiplier: 0.4, // regrow timer ×0.4 (2.5× faster) near a forestry
+      forestryGrowthMultiplier: 0.5, // growth timer ×0.5 (2× faster) near a forestry
+      forestryExtraHarvests: 3,      // +3 harvests before exhaustion (6 total near forestry)
+      forestryAutoPlantInterval: 8,  // seconds between auto-planting a sapling nearby
+      forestryAutoPlantRadius: 5,    // max hex distance for auto-planting
+      forestryWoodTrickle: 1,        // passive wood per forestry per trickle tick
+      forestryTrickleInterval: 15,   // seconds between trickle income
       grassGrowthTime: 8,
       grassSpreadInterval: 6,
       grassSpreadChance: 0.15,
@@ -430,7 +453,7 @@ export const GAME_CONFIG = {
     circleMaxRadius: 5,
     aiRangedLineThreshold: 0.5,
     aiWedgeMinUnits: 5,
-    aiMarchSpeedCatchupFactor: 0.3,
+    aiMarchSpeedCatchupFactor: 0.35,
     priorities: {
       [UnitType.PALADIN]: 0,
       [UnitType.WARRIOR]: 1,
@@ -541,18 +564,18 @@ export const GAME_CONFIG = {
   },
 
   tacticalGroup: {
-    minMusterSize: 2,          // minimum army size to start marching
-    maxMusterWait: 8,          // seconds before marching with partial army
-    reformDelay: 4,            // seconds without enemy contact before reforming
+    minMusterSize: 3,          // minimum army size to start marching (was 2 — too easy to send solo pairs)
+    maxMusterWait: 6,          // seconds before marching with partial army (was 8 — get moving faster)
+    reformDelay: 2.5,          // seconds without enemy contact before reforming (was 4 — resume march faster)
     retreatThreshold: 0.35,    // health-weighted strength ratio to retreat
+    contactRange: 10,          // hex range to detect enemies during march (was hardcoded 8)
   },
 
   gather: {
-    lumberjackCooldown: 0.5,   // seconds between tree chops
     builderMineCooldown: 0.8,  // seconds between builder mine swings
-    villagerGrassCooldown: 2.5,// seconds for grass gathering
-    villagerFarmCooldown: 4.0, // seconds for farm crop gathering
-    lumberjackChopCooldown: 3.0, // seconds between tree chops
+    villagerGrassCooldown: 2.0,// seconds for grass gathering (was 2.5 — reworked for multi-harvest)
+    villagerFarmCooldown: 3.0, // seconds for farm crop gathering (was 4.0 — reworked for multi-harvest)
+    lumberjackChopCooldown: 2.0, // seconds between tree chops (was 3.0 — reworked for multi-chop)
     initialConstructionDelay: 0.5, // seconds before first construction tick
     constructionRate: 0.125,   // progress per tick (1/8 = 8 seconds to build)
     constructionCooldown: 1.0, // seconds between construction ticks

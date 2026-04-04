@@ -1,14 +1,14 @@
 // ============================================
 // CUBITOPIA — Base Upgrade System
-// Handles base tier progression (Camp → Fort → Castle)
-// and Ogre reward unit spawning on tier-up.
+// Handles base tier progression (Camp → Fort → Castle → Citadel)
+// and reward unit spawning on tier-up.
 // ============================================
 
 import { Base, BaseTier, HexCoord, BuildingKind, PlacedBuilding } from '../../types';
 
 // --- Tier thresholds ---
 // Each tier requires BOTH a population count AND unique building types in the base's zone.
-export const BASE_TIER_CONFIG = {
+export const BASE_TIER_CONFIG: Record<number, { name: string; populationRequired: number; uniqueBuildingsRequired: number }> = {
   [BaseTier.CAMP]: {
     name: 'Camp',
     populationRequired: 0,
@@ -24,14 +24,15 @@ export const BASE_TIER_CONFIG = {
     populationRequired: 60,
     uniqueBuildingsRequired: 6,
   },
+  [BaseTier.CITADEL]: {
+    name: 'Citadel',
+    populationRequired: 90,
+    uniqueBuildingsRequired: 9,  // All building types
+  },
 };
 
-// Tier 3 (max) — not in config because there's no tier above it
-export const TIER_3_REQUIREMENTS = {
-  name: 'Citadel',
-  populationRequired: 90,
-  uniqueBuildingsRequired: 9,  // All building types
-};
+/** Max tier — no upgrades beyond this */
+const MAX_TIER = BaseTier.CITADEL;
 
 /** All 9 building kinds that count toward tier requirements (excludes walls/gates) */
 export const TIER_BUILDING_KINDS: BuildingKind[] = [
@@ -86,20 +87,16 @@ export class BaseUpgradeSystem {
    * Get the tier name for display.
    */
   getTierName(tier: BaseTier): string {
-    if (tier === BaseTier.CAMP) return 'Camp';
-    if (tier === BaseTier.FORT) return 'Fort';
-    return 'Castle';
+    return BASE_TIER_CONFIG[tier]?.name ?? 'Camp';
   }
 
   /**
    * Get the next tier's requirements for a base. Returns null if already max tier.
    */
   getNextTierRequirements(base: Base): { name: string; populationRequired: number; uniqueBuildingsRequired: number } | null {
-    if (base.tier >= BaseTier.CASTLE) return null;
+    if (base.tier >= MAX_TIER) return null;
     const nextTier = (base.tier + 1) as BaseTier;
-    if (nextTier === BaseTier.FORT) return BASE_TIER_CONFIG[BaseTier.FORT];
-    if (nextTier === BaseTier.CASTLE) return BASE_TIER_CONFIG[BaseTier.CASTLE];
-    return null;
+    return BASE_TIER_CONFIG[nextTier] ?? null;
   }
 
   /**
@@ -108,26 +105,16 @@ export class BaseUpgradeSystem {
    */
   checkUpgrade(base: Base): BaseUpgradeEvent | null {
     if (base.destroyed) return null;
-    if (base.tier >= BaseTier.CASTLE) return null;  // Already max
+    if (base.tier >= MAX_TIER) return null;  // Already max
 
     const nextTier = (base.tier + 1) as BaseTier;
-    let popRequired: number;
-    let buildingsRequired: number;
-
-    if (nextTier === BaseTier.FORT) {
-      popRequired = BASE_TIER_CONFIG[BaseTier.FORT].populationRequired;
-      buildingsRequired = BASE_TIER_CONFIG[BaseTier.FORT].uniqueBuildingsRequired;
-    } else if (nextTier === BaseTier.CASTLE) {
-      popRequired = BASE_TIER_CONFIG[BaseTier.CASTLE].populationRequired;
-      buildingsRequired = BASE_TIER_CONFIG[BaseTier.CASTLE].uniqueBuildingsRequired;
-    } else {
-      return null;
-    }
+    const req = BASE_TIER_CONFIG[nextTier];
+    if (!req) return null;
 
     const totalPop = this.ops.getTotalUnitCount(base.owner);
     const uniqueBuildings = this.getUniqueBuildingsInZone(base);
 
-    if (totalPop >= popRequired && uniqueBuildings.size >= buildingsRequired) {
+    if (totalPop >= req.populationRequired && uniqueBuildings.size >= req.uniqueBuildingsRequired) {
       const previousTier = base.tier;
       base.tier = nextTier;
       return {

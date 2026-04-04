@@ -33,7 +33,7 @@ import {
   VoxelBlock,
   ENABLE_UNDERGROUND,
 } from '../types';
-import { getPreset, generateArenaMap, generateDesertTunnelsMap, generateSkylandMap, generateVolcanicMap, generateArchipelagoMap, ArenaMap, DesertTunnelsMap, SkylandMap, VolcanicMap, ArchipelagoMap, MAP_GEN_PARAMS } from './MapPresets';
+import { getPreset, generateArenaMap, generateDesertTunnelsMap, generateSkylandMap, generateVolcanicMap, generateArchipelagoMap, generateTundraMap, generateSunkenRuinsMap, generateBadlandsMap, ArenaMap, DesertTunnelsMap, SkylandMap, VolcanicMap, ArchipelagoMap, TundraMap, MAP_GEN_PARAMS } from './MapPresets';
 import { NEUTRAL_OWNER } from './PlayerConfig';
 
 /**
@@ -214,7 +214,7 @@ export default class MapInitializer {
     }
 
     // Step 3: Smooth terrain around ALL player bases (skip for arena)
-    if (mapType !== MapType.ARENA && mapType !== MapType.SKYLAND) {
+    if (mapType !== MapType.ARENA && mapType !== MapType.SKYLAND && mapType !== MapType.ARCHIPELAGO) {
       for (const bp of basePositions) {
         this.smoothBaseArea(map, bp.q, bp.r, 3, 4, 3, TerrainType.PLAINS);
         this.seedBaseForest(map, bp.q, bp.r);
@@ -236,6 +236,15 @@ export default class MapInitializer {
           this.smoothNeutralBaseArea(map, c, sb.terrain);
         }
       }
+    }
+
+    // Step 4a: Map-specific re-skin — swap standard blocks to variant materials BEFORE building meshes
+    if (mapType === MapType.TUNDRA) {
+      this.reskinTundra(map);
+    } else if (mapType === MapType.SUNKEN_RUINS) {
+      this.reskinRuins(map);
+    } else if (mapType === MapType.BADLANDS) {
+      this.reskinBadlands(map);
     }
 
     // Step 4: Build terrain voxels and decorate tiles
@@ -353,6 +362,12 @@ export default class MapInitializer {
       return generateVolcanicMap(MAP_SIZE, undefined, playerCount);
     } else if (mapType === MapType.ARCHIPELAGO) {
       return generateArchipelagoMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.TUNDRA) {
+      return generateTundraMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.SUNKEN_RUINS) {
+      return generateSunkenRuinsMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.BADLANDS) {
+      return generateBadlandsMap(MAP_SIZE, undefined, playerCount);
     } else {
       const params = MAP_GEN_PARAMS[mapType];
       const mapGen = new MapGenerator(undefined, params);
@@ -607,6 +622,63 @@ export default class MapInitializer {
    */
   private addOceanPlane(_mapSize: number): void {
     // No-op: ocean removed for cube planet preparation
+  }
+
+  /**
+   * Post-shell-block re-skin for tundra: swap standard blocks to frozen variants.
+   * computeShellBlocks rebuilds all voxel data with standard types (GRASS, DIRT, etc.),
+   * so we remap them to tundra equivalents for the frozen aesthetic.
+   */
+  private reskinTundra(map: GameMap): void {
+    const TUNDRA_SWAP: Partial<Record<BlockType, BlockType>> = {
+      [BlockType.GRASS]: BlockType.PACKED_SNOW,
+      [BlockType.DIRT]: BlockType.FROZEN_DIRT,
+      [BlockType.JUNGLE]: BlockType.PACKED_SNOW,
+      [BlockType.SAND]: BlockType.PACKED_SNOW,
+    };
+
+    map.tiles.forEach((tile) => {
+      for (const block of tile.voxelData.blocks) {
+        const swap = TUNDRA_SWAP[block.type];
+        if (swap) block.type = swap;
+      }
+    });
+  }
+
+  /**
+   * Post-shell-block re-skin for Sunken Ruins: swap standard blocks to ruin variants.
+   */
+  private reskinRuins(map: GameMap): void {
+    const RUINS_SWAP: Partial<Record<BlockType, BlockType>> = {
+      [BlockType.GRASS]: BlockType.MOSSY_STONE,
+      [BlockType.DIRT]: BlockType.ANCIENT_BRICK,
+      [BlockType.SAND]: BlockType.MOSSY_STONE,
+    };
+
+    map.tiles.forEach((tile) => {
+      for (const block of tile.voxelData.blocks) {
+        const swap = RUINS_SWAP[block.type];
+        if (swap) block.type = swap;
+      }
+    });
+  }
+
+  /**
+   * Post-shell-block re-skin for Badlands: swap standard blocks to badlands variants.
+   */
+  private reskinBadlands(map: GameMap): void {
+    const BADLANDS_SWAP: Partial<Record<BlockType, BlockType>> = {
+      [BlockType.GRASS]: BlockType.RED_CLAY,
+      [BlockType.DIRT]: BlockType.CRACKED_EARTH,
+      [BlockType.SAND]: BlockType.CRACKED_EARTH,
+    };
+
+    map.tiles.forEach((tile) => {
+      for (const block of tile.voxelData.blocks) {
+        const swap = BADLANDS_SWAP[block.type];
+        if (swap) block.type = swap;
+      }
+    });
   }
 
   /**

@@ -368,6 +368,12 @@ export class TerrainDecorator {
   volcanicMode = false;
   /** When true, use tropical decorations: palm/jungle trees, no snow pines */
   archipelagoMode = false;
+  /** When true, use frozen tundra decorations: sparse pine trees, ice rocks, snow drifts */
+  tundraMode = false;
+  /** When true, use ruins decorations: vine clusters, mossy rocks, broken pillars */
+  ruinsMode = false;
+  /** When true, use badlands decorations: sparse dead trees, tumbleweeds, desert rocks */
+  badlandsMode = false;
   /** Camera position reference for grass distance culling. Set externally each frame. */
   cameraWorldPos: { x: number; z: number } = { x: 0, z: 0 };
   private _grassFrameSkip = 0;
@@ -460,7 +466,12 @@ export class TerrainDecorator {
     switch (terrain) {
       case TerrainType.FOREST:
         if (!neighborTooTall) {
-          if (this.volcanicMode) {
+          if (this.tundraMode) {
+            // Frozen forest: sparse snow pines, occasional rocks
+            this.addSnowPine(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.55) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
+            if (rng.next() > 0.8) this.addRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
+          } else if (this.volcanicMode) {
             // Scorched forest: charred dead trees, volcanic rocks, no greenery
             this.addScorchedTree(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.5) this.addScorchedTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
@@ -479,7 +490,11 @@ export class TerrainDecorator {
         break;
       case TerrainType.PLAINS:
         if (!neighborTooTall) {
-          if (this.volcanicMode) {
+          if (this.tundraMode) {
+            // Frozen plains: sparse rocks, very occasional lone pine
+            if (rng.next() > 0.75) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.92) this.addSnowPine(worldX + 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
+          } else if (this.volcanicMode) {
             // Ash plains: sparse volcanic rocks, no grass or flowers
             if (rng.next() > 0.55) this.addVolcanicRock(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.75) this.addVolcanicRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
@@ -508,7 +523,12 @@ export class TerrainDecorator {
         }
         break;
       case TerrainType.MOUNTAIN:
-        if (this.desertMode) {
+        if (this.tundraMode) {
+          // Frozen peaks: dense ice rocks, no trees
+          if (rng.next() > 0.3) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.45) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.6) this.addRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+        } else if (this.desertMode) {
           if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
           if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
           if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);

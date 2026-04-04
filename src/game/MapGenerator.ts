@@ -11,6 +11,7 @@ import {
   VoxelBlock,
   BlockType,
   ResourceType,
+  MapType,
   ENABLE_UNDERGROUND,
 } from '../types';
 import { Logger } from '../engine/Logger';
@@ -1158,12 +1159,13 @@ export class MapGenerator {
     const ARCHIPELAGO_BLOCK_TYPES = new Set([
       BlockType.CORAL, BlockType.TROPICAL_GRASS, BlockType.PALM_WOOD,
     ]);
-
+    const RUINS_BLOCK_TYPES = new Set([BlockType.MOSSY_STONE, BlockType.ANCIENT_BRICK, BlockType.VINE, BlockType.RUIN_PILLAR]);
+    const BADLANDS_BLOCK_TYPES = new Set([BlockType.RED_CLAY, BlockType.CRACKED_EARTH, BlockType.MESA_STONE, BlockType.DEAD_WOOD]);
     map.tiles.forEach((tile, key) => {
       const [q, r] = key.split(',').map(Number);
 
-      // ── Skyland preservation: skip void tiles entirely, keep custom island blocks ──
-      const hasCustomBlocks = tile.voxelData.blocks.some(b => SKYLAND_BLOCK_TYPES.has(b.type) || VOLCANIC_BLOCK_TYPES.has(b.type) || ARCHIPELAGO_BLOCK_TYPES.has(b.type));
+      // ── Custom map preservation: skip tiles with hand-crafted voxel columns ──
+      const hasCustomBlocks = tile.voxelData.blocks.some(b => SKYLAND_BLOCK_TYPES.has(b.type) || VOLCANIC_BLOCK_TYPES.has(b.type) || ARCHIPELAGO_BLOCK_TYPES.has(b.type) || RUINS_BLOCK_TYPES.has(b.type) || BADLANDS_BLOCK_TYPES.has(b.type));
       if (hasCustomBlocks) {
         // This is a Skyland island/bridge tile — keep its hand-crafted voxel column.
         // Still recalculate elevation from blocks so pathfinding works.

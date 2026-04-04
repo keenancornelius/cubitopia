@@ -263,6 +263,24 @@ export const UI = {
     `.replace(/\n\s+/g, ' ').trim();
   },
 
+  /** Minimize / collapse toggle button — small clickable icon in panel headers */
+  minimizeBtn(): string {
+    return `
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px;
+      border-radius: ${BORDER.radius.sm};
+      cursor: pointer; font-size: 14px; line-height: 1;
+      font-family: ${FONT.mono};
+      border: ${BORDER.thin} solid ${COLORS.borderDefault};
+      color: ${COLORS.textMuted};
+      background: rgba(255,255,255,0.05);
+      transition: ${TRANSITION.fast};
+      user-select: none;
+      pointer-events: auto;
+      flex-shrink: 0;
+    `.replace(/\n\s+/g, ' ').trim();
+  },
+
   /** Mode indicator bar (bottom center, shows build mode, etc.) */
   modeIndicator(borderColor: string): string {
     return `

@@ -43,6 +43,8 @@ export class UnitAI {
   static siloPositions: Map<number, HexCoord> = new Map();
   /** Farmhouse position per player */
   static farmhousePositions: Map<number, HexCoord> = new Map();
+  /** Forestry building positions per player (lumberjacks use as drop-off) */
+  static forestryPositions: Map<number, HexCoord[]> = new Map();
   /** Track which farm patch each villager is targeting */
   static claimedFarms: Map<string, string> = new Map(); // "q,r" → unitId
   /** Track built walls (set by main.ts) */
@@ -60,6 +62,8 @@ export class UnitAI {
   static charcoalStockpile: number[] = [0, 0];
   static steelStockpile: number[] = [0, 0];
   static goldStockpile: number[] = [0, 0];
+  /** Morale modifiers per player — attack/move speed multiplier from food ratio (set by main.ts each frame) */
+  static moraleModifiers: number[] = [1.0, 1.0];
   /** Reference to placed buildings (synced from main.ts) for builder auto-construct */
   static placedBuildings: PlacedBuilding[] = [];
 
@@ -90,7 +94,7 @@ export class UnitAI {
   /** Per-unit blacklist of tiles that failed pathfinding — avoids retrying same unreachable target every frame.
    *  Key: unitId, Value: Map of "q,r" → expiry timestamp */
   private static unreachableCache: Map<string, Map<string, number>> = new Map();
-  private static readonly UNREACHABLE_TIMEOUT = 10_000; // 10 seconds before retrying
+  private static readonly UNREACHABLE_TIMEOUT = 600; // ~10 seconds at 60fps before retrying
 
   /** Mark a tile as temporarily unreachable for a specific unit */
   private static markUnreachable(unitId: string, tileKey: string): void {
@@ -99,7 +103,7 @@ export class UnitAI {
       unitCache = new Map();
       UnitAI.unreachableCache.set(unitId, unitCache);
     }
-    unitCache.set(tileKey, Date.now() + UnitAI.UNREACHABLE_TIMEOUT);
+    unitCache.set(tileKey, UnitAI.gameFrame + UnitAI.UNREACHABLE_TIMEOUT);
   }
 
   /** Clear all unreachable caches (call on new game) */
@@ -113,7 +117,7 @@ export class UnitAI {
     if (!unitCache) return false;
     const expiry = unitCache.get(tileKey);
     if (!expiry) return false;
-    if (Date.now() > expiry) {
+    if (UnitAI.gameFrame > expiry) {
       unitCache.delete(tileKey);
       return false;
     }
@@ -125,6 +129,11 @@ export class UnitAI {
    */
   /** Debug flags passed from HUD — controls worker/combat behaviors */
   static debugFlags: UnitAIDebugFlags = {};
+
+  /** Deterministic game frame counter — set by main.ts each updateRTS call.
+   *  Use instead of Date.now()/performance.now() in any game logic.
+   *  ~60 frames/second. Convert: 10s timeout → 600 frames. */
+  static gameFrame = 0;
 
   /** True if unit is dead or dying to a ranged projectile still in flight */
   static isDead(unit: Unit): boolean {
@@ -150,9 +159,11 @@ export class UnitAI {
     [UnitType.LUMBERJACK]:   0.71, // 1/1.4
   };
 
-  /** Get attack cooldown clamped to animation cycle minimum */
+  /** Get attack cooldown clamped to animation cycle minimum, modified by morale */
   static getAttackCooldown(unit: Unit): number {
-    const baseCooldown = 1 / unit.attackSpeed;
+    const moraleMod = UnitAI.moraleModifiers[unit.owner] ?? 1.0;
+    // Higher morale → lower cooldown (faster attacks). Divide by morale modifier.
+    const baseCooldown = 1 / (unit.attackSpeed * moraleMod);
     const minCooldown = UnitAI.MIN_ATTACK_COOLDOWN[unit.type] ?? 0.40;
     return Math.max(baseCooldown, minCooldown);
   }
@@ -860,11 +871,11 @@ export class UnitAI {
       // builder keeps falling through to adjacent auto-mine).
       const failedSet = (unit as any)._failedBlueprintIds as Set<string> | undefined;
       if (failedSet && failedSet.size > 0) {
-        const now = Date.now();
+        const gf = UnitAI.gameFrame;
         const lastClear = (unit as any)._lastBlacklistClear ?? 0;
-        if (now - lastClear > 10000) { // retry every 10 seconds
+        if (gf - lastClear > 600) { // retry every ~10 seconds (600 frames at 60fps)
           failedSet.clear();
-          (unit as any)._lastBlacklistClear = now;
+          (unit as any)._lastBlacklistClear = gf;
           Logger.debug('Builder', `${unit.id} cleared blueprint blacklist (periodic retry)`);
         }
       }
@@ -961,9 +972,9 @@ export class UnitAI {
       if (!UnitAI.debugFlags.disableMine) {
         // Throttled debug log — only every 5 seconds per builder
         if (unit.owner === 0) {
-          const now = Date.now();
-          if (!(unit as any)._lastAutoMineLog || now - (unit as any)._lastAutoMineLog > 5000) {
-            (unit as any)._lastAutoMineLog = now;
+          const gf = UnitAI.gameFrame;
+          if (!(unit as any)._lastAutoMineLog || gf - (unit as any)._lastAutoMineLog > 300) {
+            (unit as any)._lastAutoMineLog = gf;
             Logger.debug('Builder', `${unit.id} fell through to auto-mine (no blueprints/walls found)`);
           }
         }
@@ -1560,7 +1571,7 @@ export class UnitAI {
       return;
     }
 
-    // VILLAGER: harvest farm patch or tall grass
+    // VILLAGER: harvest farm patch or tall grass — MULTI-HARVEST until carry full
     if (unit.type === UnitType.VILLAGER) {
       const tileKey = `${target.q},${target.r}`;
       const isFarm = UnitAI.farmPatches.has(tileKey);
@@ -1569,21 +1580,61 @@ export class UnitAI {
       const isGrass = isPlayerGrass || isAutoGrass;
 
       if (isFarm || isGrass) {
+        // Calculate food yield — farm patches get bonus from nearby farmhouse
+        let foodYield = isFarm ? GAME_CONFIG.economy.harvest.crops.foodYield : GAME_CONFIG.economy.harvest.grass.hayBase;
+        if (isFarm) {
+          const fhPos = UnitAI.farmhousePositions.get(unit.owner);
+          if (fhPos) {
+            const fhDist = Pathfinder.heuristic(target, fhPos);
+            if (fhDist <= GAME_CONFIG.population.farmhouseRadius) {
+              foodYield += GAME_CONFIG.population.farmhouseYieldBonus;
+            }
+          }
+        }
+
+        // Accumulate food (multi-harvest like lumberjack multi-chop)
+        unit.carryAmount = Math.min((unit.carryAmount || 0) + foodYield, unit.carryCapacity);
+        unit.carryType = 'food';
+
         const eventType = isGrass ? 'villager:harvest_grass' : 'villager:harvest';
         events.push({
           type: eventType,
           unit,
           result: { position: target, resource: 'food' },
         });
-        unit.gatherCooldown = isGrass ? GAME_CONFIG.gather.villagerGrassCooldown : GAME_CONFIG.gather.villagerFarmCooldown;
 
-        // Transition to RETURNING — carry food to silo or base (skip if disableAutoReturn)
+        UnitAI.claimedFarms.delete(tileKey);
+        if (isPlayerGrass) UnitAI.playerGrassBlueprint.delete(tileKey);
+
+        // If carry not full, try to find another nearby harvest target (multi-harvest)
+        if (unit.carryAmount < unit.carryCapacity) {
+          const nextTarget = UnitAI.findNearbyHarvestTarget(unit, target, map, 2);
+          if (nextTarget) {
+            const nKey = `${nextTarget.q},${nextTarget.r}`;
+            UnitAI.claimedFarms.set(nKey, unit.id);
+            const nDist = Pathfinder.heuristic(unit.position, nextTarget);
+            if (nDist <= 1) {
+              // Adjacent — stay gathering with new target
+              const nIsFarm = UnitAI.farmPatches.has(nKey);
+              unit.command = { type: CommandType.GATHER, targetPosition: nextTarget, targetUnitId: null };
+              unit.gatherCooldown = nIsFarm ? GAME_CONFIG.gather.villagerFarmCooldown : GAME_CONFIG.gather.villagerGrassCooldown;
+              return;
+            } else {
+              // 2 hexes away — go idle, idle handler will pick it up
+              unit.state = UnitState.IDLE;
+              unit.command = null;
+              return;
+            }
+          }
+          // No more harvest targets nearby — fall through to return
+        }
+
+        // Carry full or no more targets — return to nearest drop-off
         if (UnitAI.debugFlags.disableAutoReturn) {
           unit.state = UnitState.IDLE;
           unit.command = null;
         } else {
-          const siloPos = UnitAI.siloPositions.get(unit.owner);
-          const returnPos = siloPos || UnitAI.basePositions.get(unit.owner);
+          const returnPos = UnitAI.findNearestFoodDropOff(unit);
           if (returnPos) {
             unit.state = UnitState.RETURNING;
             UnitAI.commandMove(unit, returnPos, map);
@@ -1593,8 +1644,6 @@ export class UnitAI {
             unit.command = null;
           }
         }
-        UnitAI.claimedFarms.delete(tileKey);
-        if (isPlayerGrass) UnitAI.playerGrassBlueprint.delete(tileKey);
       } else {
         unit.state = UnitState.IDLE;
         unit.command = null;
@@ -1646,7 +1695,7 @@ export class UnitAI {
       return;
     }
 
-    // LUMBERJACK: chop trees only
+    // LUMBERJACK: chop trees — multi-chop until carry is full, then return to nearest drop-off
     const tile = map.tiles.get(`${target.q},${target.r}`);
 
     if (tile && (tile.terrain === TerrainType.FOREST || tile.terrain === TerrainType.JUNGLE)) {
@@ -1654,25 +1703,43 @@ export class UnitAI {
       // Release claim since tree is being chopped
       UnitAI.releaseTreeClaim(unit.id);
 
-      // Fire the chop event (main.ts removes tree, calculates yield, sets unit.carryAmount)
+      // Fire the chop event (main.ts removes tree, adds to unit.carryAmount)
       events.push({
         type: 'lumberjack:chop',
         unit,
         result: { position: target, resource: 'wood' },
       });
-      // Transition to returning state — path back to base stockpile (skip if disableAutoReturn)
+
+      // --- Multi-chop: if not full, find next adjacent tree and keep chopping ---
+      if (unit.carryAmount < unit.carryCapacity) {
+        // Look for another tree within 2 hexes
+        const nearbyTree = UnitAI.findNearbyUnclaimedTree(unit, target, map, 2);
+        if (nearbyTree) {
+          const claimKey = `${nearbyTree.q},${nearbyTree.r}`;
+          UnitAI.claimedTrees.set(claimKey, unit.id);
+          const dist = Pathfinder.heuristic(unit.position, nearbyTree);
+          if (dist <= 1) {
+            // Adjacent tree — stay in gathering state, chop next
+            unit.command = { type: CommandType.GATHER, targetPosition: nearbyTree, targetUnitId: null };
+          } else {
+            // Tree is 2 hexes away — go idle, idle handler will pick up this claimed tree
+            unit.state = UnitState.IDLE;
+            unit.command = null;
+          }
+          return;
+        }
+        // No nearby trees — fall through to return with partial load
+      }
+
+      // --- Return to nearest drop-off (forestry building > base stockpile) ---
       if (UnitAI.debugFlags.disableAutoReturn) {
         unit.state = UnitState.IDLE;
         unit.command = null;
       } else {
-        const basePos = UnitAI.basePositions.get(unit.owner);
-        if (basePos) {
-          const stockPos: HexCoord = {
-            q: basePos.q + (unit.owner === 0 ? -2 : 2),
-            r: basePos.r,
-          };
+        const dropOff = UnitAI.findNearestDropOff(unit);
+        if (dropOff) {
           unit.state = UnitState.RETURNING;
-          UnitAI.commandMove(unit, stockPos, map);
+          UnitAI.commandMove(unit, dropOff, map);
           unit.state = UnitState.RETURNING;
         } else {
           unit.state = UnitState.IDLE;
@@ -1816,7 +1883,8 @@ export class UnitAI {
         unit._path = null;
       }
     } else {
-      let speed = unit.moveSpeed * delta;
+      const moraleMod = UnitAI.moraleModifiers[unit.owner] ?? 1.0;
+      let speed = unit.moveSpeed * moraleMod * delta;
       // Apply cleanse speed boost
       const clSpeedMult = StatusEffectSystem.getSpeedMultiplier(unit);
       if (clSpeedMult > 1.0) speed *= clSpeedMult;
@@ -2334,18 +2402,20 @@ export class UnitAI {
       const coord = { q, r };
       const baseDist = Pathfinder.heuristic(basePos, coord);
       const unitDist = Pathfinder.heuristic(unit.position, coord);
-      // Worker clustering: prefer tiles near other friendly lumberjacks
-      let buddyBonus = 0;
+      // Worker spread: PENALIZE trees near other friendly lumberjacks
+      // so workers fan out across available forest instead of clustering
+      let crowdPenalty = 0;
       const allU = UnitAI._allUnitsCache;
       for (let bi = 0, blen = allU.length; bi < blen; bi++) {
         const buddy = allU[bi];
         if (buddy === unit || buddy.owner !== unit.owner || buddy.type !== UnitType.LUMBERJACK) continue;
         if (buddy.state === UnitState.DEAD) continue;
         const bDist = Pathfinder.heuristic(buddy.position, coord);
-        if (bDist <= 4) buddyBonus -= 3; // Strong pull toward other lumberjacks
+        if (bDist <= 3) crowdPenalty += 4;       // Strong push away from nearby workers
+        else if (bDist <= 6) crowdPenalty += 1.5; // Mild push for medium distance
       }
-      // Weight proximity to unit more than base so lumberjacks push outward
-      const score = baseDist * 1.5 + unitDist + buddyBonus;
+      // Weight: proximity to unit first, moderate base pull, avoid crowds
+      const score = baseDist * 1.0 + unitDist * 1.5 + crowdPenalty;
       if (score < bestScore) {
         bestScore = score;
         best = coord;
@@ -2354,6 +2424,145 @@ export class UnitAI {
 
     // Fallback to any forest if nothing on own side
     return best ?? UnitAI.findNearestForest(unit, map);
+  }
+
+  /**
+   * Find an unclaimed tree within `radius` hexes of a position.
+   * Used by multi-chop to find the next tree without going back to idle.
+   */
+  private static findNearbyUnclaimedTree(unit: Unit, origin: HexCoord, map: GameMap, radius: number): HexCoord | null {
+    let best: HexCoord | null = null;
+    let bestDist = Infinity;
+    map.tiles.forEach((tile, key) => {
+      if (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE) return;
+      const claimer = UnitAI.claimedTrees.get(key);
+      if (claimer && claimer !== unit.id) return;
+      const [q, r] = key.split(',').map(Number);
+      const dist = Pathfinder.heuristic(origin, { q, r });
+      if (dist <= radius && dist < bestDist) {
+        bestDist = dist;
+        best = { q, r };
+      }
+    });
+    return best;
+  }
+
+  /**
+   * Find the nearest wood drop-off point for a lumberjack:
+   * 1. Nearest forestry building owned by same player
+   * 2. Fallback: base stockpile position
+   */
+  private static findNearestDropOff(unit: Unit): HexCoord | null {
+    const basePos = UnitAI.basePositions.get(unit.owner);
+    const stockPos = basePos ? {
+      q: basePos.q + (unit.owner === 0 ? -2 : 2),
+      r: basePos.r,
+    } : null;
+
+    // Check forestry buildings
+    const forestries = UnitAI.forestryPositions.get(unit.owner);
+    if (forestries && forestries.length > 0) {
+      let nearest: HexCoord | null = null;
+      let nearestDist = stockPos ? Pathfinder.heuristic(unit.position, stockPos) : Infinity;
+      for (const fp of forestries) {
+        const d = Pathfinder.heuristic(unit.position, fp);
+        if (d < nearestDist) {
+          nearestDist = d;
+          nearest = fp;
+        }
+      }
+      if (nearest) return nearest;
+    }
+
+    return stockPos;
+  }
+
+  /**
+   * Find nearest harvestable tile (farm or grass) within radius of origin.
+   * Used for villager multi-harvest — find next crop after harvesting current one.
+   */
+  private static findNearbyHarvestTarget(unit: Unit, origin: HexCoord, map: GameMap, radius: number): HexCoord | null {
+    let best: HexCoord | null = null;
+    let bestDist = Infinity;
+
+    // Check farm patches
+    for (const key of UnitAI.farmPatches) {
+      const claimer = UnitAI.claimedFarms.get(key);
+      if (claimer && claimer !== unit.id) continue;
+      const [q, r] = key.split(',').map(Number);
+      const dist = Pathfinder.heuristic(origin, { q, r });
+      if (dist <= radius && dist < bestDist) {
+        bestDist = dist;
+        best = { q, r };
+      }
+    }
+
+    // Check player grass blueprints
+    for (const key of UnitAI.playerGrassBlueprint) {
+      const claimer = UnitAI.claimedFarms.get(key);
+      if (claimer && claimer !== unit.id) continue;
+      const tile = map.tiles.get(key);
+      if (!tile || tile.terrain !== TerrainType.PLAINS) continue;
+      const [q, r] = key.split(',').map(Number);
+      const dist = Pathfinder.heuristic(origin, { q, r });
+      if (dist <= radius && dist < bestDist) {
+        bestDist = dist;
+        best = { q, r };
+      }
+    }
+
+    // Check auto-harvestable grass
+    for (const key of UnitAI.grassTiles) {
+      const claimer = UnitAI.claimedFarms.get(key);
+      if (claimer && claimer !== unit.id) continue;
+      const tile = map.tiles.get(key);
+      if (!tile || tile.terrain !== TerrainType.PLAINS) continue;
+      const [q, r] = key.split(',').map(Number);
+      const dist = Pathfinder.heuristic(origin, { q, r });
+      if (dist <= radius && dist < bestDist) {
+        bestDist = dist;
+        best = { q, r };
+      }
+    }
+
+    return best;
+  }
+
+  /**
+   * Find nearest food drop-off point for villagers.
+   * Priority: 1. Farmhouse  2. Silo  3. Base stockpile
+   */
+  private static findNearestFoodDropOff(unit: Unit): HexCoord | null {
+    const basePos = UnitAI.basePositions.get(unit.owner);
+    const stockPos = basePos ? {
+      q: basePos.q + (unit.owner === 0 ? -2 : 2),
+      r: basePos.r,
+    } : null;
+
+    let nearest: HexCoord | null = stockPos;
+    let nearestDist = stockPos ? Pathfinder.heuristic(unit.position, stockPos) : Infinity;
+
+    // Check farmhouse
+    const fhPos = UnitAI.farmhousePositions.get(unit.owner);
+    if (fhPos) {
+      const d = Pathfinder.heuristic(unit.position, fhPos);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = fhPos;
+      }
+    }
+
+    // Check silo
+    const siloPos = UnitAI.siloPositions.get(unit.owner);
+    if (siloPos) {
+      const d = Pathfinder.heuristic(unit.position, siloPos);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = siloPos;
+      }
+    }
+
+    return nearest;
   }
 
   /** Release a lumberjack's tree claim */
@@ -2903,10 +3112,10 @@ export class UnitAI {
         const nextWp = path[pathIndex + 1];
         const nextKey = `${nextWp.q},${nextWp.r}`;
         // If a wall was built on the next waypoint since path was computed, re-path around it
-        // Throttle wall-repath to once every 500ms per unit to avoid pathfind spam
+        // Throttle wall-repath to once every ~500ms (30 frames) per unit to avoid pathfind spam
         if (Pathfinder.blockedTiles.has(nextKey) && nextKey !== `${path[path.length - 1].q},${path[path.length - 1].r}`
-            && (Date.now() - (unit._lastRepathTime ?? 0) > 500)) {
-          unit._lastRepathTime = Date.now();
+            && (UnitAI.gameFrame - (unit._lastRepathTime ?? 0) > 30)) {
+          unit._lastRepathTime = UnitAI.gameFrame;
           const finalGoal = path[path.length - 1];
           const canForest = unit.type === UnitType.LUMBERJACK;
           const canRidge = unit.type === UnitType.BUILDER;
@@ -2948,14 +3157,14 @@ export class UnitAI {
       }
     } else {
       // Move toward target — use squad march speed if assigned, otherwise individual speed
-      let effectiveSpeed = (unit._squadId && unit._squadSpeed) ? unit._squadSpeed : unit.moveSpeed;
-      // Berserker slow debuff — reduce speed while debuffed
-      const nowMs = performance.now();
-      if (unit._slowUntil && nowMs < unit._slowUntil && unit._slowFactor) {
+      const squadMoraleMod = UnitAI.moraleModifiers[unit.owner] ?? 1.0;
+      let effectiveSpeed = ((unit._squadId && unit._squadSpeed) ? unit._squadSpeed : unit.moveSpeed) * squadMoraleMod;
+      // Berserker slow debuff — reduce speed while debuffed (frame-based)
+      if (unit._slowUntil && UnitAI.gameFrame < unit._slowUntil && unit._slowFactor) {
         effectiveSpeed *= unit._slowFactor;
       }
-      // Berserker chase boost — increase speed while chasing slowed target
-      if (unit._chaseBoostUntil && nowMs < unit._chaseBoostUntil) {
+      // Berserker chase boost — increase speed while chasing slowed target (frame-based)
+      if (unit._chaseBoostUntil && UnitAI.gameFrame < unit._chaseBoostUntil) {
         effectiveSpeed *= 1.6;
       }
       // Healer cleanse speed boost — golden trail speed boost
@@ -2966,8 +3175,8 @@ export class UnitAI {
 
       // ── Squad leash: fast units ahead of centroid slow down to stay tight ──
       // Skip for joining units — they're catching up at their own speed.
-      // DISABLED when centroid is far from objective (squad still deploying from base) —
-      // the leash would freeze the entire group since nobody can get ahead to move the centroid.
+      // Always active (even during deployment) — the march speed formula already
+      // accounts for speed differences, so the leash won't freeze the group.
       if (unit._squadId != null && unit._tacticalGroupId != null && !unit._squadJoining) {
         const tgm = UnitAI.tacticalGroupManager;
         if (tgm) {
@@ -2990,33 +3199,28 @@ export class UnitAI {
               const centroidDistToObj = Math.sqrt(objDx * objDx + objDz * objDz);
 
               // Two-phase leash:
-              // MARCH phase (far from objective): keep units within 4 units of centroid
-              //   so the squad doesn't spread across the map on different terrain paths.
-              // APPROACH phase (<12 units from objective): tighter leash based on
-              //   distance-to-objective, preventing fast units from arriving first.
+              // APPROACH phase (<12 units from objective): tight leash, units arrive together
+              // MARCH phase (far from objective): moderate leash to keep formation cohesion
               const uDx = objWorld.x - unit.worldPosition.x, uDz = objWorld.z - unit.worldPosition.z;
               const unitDistToObj = Math.sqrt(uDx * uDx + uDz * uDz);
 
               if (centroidDistToObj < 12) {
-                // Approach phase: throttle units ahead of centroid toward objective
+                // Approach phase: tight throttle so fast units don't arrive alone
                 const aheadBy = centroidDistToObj - unitDistToObj;
-                if (aheadBy > 2.5) {
-                  const throttle = Math.max(0.40, 1.0 - (aheadBy - 2.5) * 0.15);
+                if (aheadBy > 2.0) {
+                  const throttle = Math.max(0.35, 1.0 - (aheadBy - 2.0) * 0.18);
                   effectiveSpeed *= throttle;
                 }
               } else {
-                // March phase: throttle units that are far ahead of centroid
-                // (measured as distance from unit to centroid, not to objective)
+                // March phase: keep units within ~3 world units of centroid
                 const distToCentroid = Math.sqrt(
                   (unit.worldPosition.x - cx) * (unit.worldPosition.x - cx) +
                   (unit.worldPosition.z - cz) * (unit.worldPosition.z - cz)
                 );
-                // Units >4 world units ahead of centroid (in direction of objective) slow down
-                const unitProgressToObj = unitDistToObj;
-                const centroidProgressToObj = centroidDistToObj;
-                const aheadOfCentroid = centroidProgressToObj - unitProgressToObj;
-                if (aheadOfCentroid > 4.0 && distToCentroid > 3.0) {
-                  const throttle = Math.max(0.50, 1.0 - (aheadOfCentroid - 4.0) * 0.1);
+                const aheadOfCentroid = centroidDistToObj - unitDistToObj;
+                // Tighter: threshold 3.0, floor 45%, steeper slope 0.12
+                if (aheadOfCentroid > 3.0 && distToCentroid > 2.5) {
+                  const throttle = Math.max(0.45, 1.0 - (aheadOfCentroid - 3.0) * 0.12);
                   effectiveSpeed *= throttle;
                 }
               }
@@ -3309,14 +3513,14 @@ export class UnitAI {
         }
       } else {
         // Melee unit: re-path toward target (respects walls)
-        // Throttle: only repath every 500ms to avoid 6x pathfind spam per frame
-        const now = performance.now();
-        const lastRepath = (unit as any)._lastRepathMs ?? 0;
-        if (now - lastRepath < 500) {
+        // Throttle: only repath every ~500ms (30 frames) to avoid pathfind spam
+        const gf = UnitAI.gameFrame;
+        const lastRepath = (unit as any)._lastRepathFrame ?? 0;
+        if (gf - lastRepath < 30) {
           // On cooldown — just keep moving toward current target if we have one
           if (!unit.targetPosition && !UnitAI.tryResumeSquadMarch(unit, map)) unit.state = UnitState.IDLE;
         } else {
-          (unit as any)._lastRepathMs = now;
+          (unit as any)._lastRepathFrame = gf;
           // Try pathing to an adjacent hex first (target's hex may be occupied)
           let bestPath: HexCoord[] = [];
           let bestLen = Infinity;

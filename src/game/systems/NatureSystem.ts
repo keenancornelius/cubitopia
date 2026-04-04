@@ -8,6 +8,14 @@ import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import { GAME_CONFIG } from '../GameConfig';
 import { GameRNG } from '../SeededRandom';
+import { hexDistQR } from '../HexMath';
+
+/** Position of a completed forestry building */
+export interface ForestryBuildingInfo {
+  q: number;
+  r: number;
+  owner: number;
+}
 
 /** Slim interface — only what NatureSystem needs from the outside */
 export interface NatureOps {
@@ -18,6 +26,9 @@ export interface NatureOps {
   removeGrassClump(key: string): void;
   addGrassAtStage(pos: HexCoord, baseY: number, stage: number): void;
   hasGrass(key: string): boolean;
+  /** Forestry building awareness */
+  getForestryBuildings(): ForestryBuildingInfo[];
+  addWoodToStockpile(owner: number, amount: number): void;
 }
 
 // ── Hex neighbor helper (offset coords) ─────────────────────────
@@ -71,16 +82,26 @@ export default class NatureSystem {
   /** Tiles where grass was harvested — eligible for crops */
   clearedPlains: Set<string> = new Set();
 
+  // ── Forestry aura state ─────────────────────────────────────
+  private forestryAutoPlantTimer = 0;
+  private forestryTrickleTimer = 0;
+  /** Cached set of tile keys within forestry aura range — rebuilt when forestry buildings change */
+  private forestryAuraTiles: Set<string> = new Set();
+  private lastForestryCount = 0;
+
   constructor(ops: NatureOps) {
     this.ops = ops;
   }
 
   // ── Public update (called every frame) ──────────────────────
   update(delta: number): void {
+    this.refreshForestryAuraCache();
     this.updateTreeRegrowth(delta);
-    this.updateTreeSprouts(delta);
+    this.updateTreeGrowth(delta);
     this.updateGrassGrowth(delta);
     this.updateGrassSpread(delta);
+    this.updateForestryAutoPlant(delta);
+    this.updateForestryTrickle(delta);
   }
 
   // ── Record original forest tiles (call after map generation) ──
@@ -103,16 +124,33 @@ export default class NatureSystem {
     if (!this.originalForestTiles.has(key)) return;
     const harvests = (this.harvestCount.get(key) ?? 0) + 1;
     this.harvestCount.set(key, harvests);
-    if (harvests >= this.MAX_HARVESTS) return; // exhausted — no more regrowth
 
-    // Longer regrowth time with each harvest
-    const regrowTime = this.TREE_REGROW_TIME * (1 + harvests * GAME_CONFIG.timers.nature.regrowHarvestScale);
+    // Forestry aura grants extra harvests before exhaustion
+    const nearForestry = this.forestryAuraTiles.has(key);
+    const maxH = this.MAX_HARVESTS + (nearForestry ? GAME_CONFIG.timers.nature.forestryExtraHarvests : 0);
+    if (harvests >= maxH) return; // exhausted — no more regrowth
+
+    // Longer regrowth time with each harvest, but forestry aura speeds it up
+    let regrowTime = this.TREE_REGROW_TIME * (1 + harvests * GAME_CONFIG.timers.nature.regrowHarvestScale);
+    if (nearForestry) {
+      regrowTime *= GAME_CONFIG.timers.nature.forestryRegrowMultiplier;
+    }
     this.treeRegrowthTimers.set(key, regrowTime);
+  }
+
+  /** Mark a tile as eligible for tree regrowth (auto-replant by lumberjacks) */
+  markAsReGrowable(key: string): void {
+    this.originalForestTiles.add(key);
   }
 
   /** Get tree age for wood yield calculation */
   getTreeAge(key: string): number | undefined {
     return this.treeAge.get(key);
+  }
+
+  /** Check if a tile is within a forestry building's aura */
+  isInForestryAura(key: string): boolean {
+    return this.forestryAuraTiles.has(key);
   }
 
   // ── Grass harvest callback (called by main.ts handleHarvestGrass) ──
@@ -144,37 +182,50 @@ export default class NatureSystem {
     this.syncGrassTiles();
   }
 
-  // ── Tree regrowth ───────────────────────────────────────────
+  // ── Tree regrowth (chopped stumps → saplings) ──────────────
   private updateTreeRegrowth(delta: number): void {
     const map = this.ops.getMap();
     if (!map) return;
 
-    // 1. Regrowth timers: chopped stumps → saplings (only on original forest tiles)
     for (const [key, remaining] of this.treeRegrowthTimers) {
       const newTime = remaining - delta;
       if (newTime <= 0) {
         this.treeRegrowthTimers.delete(key);
         const tile = map.tiles.get(key);
         if (!tile || tile.terrain !== TerrainType.PLAINS || Pathfinder.blockedTiles.has(key)) continue;
-        // Only regrow on original forest tiles
         if (!this.originalForestTiles.has(key)) continue;
-        // Diminishing regrowth chance based on harvest count
+
+        // Forestry aura grants extra harvest tolerance
+        const nearForestry = this.forestryAuraTiles.has(key);
         const harvests = this.harvestCount.get(key) ?? 0;
-        if (harvests >= this.MAX_HARVESTS) continue;
-        const regrowChance = 1 / (1 + harvests); // 100%, 50%, 33%
+        const maxH = this.MAX_HARVESTS + (nearForestry ? GAME_CONFIG.timers.nature.forestryExtraHarvests : 0);
+        if (harvests >= maxH) continue;
+
+        // Diminishing regrowth chance — but forestry aura boosts it
+        const baseChance = 1 / (1 + harvests); // 100%, 50%, 33%...
+        const regrowChance = nearForestry ? Math.min(1, baseChance + 0.3) : baseChance;
         if (GameRNG.rng.next() > regrowChance) continue;
 
         tile.terrain = TerrainType.FOREST;
         const [q, r] = key.split(',').map(Number);
         this.ops.addTreeAtStage({ q, r }, tile.elevation * 0.5, 0);
         this.treeAge.set(key, 0);
-        this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
+        // Forestry aura speeds up growth too
+        const growTime = nearForestry
+          ? this.TREE_GROWTH_TIME * GAME_CONFIG.timers.nature.forestryGrowthMultiplier
+          : this.TREE_GROWTH_TIME;
+        this.treeGrowthTimers.set(key, growTime);
       } else {
         this.treeRegrowthTimers.set(key, newTime);
       }
     }
+  }
 
-    // 2. Growth timers: saplings → young → mature
+  // ── Tree growth (saplings → young → mature) ───────────────
+  private updateTreeGrowth(delta: number): void {
+    const map = this.ops.getMap();
+    if (!map) return;
+
     for (const [key, remaining] of this.treeGrowthTimers) {
       const newTime = remaining - delta;
       if (newTime <= 0) {
@@ -200,7 +251,12 @@ export default class NatureSystem {
         this.treeAge.set(key, newStage);
 
         if (newStage < 2) {
-          this.treeGrowthTimers.set(key, this.TREE_GROWTH_TIME);
+          // Forestry aura speeds growth
+          const nearForestry = this.forestryAuraTiles.has(key);
+          const growTime = nearForestry
+            ? this.TREE_GROWTH_TIME * GAME_CONFIG.timers.nature.forestryGrowthMultiplier
+            : this.TREE_GROWTH_TIME;
+          this.treeGrowthTimers.set(key, growTime);
         } else {
           this.treeGrowthTimers.delete(key);
         }
@@ -210,10 +266,100 @@ export default class NatureSystem {
     }
   }
 
-  // ── Tree sprouting (disabled — trees no longer spread to new tiles) ──
-  private updateTreeSprouts(_delta: number): void {
-    // Trees only regrow on original forest tiles via regrowth timers.
-    // No new tree spawning on non-forest tiles.
+  // ── Forestry aura cache ────────────────────────────────────
+  /** Rebuild the set of tiles in range of any forestry building.
+   *  Only recomputes when the building count changes. */
+  private refreshForestryAuraCache(): void {
+    const buildings = this.ops.getForestryBuildings();
+    if (buildings.length === this.lastForestryCount) return;
+    this.lastForestryCount = buildings.length;
+
+    this.forestryAuraTiles.clear();
+    const map = this.ops.getMap();
+    if (!map) return;
+    const radius = GAME_CONFIG.timers.nature.forestryAuraRadius;
+
+    for (const fb of buildings) {
+      for (const [key] of map.tiles) {
+        if (this.forestryAuraTiles.has(key)) continue; // already covered
+        const [tq, tr] = key.split(',').map(Number);
+        if (hexDistQR(fb.q, fb.r, tq, tr) <= radius) {
+          this.forestryAuraTiles.add(key);
+        }
+      }
+    }
+  }
+
+  // ── Forestry auto-planting ─────────────────────────────────
+  /** Each forestry building periodically plants a sapling on a nearby
+   *  empty plains tile that was originally forest (or any plains within radius). */
+  private updateForestryAutoPlant(delta: number): void {
+    this.forestryAutoPlantTimer += delta;
+    if (this.forestryAutoPlantTimer < GAME_CONFIG.timers.nature.forestryAutoPlantInterval) return;
+    this.forestryAutoPlantTimer = 0;
+
+    const map = this.ops.getMap();
+    if (!map) return;
+    const buildings = this.ops.getForestryBuildings();
+    const plantRadius = GAME_CONFIG.timers.nature.forestryAutoPlantRadius;
+
+    for (const fb of buildings) {
+      // Find a suitable empty tile near this forestry
+      let bestKey: string | null = null;
+      let bestDist = Infinity;
+
+      for (const [key, tile] of map.tiles) {
+        if (tile.terrain !== TerrainType.PLAINS) continue;
+        if (Pathfinder.blockedTiles.has(key)) continue;
+        if (this.treeRegrowthTimers.has(key)) continue; // already regrowing
+        if (this.treeAge.has(key)) continue; // already has a tree
+        // Don't plant on farm patches
+        if (UnitAI.farmPatches.has(key)) continue;
+
+        const [tq, tr] = key.split(',').map(Number);
+        const d = hexDistQR(fb.q, fb.r, tq, tr);
+        if (d > plantRadius) continue;
+
+        // Prefer planting on original forest tiles first, then any plains
+        const isOriginal = this.originalForestTiles.has(key);
+        const score = d + (isOriginal ? 0 : 5);
+        if (score < bestDist) {
+          bestDist = score;
+          bestKey = key;
+        }
+      }
+
+      if (bestKey) {
+        const tile = map.tiles.get(bestKey)!;
+        tile.terrain = TerrainType.FOREST;
+        const [q, r] = bestKey.split(',').map(Number);
+        this.ops.addTreeAtStage({ q, r }, tile.elevation * 0.5, 0);
+        this.treeAge.set(bestKey, 0);
+        // Track as original so it can regrow in the future
+        this.originalForestTiles.add(bestKey);
+        const growTime = this.TREE_GROWTH_TIME * GAME_CONFIG.timers.nature.forestryGrowthMultiplier;
+        this.treeGrowthTimers.set(bestKey, growTime);
+      }
+    }
+  }
+
+  // ── Forestry passive wood trickle ──────────────────────────
+  /** Each completed forestry building produces a small passive wood income. */
+  private updateForestryTrickle(delta: number): void {
+    this.forestryTrickleTimer += delta;
+    if (this.forestryTrickleTimer < GAME_CONFIG.timers.nature.forestryTrickleInterval) return;
+    this.forestryTrickleTimer = 0;
+
+    const buildings = this.ops.getForestryBuildings();
+    // Group by owner
+    const ownerCounts = new Map<number, number>();
+    for (const fb of buildings) {
+      ownerCounts.set(fb.owner, (ownerCounts.get(fb.owner) ?? 0) + 1);
+    }
+    for (const [owner, count] of ownerCounts) {
+      const amount = count * GAME_CONFIG.timers.nature.forestryWoodTrickle;
+      this.ops.addWoodToStockpile(owner, amount);
+    }
   }
 
   // ── Grass growth ────────────────────────────────────────────
@@ -319,5 +465,9 @@ export default class NatureSystem {
     this.grassGrowthTimers.clear();
     this.grassSpreadTimer = 0;
     this.clearedPlains.clear();
+    this.forestryAuraTiles.clear();
+    this.forestryAutoPlantTimer = 0;
+    this.forestryTrickleTimer = 0;
+    this.lastForestryCount = 0;
   }
 }

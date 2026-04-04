@@ -48,6 +48,21 @@ const BLOCK_COLORS: Record<BlockType, number> = {
   [BlockType.CORAL]:           0xff6b8a,  // vibrant coral pink
   [BlockType.TROPICAL_GRASS]:  0x3cb043,  // bright tropical green
   [BlockType.PALM_WOOD]:       0xc4956a,  // warm tan wood
+  // Tundra palette
+  [BlockType.ICE]:             0xb8e0f0,  // translucent pale blue ice
+  [BlockType.FROZEN_DIRT]:     0x6b6860,  // grey-brown permafrost
+  [BlockType.PACKED_SNOW]:     0xdce8f0,  // bluish-white compacted snow
+  [BlockType.PINE_WOOD]:       0x3a2820,  // dark brown pine wood
+  // Sunken Ruins palette
+  [BlockType.MOSSY_STONE]:   0x5a7a5a,  // grey-green mossy stone
+  [BlockType.ANCIENT_BRICK]: 0xa08860,  // weathered tan brick
+  [BlockType.VINE]:          0x2d5a1e,  // dark green vine
+  [BlockType.RUIN_PILLAR]:   0xb0a898,  // pale grey carved stone
+  // Badlands palette
+  [BlockType.RED_CLAY]:      0xb5472a,  // deep red-orange clay
+  [BlockType.CRACKED_EARTH]: 0xc4a060,  // dry tan cracked ground
+  [BlockType.MESA_STONE]:    0xc46830,  // layered orange-red rock
+  [BlockType.DEAD_WOOD]:     0xb8b0a0,  // bleached grey dead wood
 };
 
 /** Gem types get special bright sparkle colors overlaid on their dark stone base */
@@ -245,6 +260,74 @@ function computeBlockColor(type: BlockType, position: GridPosition): THREE.Color
       hueShift = (hash - 0.5) * 0.04;
       satShift = (hash2 - 0.5) * 0.08;
       lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.ICE:
+      // Icy blue-white with subtle shimmer variation
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.15;
+      lightShift = (hash - 0.5) * 0.08;
+      break;
+    case BlockType.FROZEN_DIRT:
+      // Grey-brown permafrost with cold variation
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.06;
+      lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.PACKED_SNOW:
+      // Bluish compacted snow — subtle blue/white shifts
+      hueShift = (hash - 0.5) * 0.03;
+      satShift = (hash2 - 0.5) * 0.1;
+      lightShift = (hash - 0.5) * 0.06;
+      break;
+    case BlockType.PINE_WOOD:
+      hueShift = (hash - 0.5) * 0.03;
+      satShift = (hash2 - 0.5) * 0.06;
+      lightShift = (hash - 0.5) * 0.08;
+      break;
+    case BlockType.MOSSY_STONE:
+      // Green-grey with mossy patches
+      hueShift = (hash - 0.5) * 0.06;
+      satShift = (hash2 - 0.5) * 0.15;
+      lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.ANCIENT_BRICK:
+      // Weathered brick with warm variation
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.08;
+      lightShift = (hash - 0.5) * 0.12;
+      break;
+    case BlockType.VINE:
+      hueShift = (hash - 0.5) * 0.05;
+      satShift = (hash2 - 0.5) * 0.1;
+      lightShift = (hash - 0.5) * 0.08;
+      break;
+    case BlockType.RUIN_PILLAR:
+      hueShift = (hash - 0.5) * 0.02;
+      satShift = (hash2 - 0.5) * 0.04;
+      lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.RED_CLAY:
+      // Deep red-orange with warm shifts
+      hueShift = (hash - 0.5) * 0.06;
+      satShift = (hash2 - 0.5) * 0.12;
+      lightShift = (hash - 0.5) * 0.1;
+      break;
+    case BlockType.CRACKED_EARTH:
+      // Dry ground with tan-brown variation
+      hueShift = (hash - 0.5) * 0.04;
+      satShift = (hash2 - 0.5) * 0.08;
+      lightShift = (hash - 0.5) * 0.14;
+      break;
+    case BlockType.MESA_STONE:
+      // Layered sedimentary with band variation
+      hueShift = (hash - 0.5) * 0.05;
+      satShift = (hash2 - 0.5) * 0.1;
+      lightShift = (hash - 0.5) * 0.12;
+      break;
+    case BlockType.DEAD_WOOD:
+      hueShift = (hash - 0.5) * 0.02;
+      satShift = (hash2 - 0.5) * 0.04;
+      lightShift = (hash - 0.5) * 0.06;
       break;
     default: {
       const sparkleColors = GEM_SPARKLE_COLORS[type];
