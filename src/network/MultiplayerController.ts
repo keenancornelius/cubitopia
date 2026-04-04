@@ -1,0 +1,300 @@
+// ============================================
+// CUBITOPIA - Multiplayer Controller
+// Phase 5B: Top-level orchestrator for online play
+// ============================================
+//
+// This is the main entry point the game calls for multiplayer.
+// It coordinates:
+//   - Player profile (Firebase anonymous auth + display name)
+//   - Matchmaking (queue search + ghost fallback)
+//   - Network connection (WebRTC P2P via PeerJS)
+//   - Command queue (deterministic lockstep)
+//   - ELO updates after match end
+//
+// Usage from main.ts:
+//   const mp = new MultiplayerController();
+//   await mp.initialize('MyRedditName');
+//   mp.findMatch();
+//   // ... game plays via command queue ...
+//   mp.reportMatchResult(true); // won
+// ============================================
+
+import {
+  initFirebase,
+  signInAnon,
+  createOrUpdateProfile,
+  getProfile,
+  updateELO,
+  getLeaderboard,
+  type PlayerProfile,
+} from './FirebaseConfig';
+import { NetworkManager, type ConnectionState, type NetworkEvents } from './NetworkManager';
+import {
+  MatchmakingService,
+  type MatchmakingState,
+  type MatchFoundResult,
+  calculateElo,
+} from './MatchmakingService';
+import { CommandQueue } from './CommandQueue';
+import { NetworkCommand, NetCommandType, GameStateHash } from './Protocol';
+
+export type MultiplayerState =
+  | 'offline'       // Not initialized
+  | 'ready'         // Signed in, idle
+  | 'searching'     // Looking for opponent
+  | 'connecting'    // WebRTC handshake
+  | 'playing'       // In a match
+  | 'finished'      // Match ended
+  | 'error';
+
+export interface MultiplayerEvents {
+  onStateChange?: (state: MultiplayerState) => void;
+  onMatchFound?: (result: MatchFoundResult) => void;
+  onOpponentDisconnect?: () => void;
+  onDesync?: (tick: number) => void;
+  onPingUpdate?: (ms: number) => void;
+  onError?: (msg: string) => void;
+}
+
+export class MultiplayerController {
+  // Sub-systems
+  readonly network = new NetworkManager();
+  readonly matchmaking = new MatchmakingService();
+  readonly commandQueue = new CommandQueue();
+
+  // State
+  private _state: MultiplayerState = 'offline';
+  private _profile: PlayerProfile | null = null;
+  private _currentMatch: MatchFoundResult | null = null;
+  private _events: MultiplayerEvents = {};
+
+  // ── Getters ──────────────────────────────────────────────
+  get state() { return this._state; }
+  get profile() { return this._profile; }
+  get currentMatch() { return this._currentMatch; }
+  get isInMatch() { return this._state === 'playing'; }
+  get isGhostMatch() { return this._currentMatch?.isGhost ?? false; }
+  get opponentName() { return this._currentMatch?.opponentName ?? 'Unknown'; }
+  get opponentElo() { return this._currentMatch?.opponentElo ?? 0; }
+  get ping() { return this.network.ping; }
+
+  // ============================================
+  // Event registration
+  // ============================================
+  setEvents(events: MultiplayerEvents): void {
+    this._events = events;
+  }
+
+  private setState(s: MultiplayerState): void {
+    this._state = s;
+    this._events.onStateChange?.(s);
+  }
+
+  // ============================================
+  // Initialize — Firebase auth + profile
+  // ============================================
+  async initialize(displayName: string): Promise<PlayerProfile> {
+    try {
+      initFirebase();
+      await signInAnon();
+      this._profile = await createOrUpdateProfile(displayName);
+      this.setState('ready');
+      return this._profile;
+    } catch (err) {
+      this.setState('error');
+      this._events.onError?.(`Failed to initialize: ${err}`);
+      throw err;
+    }
+  }
+
+  // ============================================
+  // Find Match
+  // ============================================
+  async findMatch(): Promise<void> {
+    if (!this._profile) throw new Error('Not initialized — call initialize() first');
+    if (this._state !== 'ready') return;
+
+    this.setState('searching');
+
+    this.matchmaking.setEvents({
+      onStateChange: (ms: MatchmakingState) => {
+        if (ms === 'error') {
+          this.setState('error');
+        }
+      },
+      onMatchFound: async (result: MatchFoundResult) => {
+        this._currentMatch = result;
+        this._events.onMatchFound?.(result);
+
+        if (result.isGhost) {
+          // Ghost match — no network connection needed
+          this.commandQueue.initMultiplayer(null, true);
+          this.setState('playing');
+        } else {
+          // Real match — establish WebRTC connection
+          this.setState('connecting');
+          await this.connectToPeer(result);
+        }
+      },
+      onError: (err: string) => {
+        this.setState('error');
+        this._events.onError?.(err);
+      },
+    });
+
+    await this.matchmaking.startSearch(
+      this._profile.uid,
+      this._profile.displayName,
+      this._profile.elo,
+    );
+  }
+
+  // ============================================
+  // Cancel search
+  // ============================================
+  async cancelSearch(): Promise<void> {
+    await this.matchmaking.cancelSearch();
+    this.setState('ready');
+  }
+
+  // ============================================
+  // Connect to peer (WebRTC)
+  // ============================================
+  private async connectToPeer(result: MatchFoundResult): Promise<void> {
+    // Set up network events
+    this.network.setEvents({
+      onStateChange: (cs: ConnectionState) => {
+        if (cs === 'connected') {
+          this.commandQueue.initMultiplayer(this.network, false);
+          this.setState('playing');
+        }
+      },
+      onCommand: (cmd: NetworkCommand) => {
+        // Commands are routed through CommandQueue
+      },
+      onDisconnect: () => {
+        this._events.onOpponentDisconnect?.();
+      },
+      onPingUpdate: (ms: number) => {
+        this._events.onPingUpdate?.(ms);
+      },
+      onDesync: (local: number, remote: number, tick: number) => {
+        this._events.onDesync?.(tick);
+      },
+      onError: (err: string) => {
+        this.setState('error');
+        this._events.onError?.(err);
+      },
+    });
+
+    try {
+      if (result.isHost) {
+        await this.network.connectAsHost(
+          result.matchId,
+          this._profile!.uid,
+          'remote', // Will be resolved from match record
+        );
+      } else {
+        await this.network.connectAsGuest(
+          result.matchId,
+          this._profile!.uid,
+          'remote',
+        );
+      }
+    } catch (err) {
+      this.setState('error');
+      this._events.onError?.(`Connection failed: ${err}`);
+    }
+  }
+
+  // ============================================
+  // Report match result (called when game ends)
+  // ============================================
+  async reportMatchResult(won: boolean): Promise<EloUpdateResult> {
+    if (!this._profile || !this._currentMatch) {
+      return { newElo: this._profile?.elo ?? 1000, change: 0 };
+    }
+
+    const totalGames = (this._profile.wins ?? 0) + (this._profile.losses ?? 0);
+    const result = calculateElo(
+      this._profile.elo,
+      this._currentMatch.opponentElo,
+      won,
+      totalGames,
+      this._currentMatch.isGhost,
+    );
+
+    // Update Firebase
+    try {
+      const newStreak = won
+        ? Math.max(0, (this._profile.streak ?? 0)) + 1
+        : -1; // Reset streak on loss
+
+      await updateELO(this._profile.uid, result.newElo, won, newStreak);
+      this._profile.elo = result.newElo;
+      this._profile.streak = newStreak;
+      if (won) this._profile.wins++;
+      else this._profile.losses++;
+    } catch (err) {
+      console.warn('[MP] Failed to update ELO:', err);
+    }
+
+    this.setState('finished');
+    return result;
+  }
+
+  // ============================================
+  // Surrender
+  // ============================================
+  async surrender(): Promise<void> {
+    if (this._state !== 'playing') return;
+
+    if (!this._currentMatch?.isGhost) {
+      this.network.sendSurrender();
+    }
+
+    await this.reportMatchResult(false);
+  }
+
+  // ============================================
+  // Get leaderboard
+  // ============================================
+  async getLeaderboard(limit = 25): Promise<PlayerProfile[]> {
+    return getLeaderboard(limit);
+  }
+
+  // ============================================
+  // Return to ready state (after match)
+  // ============================================
+  returnToLobby(): void {
+    this.network.cleanup();
+    this.matchmaking.cleanup();
+    this.commandQueue.cleanup();
+    this._currentMatch = null;
+    this.setState('ready');
+  }
+
+  // ============================================
+  // Full cleanup
+  // ============================================
+  cleanup(): void {
+    this.network.cleanup();
+    this.matchmaking.cleanup();
+    this.commandQueue.cleanup();
+    this._state = 'offline';
+    this._profile = null;
+    this._currentMatch = null;
+  }
+}
+
+export interface EloUpdateResult {
+  newElo: number;
+  change: number;
+}
+
+// ── Barrel exports ─────────────────────────────────────────
+export { NetworkManager } from './NetworkManager';
+export { MatchmakingService, createGhostProfile, calculateElo } from './MatchmakingService';
+export { CommandQueue } from './CommandQueue';
+export { NetCommandType } from './Protocol';
+export type { NetworkCommand, GameStateHash, MatchFoundResult };

@@ -1,0 +1,304 @@
+// ============================================
+// CUBITOPIA - Command Queue (Deterministic Lockstep)
+// Phase 5B: Buffers and replays commands in tick order
+// ============================================
+//
+// Both clients maintain identical CommandQueues. On each
+// simulation tick, both sides:
+//   1. Buffer any local player commands for this tick
+//   2. Receive remote player commands for this tick
+//   3. Process ALL commands in deterministic order:
+//      - Host commands first (sorted by command index)
+//      - Guest commands second (sorted by command index)
+//   4. Advance simulation by one tick
+//
+// This guarantees both clients execute identical state
+// transitions, keeping the game in sync.
+// ============================================
+
+import { NetworkCommand, NetCommandType, GameStateHash, computeStateHash } from './Protocol';
+import { NetworkManager } from './NetworkManager';
+
+/** How many ticks between state hash checks */
+const HASH_CHECK_INTERVAL = 60; // ~1 second at 60 ticks/s
+
+/** How many ticks ahead we allow commands to be buffered */
+const MAX_FUTURE_TICKS = 10;
+
+/** Command with ordering index for deterministic sort */
+interface IndexedCommand extends NetworkCommand {
+  _index: number;
+}
+
+export class CommandQueue {
+  private network: NetworkManager | null = null;
+  private currentTick = 0;
+  private commandIndex = 0;
+
+  /** Commands buffered per tick: tick → commands[] */
+  private tickBuffer: Map<number, IndexedCommand[]> = new Map();
+
+  /** Local commands waiting to be sent */
+  private localBuffer: IndexedCommand[] = [];
+
+  /** Whether we're in multiplayer mode */
+  private _isMultiplayer = false;
+
+  /** Whether this is a ghost match (AI impersonation) */
+  private _isGhostMatch = false;
+
+  /** Desync state */
+  private _desynced = false;
+  private _desyncTick = -1;
+
+  /** Callback for processing commands */
+  private _commandProcessor: ((cmd: NetworkCommand) => void) | null = null;
+
+  /** Callback for computing current state hash */
+  private _stateHashProvider: (() => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number> }) | null = null;
+
+  /** Desync callback */
+  private _onDesync: ((localHash: number, remoteHash: number, tick: number) => void) | null = null;
+
+  // ── Getters ──────────────────────────────────────────────
+  get tick() { return this.currentTick; }
+  get isMultiplayer() { return this._isMultiplayer; }
+  get isGhostMatch() { return this._isGhostMatch; }
+  get isDesynced() { return this._desynced; }
+
+  // ============================================
+  // Initialization
+  // ============================================
+
+  /**
+   * Initialize for multiplayer match.
+   * @param network - NetworkManager instance (null for ghost matches)
+   * @param isGhost - true if this is a ghost match (AI impersonation)
+   */
+  initMultiplayer(network: NetworkManager | null, isGhost: boolean): void {
+    this._isMultiplayer = true;
+    this._isGhostMatch = isGhost;
+    this.network = network;
+    this.currentTick = 0;
+    this.commandIndex = 0;
+    this.tickBuffer.clear();
+    this.localBuffer = [];
+    this._desynced = false;
+    this._desyncTick = -1;
+
+    // Listen for remote commands
+    if (network) {
+      network.setEvents({
+        ...network['events'], // preserve existing events
+        onCommand: (cmd: NetworkCommand) => this.receiveRemoteCommand(cmd),
+        onStateHash: (hash: GameStateHash) => this.receiveStateHash(hash),
+      });
+    }
+  }
+
+  /** Initialize for single-player (no network, commands execute immediately) */
+  initSinglePlayer(): void {
+    this._isMultiplayer = false;
+    this._isGhostMatch = false;
+    this.network = null;
+    this.currentTick = 0;
+    this.commandIndex = 0;
+    this.tickBuffer.clear();
+    this.localBuffer = [];
+    this._desynced = false;
+  }
+
+  /** Set the function that processes commands into game state changes */
+  setCommandProcessor(processor: (cmd: NetworkCommand) => void): void {
+    this._commandProcessor = processor;
+  }
+
+  /** Set the function that provides current game state for hashing */
+  setStateHashProvider(provider: () => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number> }): void {
+    this._stateHashProvider = provider;
+  }
+
+  /** Set desync callback */
+  setDesyncHandler(handler: (localHash: number, remoteHash: number, tick: number) => void): void {
+    this._onDesync = handler;
+  }
+
+  // ============================================
+  // Enqueue local command
+  // ============================================
+
+  /**
+   * Queue a local player command. In multiplayer, it's sent to the
+   * remote peer and buffered for the next tick. In singleplayer,
+   * it executes immediately.
+   */
+  enqueue(type: NetCommandType | string, payload: Record<string, unknown>): void {
+    const cmd: IndexedCommand = {
+      tick: this.currentTick + 1, // Execute on next tick
+      playerId: this.network?.localUid ?? 'local',
+      type,
+      payload,
+      _index: this.commandIndex++,
+    };
+
+    if (!this._isMultiplayer) {
+      // Single-player: execute immediately
+      this._commandProcessor?.(cmd);
+      return;
+    }
+
+    // Multiplayer: buffer locally and send to peer
+    this.addToBuffer(cmd);
+
+    if (this.network && !this._isGhostMatch) {
+      // Send over network (strip internal index)
+      const { _index, ...netCmd } = cmd;
+      this.network.sendCommand(netCmd);
+    }
+  }
+
+  // ============================================
+  // Receive remote command
+  // ============================================
+
+  private receiveRemoteCommand(cmd: NetworkCommand): void {
+    const indexed: IndexedCommand = {
+      ...cmd,
+      _index: this.commandIndex++,
+    };
+
+    // Don't process commands too far in the future
+    if (cmd.tick > this.currentTick + MAX_FUTURE_TICKS) {
+      console.warn(`[CmdQ] Dropping future command: tick ${cmd.tick} (current: ${this.currentTick})`);
+      return;
+    }
+
+    // If command is for a past tick, execute it immediately (late arrival)
+    if (cmd.tick <= this.currentTick) {
+      console.warn(`[CmdQ] Late command for tick ${cmd.tick} (current: ${this.currentTick})`);
+      this._commandProcessor?.(indexed);
+      return;
+    }
+
+    this.addToBuffer(indexed);
+  }
+
+  // ============================================
+  // Tick processing
+  // ============================================
+
+  /**
+   * Advance the simulation by one tick. Processes all buffered
+   * commands for this tick in deterministic order, then checks
+   * for desync if needed.
+   */
+  processTick(): void {
+    this.currentTick++;
+
+    const commands = this.tickBuffer.get(this.currentTick);
+    if (commands && commands.length > 0) {
+      // Sort deterministically: host commands first, then by index
+      commands.sort((a, b) => {
+        // Host (isHost=true player) goes first
+        const aHost = this.network?.isHost ? a.playerId === this.network.localUid : a.playerId !== this.network?.localUid;
+        const bHost = this.network?.isHost ? b.playerId === this.network.localUid : b.playerId !== this.network?.localUid;
+
+        if (aHost !== bHost) return aHost ? -1 : 1;
+        return a._index - b._index;
+      });
+
+      // Process each command
+      for (const cmd of commands) {
+        this._commandProcessor?.(cmd);
+      }
+
+      // Clean up processed tick
+      this.tickBuffer.delete(this.currentTick);
+    }
+
+    // Periodic state hash check (multiplayer only, not ghost)
+    if (this._isMultiplayer && !this._isGhostMatch && this.currentTick % HASH_CHECK_INTERVAL === 0) {
+      this.sendStateHash();
+    }
+  }
+
+  // ============================================
+  // State hash (desync detection)
+  // ============================================
+
+  private sendStateHash(): void {
+    if (!this._stateHashProvider || !this.network) return;
+
+    const state = this._stateHashProvider();
+    const hash = computeStateHash(
+      this.currentTick,
+      state.units,
+      state.p1Resources,
+      state.p2Resources,
+    );
+
+    this.network.sendStateHash(hash);
+  }
+
+  private receiveStateHash(remoteHash: GameStateHash): void {
+    if (!this._stateHashProvider) return;
+
+    // Only compare if we're on the same tick
+    if (remoteHash.tick !== this.currentTick) return;
+
+    const state = this._stateHashProvider();
+    const localHash = computeStateHash(
+      this.currentTick,
+      state.units,
+      state.p1Resources,
+      state.p2Resources,
+    );
+
+    if (localHash.hash !== remoteHash.hash) {
+      console.error(`[CmdQ] DESYNC at tick ${this.currentTick}! Local: ${localHash.hash}, Remote: ${remoteHash.hash}`);
+      this._desynced = true;
+      this._desyncTick = this.currentTick;
+      this._onDesync?.(localHash.hash, remoteHash.hash, this.currentTick);
+    }
+  }
+
+  // ============================================
+  // Internal helpers
+  // ============================================
+
+  private addToBuffer(cmd: IndexedCommand): void {
+    const tick = cmd.tick;
+    if (!this.tickBuffer.has(tick)) {
+      this.tickBuffer.set(tick, []);
+    }
+    this.tickBuffer.get(tick)!.push(cmd);
+  }
+
+  /** Get pending command count (for network health display) */
+  getPendingCommandCount(): number {
+    let count = 0;
+    for (const [, cmds] of this.tickBuffer) {
+      count += cmds.length;
+    }
+    return count;
+  }
+
+  // ============================================
+  // Cleanup
+  // ============================================
+
+  cleanup(): void {
+    this.tickBuffer.clear();
+    this.localBuffer = [];
+    this.currentTick = 0;
+    this.commandIndex = 0;
+    this._isMultiplayer = false;
+    this._isGhostMatch = false;
+    this._desynced = false;
+    this._desyncTick = -1;
+    this.network = null;
+    this._commandProcessor = null;
+    this._stateHashProvider = null;
+    this._onDesync = null;
+  }
+}
