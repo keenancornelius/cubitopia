@@ -68,31 +68,26 @@ export default class MenuController {
       ${UI.overlay('linear-gradient(180deg, rgba(5,5,16,0.7) 0%, rgba(10,10,30,0.45) 40%, rgba(10,10,30,0.45) 60%, rgba(5,5,16,0.7) 100%)')};
       display:flex; flex-direction:column; align-items:center; justify-content:center;
       z-index:20000; backdrop-filter: blur(2px);
-      overflow-y:auto; overflow-x:hidden;
+      padding: 1vh 0;
     `;
-
-    // Scroll padding for smaller viewports
-    const spacerTop = document.createElement('div');
-    spacerTop.style.cssText = 'flex-shrink:0; min-height:20px;';
-    overlay.appendChild(spacerTop);
 
     // Pixel art title
     const pixelTitle = new PixelTitle();
     const titleCanvas = pixelTitle.getElement();
-    titleCanvas.style.cssText = 'max-width:600px; width:80%; height:auto; margin-bottom:8px; image-rendering:pixelated;';
+    titleCanvas.style.cssText = 'max-width:600px; width:80%; height:auto; margin-bottom:clamp(2px,1vh,8px); image-rendering:pixelated; flex-shrink:1; min-height:0;';
     overlay.appendChild(titleCanvas);
     // Store reference for cleanup
     (this as any)._pixelTitle = pixelTitle;
 
     const subtitle = document.createElement('div');
-    subtitle.style.cssText = 'font-size:14px; color:#aaa; letter-spacing:4px; margin-bottom:40px; text-transform:uppercase; text-shadow: 0 1px 4px rgba(0,0,0,0.8);';
+    subtitle.style.cssText = 'font-size:clamp(10px,1.5vh,14px); color:#aaa; letter-spacing:4px; margin-bottom:clamp(8px,3vh,40px); text-transform:uppercase; text-shadow: 0 1px 4px rgba(0,0,0,0.8); flex-shrink:0;';
     subtitle.textContent = 'Voxel Strategy';
     overlay.appendChild(subtitle);
 
     // --- Game Mode Selector ---
     const sectionLabel = (text: string) => {
       const lbl = document.createElement('div');
-      lbl.style.cssText = 'font-size:11px; color:#555; letter-spacing:3px; text-transform:uppercase; margin-bottom:10px;';
+      lbl.style.cssText = 'font-size:clamp(9px,1.2vh,11px); color:#555; letter-spacing:3px; text-transform:uppercase; margin-bottom:clamp(4px,1vh,10px); flex-shrink:0;';
       lbl.textContent = text;
       return lbl;
     };
@@ -100,7 +95,7 @@ export default class MenuController {
     overlay.appendChild(sectionLabel('GAME MODE'));
 
     const modeRow = document.createElement('div');
-    modeRow.style.cssText = 'display:flex; gap:12px; margin-bottom:30px;';
+    modeRow.style.cssText = 'display:flex; gap:clamp(6px,1vh,12px); margin-bottom:clamp(8px,2.5vh,30px); flex-shrink:0;';
 
     const modeButtons: HTMLButtonElement[] = [];
     const mkModeBtn = (label: string, mode: 'pvai' | 'aivai' | 'ffa' | '2v2', color: string) => {
@@ -188,7 +183,7 @@ export default class MenuController {
     };
 
     const mapGrid = document.createElement('div');
-    mapGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:12px; max-width:700px;';
+    mapGrid.style.cssText = 'display:flex; flex-wrap:wrap; gap:clamp(4px,0.8vh,10px); justify-content:center; margin-bottom:clamp(4px,1vh,12px); max-width:700px; flex-shrink:0;';
 
     const mapButtons: HTMLButtonElement[] = [];
     const descEl = document.createElement('div');
@@ -444,7 +439,7 @@ export default class MenuController {
     const startBtn = document.createElement('button');
     startBtn.style.cssText = `
       ${UI.ctaButton('linear-gradient(135deg, #2ecc71, #27ae60)')};
-      padding:16px 56px; font-size:20px; letter-spacing:4px;
+      padding:clamp(8px,1.5vh,16px) clamp(28px,5vw,56px); font-size:clamp(14px,2vh,20px); letter-spacing:4px; flex-shrink:0;
     `;
     startBtn.textContent = 'START BATTLE';
     startBtn.addEventListener('mouseenter', () => {
@@ -468,11 +463,6 @@ export default class MenuController {
     ver.style.cssText = 'position:absolute; bottom:20px; color:#444; font-size:10px; letter-spacing:2px;';
     ver.textContent = 'v0.2 — PLAYTEST BUILD';
     overlay.appendChild(ver);
-
-    // Bottom scroll padding for smaller viewports
-    const spacerBottom = document.createElement('div');
-    spacerBottom.style.cssText = 'flex-shrink:0; min-height:20px;';
-    overlay.appendChild(spacerBottom);
 
     document.body.appendChild(overlay);
     this.mainMenuOverlay = overlay;
@@ -501,7 +491,7 @@ export default class MenuController {
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       z-index: 200; animation: uiFadeIn 0.5s ease;
-      overflow-y:auto; overflow-x:hidden;
+      padding: 1vh 0;
     `;
 
     const color = isVictory ? '#2ecc71' : '#e74c3c';
