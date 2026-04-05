@@ -53,7 +53,7 @@ export class Renderer {
     this.createParticles();
   }
 
-  private createSkyGradient(): THREE.Texture {
+  createSkyGradient(): THREE.Texture {
     const canvas = document.createElement('canvas');
     canvas.width = 2;
     canvas.height = 256;

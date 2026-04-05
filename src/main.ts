@@ -2405,6 +2405,15 @@ class Cubitopia {
     this.bases = bases;
     this._deadUnitKills = Array(this.playerCount).fill(0);
 
+    // Reset atmosphere to defaults before applying per-map overrides
+    this.renderer.scene.background = this.renderer.createSkyGradient();
+    this.renderer.scene.fog = null;
+    // Reset lighting to defaults
+    this.renderer.scene.traverse((child: any) => {
+      if (child.isAmbientLight) { child.color.set(0x404060); child.intensity = 0.6; }
+      if (child.isDirectionalLight) { child.color.set(0xffffff); child.intensity = 1.0; }
+    });
+
     // Per-map atmosphere (lighting/sky only, no fog)
     if (this.mapType === MapType.SKYLAND) {
       this.applySkylandAtmosphere();
