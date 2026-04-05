@@ -68,7 +68,13 @@ export default class MenuController {
       ${UI.overlay('linear-gradient(180deg, rgba(5,5,16,0.7) 0%, rgba(10,10,30,0.45) 40%, rgba(10,10,30,0.45) 60%, rgba(5,5,16,0.7) 100%)')};
       display:flex; flex-direction:column; align-items:center; justify-content:center;
       z-index:20000; backdrop-filter: blur(2px);
+      overflow-y:auto; overflow-x:hidden;
     `;
+
+    // Scroll padding for smaller viewports
+    const spacerTop = document.createElement('div');
+    spacerTop.style.cssText = 'flex-shrink:0; min-height:20px;';
+    overlay.appendChild(spacerTop);
 
     // Pixel art title
     const pixelTitle = new PixelTitle();
@@ -463,6 +469,11 @@ export default class MenuController {
     ver.textContent = 'v0.2 — PLAYTEST BUILD';
     overlay.appendChild(ver);
 
+    // Bottom scroll padding for smaller viewports
+    const spacerBottom = document.createElement('div');
+    spacerBottom.style.cssText = 'flex-shrink:0; min-height:20px;';
+    overlay.appendChild(spacerBottom);
+
     document.body.appendChild(overlay);
     this.mainMenuOverlay = overlay;
 
@@ -490,6 +501,7 @@ export default class MenuController {
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       z-index: 200; animation: uiFadeIn 0.5s ease;
+      overflow-y:auto; overflow-x:hidden;
     `;
 
     const color = isVictory ? '#2ecc71' : '#e74c3c';
