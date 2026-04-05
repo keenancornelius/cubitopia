@@ -58,6 +58,7 @@ export interface BaseUpgradeOps {
   getPlacedBuildings(): PlacedBuilding[];
   getTotalUnitCount(owner: number): number;
   hexDistance(a: HexCoord, b: HexCoord): number;
+  playSound(name: string, volume?: number): void;
 }
 
 export class BaseUpgradeSystem {
@@ -117,6 +118,7 @@ export class BaseUpgradeSystem {
     if (totalPop >= req.populationRequired && uniqueBuildings.size >= req.uniqueBuildingsRequired) {
       const previousTier = base.tier;
       base.tier = nextTier;
+      this.ops.playSound('tier_upgrade', 0.6);
       return {
         baseId: base.id,
         owner: base.owner,

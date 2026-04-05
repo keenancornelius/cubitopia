@@ -160,7 +160,7 @@ export class MapGenerator {
     return this.noiseC.fbm(q * 0.2, r * 0.2, 2);
   }
 
-  generate(width: number, height: number, seed?: number): GameMap {
+  generate(width: number, height: number, seed?: number, playerCount: number = 2): GameMap {
     const actualSeed = seed ?? Math.floor(this.rng.next() * 999999);
     const tiles = new Map<string, Tile>();
 
@@ -293,7 +293,7 @@ export class MapGenerator {
     }
 
     // === PASS 6c: Find surface neutral base locations (desert outposts + mountain forts) ===
-    gameMap.surfaceBases = this.findSurfaceBaseLocations(gameMap, width, height);
+    gameMap.surfaceBases = this.findSurfaceBaseLocations(gameMap, width, height, playerCount);
 
     // === PASS 7: Balance resources across both player sides ===
     this.balanceResources(tiles, width, height);
@@ -1152,10 +1152,8 @@ export class MapGenerator {
     const SKYLAND_BLOCK_TYPES = new Set([
       BlockType.CLOUD, BlockType.PASTEL_GRASS, BlockType.CREAM_STONE, BlockType.RAINBOW_BRIDGE,
     ]);
-    const VOLCANIC_BLOCK_TYPES = new Set([
-      BlockType.BASALT, BlockType.OBSIDIAN, BlockType.ASH, BlockType.LAVA,
-      BlockType.MAGMA, BlockType.SCORCHED_EARTH,
-    ]);
+    // River Crossing uses standard block types — no custom preservation needed
+    const RIVER_CROSSING_BLOCK_TYPES = new Set<BlockType>();
     const ARCHIPELAGO_BLOCK_TYPES = new Set([
       BlockType.CORAL, BlockType.TROPICAL_GRASS, BlockType.PALM_WOOD,
     ]);
@@ -1165,7 +1163,7 @@ export class MapGenerator {
       const [q, r] = key.split(',').map(Number);
 
       // ── Custom map preservation: skip tiles with hand-crafted voxel columns ──
-      const hasCustomBlocks = tile.voxelData.blocks.some(b => SKYLAND_BLOCK_TYPES.has(b.type) || VOLCANIC_BLOCK_TYPES.has(b.type) || ARCHIPELAGO_BLOCK_TYPES.has(b.type) || RUINS_BLOCK_TYPES.has(b.type) || BADLANDS_BLOCK_TYPES.has(b.type));
+      const hasCustomBlocks = tile.voxelData.blocks.some(b => SKYLAND_BLOCK_TYPES.has(b.type) || RIVER_CROSSING_BLOCK_TYPES.has(b.type) || ARCHIPELAGO_BLOCK_TYPES.has(b.type) || RUINS_BLOCK_TYPES.has(b.type) || BADLANDS_BLOCK_TYPES.has(b.type));
       if (hasCustomBlocks) {
         // This is a Skyland island/bridge tile — keep its hand-crafted voxel column.
         // Still recalculate elevation from blocks so pathfinding works.
@@ -1357,12 +1355,12 @@ export class MapGenerator {
   // Scans map for desert and mountain-top tiles suitable for neutral outposts
   // =====================================================
 
-  private findSurfaceBaseLocations(map: GameMap, w: number, h: number): Array<{ center: { q: number; r: number }; terrain: string }> {
+  private findSurfaceBaseLocations(map: GameMap, w: number, h: number, playerCount: number = 2): Array<{ center: { q: number; r: number }; terrain: string }> {
     const EDGE = 6;
     const centerQ = Math.floor(w / 2);
     const centerR = Math.floor(h / 2);
     const MIN_DIST_FROM_EDGE = 8;
-    const MIN_DIST_BETWEEN = 10;
+    const MIN_DIST_BETWEEN = playerCount >= 4 ? 8 : 10; // tighter spacing for FFA to fit more bases
     const RIDGE_THRESHOLD = 10; // Elevation >= this is impassable
 
     // Collect candidate tiles: desert and mountain/high terrain
@@ -1388,13 +1386,22 @@ export class MapGenerator {
     // (contested ground), near chokepoints (high neighbor elevation variance),
     // and near rivers/resources. Higher score = better neutral city location.
     const BASE_INSET_NEUTRAL = 5;
-    const p1 = { q: BASE_INSET_NEUTRAL, r: h - 1 - BASE_INSET_NEUTRAL };
-    const p2 = { q: w - 1 - BASE_INSET_NEUTRAL, r: BASE_INSET_NEUTRAL };
+    // All possible player home positions (matching MapInitializer's pattern)
+    const allPlayerHomes = [
+      { q: BASE_INSET_NEUTRAL, r: h - 1 - BASE_INSET_NEUTRAL },  // P0: bottom-left
+      { q: w - 1 - BASE_INSET_NEUTRAL, r: BASE_INSET_NEUTRAL },  // P1: top-right
+      { q: BASE_INSET_NEUTRAL, r: BASE_INSET_NEUTRAL },            // P2: top-left
+      { q: w - 1 - BASE_INSET_NEUTRAL, r: h - 1 - BASE_INSET_NEUTRAL }, // P3: bottom-right
+    ].slice(0, playerCount);
+
     const strategicScore = (c: { q: number; r: number; elev: number }): number => {
-      // Balance score: prefer tiles equidistant from both player bases
-      const d1 = Math.sqrt((c.q - p1.q) ** 2 + (c.r - p1.r) ** 2);
-      const d2 = Math.sqrt((c.q - p2.q) ** 2 + (c.r - p2.r) ** 2);
-      const balanceScore = 1 - Math.abs(d1 - d2) / Math.max(d1, d2, 1);
+      // Balance score: prefer tiles equidistant from ALL player bases
+      // For 2-player: same as before. For 4-player: measures variance in distances
+      const distances = allPlayerHomes.map(p => Math.sqrt((c.q - p.q) ** 2 + (c.r - p.r) ** 2));
+      const maxDist = Math.max(...distances, 1);
+      const minDist = Math.min(...distances);
+      // Low variance → high balance score (equidistant from all players)
+      const balanceScore = 1 - (maxDist - minDist) / maxDist;
 
       // Centrality: slight preference for mid-map (contested zone)
       const dc = Math.sqrt((c.q - centerQ) ** 2 + (c.r - centerR) ** 2);
@@ -1491,10 +1498,14 @@ export class MapGenerator {
       }
     };
 
-    // Place 1-2 desert outposts and 1-2 mountain forts
-    Logger.info('MapGen', `Desert candidates: ${desertCandidates.length}, Mountain candidates: ${mountainCandidates.length}`);
-    tryPlace(desertCandidates, 'desert', 2);
-    tryPlace(mountainCandidates, 'mountain', 2);
+    // Place neutral bases: more for FFA to give all players contested territory
+    // 2-player: 2 desert + 2 mountain = 4 neutral bases
+    // 4-player: 3 desert + 3 mountain = 6 neutral bases (evenly distributed via balance scoring)
+    const desertMax = playerCount >= 4 ? 3 : 2;
+    const mountainMax = playerCount >= 4 ? 3 : 2;
+    Logger.info('MapGen', `Desert candidates: ${desertCandidates.length}, Mountain candidates: ${mountainCandidates.length} (${playerCount}p mode)`);
+    tryPlace(desertCandidates, 'desert', desertMax);
+    tryPlace(mountainCandidates, 'mountain', mountainMax);
     Logger.info('MapGen', `Surface bases placed: ${results.length} (${results.map(r => r.terrain).join(', ')})`);
 
     // --- Carve walkable ramp paths to mountain forts ---
@@ -2165,7 +2176,8 @@ export class MapGenerator {
       }
       case TerrainType.SNOW: {
         const roll = this.rng.next();
-        if (roll < 0.5) return ResourceType.CRYSTAL;
+        if (roll < 0.35) return ResourceType.CRYSTAL;
+        if (roll < 0.60) return ResourceType.IRON;
         return ResourceType.STONE;
       }
       case TerrainType.DESERT: return ResourceType.GOLD;
@@ -2211,7 +2223,7 @@ export class MapGenerator {
       [TerrainType.FOREST]: [ResourceType.WOOD, ResourceType.FOOD],
       [TerrainType.MOUNTAIN]: [ResourceType.STONE, ResourceType.IRON, ResourceType.CRYSTAL],
       [TerrainType.DESERT]: [ResourceType.GOLD, ResourceType.IRON],
-      [TerrainType.SNOW]: [ResourceType.CRYSTAL, ResourceType.STONE],
+      [TerrainType.SNOW]: [ResourceType.CRYSTAL, ResourceType.IRON, ResourceType.STONE],
       [TerrainType.JUNGLE]: [ResourceType.WOOD, ResourceType.FOOD],
       [TerrainType.RIVER]: [ResourceType.FOOD],
       [TerrainType.LAKE]: [ResourceType.FOOD],

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { UnitType } from '../types';
 import type { UnitMeshGroup } from './UnitRenderer';
+import { easeIn, easeOut, cubicOut, smoothstep, easeInOut, cubicIn, lerp, cyclePhase, phaseOf } from './AnimationUtils';
 
 type WorldPos = { x: number; y: number; z: number };
 type TrailType = 'slash' | 'stab' | 'smash';
@@ -81,13 +82,13 @@ export class UnitAnimations {
     if (t < 0.6) {
       // Wind-up: ease-in (slow start, accelerate)
       const p = t / 0.6;
-      const eased = p * p; // quadratic ease-in
+      const eased = easeIn(p); // quadratic ease-in
       z = side * windUp * eased;
       x = -eased * 0.1; // slight lean back during wind-up
     } else if (t < 0.75) {
       // Strike: fast snap to opposite side (impact!)
       const p = (t - 0.6) / 0.15;
-      const eased = 1 - (1 - p) * (1 - p); // ease-out (fast start, decel)
+      const eased = easeOut(p); // ease-out (fast start, decel)
       z = side * windUp * (1 - eased * 2.2); // overshoot past center
       x = -0.1 + eased * 0.25; // lean forward into strike
     } else if (t < 0.85) {
@@ -97,7 +98,7 @@ export class UnitAnimations {
     } else {
       // Return to neutral
       const p = (t - 0.85) / 0.15;
-      const eased = p * p;
+      const eased = easeIn(p);
       z = side * windUp * -1.2 * (1 - eased);
       x = 0.15 * (1 - eased);
     }
@@ -379,7 +380,7 @@ export class UnitAnimations {
         } else {
           // Recovery: smoothstep back to guard stance
           const p = (wCyc - 0.62) / 0.38;
-          const ss = p * p * (3 - 2 * p); // smoothstep
+          const ss = smoothstep(p); // smoothstep
           if (armRight) {
             armRight.rotation.x = SWORD_SLAM + (SWORD_READY - SWORD_SLAM) * ss;
             armRight.rotation.z = 0.18 * (1 - ss);
@@ -414,7 +415,7 @@ export class UnitAnimations {
         if (cycle < 0.10) {
           // Phase 1: STANCE — bow arm rises, draw hand reaches for string, nock arrow
           const p = cycle / 0.10;
-          const ease = p * p;
+          const ease = easeIn(p);
           if (armLeft) armLeft.rotation.x = -0.2 + 1.0 * ease; // bow arm rises to ~0.8
           if (armRight) armRight.rotation.x = 0.2 * ease;
           // Show nocked arrow partway through
@@ -426,11 +427,11 @@ export class UnitAnimations {
           // Phase 2: DRAW — bow arm locked, draw hand pulls string back to cheek
           // Bowstring visibly bends backward, nocked arrow follows
           const p = (cycle - 0.10) / 0.35;
-          const ease = 1 - (1 - p) * (1 - p); // ease-out (smooth pull)
+          const ease = easeOut(p); // ease-out (smooth pull)
           if (armLeft) armLeft.rotation.x = 0.8;
           if (armRight) armRight.rotation.x = 0.2 - 0.9 * ease; // pull back to -0.7
           // Bowstring + arrow pulled back
-          const drawZ = stringRestZ + (stringDrawZ - stringRestZ) * ease;
+          const drawZ = lerp(stringRestZ, stringDrawZ, ease);
           if (bowstring) bowstring.position.z = drawZ;
           if (nockedArrow) { nockedArrow.visible = true; nockedArrow.position.z = drawZ; }
           // Body tension — lean back into draw
@@ -449,9 +450,9 @@ export class UnitAnimations {
         } else if (cycle < 0.62) {
           // Phase 4: RELEASE — string snaps forward, arrow vanishes (fired), draw hand snaps
           const p = (cycle - 0.55) / 0.07;
-          const snap = p * p * p; // cubic ease-in — explosive snap
+          const snap = cubicIn(p); // cubic ease-in — explosive snap
           // Bowstring snaps forward past rest position (vibration overshoot)
-          const releaseZ = stringDrawZ + (stringRestZ + 0.04 - stringDrawZ) * snap;
+          const releaseZ = lerp(stringDrawZ, stringRestZ + 0.04, snap);
           if (bowstring) bowstring.position.z = releaseZ;
           // Arrow disappears at the moment of release
           if (nockedArrow) nockedArrow.visible = false;
@@ -509,7 +510,7 @@ export class UnitAnimations {
         if (cycle < 0.30) {
           // Wind-up: mace arm raises high overhead, body leans back, shield braces
           const p = cycle / 0.30;
-          const easeP = p * p; // accelerating wind-up
+          const easeP = easeIn(p); // accelerating wind-up
           if (armRight) {
             armRight.rotation.x = -1.8 * easeP;  // arm goes way back overhead
             armRight.rotation.z = -0.2 * easeP;   // slight outward spread
@@ -523,7 +524,7 @@ export class UnitAnimations {
         } else if (cycle < 0.50) {
           // Smash down: explosive forward slam, mace arm crashes down
           const p = (cycle - 0.30) / 0.20;
-          const smashP = 1 - (1 - p) * (1 - p); // ease-out for snappy impact
+          const smashP = easeOut(p); // ease-out for snappy impact
           if (armRight) {
             armRight.rotation.x = -1.8 + 3.2 * smashP; // -1.8 → +1.4 massive arc
             armRight.rotation.z = -0.2 * (1 - smashP);
@@ -546,13 +547,13 @@ export class UnitAnimations {
         } else {
           // Recovery: smooth ease-out back to ready stance
           const p = (cycle - 0.60) / 0.40;
-          const easeP = p * p * (3 - 2 * p); // smoothstep
+          const easeP = smoothstep(p); // smoothstep
           if (armRight) {
             armRight.rotation.x = 1.4 * (1 - easeP);
             armRight.rotation.z = 0;
           }
           if (armLeft) {
-            armLeft.rotation.x = 0.5 * (1 - easeP) + (-0.45) * easeP; // back to shield guard
+            armLeft.rotation.x = lerp(0.5, -0.45, easeP); // back to shield guard
           }
           entry.group.rotation.x = 0.16 * (1 - easeP);
         }
@@ -636,27 +637,27 @@ export class UnitAnimations {
         if (bkCyc < 0.28) {
           // Raise: arms spread wide apart, body leans back
           const p = bkCyc / 0.28;
-          const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          const ease = easeInOut(p);
           if (armRight) {
-            armRight.rotation.x = BK_REST_X + (BK_RAISE_X - BK_REST_X) * ease;
-            armRight.rotation.z = BK_REST_Z + (BK_RAISE_Z - BK_REST_Z) * ease; // +0.18 → +0.90 (outward right)
+            armRight.rotation.x = lerp(BK_REST_X, BK_RAISE_X, ease);
+            armRight.rotation.z = lerp(BK_REST_Z, BK_RAISE_Z, ease); // +0.18 → +0.90 (outward right)
           }
           if (armLeft) {
-            armLeft.rotation.x = BK_REST_X + (BK_RAISE_X - BK_REST_X) * ease;
-            armLeft.rotation.z = -BK_REST_Z + (-BK_RAISE_Z + BK_REST_Z) * ease; // -0.18 → -0.90 (outward left)
+            armLeft.rotation.x = lerp(BK_REST_X, BK_RAISE_X, ease);
+            armLeft.rotation.z = lerp(-BK_REST_Z, -BK_RAISE_Z, ease); // -0.18 → -0.90 (outward left)
           }
           entry.group.rotation.x = -0.10 * ease;
         } else if (bkCyc < 0.46) {
           // CHOP: arms swing down and CROSS inward
           const p = (bkCyc - 0.28) / 0.18;
-          const smash = p * p;
+          const smash = easeIn(p);
           if (armRight) {
-            armRight.rotation.x = BK_RAISE_X + (BK_CHOP_X - BK_RAISE_X) * smash;
-            armRight.rotation.z = BK_RAISE_Z + (-BK_CHOP_Z - BK_RAISE_Z) * smash; // +0.90 → -0.15 (cross inward)
+            armRight.rotation.x = lerp(BK_RAISE_X, BK_CHOP_X, smash);
+            armRight.rotation.z = lerp(BK_RAISE_Z, -BK_CHOP_Z, smash); // +0.90 → -0.15 (cross inward)
           }
           if (armLeft) {
-            armLeft.rotation.x = BK_RAISE_X + (BK_CHOP_X - BK_RAISE_X) * smash;
-            armLeft.rotation.z = -BK_RAISE_Z + (BK_CHOP_Z + BK_RAISE_Z) * smash; // -0.90 → +0.15 (cross inward)
+            armLeft.rotation.x = lerp(BK_RAISE_X, BK_CHOP_X, smash);
+            armLeft.rotation.z = lerp(-BK_RAISE_Z, BK_CHOP_Z, smash); // -0.90 → +0.15 (cross inward)
           }
           entry.group.rotation.x = -0.10 + 0.28 * smash;
           if (bkCyc >= 0.36 && bkCyc < 0.44) this.trySpawnTrail(unitId, 'slash', time, 0.4);
@@ -670,14 +671,14 @@ export class UnitAnimations {
         } else {
           // Recovery: smoothstep back to ready
           const p = (bkCyc - 0.60) / 0.40;
-          const ss = p * p * (3 - 2 * p);
+          const ss = smoothstep(p);
           if (armRight) {
-            armRight.rotation.x = BK_CHOP_X + (BK_REST_X - BK_CHOP_X) * ss;
-            armRight.rotation.z = -BK_CHOP_Z + (BK_REST_Z + BK_CHOP_Z) * ss; // -0.15 → +0.18
+            armRight.rotation.x = lerp(BK_CHOP_X, BK_REST_X, ss);
+            armRight.rotation.z = lerp(-BK_CHOP_Z, BK_REST_Z, ss); // -0.15 → +0.18
           }
           if (armLeft) {
-            armLeft.rotation.x = BK_CHOP_X + (BK_REST_X - BK_CHOP_X) * ss;
-            armLeft.rotation.z = BK_CHOP_Z + (-BK_REST_Z - BK_CHOP_Z) * ss; // +0.15 → -0.18
+            armLeft.rotation.x = lerp(BK_CHOP_X, BK_REST_X, ss);
+            armLeft.rotation.z = lerp(BK_CHOP_Z, -BK_REST_Z, ss); // +0.15 → -0.18
           }
           entry.group.rotation.x = 0.18 * (1 - ss);
         }
@@ -698,7 +699,7 @@ export class UnitAnimations {
         if (cycle < 0.30) {
           // Coil: crouch down, shield pulls slightly back, weight loads onto back foot
           const p = cycle / 0.30;
-          const ease = p * p; // ease-in, building tension
+          const ease = easeIn(p); // ease-in, building tension
           if (armLeft) {
             armLeft.rotation.x = GUARD_ARM - 0.3 * ease; // shield arm cocks back slightly
             armLeft.rotation.z = 0.1 * ease;
@@ -739,9 +740,9 @@ export class UnitAnimations {
         } else {
           // Recovery: settle back to guard stance
           const p = (cycle - 0.62) / 0.38;
-          const ease = 1 - (1 - p) * (1 - p) * (1 - p); // cubic ease-out
+          const ease = cubicOut(p); // cubic ease-out
           if (armLeft) {
-            armLeft.rotation.x = 1.5 + (GUARD_ARM - 1.5) * ease; // return to guard
+            armLeft.rotation.x = lerp(1.5, GUARD_ARM, ease); // return to guard
             armLeft.rotation.z = -0.05 * (1 - ease);
           }
           if (armRight) armRight.rotation.x = 0.3 * (1 - ease);
@@ -758,7 +759,7 @@ export class UnitAnimations {
         if (cycle < 0.25) {
           // Phase 1: Channel — draw power, left hand pulls arcane energy, body coils
           const p = cycle / 0.25;
-          const ep = 1 - (1 - p) * (1 - p); // ease-out
+          const ep = easeOut(p); // ease-out
           if (armRight) {
             armRight.rotation.x = -0.6 * ep;  // staff tips back, gathering
             armRight.rotation.z = -0.1 * ep;   // slight outward angle
@@ -772,30 +773,30 @@ export class UnitAnimations {
         } else if (cycle < 0.40) {
           // Phase 2: Overhead lift — staff sweeps high, both arms raised
           const p = (cycle - 0.25) / 0.15;
-          const ep = 1 - (1 - p) * (1 - p);
+          const ep = easeOut(p);
           if (armRight) {
-            armRight.rotation.x = -0.6 - 1.2 * ep;  // staff overhead (-1.8)
+            armRight.rotation.x = lerp(-0.6, -1.8, ep);  // staff overhead (-1.8)
             armRight.rotation.z = -0.1 * (1 - ep);
           }
           if (armLeft) {
-            armLeft.rotation.x = -0.5 - 0.8 * ep;   // casting hand high (-1.3)
+            armLeft.rotation.x = lerp(-0.5, -1.3, ep);   // casting hand high (-1.3)
             armLeft.rotation.z = 0.2 * (1 - ep);
           }
-          entry.group.position.y = -0.03 + 0.05 * ep; // rise up
-          entry.group.rotation.x = -0.04 + 0.04 * ep; // straighten
+          entry.group.position.y = lerp(-0.03, 0.02, ep); // rise up
+          entry.group.rotation.x = lerp(-0.04, 0.0, ep); // straighten
         } else if (cycle < 0.52) {
           // Phase 3: SLAM — explosive downward strike, staff crashes to ground
           const p = (cycle - 0.40) / 0.12;
-          const smashP = p * p; // ease-in for acceleration feel
+          const smashP = easeIn(p); // ease-in for acceleration feel
           if (armRight) {
-            armRight.rotation.x = -1.8 + 3.2 * smashP;  // -1.8 → +1.4 (massive arc)
+            armRight.rotation.x = lerp(-1.8, 1.4, smashP);  // -1.8 → +1.4 (massive arc)
           }
           if (armLeft) {
-            armLeft.rotation.x = -1.3 + 2.5 * smashP;   // follows through
+            armLeft.rotation.x = lerp(-1.3, 1.2, smashP);   // follows through
             armLeft.rotation.z = 0.15 * smashP;           // hand thrusts outward on release
           }
           entry.group.rotation.x = 0.14 * smashP;        // lunge forward
-          entry.group.position.y = 0.02 - 0.05 * smashP; // drop weight
+          entry.group.position.y = lerp(0.02, -0.03, smashP); // drop weight
         } else if (cycle < 0.68) {
           // Phase 4: Impact hold — tremor, staff planted, arcane shockwave
           if (armRight) armRight.rotation.x = 1.4;
@@ -811,7 +812,7 @@ export class UnitAnimations {
         } else {
           // Phase 5: Recovery — smooth return to stance via smoothstep
           const p = (cycle - 0.68) / 0.32;
-          const sp = p * p * (3 - 2 * p); // smoothstep
+          const sp = smoothstep(p); // smoothstep
           if (armRight) {
             armRight.rotation.x = 1.4 * (1 - sp);
             armRight.rotation.z = 0;
@@ -846,17 +847,17 @@ export class UnitAnimations {
         } else if (cycle < 0.50) {
           // Cast: left arm thrusts forward to release heal orb, staff raised high
           const p = (cycle - 0.30) / 0.20;
-          const castP = 1 - (1 - p) * (1 - p); // ease-out snap
+          const castP = easeOut(p); // ease-out snap
           if (armLeft) {
-            armLeft.rotation.x = -0.3 + 1.3 * castP;  // thrust forward to +1.0
+            armLeft.rotation.x = lerp(-0.3, 1.0, castP);  // thrust forward to +1.0
             armLeft.rotation.z = 0.3 * (1 - castP);    // straighten
           }
           if (armRight) {
-            armRight.rotation.x = -0.2 - 0.6 * castP;  // staff raised high
+            armRight.rotation.x = lerp(-0.2, -0.8, castP);  // staff raised high
             armRight.rotation.z = -0.1 * (1 - castP);
           }
           entry.group.rotation.x = 0.08 * castP;        // lean forward into cast
-          entry.group.position.y = -0.03 + 0.06 * castP; // rise up on release
+          entry.group.position.y = lerp(-0.03, 0.03, castP); // rise up on release
         } else if (cycle < 0.60) {
           // Hold: arm extended, feeling the heal land
           if (armLeft) { armLeft.rotation.x = 1.0; armLeft.rotation.z = 0; }
@@ -866,13 +867,13 @@ export class UnitAnimations {
         } else {
           // Recovery: smooth return to idle stance
           const p = (cycle - 0.60) / 0.40;
-          const easeP = p * p * (3 - 2 * p);
+          const easeP = smoothstep(p);
           if (armLeft) {
-            armLeft.rotation.x = 1.0 * (1 - easeP) + (-0.25) * easeP;
+            armLeft.rotation.x = lerp(1.0, -0.25, easeP);
             armLeft.rotation.z = 0.1 * easeP;
           }
           if (armRight) {
-            armRight.rotation.x = -0.8 * (1 - easeP) + 0.2 * easeP;
+            armRight.rotation.x = lerp(-0.8, 0.2, easeP);
           }
           entry.group.rotation.x = 0.08 * (1 - easeP);
           entry.group.position.y = 0.03 * (1 - easeP);
@@ -941,7 +942,7 @@ export class UnitAnimations {
         if (cycle < 0.30) {
           // Phase 1: Wind-up — sword arm sweeps back overhead, body leans back, weight loads
           const p = cycle / 0.30;
-          const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2; // ease-in-out
+          const ease = easeInOut(p); // ease-in-out
           if (armRight) {
             armRight.rotation.x = -1.8 * ease;  // sword arm sweeps far back overhead
             armRight.rotation.z = -0.15 * ease;  // slight outward for wind-up width
@@ -958,18 +959,18 @@ export class UnitAnimations {
         } else if (cycle < 0.46) {
           // Phase 2: CLEAVE — explosive downward arc, both arms crash forward
           const p = (cycle - 0.30) / 0.16;
-          const smash = p * p; // ease-in for accelerating feel
+          const smash = easeIn(p); // ease-in for accelerating feel
           if (armRight) {
-            armRight.rotation.x = -1.8 + 3.2 * smash;  // -1.8 → +1.4 (massive overhead arc)
+            armRight.rotation.x = lerp(-1.8, 1.4, smash);  // -1.8 → +1.4 (massive overhead arc)
             armRight.rotation.z = -0.15 * (1 - smash);
           }
           if (armLeft) {
-            armLeft.rotation.x = -1.2 + 2.6 * smash;   // follows through
+            armLeft.rotation.x = lerp(-1.2, 1.4, smash);   // follows through
             armLeft.rotation.z = 0.1 * (1 - smash);
           }
           // Body crashes forward — lean back → lunge forward
           entry.group.rotation.x = -0.12 + 0.30 * smash;
-          entry.group.position.y = -0.02 - 0.03 * smash; // drop weight into strike
+          entry.group.position.y = lerp(-0.02, -0.05, smash); // drop weight into strike
           // Legs drive: front leg lunges, back pushes off
           if (legLeft) legLeft.rotation.x = 0.12 + 0.30 * smash;
           if (legRight) legRight.rotation.x = -0.18 - 0.12 * smash;
@@ -992,7 +993,7 @@ export class UnitAnimations {
         } else {
           // Phase 4: Recovery — heavy pull back to stance via smoothstep
           const p = (cycle - 0.60) / 0.40;
-          const sp = p * p * (3 - 2 * p); // smoothstep
+          const sp = smoothstep(p); // smoothstep
           if (armRight) {
             armRight.rotation.x = 1.4 * (1 - sp);
             armRight.rotation.z = 0;
@@ -1021,7 +1022,7 @@ export class UnitAnimations {
         if (cycle < 0.35) {
           // Phase 1: Wind-up — club rises overhead, body leans way back
           const p = cycle / 0.35;
-          const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+          const ease = easeInOut(p);
           if (armRight) {
             armRight.rotation.x = -2.0 * ease; // massive overhead wind-up
             armRight.rotation.z = -0.2 * ease;
@@ -1036,13 +1037,13 @@ export class UnitAnimations {
         } else if (cycle < 0.50) {
           // Phase 2: SLAM — explosive downward smash
           const p = (cycle - 0.35) / 0.15;
-          const smash = p * p; // accelerating impact
+          const smash = easeIn(p); // accelerating impact
           if (armRight) {
-            armRight.rotation.x = -2.0 + 3.5 * smash; // huge arc overhead to ground
+            armRight.rotation.x = lerp(-2.0, 1.5, smash); // huge arc overhead to ground
             armRight.rotation.z = -0.2 * (1 - smash);
           }
           if (armLeft) {
-            armLeft.rotation.x = -0.8 + 1.2 * smash;
+            armLeft.rotation.x = lerp(-0.8, 0.4, smash);
             armLeft.rotation.z = 0.3 * (1 - smash);
           }
           entry.group.rotation.x = -0.15 + 0.35 * smash; // lunge forward
@@ -1066,7 +1067,7 @@ export class UnitAnimations {
         } else {
           // Phase 4: Recovery — slow, labored pull back to ready stance
           const p = (cycle - 0.65) / 0.35;
-          const sp = p * p * (3 - 2 * p); // smoothstep
+          const sp = smoothstep(p); // smoothstep
           if (armRight) {
             armRight.rotation.x = 1.5 * (1 - sp);
             armRight.rotation.z = 0;
@@ -1080,6 +1081,80 @@ export class UnitAnimations {
           entry.group.rotation.z = 0;
           if (legLeft) legLeft.rotation.x = 0.30 * (1 - sp);
           if (legRight) legRight.rotation.x = -0.20 * (1 - sp);
+        }
+        break;
+      }
+      case UnitType.CHAMPION: {
+        // CHAMPION WAR HAMMER OVERHEAD SMASH — slower than warrior, faster than ogre.
+        // Huge dramatic wind-up with body twist, explosive overhead slam, ground tremor.
+        const speed = 0.8;
+        const elapsed = entry.attackAnimStart > 0 ? (time - entry.attackAnimStart) : 0;
+        const cycle = Math.min((elapsed * speed) % 1, 0.9999);
+
+        if (cycle < 0.30) {
+          // Phase 1: Wind-up — hammer rises high overhead, body twists right
+          const p = cycle / 0.30;
+          const ease = easeInOut(p);
+          if (armRight) {
+            armRight.rotation.x = -2.2 * ease; // massive overhead pull
+            armRight.rotation.z = -0.25 * ease;
+          }
+          if (armLeft) {
+            armLeft.rotation.x = -0.6 * ease; // off-hand braces upward
+            armLeft.rotation.z = 0.2 * ease;
+          }
+          entry.group.rotation.x = -0.12 * ease; // lean back
+          entry.group.rotation.y = 0.15 * ease; // body twist
+          if (legLeft) legLeft.rotation.x = -0.20 * ease;
+          if (legRight) legRight.rotation.x = 0.12 * ease;
+        } else if (cycle < 0.45) {
+          // Phase 2: SLAM — explosive downward hammer strike
+          const p = (cycle - 0.30) / 0.15;
+          const smash = easeIn(p);
+          if (armRight) {
+            armRight.rotation.x = lerp(-2.2, 1.6, smash);
+            armRight.rotation.z = -0.25 * (1 - smash);
+          }
+          if (armLeft) {
+            armLeft.rotation.x = lerp(-0.6, 0.3, smash);
+            armLeft.rotation.z = 0.2 * (1 - smash);
+          }
+          entry.group.rotation.x = -0.12 + 0.30 * smash; // lunge forward
+          entry.group.rotation.y = 0.15 * (1 - smash); // untwist
+          entry.group.position.y = -0.06 * smash; // body drops
+          if (legLeft) legLeft.rotation.x = -0.20 + 0.45 * smash;
+          if (legRight) legRight.rotation.x = 0.12 - 0.30 * smash;
+          if (p > 0.6) this.trySpawnTrail(unitId, 'smash', time, 0.38);
+        } else if (cycle < 0.60) {
+          // Phase 3: Impact hold — ground tremor, hammer planted
+          const p = (cycle - 0.45) / 0.15;
+          if (armRight) armRight.rotation.x = 1.6;
+          if (armLeft) armLeft.rotation.x = 0.3;
+          const tremor = Math.sin(time * 45) * 0.010 * (1 - p);
+          entry.group.rotation.x = 0.18 + tremor;
+          entry.group.position.y = -0.06 + tremor * 1.5;
+          entry.group.rotation.z = tremor * 0.4;
+          entry.group.rotation.y = 0;
+          if (legLeft) legLeft.rotation.x = 0.25;
+          if (legRight) legRight.rotation.x = -0.18;
+        } else {
+          // Phase 4: Recovery — pull hammer back to ready
+          const p = (cycle - 0.60) / 0.40;
+          const sp = smoothstep(p);
+          if (armRight) {
+            armRight.rotation.x = 1.6 * (1 - sp);
+            armRight.rotation.z = 0;
+          }
+          if (armLeft) {
+            armLeft.rotation.x = 0.3 * (1 - sp);
+            armLeft.rotation.z = 0;
+          }
+          entry.group.rotation.x = 0.18 * (1 - sp);
+          entry.group.position.y = -0.06 * (1 - sp);
+          entry.group.rotation.z = 0;
+          entry.group.rotation.y = 0;
+          if (legLeft) legLeft.rotation.x = 0.25 * (1 - sp);
+          if (legRight) legRight.rotation.x = -0.18 * (1 - sp);
         }
         break;
       }
@@ -1367,6 +1442,68 @@ export class UnitAnimations {
         entry.group.position.y = Math.abs(Math.sin(time * ogreWalkSpd)) * 0.02 - 0.01;
         break;
       }
+      case UnitType.CHAMPION: {
+        // Champion walk: heavy, authoritative stride — slower than warrior, faster than ogre
+        const champWalkSpd = 5;
+        if (legLeft && legRight) {
+          legLeft.rotation.x = Math.sin(time * champWalkSpd) * 0.32;
+          legRight.rotation.x = Math.sin(time * champWalkSpd + Math.PI) * 0.32;
+        }
+        if (armLeft) armLeft.rotation.x = Math.sin(time * champWalkSpd + Math.PI) * 0.18;
+        if (armRight) {
+          armRight.rotation.x = Math.sin(time * champWalkSpd) * 0.12; // reduced — holding hammer
+        }
+        // Authoritative side-to-side sway
+        entry.group.rotation.z = Math.sin(time * champWalkSpd * 0.5) * 0.03;
+        // Slight bob
+        entry.group.position.y = Math.abs(Math.sin(time * champWalkSpd)) * 0.015 - 0.008;
+        break;
+      }
+      case UnitType.LUMBERJACK: {
+        // Lumberjack walk: heavy trudge with axe over shoulder, exaggerated arm swing
+        const lumbWalkSpd = 6; // slower, heavier than standard
+        if (legLeft && legRight) {
+          legLeft.rotation.x = Math.sin(time * lumbWalkSpd) * 0.40;
+          legRight.rotation.x = Math.sin(time * lumbWalkSpd + Math.PI) * 0.40;
+        }
+        // Right arm: axe stays relatively stable on shoulder (reduced swing)
+        if (armRight) armRight.rotation.x = -0.25 + Math.sin(time * lumbWalkSpd) * 0.10;
+        // Left arm: log held steady, slight counter-swing
+        if (armLeft) armLeft.rotation.x = 0.15 + Math.sin(time * lumbWalkSpd + Math.PI) * 0.15;
+        // Rugged forward lean
+        entry.group.rotation.x = 0.04;
+        break;
+      }
+      case UnitType.VILLAGER: {
+        // Villager walk: light, quick pace, basket bouncing, scythe swaying
+        const vilWalkSpd = 8; // quicker, lighter steps
+        if (legLeft && legRight) {
+          legLeft.rotation.x = Math.sin(time * vilWalkSpd) * 0.45;
+          legRight.rotation.x = Math.sin(time * vilWalkSpd + Math.PI) * 0.45;
+        }
+        // Right arm: scythe swings with stride
+        if (armRight) armRight.rotation.x = Math.sin(time * vilWalkSpd) * 0.30;
+        // Left arm: basket held steady, gentle bounce
+        if (armLeft) armLeft.rotation.x = -0.10 + Math.sin(time * vilWalkSpd + Math.PI) * 0.12;
+        // Light, bouncy movement
+        entry.group.position.y += Math.abs(Math.sin(time * vilWalkSpd)) * 0.015;
+        break;
+      }
+      case UnitType.BUILDER: {
+        // Builder walk: purposeful stride, hammer swinging, blueprints tucked
+        const bldWalkSpd = 7; // standard pace, professional
+        if (legLeft && legRight) {
+          legLeft.rotation.x = Math.sin(time * bldWalkSpd) * 0.38;
+          legRight.rotation.x = Math.sin(time * bldWalkSpd + Math.PI) * 0.38;
+        }
+        // Right arm: hammer swings with stride (tool momentum)
+        if (armRight) armRight.rotation.x = Math.sin(time * bldWalkSpd) * 0.30;
+        // Left arm: blueprints tucked under arm, minimal swing
+        if (armLeft) armLeft.rotation.x = -0.15 + Math.sin(time * bldWalkSpd + Math.PI) * 0.08;
+        // Slight forward lean — heading to the job site
+        entry.group.rotation.x = 0.03;
+        break;
+      }
       default: {
         // Standard walk
         const walkSpeed = 7;
@@ -1387,6 +1524,9 @@ export class UnitAnimations {
       const swayFreq = type === UnitType.RIDER ? 8
         : (type === UnitType.WARRIOR || type === UnitType.PALADIN) ? 6
         : (type === UnitType.ARCHER || type === UnitType.SCOUT) ? 9
+        : type === UnitType.LUMBERJACK ? 6
+        : type === UnitType.VILLAGER ? 8
+        : type === UnitType.BUILDER ? 7
         : 7;
       // Body tilts left-right with each step (rotation.z)
       entry.group.rotation.z = Math.sin(time * swayFreq) * 0.04;
@@ -1643,6 +1783,89 @@ export class UnitAnimations {
         entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.3) * 0.012;
         // Deep breathing chest expand
         entry.group.rotation.x = entry.group.rotation.x * 0.95 + breathe * 0.5;
+        break;
+      }
+      case UnitType.CHAMPION: {
+        // Champion idle: hammer resting, slow commanding breathing, subtle weight shift
+        const champBreathe = Math.sin(time * 0.7) * 0.008;
+        if (armRight) {
+          // Hammer arm rests forward and slightly down
+          armRight.rotation.x = armRight.rotation.x * 0.88 + (0.20 + champBreathe) * 0.12;
+        }
+        if (armLeft) {
+          // Off-hand relaxed at side
+          armLeft.rotation.x = armLeft.rotation.x * 0.90 + (-0.08 + champBreathe) * 0.10;
+          armLeft.rotation.z = armLeft.rotation.z * 0.90 + 0.06 * 0.10;
+        }
+        // Slow authoritative weight shift
+        entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.35) * 0.010;
+        // Deep breathing
+        entry.group.rotation.x = entry.group.rotation.x * 0.95 + champBreathe * 0.4;
+        break;
+      }
+      case UnitType.LUMBERJACK: {
+        // Lumberjack idle: axe resting on shoulder, deep breathing, subtle weight shift
+        const lumbBreathe = Math.sin(time * 0.9) * 0.02;
+        // Right arm (axe): resting on shoulder, slight rise/fall with breathing
+        if (armRight) {
+          armRight.rotation.x = armRight.rotation.x * 0.88 + (-0.35) * 0.12 + lumbBreathe;
+          armRight.rotation.z = armRight.rotation.z * 0.9 + (-0.08) * 0.1;
+        }
+        // Left arm (log): held at side, relaxed
+        if (armLeft) {
+          armLeft.rotation.x = armLeft.rotation.x * 0.90 + 0.15 * 0.10 + lumbBreathe * 0.5;
+        }
+        // Rugged weight shift — planted but relaxed
+        entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.5) * 0.010;
+        // Occasional scratch fidget (every ~5 seconds)
+        const lumbFidget = Math.sin(time * 0.2) > 0.95;
+        if (lumbFidget && armLeft) {
+          armLeft.rotation.x += Math.sin(time * 4) * 0.08;
+        }
+        break;
+      }
+      case UnitType.VILLAGER: {
+        // Villager idle: scythe held loosely, warm swaying, looking around
+        const vilBreathe = Math.sin(time * 1.0) * 0.015;
+        // Right arm (scythe): held low, gentle sway
+        if (armRight) {
+          armRight.rotation.x = armRight.rotation.x * 0.88 + 0.20 * 0.12 + vilBreathe;
+          armRight.rotation.z = armRight.rotation.z * 0.9 + (-0.05) * 0.1;
+          // Scythe weight — gentle pendulum
+          armRight.rotation.x += Math.sin(time * 0.7 + 1.0) * 0.010;
+        }
+        // Left arm (basket): held close, protective
+        if (armLeft) {
+          armLeft.rotation.x = armLeft.rotation.x * 0.88 + (-0.15) * 0.12 + vilBreathe * 0.5;
+          armLeft.rotation.z = armLeft.rotation.z * 0.9 + 0.06 * 0.1;
+        }
+        // Friendly sway — light on feet
+        entry.group.rotation.z = entry.group.rotation.z * 0.92 + Math.sin(time * 0.6) * 0.008;
+        // Subtle head-look (body turns slightly)
+        entry.group.rotation.x = entry.group.rotation.x * 0.95 + Math.sin(time * 0.3) * 0.005;
+        break;
+      }
+      case UnitType.BUILDER: {
+        // Builder idle: hammer at side, blueprints tucked, surveying the site
+        const bldBreathe = Math.sin(time * 0.85) * 0.018;
+        // Right arm (hammer): held at ready, slight tap fidget
+        if (armRight) {
+          armRight.rotation.x = armRight.rotation.x * 0.88 + 0.12 * 0.12 + bldBreathe;
+          // Occasional hammer tap against leg (~every 3s)
+          const tapPhase = (time * 0.35) % 1;
+          if (tapPhase > 0.9) {
+            armRight.rotation.x += Math.sin(tapPhase * 20) * 0.06;
+          }
+        }
+        // Left arm (blueprints): tucked under arm
+        if (armLeft) {
+          armLeft.rotation.x = armLeft.rotation.x * 0.88 + (-0.20) * 0.12 + bldBreathe * 0.5;
+          armLeft.rotation.z = armLeft.rotation.z * 0.9 + 0.08 * 0.1;
+        }
+        // Professional stance — steady, grounded
+        entry.group.rotation.z = entry.group.rotation.z * 0.93 + Math.sin(time * 0.45) * 0.006;
+        // Slight lean forward (surveying work)
+        entry.group.rotation.x = entry.group.rotation.x * 0.95 + 0.008 * 0.05;
         break;
       }
       default: {
@@ -1956,32 +2179,32 @@ export class UnitAnimations {
     if (cycle < 0.12) {
       // Ready: weapon arm cocks slightly inward (loading the deflect)
       const p = cycle / 0.12;
-      const easeIn = p * p; // accelerate into ready
+      const easeInVar = easeIn(p); // accelerate into ready
       if (isShielded) {
         // Shield arm pulls slightly inward before bash-deflect
-        if (armLeft) { armLeft.rotation.x = -0.3 * easeIn; armLeft.rotation.z = 0.3 * easeIn; }
-        if (armRight) { armRight.rotation.x = -0.2 * easeIn; }
+        if (armLeft) { armLeft.rotation.x = -0.3 * easeInVar; armLeft.rotation.z = 0.3 * easeInVar; }
+        if (armRight) { armRight.rotation.x = -0.2 * easeInVar; }
       } else {
         // Sword arm cocks to the right side (loading the sweep)
-        if (armRight) { armRight.rotation.x = -0.5 * easeIn; armRight.rotation.z = 0.4 * easeIn; }
-        if (armLeft) { armLeft.rotation.x = -0.2 * easeIn; }
+        if (armRight) { armRight.rotation.x = -0.5 * easeInVar; armRight.rotation.z = 0.4 * easeInVar; }
+        if (armLeft) { armLeft.rotation.x = -0.2 * easeInVar; }
       }
-      entry.group.rotation.y = 0.15 * easeIn; // slight body twist loading
-      entry.group.rotation.x = -0.05 * easeIn;
+      entry.group.rotation.y = 0.15 * easeInVar; // slight body twist loading
+      entry.group.rotation.x = -0.05 * easeInVar;
     } else if (cycle < 0.28) {
       // Deflect sweep: fast sideways weapon swing knocking the blow away
       const p = (cycle - 0.12) / 0.16;
-      const easeOut = 1 - (1 - p) * (1 - p); // quick snap
+      const easeOutVar = easeOut(p); // quick snap
       if (isShielded) {
         // Shield bash outward to the left
-        if (armLeft) { armLeft.rotation.x = -0.3 + 0.6 * easeOut; armLeft.rotation.z = 0.3 - 0.8 * easeOut; }
+        if (armLeft) { armLeft.rotation.x = lerp(-0.3, 0.3, easeOutVar); armLeft.rotation.z = lerp(0.3, -0.5, easeOutVar); }
         if (armRight) { armRight.rotation.x = -0.2; }
       } else {
         // Sword sweeps from right to left across body
-        if (armRight) { armRight.rotation.x = -0.5 + 0.2 * easeOut; armRight.rotation.z = 0.4 - 1.0 * easeOut; }
-        if (armLeft) { armLeft.rotation.x = -0.2 + 0.1 * easeOut; armLeft.rotation.z = -0.15 * easeOut; }
+        if (armRight) { armRight.rotation.x = lerp(-0.5, -0.3, easeOutVar); armRight.rotation.z = lerp(0.4, -0.6, easeOutVar); }
+        if (armLeft) { armLeft.rotation.x = lerp(-0.2, -0.1, easeOutVar); armLeft.rotation.z = -0.15 * easeOutVar; }
       }
-      entry.group.rotation.y = 0.15 - 0.5 * easeOut; // body whips in sweep direction
+      entry.group.rotation.y = 0.15 - 0.5 * easeOutVar; // body whips in sweep direction
       entry.group.rotation.x = -0.05;
     } else if (cycle < 0.42) {
       // Follow-through: slight overextension at end of sweep
@@ -1999,7 +2222,7 @@ export class UnitAnimations {
     } else {
       // Recovery: smooth return to neutral
       const p = (cycle - 0.42) / 0.58;
-      const ease = 1 - (1 - p) * (1 - p) * (1 - p); // cubic ease-out for smooth settle
+      const ease = cubicOut(p); // cubic ease-out for smooth settle
       if (isShielded) {
         if (armLeft) { armLeft.rotation.x = 0.3 * (1 - ease); armLeft.rotation.z = -0.5 * (1 - ease); }
         if (armRight) { armRight.rotation.x = -0.2 * (1 - ease); }
@@ -2017,9 +2240,17 @@ export class UnitAnimations {
     if (legRight) legRight.rotation.x = cycle < 0.42 ? -0.15 : -0.15 * (1 - (cycle - 0.42) / 0.58);
 
     // --- Metal flash on contact (0.12-0.22 = moment of deflect) ---
+    // IMPORTANT: Only flash if materials are already cloned (preview entry).
+    // Mutating shared cached materials would leak the flash to ALL units of this type.
     const shouldFlash = cycle >= 0.12 && cycle < 0.22;
     entry.group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+        // Safety: clone material on first flash if it hasn't been cloned yet
+        // (prevents leaking color changes to shared cached materials)
+        if (shouldFlash && !(child.material as any)._clonedForBlock) {
+          child.material = child.material.clone();
+          (child.material as any)._clonedForBlock = true;
+        }
         if (shouldFlash) {
           if (!(child.material as any)._origColor) {
             (child.material as any)._origColor = child.material.color.getHex();
@@ -2133,6 +2364,19 @@ export class UnitAnimations {
   ): void {
     // Lazily create / reuse a minimal fake UnitMeshGroup
     if (!this._previewEntry || this._previewEntry.group !== group) {
+      // Clone ALL materials so preview animations don't leak to live units.
+      // Cached materials are shared globally — mutating color/emissive affects every mesh
+      // that references the same material. Must clone Lambert, Basic, and material arrays.
+      group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (Array.isArray(child.material)) {
+            child.material = child.material.map((m: THREE.Material) => m.clone());
+          } else if (child.material instanceof THREE.Material) {
+            child.material = child.material.clone();
+          }
+        }
+      });
+
       const canvas = document.createElement('canvas');
       canvas.width = 1; canvas.height = 1;
       const ctx = canvas.getContext('2d')!;
@@ -2189,5 +2433,10 @@ export class UnitAnimations {
       entry.attackAnimStart = 0;
       this.animateIdle(entry, unitType, armLeft ?? undefined, armRight ?? undefined, legLeft ?? undefined, legRight ?? undefined, time);
     }
+  }
+
+  /** Clear the preview entry — call when the debug preview is destroyed */
+  clearPreviewEntry(): void {
+    this._previewEntry = null;
   }
 }

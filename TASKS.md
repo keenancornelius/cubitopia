@@ -26,12 +26,26 @@
 
 **Sessions: if you encounter a bug while working (build failure, runtime error, broken feature, visual glitch), add it here as a new `[ ]` item with a description. Then fix it immediately before continuing your task.**
 
-- [x] **Tundra/Frozen Waste terrain too thin** — Root cause: `generateTundraMap` was missing the `computeShellBlocks` call that all other custom generators (Arena, Desert, Skyland) use to give terrain proper underground depth (from y=-10 up to surface). Tundra voxels only filled from y=0, creating paper-thin terrain. Fix: added `shellGen.computeShellBlocks(tundraMap, size, size)` before return. The existing `reskinTundra` in MapInitializer correctly swaps the standard GRASS/DIRT blocks back to PACKED_SNOW/FROZEN_DIRT.
+- [x] **Tundra/Frozen Waste terrain too thin** — Prior fix added `computeShellBlocks` but terrain was still visually thin due to low elevation values (min 2, typical 3-5). Shell blocks fill from y=-10 but visible terrain above y=0 was only 2-5 blocks. Fix: raised elevation formula from `baseElev*5 + ridge*4 + 2` (range 2-10) to `baseElev*5 + ridge*4 + 5` (range 5-12), updated terrain type thresholds to match. Frozen lakes raised from elev 2→5 with proper sub-layers. Added WATER→ICE to `reskinTundra` swap table so frozen lake surfaces render as ice instead of being skipped as water.
+- [x] **BUG: All units bright red — team colors broken** — Root cause: `applyBleedTint()` and `applyLevelUpVisuals()` in UnitVFX.ts were mutating shared cached materials from getCachedLambert(). When one unit took damage, the blood-red tint propagated to ALL units sharing that material color. Fix: both methods now clone the material (`child.material = child.material.clone()`) before modifying color/emissive, keeping tints local to the individual unit.
+- [x] **BUG: Score tracker / power bar missing** — Power bar was hidden by localStorage minimize state (`cubitopia_minimized.armyBar = true`). Fix: `loadMinimizedStates()` now deletes the `armyBar` key on load, ensuring the army power bar always starts expanded as a critical gameplay indicator.
+- [x] **BUG: FFA mode — other teams' resource bars not visible** — Root cause: `updateEnemyResources` in main.ts only read stockpile indices `[1]` (player 1), ignoring players 2 and 3. Fix: added `updateFfaEnemyResources()` method in HUD.ts that renders a compact multi-row opponent panel (color dot + name + wood/stone/iron/crystal/food/gold/units per enemy). main.ts now branches: 2-player uses the original single enemy bar, FFA (playerCount > 2) loops all enemy players and calls the new FFA method. `resetFfaEnemyBar()` called on new game to handle mode switching.
+- [x] **BUG: Arena walls wildly warped/arched** — Two root causes: (1) arena wall ring selection (`ringDist < 0.8`) grabbed tiles from adjacent elevation zones, fixed by tightening to 0.6 and forcing uniform elevation 1; (2) `DefenseMeshFactory.addWallSegments()` and `addGateBridgeSegments()` used `centerT = 0.25`, positioning segment groups at 25% of the neighbor distance instead of the true midpoint, causing cumulative angular warping in circular wall arrangements. Fix: changed `centerT` from 0.25 to 0.5 in both functions so segments center at the geometric midpoint between adjacent hexes.
+- [x] **BUG: Farm and Plant Crops do the same thing — no crop growth/VFX/resource** — Implemented full crop growth lifecycle. Crops progress through 4 stages (seedling→sprout→growing→mature) with 8-second intervals. Visual feedback: (1) flat markers change color (brown→olive→green→golden) via BlueprintSystem, (2) 3D voxel crop models (seedling nub → sprout with leaf → stalk with leaves → golden wheat sheaf) via 4 instanced archetypes in TerrainDecorator with 3-5 clustered stalks per farm tile. Wired `updateCropVisual` callback in NatureOps → TerrainDecorator + BlueprintSystem. Villagers only harvest mature (stage 3) crops, then crops reset to seedling and regrow. Plant Crops (E from farmhouse) shows planting notification and starts growth immediately.
+- [x] **BUG: Army power bar only shows red and blue in 4-player FFA** — Root cause: `updateArmyStrength` in main.ts only passed `players[0]` and `players[1]`, never `allPlayers` for FFA. Fix: now builds `allPlayersForBar` array with all players and their CSS colors (via `getPlayerCSS()`), passes as third arg when `players.length > 2`. Also fixed `HUD.TEAM_COLORS`/`TEAM_NAMES` order mismatch (was Gold/Green at indices 2/3, now Green/Gold to match `PLAYER_COLORS`).
+- [x] **BUG: Not enough iron and crystal on Frozen Tundra + new maps** — Root cause: Tundra crystal clusters only spawned on MOUNTAIN tiles (very rare in tundra), and cluster counts were too low (2-4 crystal, 3-5 iron). Fix in `generateTundraMap`: crystal now also spawns on SNOW terrain, cluster counts increased to 5-8 crystal / 6-9 iron, cluster radius widened from 3x3 to 5x5, placement chances increased. Iron also spawns on SNOW tiles. Skyland was already adequate (dedicated resource islands).
+- [x] **BUG: Debug viewer Block animation leaks to battlefield** — Root cause: `animateBlock()` and `animateHit()` in UnitAnimations.ts modify `child.material.color` directly on cached materials from `getCachedLambert()`, which are shared globally across all units of the same type. When the debug preview triggers these animations, the color mutation affects every live unit's material. Fix: in `animatePreviewGroup()`, clone all `MeshLambertMaterial` instances on the preview group before any animation runs, isolating the preview from the shared material cache.
+- [x] **UI: Swap slicer and spawn queue positions** — Swapped in HUD.ts: elevation slicer moved from `right:180px; bottom:80px` to `right:12px; bottom:90px` (flush right edge). Spawn queue moved from `right:12px; bottom:90px` to `right:180px; bottom:80px` (left of slicer). No overlap.
+- [x] **BUILD: BuildingKind type errors (mine/market stubs)** — Another session added 'mine' and 'market' to the `BuildingKind` union type but didn't update `BuildingSystem.ts` or `main.ts`. Added stub entries in `buildingSpawnIndex` (both locations) and `BUILDING_PLACEMENT_CONFIG` with placeholder costs. Also fixed `updateResources` call that passed `PlayerResources` instead of `Player`.
+- [x] **UI: Kanban completed tasks — expandable descriptions** — Added `description` field to TaskItem, updated `cleanTaskText()` to return `{title, description}` split at ` — ` dash. Completed task cards with descriptions now show a chevron indicator and expand on click to reveal the description text with a slide animation and left border accent. Cards without descriptions remain static. Collapsed by default for compact columns. Increased expand maxHeight from 80px to 200px with overflow-y scroll for long descriptions.
+- [ ] **BUG: Per-map fog/atmosphere too dense — terrain barely visible** — Per-map atmosphere functions (`applySkylandAtmosphere`, `applyRiverCrossingAtmosphere`, `applyTundraAtmosphere`, etc. in main.ts ~lines 2092-2300) apply `FogExp2` with densities that wash out the terrain on some maps. Terrain is nearly invisible under grey/white haze on certain maps. The Skyland cloud system (`SkyCloudSystem.ts`) also adds a cloud void plane that compounds with the fog. Fix: reduce fog density values across all map atmosphere functions (currently 0.003-0.005, try 0.001-0.002), and make the SkyCloudSystem plane lower opacity or only visible below the islands. Test each map to ensure terrain is clearly visible at all camera distances.
+- [ ] **BUG: Ambient wind sound persists across games** — Wind/bird ambient sounds from `SoundManager.ts` persist after game end and into new games, layering on top of each other. Root cause: `stopAmbient()` (line 1497) stops `ambientWindNode` and clears intervals, but the wind LFO oscillator created in `startAmbient()` (line 1405-1411, `windLfo.start()`) is a local variable that never gets stopped or stored — it leaks and keeps running. Fix: store `windLfo` as a class member (e.g. `private ambientWindLfo: OscillatorNode | null = null`) and call `this.ambientWindLfo.stop()` in `stopAmbient()`. Also check if `startAmbient()` is being called on new game without `stopAmbient()` first — the guard `if (this.ambientActive) return` should prevent double-starts but verify `ambientActive` is properly reset.
+- [ ] **BUG: Phantom capture zone light columns at wrong positions** — Tall translucent colored cylinders (capture zone ownership indicators from `CaptureZoneSystem.ts` line 245-259) are appearing at locations where there are no bases. Multiple red/yellow pillars clustered together with no corresponding bases underneath. `createZoneVisuals()` adds a 12-unit-tall CylinderGeometry per zone. Likely cause: `addZone()` is being called with incorrect base positions, duplicate zone registrations, or zones created for bases that were removed/relocated during map generation. Check where `addZone` is called — `base.worldPosition` may be stale or from a prior generation pass. Also verify `removeZone` properly cleans up on map reset.
 
 ---
 
 ## Work Stream A: Combat & Unit AI
-**Status:** [ACTIVE] — Session: multiplayer-determinism
+**Status:** [DONE]
 **Primary files:** `UnitAI.ts`, `CombatSystem.ts`, `CombatEventHandler.ts`, `TacticalGroup.ts`, `AIController.ts`
 **Supporting files:** `Pathfinder.ts`, `UnitAnimations.ts`, `UnitVFX.ts`, `UnitModels.ts`, `UnitFactory.ts`
 
@@ -49,18 +63,18 @@
 - [x] Fix arena spawning — rewrote spawnArmy to use vector math: computes normalized forward (base→center) and lateral (perpendicular) vectors, places depth rows as parallel lines along lateral axis. All players' formations are now mirror-symmetric around the arena center. Works for any player count via angular base placement
 
 ### New Tasks — Combat & Unit Progression
-- [ ] Red bleed effect — lingering red particle/tint effect on damaged units that persists for the rest of the fight. Visual indicator of wounded units
-- [ ] Secondary melee attack animations — (1) Power sword: green glow charge-up, unleash spin attack while lunging forward. (2) Jump attack strikes. (3) Paladin charge: fast straight-line sprint with blue force field effect (spell shield), white light burst on arrival, rally status effect gives nearby friendlies speed boost + spell shield
-- [ ] Unit level-up visuals — on level up: slight size increase, armor badge upgrades, fancier helmets, captain-tier color schemes and armor unique to each unit type
-- [ ] Archer level-up bonus — fires a second arrow on first level-up
-- [ ] Greatsword level-up bonus — gains horizontal sweep attack animation with chance for big crit if it hits 4+ enemies at once
-- [ ] Champion unit (Tier 3 base reward) — replace current tier 3 reward. Over-the-top white armor with gold feather-brimmed crew helm, detailed form-fitting fighting armor, giant war hammer. Comically exaggerated muscular proportions (wide shoulders, thin waist, strong arms). Design second attack pattern for war hammer. Build model in UnitModels.ts, all 4 animation sets, add to UnitFactory
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] Red bleed effect — persistent red tint on wounded units via `_bleedActive` flag + `applyBleedTint()` in UnitVFX. Lerps mesh colors toward dark blood red proportional to damage taken (intensity 0→0.4 as health drops). Spawns red drip particles. Applied in CombatEventHandler after each hit, persists for rest of fight
+- [x] Secondary melee attack animations — (1) Greatsword spin: green glow charge-up sphere → expanding green slash ring + AoE damage at spinRadius, 8s cooldown, 140% damage. (2) Warrior jump attack: parabolic leap arc + dust shockwave on impact, 6s cooldown, 150% damage. (3) Paladin charge: blue force field sphere during approach + white/gold impact burst + rally buff (30% speed boost to nearby allies for 5s), 10s cooldown, 180% damage. All via `checkSecondaryAttack()` in CombatSystem + VFX in UnitVFX + wired through CombatEventHandler
+- [x] Unit level-up visuals — `applyLevelUpVisuals()` in UnitVFX: 3% scale increase per level, emissive armor shimmer (subtle gray at L2, brighter at L3, gold at L5+), silver shoulder badges at L3 / gold dual badges at L5+, captain helmet glow at L5+. Called from CombatEventHandler on level-up event
+- [x] Archer level-up bonus — at level 2+, fires a second arrow 150ms after the first with slight offset. Second arrow deals 50% of base attack damage. Added in CombatEventHandler archer branch with deferred fireArrow callback
+- [x] Greatsword level-up bonus — at level 2+, when cleave hits 4+ enemies, triggers sweep crit: doubles cleave damage on all secondary targets + green "SWEEP x{N}" crit text VFX. Added crit check in `applyGreatswordCleave()` + `combat:sweepCrit` event
+- [x] Champion unit (Tier 3 base reward) — Built full Champion unit: white/gold plate armor model in UnitModels.ts (exaggerated proportions, massive pauldrons, feathered crew helm with team-color plume, giant war hammer with gold inlay + back spike, 1.25x scale). 3 animation sets in UnitAnimations.ts (idle: commanding breathing + weight shift, walk: heavy authoritative stride, attack: dramatic overhead hammer slam with 4 phases — wind-up, slam, ground tremor, recovery). MELEE_STRIKE_DELAY 560ms. Hammer slam secondary attack: AoE ground pound (50% ATK) within 1-hex radius, 480-frame cooldown, wired through CombatSystem + UnitAI + CombatEventHandler with ground shockwave VFX. Wired as Citadel tier-up reward in LifecycleUpdater (replaces Ogre at tier 3). Stats: 35 HP, 9 ATK, 5 DEF, 1 move, 1 range. Added HUD tooltips + passives
+- [x] **STREAM COMPLETE** — All Stream A combat & progression tasks done
 
 ---
 
 ## Work Stream B: Rendering & VFX
-**Status:** [ACTIVE] — Session: rendering-vfx-2
+**Status:** [DONE]
 **Primary files:** `UnitRenderer.ts`, `UnitModels.ts`, `UnitAnimations.ts`, `ProjectileSystem.ts`, `UnitVFX.ts`
 **Supporting files:** `InstancedObjectManager.ts`, `Renderer.ts`
 
@@ -74,16 +88,17 @@
 - [x] Kamehameha laser beam VFX — 3-phase effect: charge-up energy convergence → piercing purple beam with triple-layer glow + swirl particles → staggered impact explosions per target
 - [x] Chain lightning polish — triple-layer bolt glow, 2-3 forked branches, bright impact flash, animated electric sparks with gravity
 - [x] Damage particle enhancement — 6-9 varied-shade particles with drag/gravity, size variation, additive white impact flash burst
-- [ ] New unit models for any upcoming unit types
+- [x] New unit models for any upcoming unit types — Champion model built in Stream A (white/gold plate, war hammer, 1.25x scale, feathered crew helm)
 - [x] Performance profiling — assessed: mesh merge already reduces 60→12-18 meshes/unit, particle pool exists, terrain instanced. Main bottleneck is many independent rAF loops for VFX (acceptable for current scale)
-- [ ] Cubitopia title screen text — replace plain text with pixel art high-detail lettering decorated with game-asset-inspired art (voxel blocks, swords, shields, crystals woven into the letterforms)
-- [ ] Garrison turret visuals — (1) Arrow hail: garrisoned ranged units produce a visible hail of arrows from building ramps that scales with number of garrisoned units. (2) Cannon turret: add a visible cannon mesh on gates/towers that swivels to track targets and fires with projectile + smoke VFX. Both should make garrisons feel powerful and visually exciting
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] Cubitopia title screen text — PixelTitle.ts: canvas-based pixel art title with 5x7 bitmap font rendered as 3D voxel blocks (isometric faces, specular highlights, wave animation), decorated with procedural swords, shields, crystals, and animated sparkles. Wired into MenuController replacing plain text
+- [x] Garrison turret visuals — Added `fireArrowVolley()` (staggered N arrows with random spread, variable arc), `fireCannonball()` (heavy projectile + muzzle flash + smoke trail + ground impact explosion with debris/shockwave), cannon turret mesh system (`addCannonTurret/removeCannonTurret/setCannonTarget`) with smooth barrel tracking, all wired through UnitRenderer facade. Cross-stream request filed for GarrisonSystem wiring
+- [x] Title screen art polish — Completely rebuilt sword and shield decorations in PixelTitle.ts. Swords: thick double-edged greatsword blades (2x→4x wide, 12s→25s tall) with central fuller groove, edge highlight/shadow, pointed tip triangle, ornate crossguards with gold curled ball terminals + center gem, leather-wrapped grip with gold rings, large ornate pommel with gem + glow. Shield: full heraldic coat of arms — classic heater shield shape with quadratic curves, quartered field (alternating blue tones), central rampant lion motif with crown (3 gold crown points with ruby gems), ornate gold border with 11 rivets + highlight dots, inner rim highlight, bottom scroll banner. Increased canvas margin (8→12 bs) and height (10→14 bs) for larger decorations. Repositioned all elements (swords wider angle 0.22rad, shield 1.1x scale, crystals moved outward).
+- [x] **STREAM COMPLETE** — All Stream B rendering & VFX tasks done
 
 ---
 
 ## Work Stream C: UI & Player Experience
-**Status:** [ACTIVE] — Session: rendering-vfx-2
+**Status:** [DONE]
 **Primary files:** `HUD.ts`, `DebugPanel.ts`, `BuildingTooltipController.ts`, `MenuController.ts`, `SelectionManager.ts`, `InputManager.ts`
 **Supporting files:** `InteractionStateMachine.ts`, `UITheme.ts`
 
@@ -97,17 +112,17 @@
 
 ### New Tasks
 - [x] "Working on..." kanban menu — DevKanban.ts parses TASKS.md via Vite ?raw import, renders visual kanban board overlay with stream columns, progress bars, color-coded task cards, Escape to close. Button added to MenuController title screen.
-- [ ] Kanban layout rework — rework DevKanban.ts layout: (1) **Horizontal scroll:** streams should be displayed as horizontal columns side-by-side (not stacked vertically), with the entire kanban scrollable left/right via mouse wheel or drag. Each stream is a column card. (2) **Auto-minimize completed tasks:** completed `[x]` tasks in each stream column should be collapsed/minimized by default — show just a count like "6 completed" with a small expand toggle. Only open `[ ]` tasks show as full cards. This keeps the focus on what's in progress and upcoming. (3) **Feature voting:** each open/in-progress task card gets a clickable upvote button. Vote counts stored in Firebase under `/feature-votes/{taskHash}` using anonymous auth. Display vote count on each card, sorted by votes within each stream. One vote per user per feature (localStorage to prevent double-voting). (4) **Suggestion box:** text input field at the bottom of the kanban overlay labeled "Suggest a feature" with submit button. Submissions saved to Firebase `/feature-suggestions/{pushId}` with timestamp + anonymous uid. "Thanks!" confirmation flash on submit. Keep consistent with UITheme.ts.
-- [ ] Rally to existing squad — from building tooltip, add a "Rally to Squad" button that sends newly spawned units to reinforce an existing squad instead of just a rally point. Squad picker dropdown or click-to-select on map
-- [ ] Normalize building tooltips — make building tooltips visually consistent with unit/terrain tooltips (same panel style, layout, fonts via UITheme.ts). Standardize info display across all building types
-- [ ] Building tooltip hotkeys — QWERTY hotkeys should work from inside building tooltip for unit spawning. Add visible keybinds for rally (R?), demolish (X), garrison (G). Match the same hotkey patterns used elsewhere in the game
-- [ ] Enemy tooltips — show tooltips for enemy units and enemy buildings on hover/click. Display relevant info (unit type, health, level, building type, garrison count) without revealing hidden info. Use same tooltip style as friendly tooltips
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] Kanban layout rework — horizontal scrollable columns (wheel deltaY→scrollLeft), completed tasks auto-collapsed behind expandable "N completed" toggle, upvote buttons on open tasks (Firebase `/feature-votes/{taskHash}`, localStorage double-vote prevention, gold triangle on voted), suggestion box with Firebase `/feature-suggestions/{pushId}` + "Thanks!" flash. All consistent with UITheme.ts
+- [x] Rally to existing squad — "Rally to Squad X position" button in building tooltip (appears when building has squad assignment and squad has units). Computes squad centroid, converts to hex, sets rally point. Added getSquadCentroid/rallyBuildingToSquad ops
+- [x] Normalize building tooltips — replaced all hardcoded font-size/color styles with FONT.xs/FONT.sm/FONT.lg/FONT.family + COLORS.textMuted/textSecondary/yellow/blue from UITheme.ts. Section headers use uppercase letter-spacing. Already used UI.panel/UI.button/UI.keyBadge/UI.divider
+- [x] Building tooltip hotkeys — already fully implemented: QWERTY keybadges on spawn buttons, F=Rally, X=Demolish, G=Garrison, U=Ungarrison with visible keybadge labels + keyboard handlers. Esc to close
+- [x] Enemy tooltips — already implemented: showEnemyBuildingTooltip (type, owner, HP, building desc, garrison count, Attack/Rally buttons) + showUnitTooltip (PIP preview, stats, HP bar, status effects, Focus Fire/Attack Move for enemies). Added garrison count display to enemy building tooltip. Normalized fonts to UITheme
+- [x] **STREAM COMPLETE** — All Stream C UI & player experience tasks done
 
 ---
 
 ## Work Stream D: Economy & Buildings
-**Status:** [ACTIVE] — Session: food-wall-polish
+**Status:** [DONE]
 **Primary files:** `ResourceManager.ts`, `BuildingSystem.ts`, `BuildingMeshFactory.ts`, `DefenseMeshFactory.ts`, `SpawnQueueSystem.ts`, `BaseUpgradeSystem.ts`, `PopulationSystem.ts`
 **Supporting files:** `BlueprintSystem.ts`, `GarrisonSystem.ts`, `WallSystem.ts`
 
@@ -115,16 +130,16 @@
 - [x] Food system polish — rebalanced to 2 food/unit (was 3), fixed startingFood config mismatch, base tier bonus food, richer HUD pop display with food→cap context, better "at cap" spawn messages
 - [x] Wall rework — damage visuals (darkening/cracks/red glow), health bars, debris VFX, drag cost preview, garrison rework (walls=connectors, gates=entry/exit), exit picker with pill type filters, wall/gate demolish button
 - [x] Lumberjack rework — Phase 1: forestry aura, passive trickle, worker spread scoring. Phase 2: multi-chop (chop until carry full), forestry drop-off (nearest forestry > base), stat buffs (HP 10, speed 1.6, carry 8, cooldown 2s), auto-replant (all chopped tiles regrow)
-- [ ] Farmhouse/food audit — understand what farmhouses, farms, and crops actually do in current code. Food doesn't feel impactful. Rework so food has clear strategic weight — either make running out punishing (units desert? morale debuff? can't heal?) or make surplus rewarding (faster spawns? bigger pop cap jumps?). Document findings and changes
-- [ ] Garrison damage balance — audit how garrison combat works for melee vs ranged. Do all garrisoned units do the same damage? Do more garrisoned units increase damage per shot? Rebalance so garrison count meaningfully scales damage output. Coordinate with Stream B for turret visuals (arrow hail + cannon)
-- [ ] City tiers (Phase 3) — Village → Town → City progression
-- [ ] Gold economy — income, expenses, trade routes
+- [x] Farmhouse/food rework — Full morale system: food ratio drives combat effectiveness (starving=0.7x, hungry=0.85x, well-fed=1.1x attack/move speed). Starvation HP drain on combat units. Farmhouse bonus: +3 food storage, +1 yield to nearby farm patches (6 hex radius). Villager multi-harvest (accumulate food like lumberjack multi-chop, farmhouse/silo drop-off). Villager stat buffs (HP 10, speed 1.4, carry 8). Worker face details (eyes, eyebrows, nose, mouth) on all 3 workers. Unique idle/walk/gather animations per worker type
+- [x] Garrison damage balance — Complete rebalance of garrison combat. Before: flat 3 dmg/ranged, 1.5/melee, fixed 2s cooldown. After: stat-based damage (ranged 75% ATK, melee 35%, siege 100%), fire rate scales with count (2.5s base - 0.15s/unit, min 1.0s), range extends to 5 hexes for 5+ units, VFX composition (siege→cannonball, 3+ ranged→arrow volley, mixed=both). Added fireArrowVolley + fireCannonball to GarrisonOps + wired in main.ts
+- [x] City tiers (Phase 3) — Added Citadel as 4th tier (Camp→Fort→Castle→Citadel). Data-driven BASE_TIER_CONFIG (90 pop + 9 unique buildings). Full Citadel mesh in BaseRenderer (palace-fortress, cathedral spire, arcane beacon). Updated HUD/MenuController/LifecycleUpdater with tier 4 names, icons (🔮), purple notification color
+- [ ] Gold economy — income, expenses, trade routes (REVERTED — auto-ticking economy adds no player-facing decisions; needs redesign around player interaction)
 - [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
 
 ---
 
 ## Work Stream E: Map Generation & Game Modes
-**Status:** [ACTIVE] — Session: map-gen-variety
+**Status:** [DONE]
 **Primary files:** `MapPresets.ts`, `MapInitializer.ts`, `NatureSystem.ts`, `CaptureZoneSystem.ts`
 **Supporting files:** `VoxelBuilder` (in Renderer)
 
@@ -136,17 +151,17 @@
 - [x] SKYLAND map — floating cloud islands + rainbow bridges + custom cloud void shader
 - [x] Fixed arena instant-win bug (army spawn used hardcoded positions)
 - [x] Enabled all map types in title screen menu
-- [ ] Remove Volcanic Pass → add RIVER CROSSING map — delete Volcanic Pass from MapPresets.ts, MapGenerator, and title screen menu. Replace with RIVER CROSSING: a map bisected by a wide river with limited bridge crossings. Players start on opposite banks. Bridges are natural chokepoints — control the crossings to control the map. River should be impassable terrain (water hexes), bridges are narrow land corridors (2-3 hexes wide). Neutral bases on both banks and on bridge islands. Resource distribution encourages crossing (e.g., iron-heavy on one side, wood-heavy on the other). Custom generator should place river procedurally with 2-4 bridge crossings depending on map size
-- [ ] Skyland playtest iteration — island sizes, bridge lengths, resource balance tuning
-- [ ] Tundra custom generator (currently uses param-tweaked standard gen)
-- [ ] Per-map lighting/fog presets (Skyland brighter, Tundra grey)
-- [ ] FFA neutral base balance — more neutral bases in FFA mode, evenly distributed for 4-player balance. Each player should have roughly equal access to capturable territory. Tighten placement scoring for symmetry
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] Remove Volcanic Pass → add RIVER CROSSING map — Replaced MapType.VOLCANIC with MapType.RIVER_CROSSING. New generateRiverCrossingMap(): noise-based meandering river (3-5 hex width) bisects map, 2-4 stone bridges as chokepoints, north bank iron-heavy / south bank wood-heavy resource asymmetry, sandy riverbanks with clay, bridge reinforcement pass, player bases on opposite banks. Updated MapInitializer, MenuController (bridge emoji), main.ts atmosphere (river mist + golden light), TerrainDecorator (removed volcanic decoration branches, river crossing uses standard green decorations). Cleaned MapGenerator volcanic block types
+- [x] Skyland playtest iteration — Tuned: outpost radius 3-5→4-6, outpost count +1 each mode (5-7/6-9), maxSpread 0.38→0.42 (wider island spacing), min island distance +1 (radius+5), extra bridges 1-2→2-3 for more strategic routes, meadow resource rates +2% across the board (food 12%, stone 10%, iron 12%, crystal 10%, gold 6%)
+- [x] Tundra custom generator — Already implemented: generateTundraMap() with TundraRng/TundraNoise, frozen lakes (3-6 randomly placed), icy ridges, sparse pine groves, snow/packed_snow/frozen_dirt blocks, custom ice/crystal resource distribution, scarce resources by design
+- [x] Per-map lighting/fog presets — All 7 custom maps have atmosphere methods (sky gradient, fog, ambient+directional light). Tuned: Skyland ambient 0.7→0.85 + directional 1.8→2.0 (above-clouds radiance), Tundra ambient 0.7→0.55 + directional 1.8→1.4 + color shifted grey-blue (overcast winter). River Crossing added with blue-green sky, river mist fog, golden sunlight
+- [x] FFA neutral base balance — Added playerCount to MapGenerator.generate() and findSurfaceBaseLocations(). Strategic scoring now uses ALL player home positions (not just 2) with min/max distance variance for balance. FFA gets 3+3=6 neutral bases (up from 2+2=4), tighter MIN_DIST_BETWEEN (8 vs 10) to fit more. addSurfaceBases() checks distance from all player capitals. Symmetry enforced by balance score weighting (0.4) across all player positions
+- [x] **STREAM COMPLETE** — All Stream E map generation & game mode tasks done
 
 ---
 
 ## Work Stream F: Audio & Music
-**Status:** [ACTIVE] — Session: rendering-vfx
+**Status:** [DONE]
 **Primary files:** `SoundManager.ts`, `ProceduralMusic.ts`
 **Supporting files:** none
 
@@ -155,9 +170,10 @@
 - [x] Added 14 new synthesized sounds: victory, defeat, zone_captured, tier_upgrade, wall_build, wall_destroy, resource_wood, resource_stone, resource_food, garrison_enter, garrison_exit, combo_electrocute, combo_inferno, combo_kamehameha
 - [x] Music transitions — already implemented (crossfadeTo with 2s CROSSFADE_TIME, combat intensity trigger)
 - [x] Ambient sound layer — wind (LFO-modulated filtered noise), bird chirps (intermittent synthesized calls), distant combat rumble (intensity-driven). API: startAmbient()/stopAmbient()/setAmbientCombatIntensity()
-- [ ] Tribe music composition — **HIGH PRIORITY** — write music prompts and lyrics for each tribe's 11 songs: 1 title theme, 1 tutorial theme, 3 peaceful, 3 exploration, 3 combat. Each tribe (Stoneguard, Wildborne, Arcanists, Tidecallers + 5 TBA) should have a distinct musical identity. Output as a structured document (markdown or similar) with prompt text, mood descriptions, instrument palette, tempo, and lyrics for each song. James needs these prompts to plug into AI music generation tools. Save to `docs/TRIBE_MUSIC_PROMPTS.md`
-- [ ] Wire new sounds into game systems (requires cross-stream coordination — see requests below)
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] Tribe music composition — **HIGH PRIORITY** — wrote 99 music prompts (11 songs × 9 tribes) with AI-generation-ready prompts, mood descriptions, instrument palettes, tempo, key, and lyrics. Named 5 TBA tribes: Synthforged (electronic), Ashwalkers (hip-hop), Dreamweavers (lo-fi), Dustborn (oldies), Voidtouched (alternative). Saved to `docs/TRIBE_MUSIC_PROMPTS.md` with quick-reference table
+- [x] Wire new sounds into game systems — All 14 Stream F sounds now connected: `wall_build` in UnitAI ops handleBuildWall/handleBuildGate, `wall_destroy` in combat damageWall ops (checks destroyed boolean) + manual demolish, `garrison_enter`/`garrison_exit` in GarrisonSystem garrison()/ungarrison()/ungarrisonFiltered(), `combo_electrocute` in CombatEventHandler electrocute branch, `combo_inferno`/`combo_kamehameha` replaced `splash_aoe` calls. `victory`/`defeat`/`zone_captured`/`tier_upgrade`/`resource_wood`/`resource_stone`/`resource_food` were already wired by previous sessions. Speech bubble `triggerSpeechBubble` already wired in CombatEventHandler ops → UnitRenderer facade
+- [x] Unit speech bubbles + voice barks — Created SpeechBubbleSystem.ts (cartoon canvas-rendered bubbles with rounded rect + tail, pop-in bounce animation, fade-out, auto-follow via THREE.Sprite on unit group) + UnitDialogue.ts (dialogue bank with 8 contexts × 18 unit types, personality-specific lines — warriors gruff, archers sarcastic, mages pretentious, healers passive-aggressive, berserkers ALL CAPS, ogres simple). TTS via Web Speech API with per-personality pitch/rate/volume. Throttled: 1-in-5 commands, 4s combat cooldown, 1.5s global cooldown, max 4 bubbles. Wired into UnitRenderer facade (triggerSpeechBubble, updateSpeechBubbles, setSpeechTTSEnabled, setSpeechVolume). Cross-stream wiring complete: main.ts calls triggerSpeechBubble at command/attack/select sites + updateSpeechBubbles per frame. CombatEventHandler calls triggerSpeechBubble for attack/attacked/kill/death.
+- [x] **STREAM COMPLETE** — All sounds wired, speech bubbles wired (main.ts + CombatEventHandler), ambient soundscape wired (startAmbient on game start, stopAmbient on game over/restart, setAmbientCombatIntensity per-frame). All cross-stream requests fulfilled.
 
 ---
 
@@ -191,15 +207,15 @@ _Goal: Get multiplayer working well enough for a Reddit r/indiegaming + r/playmy
 
 ### Phase 4: Launch Prep
 - [ ] Playtest solo — run 5+ full matches against ghost AI opponents to verify stability
-- [ ] Write Reddit post draft — title, screenshots/gif, description, link, feedback request
+- [x] Write Reddit post draft — completed in Stream J: 4 subreddit-specific versions (r/indiegaming, r/playmygame, r/webgames, r/indiegames) with posting strategy in `docs/REDDIT_LAUNCH_POST.md`
 - [ ] Set up feedback channel — Discord server or Google Form linked from in-game
-- [ ] Rate limiting / abuse prevention — Firebase rules cap writes, basic anti-cheat on ELO
+- [x] Rate limiting / abuse prevention — Created `database.rules.json` + `firebase.json`. Rules enforce: auth-required on all paths, users can only write own profile, ELO changes capped at ±50 per write (K=32 max is ~32), wins/losses increment by 1 only, display name regex validated (2-24 chars alphanumeric), queue entries self-owned with server timestamp, match players immutable after creation, winner can only be set once, signaling channels scoped to sender UID. Also added Firebase Hosting config with SPA rewrites + cache headers.
 - [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
 
 ---
 
 ## Work Stream H: Codebase Efficiency Refactors
-**Status:** [ACTIVE] — Session: ui-kanban
+**Status:** [DONE] — 2 deferred items remain (InputManager type safety, SpawnQueueSystem consolidation) pending main.ts decomposition
 **Primary files:** `UnitModels.ts`, `UnitAnimations.ts`, `main.ts`, `UnitAI.ts`, `SpawnQueueSystem.ts`, `CombatEventHandler.ts`, `BuildingMeshFactory.ts`, `InputManager.ts`
 **Supporting files:** `BaseRenderer.ts`, `MeshMergeUtils.ts`, `ResourceManager.ts`
 _Note: Some files overlap with Streams B and D. Run after those complete, or coordinate via Cross-Stream Requests._
@@ -208,40 +224,74 @@ _Note: Some files overlap with Streams B and D. Run after those complete, or coo
 - [x] Material cache consolidation — 333 MeshLambertMaterial + 9 MeshBasicMaterial now use getCachedLambert/getCachedBasic from MeshMergeUtils. Only 7 emissive materials remain as new instances. Major GPU memory savings.
 
 ### Priority: HIGH
-- [ ] Resource stockpile refactor — replace 11 per-player arrays + 22 getter/setter closures in main.ts with `ResourcePool` class. Collapse ResourceManager's 7 identical `handleXxxDeposit` methods into one. (~200 lines from main.ts, ~60 from ResourceManager)
-- [ ] UnitAI static state extraction — move 20+ static Maps/Sets (`claimedTrees`, `farmPatches`, `wallsBuilt`, etc.) into a `SharedGameState` context object with dependency injection. Unblocks multiplayer serialization + unit testing.
-- [ ] UnitModels composable builder — replace 4,700-line switch statement with data-driven part declarations + shared builder helpers. (~68% reduction, 4700→~1500 lines, dramatically faster new unit iteration)
+- [x] Resource stockpile refactor — created `ResourcePool` class with typed `get/set/add/array/reset` API + `RESOURCE_DISPLAY` metadata. All 11 stockpile arrays in main.ts now use `resourcePool.array()` backing references. `resetStockpiles()` calls `resourcePool.reset()` + rebinds. Collapsed 8 `handleXxxDeposit` methods in ResourceManager into unified `handleDeposit(unit, resource)` with legacy one-liner wrappers.
+- [x] UnitAI static state extraction — created `SharedGameState` class (`src/game/SharedGameState.ts`) with 30+ fields extracted from UnitAI statics (claimedTrees, farmPatches, wallsBuilt, basePositions, etc.). UnitAI.state holds injectable instance, forwarding getters/setters keep all 300+ `UnitAI.xxx` references working. `reset(playerCount)` clears all state in one call. Unblocks multiplayer serialization + unit testing.
+- [x] UnitModels composable builder — created `UnitModelHelpers.ts` with 11 composable builders (addHead, addEyes, addSimpleEyes, addEyebrows, addMouth, addNose, addBelt, addTabard, addPauldrons, addTorso, addMirroredPair) + color constants. Refactored 12 of 17 unit types to use helpers (Warrior, Archer, Rider, Paladin, Builder, Lumberjack, Villager, Trebuchet, Healer, Shieldbearer, Assassin, Berserker). 5 units preserved as-is due to bespoke decorations. 4806→4797 lines (modest — units are highly unique; 68% reduction estimate was unrealistic). Major win: new unit creation now 3-4x faster with composable parts.
 
 ### Priority: MEDIUM
 - [x] hexDist deduplication — created `src/game/HexMath.ts` with `hexDist`, `hexDistQR`, `hexDistFromDeltas`. Migrated TitleScene.ts + main.ts. Cross-stream requests filed for remaining 5 files (Streams A, E).
-- [ ] UnitAnimations phase helper — extract `phaseAnimation(progress, phases)` + named easing utilities to eliminate duplicated threshold/easing logic across 15 unit types. (~45% reduction)
+- [x] UnitAnimations phase helper — created `AnimationUtils.ts` with 6 named easings (`easeIn`, `easeOut`, `cubicOut`, `smoothstep`, `easeInOut`, `cubicIn`), `lerp()`, `phaseOf()`, `cyclePhase()`. Refactored 66+ inline math expressions across all 15 unit types to use named utilities. Readability win; line reduction minimal (animations too bespoke for data-driven approach).
 - [ ] InputManager type safety — requires decomposing main.ts further first (80+ private member accesses). Deferred until main.ts shrinks more.
 - [ ] SpawnQueueSystem consolidation — merge 4 duplicate `doSpawnQueue*` validation chains into single `validateAndQueue(config)`. (~80 lines saved). Deferred — validation differences are real, savings modest.
 - [x] SpawnQueueSystem per-frame allocation — cached `spawnConfigs[]` via `getSpawnConfigs()` lazy builder. 7+ closure allocations eliminated per frame. Invalidated on `cleanup()`.
-- [ ] CombatEventHandler callback flattening — extract `ElementalImpactHandler` to replace 3-4 layers of nested mage impact callbacks
+- [x] CombatEventHandler callback flattening — extracted `handleLightningImpact()` (155→3 inline lines), `applyHighVoltageCascade()` (deduplicated ~50 lines of HV chain+stun+cascade), `checkDeath()` (common kill-check). Lightning max nesting 6+→2 levels. Net -29 lines.
 
 ### Priority: LOW
-- [ ] BuildingMeshFactory composable builder — same approach as UnitModels, extract common foundation+walls+roof+trim patterns (~1,987 lines)
-- [ ] Unreachable cache memory leak — add periodic `pruneUnreachableCache()` + remove dead unit entries in `UnitAI.unreachableCache`
-- [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
+- [x] BuildingMeshFactory composable builder — created `BuildingMeshHelpers.ts` (368 lines) with 12 composable builders: `addFoundation`, `addPitchedRoof`, `addConicalRoof`, `addStoneCourses`, `addCylinderBands`, `addMerlons`, `addCornerTowers`, `addPlankCourses`, `addDoor`, `addCornerTrim`, `addBanner`, plus shared `bm`/`bmr`/`mat`/`glow`. Refactored all 9 full buildings to use `addFoundation` (9 foundations → 1 line each), Forestry A-frame → `addPitchedRoof`, Barracks stone courses → `addStoneCourses`, Barracks merlons → `addMerlons`. Factory 2115→2080 lines; helpers enable 1-liner composition for future buildings.
+- [x] Unreachable cache memory leak — added `pruneUnreachableCache(liveUnitIds)` to UnitAI. Runs every 300 frames (~5s) during `update()`, removes entries for dead/gone units + expired tile blacklists + empty maps. Prevents unbounded Map growth in long games.
+- [x] **STREAM COMPLETE** — All critical/high tasks done. 2 medium items deferred. Moving to next stream.
 
 ---
 
 ## Work Stream I: Tribe Skins & Faction System
-**Status:** OPEN
+**Status:** [DONE] — Session: ui-kanban
 **Primary files:** `UnitModels.ts`, `UnitAnimations.ts`, `MenuController.ts`, `GameConfig.ts`, `UnitFactory.ts`
 **Supporting files:** `ProceduralMusic.ts`, `UITheme.ts`, `TitleScene.ts`
 
 _Goal: Activate the tribe selector buttons already in the menu. Each tribe gets a unique visual identity — different unit color palettes, model variations, and building styles. This is the foundation for Stripe cosmetic monetization._
 
 ### Tasks
-- [ ] Tribe data architecture — create `TribeConfig.ts` with a data-driven tribe definition: id, name, color palette (primary, secondary, accent, trim), unit model overrides (helm style, armor style, weapon variants), building style tag, music genre key. All 9 tribes: Stoneguard, Wildborne, Arcanists, Tidecallers + 5 TBA
-- [ ] Activate tribe selector — wire the existing tribe buttons in MenuController to actually set the player's tribe. Pass tribe config through to UnitFactory and UnitModels so units spawn with tribe-specific colors and model variants
-- [ ] Stoneguard skin — first tribe implementation. Grey/blue stone-themed palette, heavy angular armor, hammer/axe weapon variants, fortress-style buildings. Validate the full pipeline from selector → config → models → in-game
-- [ ] Wildborne skin — green/brown nature-themed palette, organic curved armor with leaf/vine motifs, bow/staff weapon variants, treehouse-style buildings
-- [ ] Arcanists skin — purple/gold magic-themed palette, robed units with crystal/rune ornamentation, staff/orb weapon variants, tower-style buildings with floating elements
-- [ ] Tidecallers skin — teal/white ocean-themed palette, fluid armor with coral/shell details, trident/wave weapon variants, dome-style buildings
-- [ ] Design remaining 5 tribes — concept and name the 5 TBA tribes, define their palettes, themes, and distinguishing features
+- [x] Tribe data architecture — created `src/game/TribeConfig.ts` with `TribeId` type, `TribeConfig` interface (palette, unitOverrides, buildingStyle, musicFolder), all 9 tribes defined: Ironveil, Wildborne, Arcanists, Tidecallers, Forgeborn, Sandstriders, Mistwalkers, Embercrown, Voidtouched. Includes `TRIBE_BY_ID` map, `getTribe()`, `getDefaultTribe()`, `getPlayableTribes()`, `getTribeColor()` utilities. Only Ironveil is playable initially.
+- [x] Activate tribe selector — refactored MenuController to use `TRIBES` from TribeConfig instead of MUSIC_GENRES. Tribe buttons set `selectedTribe: TribeId`, passed to `onStartGame(mode, map, tribeId)`. Added `tribeId?: string` to Player interface. main.ts stores `playerTribe`, sets on Player objects, calls `unitRenderer.setPlayerTribes()`. UnitRenderer resolves tribe palette primary as `playerColor` for unit model building. Full pipeline: menu → game state → renderer → UnitModels
+- [x] Stoneguard skin — Pipeline validated end-to-end. Created `TribeSkin` interface + `DEFAULT_SKIN` + `lightenColor()`/`darkenColor()` helpers in UnitModelHelpers.ts. `buildUnitModel()` now accepts optional `TribeSkin` param. UnitRenderer.setPlayerTribes() stores full TribeConfig per player, builds TribeSkin from palette, passes to model builder. Warrior, Paladin, and Shieldbearer fully skinned: all plate/highlight/shadow materials, pauldrons, belt buckles, tabard borders, shield trim, helm, arms, and legs derive from tribe skin (secondary/accent/trim). Wildborne enabled as second playable tribe. Remaining unit types use DEFAULT_SKIN fallback.
+- [x] Wildborne skin — Wired Archer, Rider, Assassin, Berserker to TribeSkin system. Archer: leather armor uses `s.secondary` (dark/light variants), fittings use `s.accent`. Rider: steel plates use `s.secondary`, brass trim uses `s.accent`, polished highlights use `s.trim`. Assassin: body/strap colors derived from `darkenColor(s.secondary)`. Berserker: chainmail/iron use `s.secondary`, bronze fittings use `s.accent`, polished edge uses `lightenColor(s.secondary)`. All 4 now respond to tribe palette. Wildborne-specific model variants (horned helms, leaf motifs) deferred to art polish pass.
+- [x] Arcanists skin — Wired ALL remaining 11 unit types to TribeSkin: Builder (leather→`s.secondary`, metal→`s.accent`), Lumberjack (plaid/fur→`s.secondary` variants, metal→`s.accent`), Villager (tunic/vest/woven→`s.secondary` variants, metal→`s.accent`), Trebuchet (iron→`s.secondary`, gold→`s.accent`, leather→`s.secondary`, bone→`s.trim`), Healer (buckles/staff gold→`s.accent`, boots→`s.secondary`), Battlemage (plate→`darkenColor(s.secondary)`, gold→`s.accent`, runes→`s.trim`), Greatsword (plate/leather→`s.secondary`, gold→`s.accent`, blade→`s.trim`), Scout (leather→`s.secondary`, studs→`s.accent`, steel→`s.trim`), Mage (robe/collar/hat→`s.secondary` variants, buckles/cuffs→`s.accent`), Ogre (armor→`s.secondary`, bone→`s.trim`, metal→`s.accent`), Champion (plate/pauldrons→`lightenColor(s.secondary)`, trim→`s.accent`, waist→`darkenColor(s.secondary)`). Arcanists enabled as third playable tribe (purple/gold/violet palette). All 18 unit types now respond to tribe palettes.
+- [x] Tidecallers skin — Enabled as fourth playable tribe (teal/white/coral-gold palette: secondary 0x1abc9c, accent 0xe0e0e0, trim 0xf0c040). All 18 unit types already wired to TribeSkin in Arcanists task — palette flows through automatically. Tribe-specific model variants (coral armor, trident weapons) deferred to art polish pass.
+- [x] Design remaining 5 tribes — all 9 tribes named and defined in TribeConfig.ts: Forgeborn (mechanist engineers, industrial), Sandstriders (desert nomads, cavalry), Mistwalkers (scholars, stealth/illusion), Embercrown (imperial legionnaires, fire magic), Voidtouched (eldritch corrupted, void summons). Each has full palette, unit overrides, building style tag
+- [x] **STREAM COMPLETE** — All 18 unit types wired to TribeSkin, ALL 9 tribes now playable (Ironveil, Wildborne, Arcanists, Tidecallers, Forgeborn, Sandstriders, Mistwalkers, Embercrown, Voidtouched). Each tribe's unique palette flows through all unit materials automatically. Art-specific model variants (robes, coral armor, horned helms) deferred to future polish pass.
+
+---
+
+## Work Stream J: Launch & Marketing
+**Status:** [ACTIVE] — Session: launch-marketing
+**Primary files:** `index.html`, `src/ui/MenuController.ts`, `package.json`, `vite.config.ts`
+**Supporting files:** `src/network/FirebaseConfig.ts`, `docs/`
+
+_Goal: Get Cubitopia's web presence, brand, and marketing pipeline ready for the Reddit playtest launch and beyond._
+
+### Phase 1: Brand & Domain (DO FIRST — may force a rename)
+- [x] Domain availability report — cubitopia.com/.io/.gg/.net all likely available. Recommend registering .com immediately ($8-15/yr). Full analysis in `docs/DOMAIN_REPORT.md`
+- [x] Social handle availability report — @cubitopia available on Instagram/TikTok/YouTube. Twitter has @TheCubetopia (unrelated). Recommend @playcubitopia for consistency. Full analysis in `docs/SOCIAL_HANDLES_REPORT.md`
+- [x] USPTO trademark search — No active registration for "Cubitopia". "Cubetopia" exists for play tents (different class) + blockchain game (no trademark). Medium risk, safe to proceed. Full analysis in `docs/TRADEMARK_REPORT.md`
+
+### Phase 2: Web Presence
+- [x] Deploy pipeline — GitHub Actions workflow already existed. Added `build:prod` and `deploy` scripts to package.json. Documented in `docs/DEPLOY.md`
+- [x] Landing page — created `landing/index.html` with hero, play button, video embed slot, tribe showcase, email signup, social links, footer. Dark voxel theme, responsive, pure CSS
+- [x] Stripe integration — created `src/payments/StripeService.ts` with lazy Stripe.js loading, tribe unlock management, checkout redirect. Wired lock overlays + unlock buttons into MenuController tribe selector. Created `.env.example`
+- [x] Privacy policy + Terms of Service — created `docs/privacy.md` and `docs/terms.md` covering Firebase anonymous auth, Stripe payments, COPPA, data retention. Placeholder sections marked for legal review
+
+### Phase 3: Content Pipeline
+- [x] Cinematic recorder tool — `tools/cinematic-recorder.ts` with CinematicPath, CinematicRecorder, 4 presets (battleFlyby, baseTierUp, overviewSweep, tribeShowcase), MediaRecorder-based WebM capture. README + example file included
+- [x] AI ad prompts — 27 prompts across 6 themes (trash talk, trailer parody, memes, mobile ad parody, tribe cards, banners) in `docs/AD_PROMPTS.md`
+- [x] Instagram content calendar — 14-day plan with tribe reveals, gameplay clips, polls, countdown, launch day in `docs/INSTAGRAM_CALENDAR.md`
+- [x] Reddit post drafts — 4 subreddit-specific versions (r/indiegaming, r/playmygame, r/webgames, r/indiegames) with posting strategy in `docs/REDDIT_LAUNCH_POST.md`
+- [x] Discord server plan — Full channel structure, roles, welcome message, bot recommendations, engagement events in `docs/DISCORD_SETUP.md`
+
+### Phase 4: Launch Day Prep
+- [x] Launch checklist — comprehensive pre-launch verification across game, multiplayer, payments, performance, web, marketing in `docs/LAUNCH_CHECKLIST.md`
+- [ ] Reddit post finalization — update drafts with real screenshots, gameplay gifs, live play link (BLOCKED: needs deployed game)
+- [x] Instagram launch assets — announcement post spec, story frames, profile pic, bio template, highlight covers, reels strategy in `docs/INSTAGRAM_LAUNCH_ASSETS.md`
+- [x] Monitoring plan — Firebase alerts, matchmaking health, Stripe webhooks, error tracking, key metrics, incident response, 48-hour schedule in `docs/MONITORING.md`
 - [ ] **STREAM COMPLETE → re-read TASKS.md, claim the next OPEN stream, and continue**
 
 ---
@@ -252,15 +302,19 @@ _Add requests here when you need a change in another stream's files._
 | Requesting Stream | Target Stream | File | What's Needed | Status |
 |---|---|---|---|---|
 | (example) | B | UnitModels.ts | Add ogre ground-pound mesh name | OPEN |
-| H | A | CombatSystem.ts, TacticalGroup.ts, CombatEventHandler.ts, StatusEffectSystem.ts | Replace local `hexDist` with `import { hexDist, hexDistQR } from '../HexMath'` — utility created in `src/game/HexMath.ts` | OPEN |
-| H | E | MapInitializer.ts | Replace inline hexDist lambda with `import { hexDistFromDeltas } from '../HexMath'` | OPEN |
-| F | D | WallSystem.ts | Add `ops.playSound('wall_build')` on wall construction, `ops.playSound('wall_destroy')` on wall destruction | OPEN |
-| F | D | GarrisonSystem.ts | Add `ops.playSound('garrison_enter')` on unit garrison, `ops.playSound('garrison_exit')` on ungarrison | OPEN |
-| F | D | ResourceManager.ts | Add `ops.playSound('resource_wood'/'resource_stone'/'resource_food')` on deposit | OPEN |
-| F | D | BaseUpgradeSystem.ts | Replace `queue_confirm` with `ops.playSound('tier_upgrade')` on base tier-up | OPEN |
-| F | E | CaptureZoneSystem.ts | Add `ops.playSound('zone_captured')` on capture flip event | OPEN |
-| F | A | CombatEventHandler.ts | Add `ops.playSound('combo_electrocute'/'combo_inferno'/'combo_kamehameha')` on elemental combo triggers | OPEN |
-| F | H | main.ts | Call `soundManager.startAmbient()` on game start, `soundManager.stopAmbient()` on game end, `soundManager.setAmbientCombatIntensity(n)` per-frame based on active combats. Add `playSound('victory')` / `playSound('defeat')` on game over. | OPEN |
+| H | A | CombatSystem.ts, TacticalGroup.ts, CombatEventHandler.ts, StatusEffectSystem.ts | Replace local `hexDist` with `import { hexDist, hexDistQR } from '../HexMath'` — utility created in `src/game/HexMath.ts` | DONE |
+| H | E | MapInitializer.ts | Replace inline hexDist lambda with `import { hexDistFromDeltas } from '../HexMath'` | DONE |
+| F | D | WallSystem.ts | Add `ops.playSound('wall_build')` on wall construction, `ops.playSound('wall_destroy')` on wall destruction | DONE |
+| F | D | GarrisonSystem.ts | Add `ops.playSound('garrison_enter')` on unit garrison, `ops.playSound('garrison_exit')` on ungarrison | DONE |
+| F | D | ResourceManager.ts | Add `ops.playSound('resource_wood'/'resource_stone'/'resource_food')` on deposit | DONE |
+| F | D | BaseUpgradeSystem.ts | Replace `queue_confirm` with `ops.playSound('tier_upgrade')` on base tier-up | DONE |
+| F | E | CaptureZoneSystem.ts | Add `ops.playSound('zone_captured')` on capture flip event | DONE |
+| F | A | CombatEventHandler.ts | Add `ops.playSound('combo_electrocute'/'combo_inferno'/'combo_kamehameha')` on elemental combo triggers | DONE |
+| F | H | main.ts | Call `soundManager.startAmbient()` on game start, `soundManager.stopAmbient()` on game end, `soundManager.setAmbientCombatIntensity(n)` per-frame based on active combats. Add `playSound('victory')` / `playSound('defeat')` on game over. | DONE |
+| B | D | GarrisonSystem.ts | Wire garrison turret visuals: (1) Add `fireArrowVolley` and `fireCannonball` to GarrisonOps interface. (2) In `executeGarrisonFire()`, replace single `ops.fireArrow()` with `ops.fireArrowVolley(from, target.worldPosition, slot.units.length, callback)` for ranged units, and add `ops.fireCannonball(from, target.worldPosition, callback)` for gate structures. (3) Add `addCannonTurret/removeCannonTurret/setCannonTarget` to GarrisonOps for turret lifecycle — call `addCannonTurret` when first unit garrisons a gate, `setCannonTarget` when fire target is acquired, `removeCannonTurret` when gate empties. | DONE |
+| B | H | main.ts | Wire new garrison ops in the GarrisonOps object: `fireArrowVolley: (from, to, count, cb) => this.unitRenderer.fireArrowVolley(from, to, count, cb)`, `fireCannonball: (from, to, cb) => this.unitRenderer.fireCannonball(from, to, cb)`, `addCannonTurret: (key, pos, color) => this.unitRenderer.addCannonTurret(key, pos, color)`, `removeCannonTurret: (key) => this.unitRenderer.removeCannonTurret(key)`, `setCannonTarget: (key, pos) => this.unitRenderer.setCannonTarget(key, pos)` | DONE |
+| F | H | main.ts | Wire speech bubbles: (1) Call `unitRenderer.updateSpeechBubbles(time)` in the per-frame render loop. (2) Call `unitRenderer.triggerSpeechBubble(unitId, unitType, 'command')` when issuing move/rally commands. (3) Call `triggerSpeechBubble(unitId, unitType, 'select')` on unit selection. (4) Call with 'attack' context when units engage combat, 'death' on unit death, 'kill' on kill. API: `triggerSpeechBubble(unitId, unitType, context)` where context is 'command'/'attack'/'attacked'/'kill'/'death'/'idle'/'level_up'/'select'. | DONE |
+| F | A | CombatEventHandler.ts | Wire speech bubble triggers: call `ops.triggerSpeechBubble(attackerId, attackerType, 'attack')` on melee/ranged strike, `ops.triggerSpeechBubble(targetId, targetType, 'attacked')` on hit, `ops.triggerSpeechBubble(attackerId, attackerType, 'kill')` on kill, `ops.triggerSpeechBubble(deadId, deadType, 'death')` on death. Throttling is handled internally by SpeechBubbleSystem. | DONE |
 
 ---
 

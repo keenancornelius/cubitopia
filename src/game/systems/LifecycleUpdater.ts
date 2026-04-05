@@ -71,33 +71,39 @@ export default class LifecycleUpdater {
         const msg = `${tierEmojis[evt.newTier] ?? '🏰'} Base upgraded to ${tierNames[evt.newTier]}!`;
         if (pid === 0) {
           this.ops.showNotification(msg, evt.newTier === BaseTier.CITADEL ? '#9b59b6' : '#f1c40f');
-          this.ops.playSound('queue_confirm', 0.8);
+          this.ops.playSound('tier_upgrade', 0.9);
         }
         Logger.info('BaseUpgrade', `Player ${pid} base ${evt.baseId} → ${tierNames[evt.newTier]}`);
 
-        // Spawn reward Ogre at the upgraded base
-        const ogresForTier = evt.newTier;
-        if (base.ogresSpawned < ogresForTier) {
+        // Spawn reward unit at the upgraded base — Ogre for tiers 1-2, Champion for Citadel (tier 3)
+        const rewardsForTier = evt.newTier;
+        if (base.ogresSpawned < rewardsForTier) {
           const spawnCoord = this.ops.findSpawnTile(base.position.q, base.position.r);
-          const ogre = UnitFactory.create(UnitType.OGRE, pid, spawnCoord);
-          ogre.worldPosition = this.ops.hexToWorld(spawnCoord);
-          ogre.isSiege = true;
-          players[pid].units.push(ogre);
-          allUnits.push(ogre);
+          const isCitadel = evt.newTier === BaseTier.CITADEL;
+          const rewardType = isCitadel ? UnitType.CHAMPION : UnitType.OGRE;
+          const reward = UnitFactory.create(rewardType, pid, spawnCoord);
+          reward.worldPosition = this.ops.hexToWorld(spawnCoord);
+          if (reward.isSiege) reward.isSiege = true; // Ogre is siege, Champion is not
+          players[pid].units.push(reward);
+          allUnits.push(reward);
           const elev = this.ops.getElevation(spawnCoord);
-          this.ops.addUnitToWorld(ogre, elev);
-          base.ogresSpawned = ogresForTier;
+          this.ops.addUnitToWorld(reward, elev);
+          base.ogresSpawned = rewardsForTier;
           if (pid === 0) {
-            this.ops.showNotification('👹 An Ogre has joined your army!', '#4e342e');
+            const notifMsg = isCitadel
+              ? '⚔️ A Champion has joined your army!'
+              : '👹 An Ogre has joined your army!';
+            const notifColor = isCitadel ? '#f5f5f5' : '#4e342e';
+            this.ops.showNotification(notifMsg, notifColor);
             this.ops.setPlayerUnits(allUnits, 0);
           }
-          // Send ogre to base rally point if one is set
-          const rallySlot = this.ops.getRallyFormationSlot('base', ogre);
+          // Send reward unit to base rally point if one is set
+          const rallySlot = this.ops.getRallyFormationSlot('base', reward);
           if (rallySlot) {
-            ogre._path = null;
-            ogre._postPosition = rallySlot;
+            reward._path = null;
+            reward._postPosition = rallySlot;
           }
-          Logger.info('BaseUpgrade', `Spawned Ogre for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
+          Logger.info('BaseUpgrade', `Spawned ${isCitadel ? 'Champion' : 'Ogre'} for player ${pid} at (${spawnCoord.q},${spawnCoord.r})`);
         }
       }
     }

@@ -8,6 +8,8 @@ import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { GAME_CONFIG } from '../GameConfig';
 import { GameRNG } from '../SeededRandom';
 import { StatusEffectSystem } from './StatusEffectSystem';
+import { UnitAI } from './UnitAI';
+import { hexDistQR } from '../HexMath';
 
 export interface CombatResult {
   attackerDamage: number;
@@ -20,14 +22,6 @@ export interface CombatResult {
 }
 
 export class CombatSystem {
-  /** Correct hex distance for offset coordinates (odd-q) */
-  static hexDist(q1: number, r1: number, q2: number, r2: number): number {
-    // Convert offset (odd-q) to cube coordinates, same as Pathfinder
-    const x1 = q1, z1 = r1 - (q1 - (q1 & 1)) / 2, y1 = -x1 - z1;
-    const x2 = q2, z2 = r2 - (q2 - (q2 & 1)) / 2, y2 = -x2 - z2;
-    return Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2), Math.abs(z1 - z2));
-  }
-
   /**
    * Resolve combat between an attacker and defender.
    * Accounts for berserker rage, shieldbearer aura, assassin burst.
@@ -72,12 +66,25 @@ export class CombatSystem {
       for (const ally of allUnits) {
         if (ally.type === UnitType.PALADIN && ally.owner === defender.owner &&
             ally.currentHealth > 0 && ally !== defender) {
-          const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
+          const dist = hexDistQR(ally.position.q, ally.position.r, defender.position.q, defender.position.r);
           if (dist <= GAME_CONFIG.combat.paladin.auraRange) {
             defStat += GAME_CONFIG.combat.paladin.auraDefenseBonus;
             // No break — auras stack from multiple Paladins
           }
         }
+      }
+    }
+
+    // --- Secondary Attack Damage Multipliers ---
+    if (attacker._useSecondaryAttack) {
+      if (attacker.type === UnitType.GREATSWORD) {
+        atkStat = Math.ceil(atkStat * GAME_CONFIG.combat.greatsword.spinDamageMultiplier);
+      } else if (attacker.type === UnitType.WARRIOR) {
+        atkStat = Math.ceil(atkStat * GAME_CONFIG.combat.warrior.jumpDamageMultiplier);
+      } else if (attacker.type === UnitType.PALADIN) {
+        atkStat = Math.ceil(atkStat * GAME_CONFIG.combat.paladin.chargeDamageMultiplier);
+      } else if (attacker.type === UnitType.CHAMPION) {
+        atkStat = Math.ceil(atkStat * GAME_CONFIG.combat.champion.hammerSlamDamageMultiplier);
       }
     }
 
@@ -196,7 +203,7 @@ export class CombatSystem {
     for (const ally of allUnits) {
       if (ally.owner !== healer.owner || ally === healer || ally.currentHealth <= 0) continue;
       if (ally.currentHealth >= ally.stats.maxHealth) continue;
-      const dist = CombatSystem.hexDist(ally.position.q, ally.position.r, healer.position.q, healer.position.r);
+      const dist = hexDistQR(ally.position.q, ally.position.r, healer.position.q, healer.position.r);
       if (dist > healRange) continue;
       // Score: prioritize lowest HP ratio, break ties by proximity
       const hpMissing = 1 - (ally.currentHealth / ally.stats.maxHealth);
@@ -232,7 +239,7 @@ export class CombatSystem {
 
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit === target || unit.currentHealth <= 0) continue;
-      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, target.position.q, target.position.r);
+      const dist = hexDistQR(unit.position.q, unit.position.r, target.position.q, target.position.r);
       if (dist <= GAME_CONFIG.combat.battlemage.splashRadius) {
         unit.currentHealth = Math.max(0, unit.currentHealth - splashDamage);
         splashed.push(unit.id);
@@ -272,7 +279,7 @@ export class CombatSystem {
 
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
-      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, cq, cr);
+      const dist = hexDistQR(unit.position.q, unit.position.r, cq, cr);
       if (dist > 0 && dist <= pullRadius) {
         // Apply cyclone damage
         unit.currentHealth = Math.max(0, unit.currentHealth - cycloneDamage);
@@ -318,7 +325,7 @@ export class CombatSystem {
     const victims: Unit[] = [];
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
-      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
+      const dist = hexDistQR(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
       if (dist <= GAME_CONFIG.combat.greatsword.cleaveRadius && unit !== target) {
         victims.push(unit);
       }
@@ -327,6 +334,18 @@ export class CombatSystem {
     // Apply cleave damage to secondary targets
     for (const victim of victims) {
       victim.currentHealth = Math.max(0, victim.currentHealth - cleaveDamage);
+    }
+
+    // Greatsword level-up bonus: sweep crit when hitting 4+ enemies at level 2+
+    const totalHit = victims.length + 1; // +1 for primary target
+    if (attacker.level >= 2 && totalHit >= 4) {
+      // Big crit: 2x cleave damage to all secondary targets
+      const critDmg = cleaveDamage;
+      for (const victim of victims) {
+        victim.currentHealth = Math.max(0, victim.currentHealth - critDmg);
+      }
+      // Mark for VFX notification (consumed by CombatEventHandler)
+      (attacker as any)._sweepCritHitCount = totalHit;
     }
 
     // Apply knockback to ALL hit enemies (primary target + cleave victims)
@@ -375,7 +394,7 @@ export class CombatSystem {
     const victims: Unit[] = [];
     for (const unit of allUnits) {
       if (unit.owner === attacker.owner || unit.currentHealth <= 0) continue;
-      const dist = CombatSystem.hexDist(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
+      const dist = hexDistQR(unit.position.q, unit.position.r, attacker.position.q, attacker.position.r);
       if (dist <= GAME_CONFIG.combat.ogre.swipeRadius && unit !== target) {
         victims.push(unit);
       }
@@ -441,7 +460,7 @@ export class CombatSystem {
    * Calculate if a unit can attack another (range check)
    */
   static canAttack(attacker: Unit, defender: Unit): boolean {
-    const dist = CombatSystem.hexDist(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
+    const dist = hexDistQR(attacker.position.q, attacker.position.r, defender.position.q, defender.position.r);
     return dist <= attacker.stats.range;
   }
 
@@ -485,7 +504,7 @@ export class CombatSystem {
         const cluster = [mage];
         for (const other of mages) {
           if (other === mage || used.has(other.id)) continue;
-          const dist = CombatSystem.hexDist(mage.position.q, mage.position.r, other.position.q, other.position.r);
+          const dist = hexDistQR(mage.position.q, mage.position.r, other.position.q, other.position.r);
           if (dist <= cfg.proximityRange) {
             cluster.push(other);
           }
@@ -508,7 +527,7 @@ export class CombatSystem {
         const damagedIds: string[] = [];
         for (const enemy of allUnits) {
           if (enemy.owner === teamId || enemy.currentHealth <= 0) continue;
-          const dist = CombatSystem.hexDist(enemy.position.q, enemy.position.r, cq, cr);
+          const dist = hexDistQR(enemy.position.q, enemy.position.r, cq, cr);
           if (dist <= cfg.effectRadius) {
             enemy.currentHealth = Math.max(0, enemy.currentHealth - damage);
             damagedIds.push(enemy.id);
@@ -521,5 +540,117 @@ export class CombatSystem {
       }
     }
     return results;
+  }
+
+  /**
+   * Check if a melee unit should use its secondary attack this combat.
+   * Sets `_useSecondaryAttack` flag on the attacker if conditions are met.
+   * Called before resolve() in the combat pipeline.
+   */
+  static checkSecondaryAttack(attacker: Unit): boolean {
+    const gf = UnitAI.gameFrame;
+    const cooldown = attacker._secondaryAttackCooldown ?? 0;
+    if (gf < cooldown) return false;
+
+    switch (attacker.type) {
+      case UnitType.GREATSWORD: {
+        attacker._useSecondaryAttack = true;
+        attacker._secondaryAttackCooldown = gf + GAME_CONFIG.combat.greatsword.spinAttackCooldown;
+        return true;
+      }
+      case UnitType.WARRIOR: {
+        attacker._useSecondaryAttack = true;
+        attacker._secondaryAttackCooldown = gf + GAME_CONFIG.combat.warrior.jumpAttackCooldown;
+        return true;
+      }
+      case UnitType.PALADIN: {
+        attacker._useSecondaryAttack = true;
+        attacker._secondaryAttackCooldown = gf + GAME_CONFIG.combat.paladin.chargeCooldown;
+        return true;
+      }
+      case UnitType.CHAMPION: {
+        attacker._useSecondaryAttack = true;
+        attacker._secondaryAttackCooldown = gf + GAME_CONFIG.combat.champion.hammerSlamCooldown;
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Apply Greatsword spin attack — hits all enemies within spinRadius.
+   * Returns array of affected unit IDs for VFX.
+   */
+  static applyGreatswordSpin(
+    attacker: Unit, primaryTarget: Unit, allUnits: Unit[],
+  ): string[] {
+    const cfg = GAME_CONFIG.combat.greatsword;
+    const affectedIds: string[] = [];
+    const spinDmg = Math.ceil(attacker.stats.attack * cfg.spinDamageMultiplier * 0.5); // AoE portion
+
+    for (const u of allUnits) {
+      if (u.owner === attacker.owner || u.currentHealth <= 0 || u === primaryTarget) continue;
+      const dist = hexDistQR(
+        attacker.position.q, attacker.position.r,
+        u.position.q, u.position.r,
+      );
+      if (dist <= cfg.spinRadius) {
+        u.currentHealth = Math.max(0, u.currentHealth - spinDmg);
+        affectedIds.push(u.id);
+      }
+    }
+    return affectedIds;
+  }
+
+  /**
+   * Apply Paladin rally — buff nearby friendly units with speed boost.
+   * Returns array of buffed unit IDs for VFX.
+   */
+  /**
+   * Apply Champion hammer slam — AoE ground pound hitting all enemies within hammerSlamRadius.
+   * Returns array of affected unit IDs for VFX.
+   */
+  static applyChampionHammerSlam(
+    attacker: Unit, primaryTarget: Unit, allUnits: Unit[],
+  ): string[] {
+    const cfg = GAME_CONFIG.combat.champion;
+    const affectedIds: string[] = [];
+    const slamDmg = Math.ceil(attacker.stats.attack * cfg.hammerSlamDamageMultiplier);
+
+    for (const u of allUnits) {
+      if (u.owner === attacker.owner || u.currentHealth <= 0 || u === primaryTarget) continue;
+      const dist = hexDistQR(
+        attacker.position.q, attacker.position.r,
+        u.position.q, u.position.r,
+      );
+      if (dist <= cfg.hammerSlamRadius) {
+        u.currentHealth = Math.max(0, u.currentHealth - slamDmg);
+        affectedIds.push(u.id);
+      }
+    }
+    return affectedIds;
+  }
+
+  static applyPaladinRally(paladin: Unit, allUnits: Unit[]): string[] {
+    const cfg = GAME_CONFIG.combat.paladin;
+    const gf = UnitAI.gameFrame;
+    const buffedIds: string[] = [];
+
+    paladin._paladinRallyUntil = gf + cfg.rallyDuration;
+
+    for (const u of allUnits) {
+      if (u.owner !== paladin.owner || u.currentHealth <= 0 || u === paladin) continue;
+      const dist = hexDistQR(
+        paladin.position.q, paladin.position.r,
+        u.position.q, u.position.r,
+      );
+      if (dist <= cfg.rallyRadius) {
+        u._speedBoostUntil = gf + cfg.rallyDuration;
+        u._speedBoostFactor = cfg.rallySpeedBoost;
+        buffedIds.push(u.id);
+      }
+    }
+    return buffedIds;
   }
 }

@@ -154,6 +154,9 @@ export const GAME_CONFIG = {
     [UnitType.OGRE]: {
       costs: {},
     },
+    [UnitType.CHAMPION]: {
+      costs: {},  // reward unit — not purchasable
+    },
   },
 
   buildings: {
@@ -226,6 +229,80 @@ export const GAME_CONFIG = {
       },
       refund: { wood: 5 },
       spawnTime: 7,
+    },
+    mine: {
+      cost: {
+        player: { wood: 8, stone: 8, steel: 0, crystal: 0 },
+        ai: { wood: 8, stone: 8, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 4, stone: 4 },
+      goldPerTick: 2,       // passive gold income per economy tick
+    },
+    market: {
+      cost: {
+        player: { wood: 12, stone: 6, steel: 0, crystal: 0 },
+        ai: { wood: 12, stone: 6, steel: 0, crystal: 0 },
+      },
+      refund: { wood: 6 },
+      tradeIncomePerBase: 3,  // gold per owned base per economy tick (scales with empire)
+      sellRateBonus: 1.5,     // wood→gold trade gives 50% more gold when market exists
+    },
+  },
+
+  goldEconomy: {
+    tickInterval: 10,           // seconds between gold economy ticks
+    baseIncomePerTier: [0, 1, 2, 3, 5],  // gold per tick: none/Camp/Fort/Castle/Citadel
+    unitUpkeep: {
+      // Gold cost per unit per economy tick (only combat units)
+      [UnitType.WARRIOR]: 0,    // basic unit — free
+      [UnitType.ARCHER]: 0,     // basic unit — free
+      [UnitType.RIDER]: 1,
+      [UnitType.PALADIN]: 2,
+      [UnitType.MAGE]: 1,
+      [UnitType.BATTLEMAGE]: 2,
+      [UnitType.ASSASSIN]: 1,
+      [UnitType.HEALER]: 1,
+      [UnitType.BERSERKER]: 1,
+      [UnitType.GREATSWORD]: 1,
+      [UnitType.SHIELDBEARER]: 1,
+      [UnitType.TREBUCHET]: 2,
+      [UnitType.SCOUT]: 0,      // scout — free
+      [UnitType.CHAMPION]: 3,   // elite unit — expensive upkeep
+      default: 0,
+    } as Record<string, number>,
+    startingGold: 20,             // gold each player begins the game with
+    /** Passive gold income per economy tick by building type */
+    buildingIncome: {
+      barracks: 0,
+      masonry: 0,
+      farmhouse: 0,
+      forestry: 1,
+      workshop: 2,
+      silo: 0,
+      smelter: 2,
+      armory: 3,
+      wizard_tower: 3,
+      mine: 0,                  // mine uses its own goldPerTick from buildings config
+      market: 0,                // market uses tradeIncomePerBase from buildings config
+    } as Record<string, number>,
+    /** Gold upkeep (maintenance cost) per building per economy tick */
+    buildingUpkeep: {
+      barracks: 0,
+      masonry: 0,
+      farmhouse: 0,
+      forestry: 0,
+      workshop: 1,
+      silo: 0,
+      smelter: 1,
+      armory: 2,
+      wizard_tower: 2,
+      mine: 1,
+      market: 1,
+    } as Record<string, number>,
+    tradeRouteGold: 4,          // gold per trade route tick (requires 2+ bases + market)
+    noGoldPenalty: {
+      attackMultiplier: 0.85,   // 15% ATK penalty when gold is 0
+      speedMultiplier: 0.90,    // 10% speed penalty when gold is 0
     },
   },
 
@@ -307,6 +384,10 @@ export const GAME_CONFIG = {
       projectileCooldown: 2.0,
       healAmount: 3,
     },
+    warrior: {
+      jumpAttackCooldown: 360,          // frames (~6s) between jump attacks
+      jumpDamageMultiplier: 1.5,        // 150% base damage on jump strike
+    },
     berserker: {
       axeThrowDamageMultiplier: 0.4,
       rageAttackBonusMax: 4,
@@ -317,6 +398,12 @@ export const GAME_CONFIG = {
     paladin: {
       auraRange: 2,
       auraDefenseBonus: 2,
+      chargeCooldown: 600,              // frames (~10s) between charges
+      chargeRange: 5,                   // max hex distance to charge target
+      chargeDamageMultiplier: 1.8,      // 180% base damage on impact
+      rallyDuration: 300,               // frames (~5s) speed boost + shield for nearby allies
+      rallyRadius: 2,                   // hex radius for rally buff
+      rallySpeedBoost: 1.3,            // 30% speed boost during rally
     },
     battlemage: {
       splashRadius: 1,
@@ -403,6 +490,9 @@ export const GAME_CONFIG = {
       cleaveRadius: 1,
       cleaveDamageMultiplier: 0.6,
       knockbackDistance: 1,
+      spinAttackCooldown: 480,          // frames (~8s) between spin attacks
+      spinDamageMultiplier: 1.4,        // 140% base damage on spin
+      spinRadius: 1,                    // hits all enemies within 1 hex
     },
     ogre: {
       swipeRadius: 2,
@@ -411,6 +501,11 @@ export const GAME_CONFIG = {
     },
     shieldbearer: {
       bashKnockbackDistance: 1,
+    },
+    champion: {
+      hammerSlamRadius: 1,              // AoE radius for war hammer slam
+      hammerSlamDamageMultiplier: 0.5,  // 50% base damage to AoE targets
+      hammerSlamCooldown: 480,          // frames (~8s) between slams
     },
   },
 
@@ -522,6 +617,7 @@ export const GAME_CONFIG = {
     harvest: {
       crops: {
         foodYield: 3,
+        growTime: 8,  // seconds per crop growth stage (0→1→2→3)
       },
       tree: {
         plantCost: { wood: 1 },

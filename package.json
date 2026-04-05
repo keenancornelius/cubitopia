@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:prod": "GITHUB_ACTIONS=true tsc && GITHUB_ACTIONS=true vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build:prod && echo 'Built to dist/ — push to main to trigger GitHub Pages deploy'"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

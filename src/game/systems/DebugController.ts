@@ -307,7 +307,7 @@ export default class DebugController {
 
   /** Role-based spawn depth — tanks front, melee mid, ranged back, siege far back */
   static readonly ROLE_DEPTH: Record<string, number> = {
-    [UnitType.PALADIN]: 0, [UnitType.SHIELDBEARER]: 0, [UnitType.OGRE]: 0,
+    [UnitType.PALADIN]: 0, [UnitType.SHIELDBEARER]: 0, [UnitType.OGRE]: 0, [UnitType.CHAMPION]: 0,
     [UnitType.WARRIOR]: 1, [UnitType.GREATSWORD]: 1,
     [UnitType.BERSERKER]: 1, [UnitType.ASSASSIN]: 1, [UnitType.RIDER]: 1, [UnitType.SCOUT]: 1,
     [UnitType.ARCHER]: 2, [UnitType.MAGE]: 2, [UnitType.BATTLEMAGE]: 2,

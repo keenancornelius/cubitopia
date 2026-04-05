@@ -2,26 +2,20 @@
  * Building Mesh Factory — Pure mesh construction functions for all building types.
  * Each function creates a Three.js Group with the building's visual geometry.
  * Design philosophy: mixed geometry, layered detail, ornamentation, back detail.
+ *
+ * Common patterns (foundation, roofs, bands, doors, etc.) use composable helpers
+ * from BuildingMeshHelpers.ts. Building-specific ornamentation stays inline.
  */
 import * as THREE from 'three';
 import { HexCoord } from '../../types';
 import { getPlayerHex } from '../PlayerConfig';
-// Pathfinder import removed — blockedTiles now managed by BuildingSystem
-
-/** Helper: create a mesh and set its position */
-function bm(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  return m;
-}
-
-/** Helper: create a positioned + rotated mesh */
-function bmr(geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rx: number, ry: number, rz: number): THREE.Mesh {
-  const m = new THREE.Mesh(geo, mat);
-  m.position.set(x, y, z);
-  m.rotation.set(rx, ry, rz);
-  return m;
-}
+import {
+  bm, bmr, mat, glow,
+  addFoundation, addPitchedRoof, addConicalRoof,
+  addStoneCourses, addCylinderBands, addMerlons,
+  addCornerTowers, addPlankCourses, addDoor,
+  addCornerTrim, addBanner,
+} from './BuildingMeshHelpers';
 
 /** Create a positioned building group at the hex coordinate */
 function createBuildingGroup(pos: HexCoord, owner: number, name: string, getElevation: (pos: HexCoord) => number): THREE.Group {
@@ -33,17 +27,6 @@ function createBuildingGroup(pos: HexCoord, owner: number, name: string, getElev
   group.scale.set(1, 1, 1);
   group.name = `${name}_${owner}`;
   return group;
-}
-
-// ====== Shared material factories (reuse across buildings) ======
-const _matCache: Map<number, THREE.MeshLambertMaterial> = new Map();
-function mat(color: number): THREE.MeshLambertMaterial {
-  let m = _matCache.get(color);
-  if (!m) { m = new THREE.MeshLambertMaterial({ color }); _matCache.set(color, m); }
-  return m;
-}
-function glow(color: number, intensity = 0.6): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: intensity });
 }
 
 // ========================================================================
@@ -64,20 +47,13 @@ export function buildForestryMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   // ── PASS 1: SILHOUETTE — big shapes: main lodge, sawmill lean-to, chimney ──
 
   // Rough stone & packed earth foundation — organic, uneven
-  g.add(bm(new THREE.BoxGeometry(1.75, 0.06, 1.75), mat(0x5a5a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.65, 0.16, 1.65), mat(0x6a6a5a), 0, 0.11, 0));
+  addFoundation(g, { width: 1.75, color1: 0x5a5a4a, color2: 0x6a6a5a });
 
   // Main lodge body — wide rectangular cabin
   g.add(bm(new THREE.BoxGeometry(1.15, 1.15, 0.95), mat(stucco), 0, 0.77, 0));
 
   // Steep A-frame roof — two sloped planes + overhang
-  for (const side of [-1, 1]) {
-    const slab = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.1, 1.1), mat(slate));
-    slab.position.set(side * 0.35, 1.58, 0); slab.rotation.z = -side * 0.52; g.add(slab);
-    // Second layer — slight offset for depth
-    const layer2 = new THREE.Mesh(new THREE.BoxGeometry(1.32, 0.04, 1.06), mat(0x4a4a3a));
-    layer2.position.set(side * 0.34, 1.52, 0); layer2.rotation.z = -side * 0.52; g.add(layer2);
-  }
+  addPitchedRoof(g, { width: 1.35, depth: 1.1, y: 1.58, angle: 0.52, color: slate, underColor: 0x4a4a3a });
   // Ridge beam — thick log
   g.add(bm(new THREE.CylinderGeometry(0.05, 0.05, 1.15, 6), mat(darkLog), 0, 1.88, 0));
   // Ridge beam rotation to horizontal
@@ -294,9 +270,7 @@ export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   // ── PASS 1: SILHOUETTE — large shapes establishing the compound ──
 
   // Raised stone platform — 2-tier foundation with stepped edges
-  g.add(bm(new THREE.BoxGeometry(1.85, 0.08, 1.85), mat(0x6f7c6d), 0, 0.04, 0));
-  g.add(bm(new THREE.BoxGeometry(1.78, 0.18, 1.78), mat(0x7f8c8d), 0, 0.13, 0));
-  g.add(bm(new THREE.BoxGeometry(1.72, 0.06, 1.72), mat(darkStone), 0, 0.25, 0));
+  addFoundation(g, { width: 1.85, color1: 0x6f7c6d, color2: 0x7f8c8d, tier3: { width: 1.72, depth: 1.72, height: 0.06, color: darkStone } });
 
   // Main hall — rectangular keep, the dominant structure
   g.add(bm(new THREE.BoxGeometry(1.1, 1.3, 0.75), mat(stone), 0, 0.93, -0.15));
@@ -314,9 +288,7 @@ export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   // ── PASS 2: LAYERING — stone courses, wall depth, structural stacking ──
 
   // Keep: horizontal stone band courses (3 levels)
-  for (const y of [0.5, 0.85, 1.2]) {
-    g.add(bm(new THREE.BoxGeometry(1.12, 0.04, 0.77), mat(darkStone), 0, y, -0.15));
-  }
+  addStoneCourses(g, { ys: [0.5, 0.85, 1.2], width: 1.12, depth: 0.77, color: darkStone, z: -0.15 });
   // Keep: vertical pilaster buttresses on front face (4 pillars)
   for (const x of [-0.45, -0.15, 0.15, 0.45]) {
     g.add(bm(new THREE.BoxGeometry(0.06, 1.3, 0.04), mat(darkStone), x, 0.93, 0.24));
@@ -345,13 +317,13 @@ export function buildBarracksMesh(pos: HexCoord, owner: number, scene: THREE.Sce
 
   // ── Crenellated battlements — keep roof ──
   g.add(bm(new THREE.BoxGeometry(1.2, 0.08, 0.85), mat(darkStone), 0, 1.62, -0.15)); // roof slab
+  // Front merlons (7)
+  addMerlons(g, { count: 7, startX: -0.54, spacing: 0.18, y: 1.74, z: 0.24, color: stone });
+  // Back merlons (7)
+  addMerlons(g, { count: 7, startX: -0.54, spacing: 0.18, y: 1.74, z: -0.54, color: stone });
+  // Side merlons (4 per side)
   const merlonGeo = new THREE.BoxGeometry(0.1, 0.16, 0.1);
   const merlonMat = mat(stone);
-  // Front merlons (7)
-  for (let i = 0; i < 7; i++) g.add(bm(merlonGeo, merlonMat, -0.54 + i * 0.18, 1.74, 0.24));
-  // Back merlons (7)
-  for (let i = 0; i < 7; i++) g.add(bm(merlonGeo, merlonMat, -0.54 + i * 0.18, 1.74, -0.54));
-  // Side merlons (4 per side)
   for (let i = 0; i < 4; i++) {
     g.add(bm(merlonGeo, merlonMat, 0.56, 1.74, -0.44 + i * 0.2));
     g.add(bm(merlonGeo, merlonMat, -0.56, 1.74, -0.44 + i * 0.2));
@@ -573,8 +545,7 @@ export function buildMasonryMesh(pos: HexCoord, owner: number, scene: THREE.Scen
   // ── PASS 1: SILHOUETTE — kiln tower, cutting shed, stone yard ──
 
   // Broad stone foundation — two tiers
-  g.add(bm(new THREE.BoxGeometry(1.8, 0.06, 1.8), mat(0x5a5a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.7, 0.16, 1.7), mat(0x7f8c8d), 0, 0.11, 0));
+  addFoundation(g, { width: 1.8, color1: 0x5a5a4a, color2: 0x7f8c8d });
 
   // Central kiln tower — round, wide base tapering up
   g.add(bm(new THREE.CylinderGeometry(0.5, 0.65, 1.5, 8), mat(stucco), 0, 0.94, -0.1));
@@ -762,8 +733,7 @@ export function buildFarmhouseMesh(pos: HexCoord, owner: number, scene: THREE.Sc
   // ── PASS 1: SILHOUETTE — barn, silo, shed, fenced yard ──
 
   // Packed earth and stone foundation
-  g.add(bm(new THREE.BoxGeometry(1.8, 0.06, 1.75), mat(0x5a5a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.7, 0.12, 1.65), mat(0x7f8c8d), 0, 0.09, 0));
+  addFoundation(g, { width: 1.8, depth: 1.75, color1: 0x5a5a4a, color2: 0x7f8c8d });
 
   // Main barn — wide, tall, the centerpiece
   g.add(bm(new THREE.BoxGeometry(1.15, 1.0, 0.9), mat(plaster), 0, 0.65, 0));
@@ -974,8 +944,7 @@ export function buildWorkshopMesh(pos: HexCoord, owner: number, scene: THREE.Sce
   // ── PASS 1: SILHOUETTE — forge building, hearth, chimney ──
 
   // Scorched stone and iron foundation
-  g.add(bm(new THREE.BoxGeometry(1.8, 0.06, 1.8), mat(0x4a4a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.72, 0.14, 1.72), mat(darkStone), 0, 0.1, 0));
+  addFoundation(g, { width: 1.8, color1: 0x4a4a4a, color2: darkStone, shrink: 0.08 });
 
   // Main building — L-shaped: forge hall + storage wing
   g.add(bm(new THREE.BoxGeometry(1.3, 1.2, 1.0), mat(stucco), 0, 0.78, -0.1));
@@ -1171,8 +1140,7 @@ export function buildSiloMesh(pos: HexCoord, owner: number, scene: THREE.Scene, 
   // ── PASS 1: SILHOUETTE — main tower, secondary silo, storehouse ──
 
   // Stone foundation — octagonal feel
-  g.add(bm(new THREE.BoxGeometry(1.65, 0.06, 1.65), mat(0x5a5a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.55, 0.12, 1.55), mat(0x7f8c8d), 0, 0.09, 0));
+  addFoundation(g, { width: 1.65, color1: 0x5a5a4a, color2: 0x7f8c8d });
 
   // Main grain tower — tall, slight taper
   g.add(bm(new THREE.CylinderGeometry(0.38, 0.5, 2.3, 8), mat(stucco), 0, 1.3, 0));
@@ -1369,8 +1337,7 @@ export function buildSmelterMesh(pos: HexCoord, owner: number, scene: THREE.Scen
   // ── PASS 1: SILHOUETTE — furnace, chimneys, processing shed ──
 
   // Scorched and darkened stone foundation
-  g.add(bm(new THREE.BoxGeometry(1.8, 0.06, 1.8), mat(0x3a3a3a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.7, 0.14, 1.7), mat(0x4a4a4a), 0, 0.1, 0));
+  addFoundation(g, { width: 1.8, color1: 0x3a3a3a, color2: 0x4a4a4a });
 
   // Main blast furnace — stepped dome, the dominant structure
   g.add(bm(new THREE.BoxGeometry(0.95, 0.75, 0.95), mat(grayStone), 0, 0.55, 0));
@@ -1560,8 +1527,7 @@ export function buildArmoryMesh(pos: HexCoord, owner: number, scene: THREE.Scene
   // ── PASS 1: SILHOUETTE — main vault, corner buttresses, watchpost ──
 
   // Heavy reinforced foundation — double-tier
-  g.add(bm(new THREE.BoxGeometry(1.8, 0.06, 1.8), mat(0x4a4a4a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.72, 0.16, 1.72), mat(0x5f5f5f), 0, 0.11, 0));
+  addFoundation(g, { width: 1.8, color1: 0x4a4a4a, color2: 0x5f5f5f, shrink: 0.08 });
 
   // Main vault — squat, wide, imposing
   g.add(bm(new THREE.BoxGeometry(1.15, 0.85, 1.05), mat(darkStone), 0, 0.62, 0));
@@ -1757,8 +1723,7 @@ export function buildWizardTowerMesh(pos: HexCoord, owner: number, scene: THREE.
   // ── PASS 1: SILHOUETTE — tower, library wing, spire ──
 
   // Foundation with arcane circle carved in stone
-  g.add(bm(new THREE.BoxGeometry(1.65, 0.06, 1.65), mat(0x5a5a5a), 0, 0.03, 0));
-  g.add(bm(new THREE.BoxGeometry(1.55, 0.12, 1.55), mat(midStone), 0, 0.09, 0));
+  addFoundation(g, { width: 1.65, color1: 0x5a5a5a, color2: midStone });
   // Glowing rune circle — outer ring
   const runeRing = new THREE.Mesh(new THREE.RingGeometry(0.68, 0.75, 24), glow(purple, 0.25));
   runeRing.rotation.x = -Math.PI / 2; runeRing.position.y = 0.16; g.add(runeRing);
@@ -1983,5 +1948,133 @@ export function buildWizardTowerMesh(pos: HexCoord, owner: number, scene: THREE.
   g.add(bm(new THREE.BoxGeometry(0.22, 0.02, 0.025), mat(gold), 0.15, 2.3, 0.52)); // fringe
 
   scene.add(g); // blockedTiles managed by BuildingSystem (on construction complete)
+  return g;
+}
+
+// ========================================================================
+// MINE — Gold extraction operation
+// Design: Stone mine shaft entrance with wooden support beams, ore cart on
+// rails, gold ore pile, pickaxe rack, lantern glow, ventilation chimney.
+// ========================================================================
+export function buildMineMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
+  const g = createBuildingGroup(pos, owner, 'mine', getElevation);
+  const tc = getPlayerHex(owner);
+  const stone = 0x7a7a7a; const darkStone = 0x5a5a5a; const wd = 0x6b4226;
+  const darkWd = 0x4a2a12; const gd = 0xffd700; const iron = 0x888888;
+
+  // Mine shaft entrance — stone archway
+  g.add(bm(new THREE.BoxGeometry(0.25, 1.2, 0.8), mat(stone), -0.45, 0.6, 0));
+  g.add(bm(new THREE.BoxGeometry(0.25, 1.2, 0.8), mat(stone), 0.45, 0.6, 0));
+  g.add(bm(new THREE.BoxGeometry(1.15, 0.2, 0.8), mat(darkStone), 0, 1.25, 0));
+  g.add(bm(new THREE.BoxGeometry(0.65, 0.9, 0.6), mat(0x1a1a1a), 0, 0.55, 0));
+  g.add(bm(new THREE.BoxGeometry(0.18, 0.25, 0.12), mat(gd), 0, 1.3, 0.35));
+
+  // Wooden support beams
+  g.add(bm(new THREE.BoxGeometry(0.08, 1.3, 0.08), mat(wd), -0.35, 0.65, 0.35));
+  g.add(bm(new THREE.BoxGeometry(0.08, 1.3, 0.08), mat(wd), 0.35, 0.65, 0.35));
+  g.add(bm(new THREE.BoxGeometry(0.78, 0.06, 0.06), mat(darkWd), 0, 1.15, 0.35));
+
+  // Ore cart on rails
+  g.add(bm(new THREE.BoxGeometry(0.04, 0.03, 1.2), mat(iron), -0.15, 0.04, 0.5));
+  g.add(bm(new THREE.BoxGeometry(0.04, 0.03, 1.2), mat(iron), 0.15, 0.04, 0.5));
+  g.add(bm(new THREE.BoxGeometry(0.3, 0.15, 0.25), mat(darkWd), 0, 0.18, 0.7));
+  g.add(bm(new THREE.BoxGeometry(0.22, 0.08, 0.18), mat(gd), 0, 0.3, 0.7));
+  for (const dx of [-0.12, 0.12]) {
+    g.add(bm(new THREE.BoxGeometry(0.06, 0.06, 0.04), mat(iron), dx, 0.08, 0.6));
+    g.add(bm(new THREE.BoxGeometry(0.06, 0.06, 0.04), mat(iron), dx, 0.08, 0.8));
+  }
+
+  // Gold ore pile outside
+  g.add(bm(new THREE.BoxGeometry(0.5, 0.2, 0.4), mat(0x8a7530), -0.5, 0.1, 0.6));
+  g.add(bm(new THREE.BoxGeometry(0.35, 0.12, 0.3), mat(0x9a8540), -0.5, 0.26, 0.6));
+  g.add(bm(new THREE.BoxGeometry(0.06, 0.06, 0.06), mat(gd), -0.55, 0.2, 0.55));
+  g.add(bm(new THREE.BoxGeometry(0.05, 0.05, 0.05), mat(gd), -0.4, 0.28, 0.65));
+
+  // Pickaxe rack
+  g.add(bm(new THREE.BoxGeometry(0.06, 0.7, 0.06), mat(wd), 0.6, 0.35, 0.2));
+  g.add(bmr(new THREE.BoxGeometry(0.2, 0.05, 0.05), mat(iron), 0.6, 0.7, 0.2, 0, 0, 0.3));
+
+  // Ventilation chimney
+  g.add(bm(new THREE.BoxGeometry(0.2, 0.6, 0.2), mat(stone), -0.4, 1.5, -0.2));
+  g.add(bm(new THREE.BoxGeometry(0.24, 0.06, 0.24), mat(darkStone), -0.4, 1.83, -0.2));
+
+  // Lantern
+  g.add(bm(new THREE.BoxGeometry(0.08, 0.08, 0.08), glow(0xffaa00, 0.8), 0, 1.08, 0.4));
+
+  // Team color banner + foundation
+  g.add(bm(new THREE.BoxGeometry(0.15, 0.3, 0.02), mat(tc), 0.5, 0.9, 0.4));
+  g.add(bm(new THREE.BoxGeometry(0.03, 0.4, 0.03), mat(darkWd), 0.5, 1.0, 0.4));
+  g.add(bm(new THREE.BoxGeometry(1.4, 0.08, 1.3), mat(0x6a6a6a), 0, 0.02, 0.2));
+  g.add(bm(new THREE.BoxGeometry(1.3, 0.05, 1.2), mat(tc), 0, 0.08, 0.2));
+
+  scene.add(g);
+  return g;
+}
+
+// ========================================================================
+// MARKET — Gold trading post / bazaar
+// Design: Open-air market stall with colorful canopy, merchant counter,
+// gold coin display, crate stacks, scales, team-color awning, trade sign.
+// ========================================================================
+export function buildMarketMesh(pos: HexCoord, owner: number, scene: THREE.Scene, getElevation: (pos: HexCoord) => number): THREE.Group {
+  const g = createBuildingGroup(pos, owner, 'market', getElevation);
+  const tc = getPlayerHex(owner);
+  const wd = 0x6b4226; const darkWd = 0x4a2a12; const gd = 0xffd700;
+  const cloth = 0xcc3333; const cream = 0xf5e6c8;
+
+  // Wooden platform / counter
+  g.add(bm(new THREE.BoxGeometry(1.4, 0.12, 1.2), mat(wd), 0, 0.15, 0));
+  g.add(bm(new THREE.BoxGeometry(1.3, 0.06, 1.1), mat(darkWd), 0, 0.06, 0));
+  g.add(bm(new THREE.BoxGeometry(1.0, 0.5, 0.15), mat(wd), 0, 0.45, 0.45));
+  g.add(bm(new THREE.BoxGeometry(1.05, 0.04, 0.2), mat(darkWd), 0, 0.72, 0.45));
+
+  // Support posts
+  for (const [px, pz] of [[-0.55, -0.4], [0.55, -0.4], [-0.55, 0.4], [0.55, 0.4]]) {
+    g.add(bm(new THREE.BoxGeometry(0.08, 1.8, 0.08), mat(wd), px, 1.0, pz));
+  }
+
+  // Colorful canopy / awning
+  g.add(bm(new THREE.BoxGeometry(1.3, 0.04, 1.0), mat(tc), 0, 1.9, 0));
+  for (let i = 0; i < 5; i++) {
+    const zPos = -0.4 + i * 0.2;
+    const stripColor = i % 2 === 0 ? cloth : cream;
+    g.add(bm(new THREE.BoxGeometry(1.25, 0.02, 0.15), mat(stripColor), 0, 1.92, zPos));
+  }
+  g.add(bm(new THREE.BoxGeometry(1.2, 0.02, 0.25), mat(tc), 0, 1.85, 0.6));
+  for (let i = 0; i < 6; i++) {
+    g.add(bm(new THREE.BoxGeometry(0.12, 0.08, 0.04), mat(gd), -0.5 + i * 0.2, 1.82, 0.72));
+  }
+
+  // Gold coin stacks on counter
+  for (let ci = 0; ci < 3; ci++) {
+    g.add(bm(new THREE.BoxGeometry(0.1 - ci * 0.015, 0.04, 0.1 - ci * 0.015),
+      mat(gd), -0.25, 0.76 + ci * 0.04, 0.45));
+  }
+  for (let ci = 0; ci < 2; ci++) {
+    g.add(bm(new THREE.BoxGeometry(0.08, 0.04, 0.08), mat(gd), 0.2, 0.76 + ci * 0.04, 0.45));
+  }
+
+  // Crate stacks (back)
+  g.add(bm(new THREE.BoxGeometry(0.28, 0.28, 0.28), mat(wd), -0.4, 0.35, -0.3));
+  g.add(bm(new THREE.BoxGeometry(0.25, 0.25, 0.25), mat(darkWd), -0.15, 0.33, -0.35));
+  g.add(bm(new THREE.BoxGeometry(0.22, 0.22, 0.22), mat(wd), -0.35, 0.60, -0.3));
+  g.add(bm(new THREE.BoxGeometry(0.22, 0.3, 0.22), mat(0x8B4513), 0.35, 0.35, -0.3));
+
+  // Trade scales on counter
+  g.add(bm(new THREE.BoxGeometry(0.03, 0.25, 0.03), mat(gd), 0, 0.88, 0.45));
+  g.add(bm(new THREE.BoxGeometry(0.3, 0.02, 0.02), mat(gd), 0, 1.0, 0.45));
+  g.add(bm(new THREE.BoxGeometry(0.08, 0.02, 0.08), mat(gd), -0.12, 0.95, 0.45));
+  g.add(bm(new THREE.BoxGeometry(0.08, 0.02, 0.08), mat(gd), 0.12, 0.97, 0.45));
+
+  // Trade sign
+  g.add(bm(new THREE.BoxGeometry(0.04, 0.5, 0.04), mat(darkWd), 0.62, 1.5, 0.4));
+  g.add(bm(new THREE.BoxGeometry(0.3, 0.18, 0.03), mat(cream), 0.62, 1.7, 0.42));
+  g.add(bm(new THREE.BoxGeometry(0.1, 0.1, 0.02), mat(gd), 0.62, 1.7, 0.44));
+
+  // Lanterns
+  g.add(bm(new THREE.BoxGeometry(0.06, 0.06, 0.06), glow(0xffaa00, 0.7), -0.55, 1.75, 0.4));
+  g.add(bm(new THREE.BoxGeometry(0.06, 0.06, 0.06), glow(0xffaa00, 0.7), 0.55, 1.75, 0.4));
+
+  scene.add(g);
   return g;
 }

@@ -1,0 +1,122 @@
+{
+  "rules": {
+    // ── Global: all access requires Firebase Anonymous Auth ──
+    ".read": false,
+    ".write": false,
+
+    // ══════════════════════════════════════════
+    // PLAYER PROFILES — /users/{uid}
+    // ══════════════════════════════════════════
+    "users": {
+      ".read": true,
+      ".indexOn": ["elo"],
+
+      "$uid": {
+        // Only the profile owner can write their own profile
+        ".write": "auth !== null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['uid', 'displayName', 'elo', 'wins', 'losses', 'streak', 'lastSeen'])",
+
+        "uid": {
+          ".validate": "newData.val() === $uid"
+        },
+        "displayName": {
+          // 2-24 alphanumeric chars, underscores, hyphens (matches client validation)
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 24 && newData.val().matches(/^[a-zA-Z0-9_-]+$/)"
+        },
+        "elo": {
+          // ELO must be a number, floor at 100, cap at 3000
+          // Prevent jumps > 50 per write (K=32 max change is ~32)
+          ".validate": "newData.isNumber() && newData.val() >= 100 && newData.val() <= 3000 && ((!data.exists()) || (newData.val() - data.val() <= 50 && data.val() - newData.val() <= 50))"
+        },
+        "wins": {
+          // Wins can only increment by 1 per write
+          ".validate": "newData.isNumber() && newData.val() >= 0 && ((!data.exists()) || newData.val() === data.val() + 1 || newData.val() === data.val())"
+        },
+        "losses": {
+          // Losses can only increment by 1 per write
+          ".validate": "newData.isNumber() && newData.val() >= 0 && ((!data.exists()) || newData.val() === data.val() + 1 || newData.val() === data.val())"
+        },
+        "streak": {
+          ".validate": "newData.isNumber() && newData.val() >= -100 && newData.val() <= 100"
+        },
+        "lastSeen": {
+          ".validate": "newData.val() === now"
+        },
+        // Reject any extra fields
+        "$other": {
+          ".validate": false
+        }
+      }
+    },
+
+    // ══════════════════════════════════════════
+    // MATCHMAKING QUEUE — /matchmaking/queue/{uid}
+    // ══════════════════════════════════════════
+    "matchmaking": {
+      "queue": {
+        ".read": "auth !== null",
+
+        "$uid": {
+          // Only the owner can add/remove their own queue entry
+          ".write": "auth !== null && auth.uid === $uid",
+          ".validate": "(!newData.exists()) || (newData.hasChildren(['uid', 'displayName', 'elo', 'timestamp']) && newData.child('uid').val() === $uid && newData.child('displayName').isString() && newData.child('displayName').val().length >= 2 && newData.child('displayName').val().length <= 24 && newData.child('elo').isNumber() && newData.child('elo').val() >= 100 && newData.child('elo').val() <= 3000 && newData.child('timestamp').val() === now)"
+        }
+      }
+    },
+
+    // ══════════════════════════════════════════
+    // MATCHES — /matches/{matchId}
+    // ══════════════════════════════════════════
+    "matches": {
+      ".read": "auth !== null",
+
+      "$matchId": {
+        // Either player in the match can write (for signaling + status updates)
+        ".write": "auth !== null && ((!data.exists()) || data.child('player1').val() === auth.uid || data.child('player2').val() === auth.uid)",
+
+        ".validate": "newData.hasChildren(['matchId', 'player1', 'player2', 'mapSeed', 'mapType', 'createdAt', 'status'])",
+
+        "matchId": {
+          ".validate": "newData.isString()"
+        },
+        "player1": {
+          // player1 must be the creating user (on creation) and cannot change
+          ".validate": "newData.isString() && ((!data.exists()) || newData.val() === data.val())"
+        },
+        "player2": {
+          ".validate": "newData.isString() && ((!data.exists()) || newData.val() === data.val())"
+        },
+        "mapSeed": {
+          ".validate": "newData.isNumber() && ((!data.exists()) || newData.val() === data.val())"
+        },
+        "mapType": {
+          ".validate": "newData.isString() && ((!data.exists()) || newData.val() === data.val())"
+        },
+        "createdAt": {
+          ".validate": "(newData.val() === now) || (data.exists() && newData.val() === data.val())"
+        },
+        "status": {
+          // Valid status transitions only
+          ".validate": "newData.isString() && (newData.val() === 'waiting' || newData.val() === 'signaling' || newData.val() === 'playing' || newData.val() === 'finished')"
+        },
+        "winner": {
+          // Winner can only be set once, must be one of the two players or a ghost
+          ".validate": "newData.isString() && !data.exists()"
+        },
+        "isGhost": {
+          ".validate": "newData.isBoolean()"
+        },
+        "signaling": {
+          // Each player can only write their own signaling channel
+          "$fromUid": {
+            ".write": "auth !== null && auth.uid === $fromUid",
+            ".validate": true
+          }
+        },
+        "$other": {
+          ".validate": false
+        }
+      }
+    }
+  }
+}

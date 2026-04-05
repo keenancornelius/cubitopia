@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CUBITOPIA - Turn-Based Voxel Strategy Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Voxel-style pixel borders */
+        .pixel-border {
+            border: 2px solid;
+            position: relative;
+        }
+
+        .pixel-border::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            pointer-events: none;
+        }
+
+        /* Navigation */
+        nav {
+            background: rgba(22, 33, 62, 0.95);
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 3px solid #00d4ff;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            letter-spacing: 4px;
+            color: #00d4ff;
+            text-shadow: 2px 2px 0 rgba(0, 212, 255, 0.3);
+        }
+
+        nav .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        nav a {
+            color: #e0e0e0;
+            text-decoration: none;
+            transition: color 0.3s;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+        }
+
+        nav a:hover {
+            color: #00d4ff;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            position: relative;
+            overflow: hidden;
+            padding: 2rem;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(0, 212, 255, 0.1) 0%, transparent 70%);
+            border-radius: 50%;
+            top: 20%;
+            right: 10%;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .hero::after {
+            content: '';
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(255, 107, 107, 0.1) 0%, transparent 70%);
+            border-radius: 50%;
+            bottom: 10%;
+            left: 5%;
+            animation: float 8s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+
+        .hero-content {
+            text-align: center;
+            z-index: 10;
+            max-width: 800px;
+        }
+
+        .hero h1 {
+            font-size: 4rem;
+            font-weight: bold;
+            letter-spacing: 8px;
+            margin-bottom: 1rem;
+            color: #00d4ff;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5), 2px 2px 0 rgba(0, 0, 0, 0.5);
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { text-shadow: 0 0 20px rgba(0, 212, 255, 0.5), 2px 2px 0 rgba(0, 0, 0, 0.5); }
+            50% { text-shadow: 0 0 40px rgba(0, 212, 255, 0.8), 2px 2px 0 rgba(0, 0, 0, 0.5); }
+        }
+
+        .hero p {
+            font-size: 1.3rem;
+            margin-bottom: 2rem;
+            color: #ff6b6b;
+            letter-spacing: 2px;
+        }
+
+        .cta-button {
+            display: inline-block;
+            padding: 1rem 3rem;
+            background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
+            color: #1a1a2e;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1rem;
+            letter-spacing: 2px;
+            border: 3px solid #00d4ff;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+            cursor: pointer;
+            margin: 0 1rem;
+        }
+
+        .cta-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 212, 255, 0.6);
+            background: linear-gradient(135deg, #00e6ff 0%, #00aadd 100%);
+        }
+
+        .cta-button:active {
+            transform: translateY(-1px);
+        }
+
+        .cta-button.secondary {
+            background: transparent;
+            color: #00d4ff;
+        }
+
+        .cta-button.secondary:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        /* Video Section */
+        .video-section {
+            padding: 4rem 2rem;
+            background: #16213e;
+            text-align: center;
+        }
+
+        .video-section h2 {
+            font-size: 2rem;
+            margin-bottom: 2rem;
+            letter-spacing: 3px;
+            color: #00d4ff;
+        }
+
+        .video-container {
+            max-width: 800px;
+            margin: 0 auto;
+            aspect-ratio: 16 / 9;
+            background: #0a0e27;
+            border: 3px solid #00d4ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+        }
+
+        .video-placeholder {
+            text-align: center;
+            font-size: 1rem;
+            letter-spacing: 1px;
+        }
+
+        /* Features Section */
+        .features {
+            padding: 4rem 2rem;
+            background: #1a1a2e;
+        }
+
+        .features h2 {
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            letter-spacing: 3px;
+            color: #00d4ff;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: rgba(22, 33, 62, 0.6);
+            padding: 2rem;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: #00d4ff;
+            background: rgba(22, 33, 62, 0.9);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 212, 255, 0.2);
+        }
+
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: #00d4ff;
+            letter-spacing: 1px;
+        }
+
+        .feature-card p {
+            color: #b0b0b0;
+            font-size: 0.9rem;
+            line-height: 1.8;
+        }
+
+        /* Tribes Section */
+        .tribes {
+            padding: 4rem 2rem;
+            background: #16213e;
+        }
+
+        .tribes h2 {
+            font-size: 2rem;
+            text-align: center;
+            margin-bottom: 3rem;
+            letter-spacing: 3px;
+            color: #00d4ff;
+        }
+
+        .tribes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .tribe-card {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid;
+            transition: all 0.3s;
+            cursor: pointer;
+            font-weight: bold;
+            letter-spacing: 1px;
+            font-size: 0.85rem;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .tribe-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 20px currentColor;
+        }
+
+        .tribe-ironveil {
+            border-color: #888888;
+            color: #888888;
+            background: rgba(136, 136, 136, 0.1);
+        }
+
+        .tribe-wildborne {
+            border-color: #22aa44;
+            color: #22aa44;
+            background: rgba(34, 170, 68, 0.1);
+        }
+
+        .tribe-arcanists {
+            border-color: #aa44ff;
+            color: #aa44ff;
+            background: rgba(170, 68, 255, 0.1);
+        }
+
+        .tribe-tidecallers {
+            border-color: #4488ff;
+            color: #4488ff;
+            background: rgba(68, 136, 255, 0.1);
+        }
+
+        .tribe-forgeborn {
+            border-color: #ff6600;
+            color: #ff6600;
+            background: rgba(255, 102, 0, 0.1);
+        }
+
+        .tribe-sandstriders {
+            border-color: #ffcc44;
+            color: #ffcc44;
+            background: rgba(255, 204, 68, 0.1);
+        }
+
+        .tribe-mistwalkers {
+            border-color: #88ccff;
+            color: #88ccff;
+            background: rgba(136, 204, 255, 0.1);
+        }
+
+        .tribe-embercrown {
+            border-color: #ff4444;
+            color: #ff4444;
+            background: rgba(255, 68, 68, 0.1);
+        }
+
+        .tribe-voidtouched {
+            border-color: #dd00ff;
+            color: #dd00ff;
+            background: rgba(221, 0, 255, 0.1);
+        }
+
+        /* Email Signup Section */
+        .signup {
+            padding: 4rem 2rem;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            text-align: center;
+        }
+
+        .signup h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            letter-spacing: 3px;
+            color: #00d4ff;
+        }
+
+        .signup p {
+            margin-bottom: 2rem;
+            color: #b0b0b0;
+        }
+
+        .signup-form {
+            max-width: 500px;
+            margin: 0 auto;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .signup-form input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.8rem 1rem;
+            background: rgba(22, 33, 62, 0.8);
+            border: 2px solid #00d4ff;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+
+        .signup-form input:focus {
+            outline: none;
+            background: rgba(22, 33, 62, 0.95);
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+        }
+
+        .signup-form input::placeholder {
+            color: #666;
+        }
+
+        .signup-form button {
+            padding: 0.8rem 2rem;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            color: white;
+            border: 2px solid #ff6b6b;
+            font-weight: bold;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-family: 'Courier New', monospace;
+        }
+
+        .signup-form button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        /* Social Links */
+        .social {
+            padding: 2rem;
+            background: #0a0e27;
+            text-align: center;
+            border-top: 2px solid #00d4ff;
+        }
+
+        .social-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .social-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+            border: 2px solid transparent;
+            transition: all 0.3s;
+            letter-spacing: 1px;
+        }
+
+        .social-links a:hover {
+            border: 2px solid #00d4ff;
+            box-shadow: 0 0 10px rgba(0, 212, 255, 0.3);
+        }
+
+        /* Footer */
+        footer {
+            background: #16213e;
+            padding: 2rem;
+            text-align: center;
+            border-top: 2px solid #00d4ff;
+        }
+
+        footer p {
+            color: #666;
+            margin-bottom: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        .footer-links a {
+            color: #00d4ff;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.3s;
+        }
+
+        .footer-links a:hover {
+            color: #ff6b6b;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            nav {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            nav .nav-links {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+
+            .cta-button {
+                padding: 0.8rem 2rem;
+                font-size: 0.9rem;
+                margin: 0.5rem;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .tribes-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+
+            .signup-form {
+                flex-direction: column;
+            }
+
+            .signup-form input {
+                min-width: unset;
+            }
+
+            .social-links {
+                gap: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                font-size: 0.9rem;
+            }
+
+            .hero {
+                min-height: 80vh;
+            }
+
+            .hero h1 {
+                font-size: 1.8rem;
+                letter-spacing: 4px;
+            }
+
+            .hero p {
+                font-size: 0.9rem;
+            }
+
+            .tribes-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            nav .logo {
+                font-size: 1rem;
+                letter-spacing: 2px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <div class="logo">CUBITOPIA</div>
+        <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#tribes">Tribes</a></li>
+            <li><a href="#signup">Newsletter</a></li>
+            <li><a href="#social">Community</a></li>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <h1>CUBITOPIA</h1>
+            <p>A Turn-Based Voxel Strategy Game</p>
+            <div>
+                <a href="../index.html" class="cta-button">PLAY NOW</a>
+                <button class="cta-button secondary" onclick="document.getElementById('video-section').scrollIntoView({behavior: 'smooth'})">WATCH TRAILER</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Video Section -->
+    <section class="video-section" id="video-section">
+        <h2>GAME TRAILER</h2>
+        <div class="video-container">
+            <div class="video-placeholder">
+                <p>YouTube embed placeholder</p>
+                <p>Replace with: &lt;iframe src="https://www.youtube.com/embed/VIDEO_ID" ...&gt;</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <h2>KEY FEATURES</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">⚔️</div>
+                <h3>STRATEGIC COMBAT</h3>
+                <p>Turn-based hex-grid gameplay with elemental combo mechanics. Master unit placement and terrain control.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧱</div>
+                <h3>VOXEL TERRAIN</h3>
+                <p>Destructible 3D voxel environment. Reshape the battlefield to gain tactical advantages.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">👥</div>
+                <h3>MULTIPLAYER BATTLES</h3>
+                <p>WebRTC-powered 4-player free-for-all mode. Battle friends directly in your browser with no installation required.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🏰</div>
+                <h3>BASE BUILDING</h3>
+                <p>Construct towers and garrisons to defend your territory and expand your empire.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Tribes Section -->
+    <section class="tribes" id="tribes">
+        <h2>CHOOSE YOUR TRIBE</h2>
+        <div class="tribes-grid">
+            <div class="tribe-card tribe-ironveil">
+                <div>IRONVEIL</div>
+            </div>
+            <div class="tribe-card tribe-wildborne">
+                <div>WILDBORNE</div>
+            </div>
+            <div class="tribe-card tribe-arcanists">
+                <div>ARCANISTS</div>
+            </div>
+            <div class="tribe-card tribe-tidecallers">
+                <div>TIDECALLERS</div>
+            </div>
+            <div class="tribe-card tribe-forgeborn">
+                <div>FORGEBORN</div>
+            </div>
+            <div class="tribe-card tribe-sandstriders">
+                <div>SANDSTRIDERS</div>
+            </div>
+            <div class="tribe-card tribe-mistwalkers">
+                <div>MISTWALKERS</div>
+            </div>
+            <div class="tribe-card tribe-embercrown">
+                <div>EMBERCROWN</div>
+            </div>
+            <div class="tribe-card tribe-voidtouched">
+                <div>VOIDTOUCHED</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Email Signup Section -->
+    <section class="signup" id="signup">
+        <h2>STAY UPDATED</h2>
+        <p>Subscribe to get the latest news and updates on Cubitopia</p>
+        <form class="signup-form" action="#" method="POST">
+            <input type="email" placeholder="your@email.com" required>
+            <button type="submit">SUBSCRIBE</button>
+        </form>
+    </section>
+
+    <!-- Social Links -->
+    <section class="social" id="social">
+        <div class="social-links">
+            <a href="https://instagram.com/cubitopia" target="_blank">INSTAGRAM</a>
+            <a href="https://twitter.com/cubitopia" target="_blank">TWITTER</a>
+            <a href="https://discord.gg/cubitopia" target="_blank">DISCORD</a>
+            <a href="https://youtube.com/@cubitopia" target="_blank">YOUTUBE</a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 Cubitopia. All rights reserved.</p>
+        <div class="footer-links">
+            <a href="../docs/privacy.md">PRIVACY POLICY</a>
+            <a href="../docs/terms.md">TERMS OF SERVICE</a>
+            <a href="mailto:contact@cubitopia.game">CONTACT</a>
+        </div>
+    </footer>
+</body>
+</html>

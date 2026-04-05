@@ -69,6 +69,8 @@ export class HUD {
     try {
       const saved = localStorage.getItem('cubitopia_minimized');
       if (saved) this._minimized = JSON.parse(saved);
+      // Army power bar should always start expanded — it's a critical gameplay indicator
+      delete this._minimized['armyBar'];
     } catch {}
   }
 
@@ -328,6 +330,7 @@ export class HUD {
       this.armyStrengthBar = null;
       this.armyStrengthFill = null;
       this.armyStrengthLabel = null;
+      this.armyStrengthContent = null;
     }
   }
 
@@ -1191,6 +1194,92 @@ export class HUD {
     this._lastEnemyUnits = player.units;
   }
 
+  /** FFA mode: compact multi-enemy resource display showing all opponents */
+  private _ffaEnemyRows: Map<number, {
+    woodVal: HTMLElement; foodVal: HTMLElement; goldVal: HTMLElement; unitVal: HTMLElement;
+    stoneVal: HTMLElement; ironVal: HTMLElement; crystalVal: HTMLElement;
+  }> = new Map();
+  private _ffaBuilt = false;
+
+  updateFfaEnemyResources(enemies: {
+    playerId: number; name: string; color: string; units: Unit[];
+    stockpiles: { wood: number; food: number; stone: number; iron: number; crystal: number; gold: number };
+    defeated: boolean;
+  }[]): void {
+    const bar = this.elements.enemyResourceBar;
+    if (!bar) return;
+
+    // Build the FFA layout once, then just update values
+    if (!this._ffaBuilt || this._ffaEnemyRows.size !== enemies.length) {
+      bar.innerHTML = '';
+      this._ffaEnemyRows.clear();
+
+      const header = document.createElement('div');
+      header.style.cssText = `font-size:${FONT.xs};color:${COLORS.textMuted};text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;font-family:${FONT.family};`;
+      header.textContent = '⚔️ OPPONENTS';
+      bar.appendChild(header);
+
+      for (const enemy of enemies) {
+        const row = document.createElement('div');
+        row.style.cssText = `display:flex;align-items:center;gap:8px;padding:3px 0;${enemy.defeated ? 'opacity:0.4;' : ''}`;
+
+        // Color dot + name
+        const dot = document.createElement('span');
+        dot.style.cssText = `display:inline-block;width:8px;height:8px;border-radius:50%;background:${enemy.color};flex-shrink:0;`;
+        row.appendChild(dot);
+
+        const name = document.createElement('span');
+        name.style.cssText = `color:${enemy.color};font-weight:bold;font-size:${FONT.sm};min-width:42px;`;
+        name.textContent = enemy.defeated ? `${enemy.name} ☠️` : enemy.name;
+        row.appendChild(name);
+
+        const mkVal = (emoji: string, color: string): HTMLElement => {
+          const w = document.createElement('span');
+          w.style.cssText = `white-space:nowrap;font-size:${FONT.sm};`;
+          w.textContent = emoji + ' ';
+          const v = document.createElement('span');
+          v.style.cssText = `color:${color};font-weight:bold;`;
+          w.appendChild(v);
+          row.appendChild(w);
+          return v;
+        };
+
+        const woodVal = mkVal('🪵', '#f0c040');
+        const stoneVal = mkVal('🪨', '#aaa');
+        const ironVal = mkVal('⛏️', '#b0a0a0');
+        const crystalVal = mkVal('💎', '#6ba3e0');
+        const foodVal = mkVal('🌾', '#8bc34a');
+        const goldVal = mkVal('💰', '#f0c040');
+        const unitVal = mkVal('⚔️', '#ff8a80');
+
+        bar.appendChild(row);
+        this._ffaEnemyRows.set(enemy.playerId, { woodVal, foodVal, goldVal, unitVal, stoneVal, ironVal, crystalVal });
+      }
+      this._ffaBuilt = true;
+    }
+
+    // Update values
+    for (const enemy of enemies) {
+      const refs = this._ffaEnemyRows.get(enemy.playerId);
+      if (!refs) continue;
+      refs.woodVal.textContent = `${enemy.stockpiles.wood}`;
+      refs.stoneVal.textContent = `${enemy.stockpiles.stone}`;
+      refs.ironVal.textContent = `${enemy.stockpiles.iron}`;
+      refs.crystalVal.textContent = `${enemy.stockpiles.crystal}`;
+      refs.foodVal.textContent = `${enemy.stockpiles.food}`;
+      refs.goldVal.textContent = `${enemy.stockpiles.gold}`;
+      refs.unitVal.textContent = `${enemy.units.length}`;
+    }
+  }
+
+  /** Reset FFA enemy bar state (call on new game) — also rebuilds the normal 2-player enemy bar DOM */
+  resetFfaEnemyBar(): void {
+    this._ffaBuilt = false;
+    this._ffaEnemyRows.clear();
+    // Rebuild the standard enemy resource bar DOM so refs are valid for 2-player mode
+    this.buildEnemyResourceBarDOM(this.elements.enemyResourceBar);
+  }
+
   // === Army Strength Indicator ===
   private armyStrengthBar: HTMLElement | null = null;
   private armyStrengthFill: HTMLElement | null = null;
@@ -1198,8 +1287,8 @@ export class HUD {
   private _lastStrengthUpdate = 0;
 
   // N-player team colors — expandable to any number of players
-  static readonly TEAM_COLORS: string[] = ['#3498db', '#e74c3c', '#d4af37', '#2ecc71', '#9b59b6', '#e67e22'];
-  static readonly TEAM_NAMES: string[] = ['Blue', 'Red', 'Gold', 'Green', 'Purple', 'Orange'];
+  static readonly TEAM_COLORS: string[] = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#e67e22'];
+  static readonly TEAM_NAMES: string[] = ['Blue', 'Red', 'Green', 'Gold', 'Purple', 'Orange'];
 
   private armyStrengthContent: HTMLElement | null = null;
 
@@ -1661,7 +1750,7 @@ export class HUD {
     if (!this.unifiedQueuePanel) {
       this.unifiedQueuePanel = document.createElement('div');
       this.unifiedQueuePanel.style.cssText = `
-        position: absolute; bottom: 90px; right: 12px;
+        position: absolute; bottom: 80px; right: 180px;
         display: flex; flex-direction: column; gap: 6px;
         pointer-events: auto; z-index: 50;
         max-height: 60vh; overflow-y: auto;
@@ -3338,6 +3427,7 @@ export class HUD {
       case UnitType.BATTLEMAGE: return 'AoE setup caster. Weak splash damage but applies status effects for Mage combos.';
       case UnitType.GREATSWORD: return 'Cleave warrior. Hits all adjacent enemies with knockback.';
       case UnitType.OGRE: return 'Reward brute. Massive HP, club swipe hits all in 2-hex radius.';
+      case UnitType.CHAMPION: return 'Citadel reward. Elite war hammer knight with AoE ground slam.';
       default: return '';
     }
   }
@@ -3410,6 +3500,10 @@ export class HUD {
         'Knockback on all hit enemies',
         'Siege: Damages walls and buildings',
         'Cannot be trained — spawns at base tier-up',
+      ];
+      case UnitType.CHAMPION: return [
+        `Hammer Slam: AoE ground pound (${Math.round(GAME_CONFIG.combat.champion.hammerSlamDamageMultiplier * 100)}% ATK) within ${GAME_CONFIG.combat.champion.hammerSlamRadius}-hex radius`,
+        'Cannot be trained — spawns at Citadel tier-up',
       ];
       default: return [];
     }
@@ -3598,7 +3692,7 @@ export class HUD {
     if (!this.slicerContainer) {
       this.slicerContainer = document.createElement('div');
       this.slicerContainer.style.cssText = `
-        position: absolute; right: 180px; bottom: 80px;
+        position: absolute; right: 12px; bottom: 90px;
         display: flex; flex-direction: column; align-items: center; gap: 4px;
         background: rgba(0,0,0,0.8); padding: 10px 8px; border-radius: 8px;
         border: 2px solid #ff8c00; z-index: 100; user-select: none;

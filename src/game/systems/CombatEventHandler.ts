@@ -10,6 +10,8 @@ import { UnitAI, UnitEvent } from './UnitAI';
 import { GAME_CONFIG } from '../GameConfig';
 import { StatusEffectSystem, StatusEvent } from './StatusEffectSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
+import { hexDistQR } from '../HexMath';
+import type { DialogueContext } from '../../engine/UnitDialogue';
 
 /** Slim interface — only what CombatEventHandler needs from the outside */
 export interface CombatEventOps {
@@ -58,6 +60,15 @@ export interface CombatEventOps {
   showXPText(worldPos: any, xp: number): void;
   showCritText(worldPos: any, combo: string, damage: number, color: string): void;
   showLevelUpEffect(unitId: string, worldPos: any, newLevel: number): void;
+  applyBleedTint(unitId: string, healthPercent: number): void;
+
+  // Secondary melee attack VFX
+  spawnGreatswordSpin(worldPos: { x: number; y: number; z: number }): void;
+  spawnJumpAttackImpact(worldPos: { x: number; y: number; z: number }): void;
+  animateJumpAttack(unitId: string): void;
+  spawnPaladinChargeField(unitId: string): void;
+  spawnPaladinImpactBurst(worldPos: { x: number; y: number; z: number }): void;
+  applyLevelUpVisuals(unitId: string, newLevel: number): void;
 
   // Audio
   playSound(name: string, volume?: number): void;
@@ -102,6 +113,9 @@ export interface CombatEventOps {
   getBases(): { id: string; owner: number; position: HexCoord; destroyed: boolean }[];
   getPrimaryBasePosition(owner: number): HexCoord | undefined;
   addTradeGold(owner: number, amount: number): void;
+
+  // Speech bubbles
+  triggerSpeechBubble(unitId: string, unitType: UnitType, context: DialogueContext): void;
 }
 
 export default class CombatEventHandler {
@@ -125,6 +139,7 @@ export default class CombatEventHandler {
     [UnitType.SHIELDBEARER]: 460,  // speed=1.0,  shield bash at cycle ~0.46 → 460ms
     [UnitType.GREATSWORD]:   550,  // speed=0.8,  cleave at cycle ~0.44 → 550ms
     [UnitType.OGRE]:         830,  // speed=0.6,  club slam at cycle ~0.50 → 833ms
+    [UnitType.CHAMPION]:     560,  // speed=0.8,  hammer slam at cycle ~0.45 → 563ms
     [UnitType.LUMBERJACK]:   180,  // speed=1.4,  swing peak at cycle ~0.25 → 179ms
   };
 
@@ -205,6 +220,12 @@ export default class CombatEventHandler {
           }
         }
 
+        // Speech bubbles: death bark for the dying unit, kill bark for the killer
+        ops.triggerSpeechBubble(event.unit.id, event.unit.type, 'death');
+        if (event.killer) {
+          ops.triggerSpeechBubble(event.killer.id, event.killer.type, 'kill');
+        }
+
         const killerIsRanged = event.killer && event.killer.stats.range > 1;
         if (killerIsRanged) {
           (event.unit as any)._pendingKillVisual = true;
@@ -221,6 +242,10 @@ export default class CombatEventHandler {
 
       // ─── Combat (melee / ranged) ───
       if (event.type === 'combat' && event.attacker && event.defender && !debugFlags.disableCombat) {
+        // Speech bubbles: attacker barks on strike, defender barks on getting hit
+        ops.triggerSpeechBubble(event.attacker.id, event.attacker.type, 'attack');
+        ops.triggerSpeechBubble(event.defender.id, event.defender.type, 'attacked');
+
         // Ogre has range 2 for gameplay reach but attacks as melee (club slam, not projectile)
         const isRangedAttack = event.attacker.stats.range > 1 && event.attacker.type !== UnitType.OGRE;
 
@@ -258,6 +283,15 @@ export default class CombatEventHandler {
         const applyDamageVisuals = () => {
           ops.updateHealthBar(attacker);
           ops.updateHealthBar(defender);
+          // Persistent red bleed tint on wounded units
+          if (defender.currentHealth > 0 && defender.currentHealth < defender.stats.maxHealth) {
+            defender._bleedActive = true;
+            ops.applyBleedTint(defender.id, defender.currentHealth / defender.stats.maxHealth);
+          }
+          if (attacker.currentHealth > 0 && attacker.currentHealth < attacker.stats.maxHealth && !attacker._bleedActive) {
+            attacker._bleedActive = true;
+            ops.applyBleedTint(attacker.id, attacker.currentHealth / attacker.stats.maxHealth);
+          }
           if (isBlocked) {
             // Block: sparks fly from weapon clash, shorter flash, metallic sound
             const midX = (attacker.worldPosition.x + defender.worldPosition.x) / 2;
@@ -295,6 +329,27 @@ export default class CombatEventHandler {
               ops.fireDeflectedArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
             } else {
               ops.fireArrow(event.attacker.worldPosition, event.defender.worldPosition, defId, applyDamageVisuals);
+              // Archer level-up bonus: fire a second arrow at level 2+
+              if (event.attacker.level >= 2 && event.defender.currentHealth > 0) {
+                const archerAtk = event.attacker;
+                const atkWp = archerAtk.worldPosition;
+                const defWp = event.defender.worldPosition;
+                const secondDefId = defId;
+                // Slight offset for visual variety + 150ms delay
+                const offsetFrom = { x: atkWp.x + 0.15, y: atkWp.y, z: atkWp.z - 0.1 };
+                ops.queueDeferredEffect(150, () => {
+                  ops.fireArrow(offsetFrom, defWp, secondDefId, () => {
+                    // Second arrow deals 50% damage
+                    const target = ops.getAllUnits().find(u => u.id === secondDefId);
+                    if (target && target.currentHealth > 0) {
+                      const bonusDmg = Math.max(1, Math.floor(archerAtk.stats.attack * 0.5));
+                      target.currentHealth = Math.max(0, target.currentHealth - bonusDmg);
+                      ops.updateHealthBar(target);
+                      ops.showDamageEffect(target.worldPosition);
+                    }
+                  });
+                });
+              }
             }
           } else if (event.attacker.type === UnitType.MAGE) {
             // Element-specific projectiles — each element has a unique visual
@@ -312,158 +367,9 @@ export default class CombatEventHandler {
 
             switch (elem) {
               case ElementType.LIGHTNING:
-                // Lightning bolt — chain behavior is now driven by status interactions
-                // (Wet + Lightning → Electrocute Crit with enhanced chain spread)
+                // Lightning bolt — chain/electrocute/HV cascade logic extracted to handleLightningImpact
                 ops.fireLightningBolt(attackerRef.worldPosition, defenderRef.worldPosition, defId, () => {
-                  applyDamageVisuals();
-                  const allUnits = ops.getAllUnits();
-                  const statusEvents = StatusEffectSystem.applyMageElement(attackerRef, defenderRef, elem, allUnits);
-                  const hasElectrocute = statusEvents.some(e => e.effect === 'electrocute');
-
-                  if (hasElectrocute) {
-                    // Electrocute Crit: enhanced chain driven by status system (already applied damage)
-                    // Show chain VFX for each spread target
-                    const ecEvt = statusEvents.find(e => e.effect === 'electrocute');
-                    const hvCfg = GAME_CONFIG.combat.statusEffects.highVoltage;
-                    if (ecEvt?.spreadTo) {
-                      for (const sid of ecEvt.spreadTo) {
-                        const chainUnit = allUnits.find(u => u.id === sid);
-                        if (chainUnit) {
-                          ops.queueDeferredEffect(150, () => {
-                            ops.fireLightningChain(defenderRef.worldPosition, chainUnit.worldPosition, chainUnit.id);
-                            ops.spawnElectrocuteEffect(chainUnit.id);
-                            ops.updateHealthBar(chainUnit);
-
-                            // --- HIGH VOLTAGE CASCADE: if chain target has HV, consume it → arc cascade + stun ---
-                            if (chainUnit._statusHighVoltage && UnitAI.gameFrame < chainUnit._statusHighVoltage && chainUnit.currentHealth > 0) {
-                              chainUnit._statusHighVoltage = 0; // consume
-                              // Stun the HV target (knockup)
-                              chainUnit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
-                              // Cascade damage on the HV target itself
-                              const cascadeDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
-                              chainUnit.currentHealth = Math.max(0, chainUnit.currentHealth - cascadeDmg);
-                              ops.updateHealthBar(chainUnit);
-                              ops.showCritText(chainUnit.worldPosition, 'HIGH VOLTAGE', cascadeDmg, '#44eeff');
-                              ops.playSound('splash_aoe');
-                              CombatLog.logCombo(attackerRef, chainUnit, 'high_voltage', cascadeDmg);
-
-                              // Secondary arc cascade from HV target to nearby enemies
-                              const cascadeTargets = allUnits
-                                .filter(u => u.id !== chainUnit.id && u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.currentHealth > 0 && u.state !== 'dead')
-                                .map(u => ({ unit: u, dist: CombatEventHandler.hexDist(u.position.q, u.position.r, chainUnit.position.q, chainUnit.position.r) }))
-                                .filter(e => e.dist <= hvCfg.cascadeChainRadius)
-                                .sort((a, b) => a.dist - b.dist)
-                                .slice(0, hvCfg.cascadeChainCount);
-
-                              for (const ct of cascadeTargets) {
-                                const cascadeUnit = ct.unit;
-                                const cDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
-                                cascadeUnit.currentHealth = Math.max(0, cascadeUnit.currentHealth - cDmg);
-                                // Stun cascade targets too
-                                cascadeUnit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
-                                const cascadeRef = cascadeUnit;
-                                ops.queueDeferredEffect(100, () => {
-                                  ops.fireLightningChain(chainUnit.worldPosition, cascadeRef.worldPosition, cascadeRef.id);
-                                  ops.spawnElectrocuteEffect(cascadeRef.id);
-                                  ops.flashUnit(cascadeRef.id, 0.2);
-                                  ops.updateHealthBar(cascadeRef);
-                                  if (cascadeRef.currentHealth <= 0) {
-                                    cascadeRef.state = UnitState.DEAD;
-                                    ops.removeUnitFromGame(cascadeRef, attackerRef);
-                                    ops.playSound('death');
-                                  }
-                                });
-                              }
-
-                              if (chainUnit.currentHealth <= 0) {
-                                chainUnit.state = UnitState.DEAD;
-                                ops.removeUnitFromGame(chainUnit, attackerRef);
-                                ops.playSound('death');
-                              }
-                            } else if (chainUnit.currentHealth <= 0) {
-                              chainUnit.state = UnitState.DEAD;
-                              ops.removeUnitFromGame(chainUnit, attackerRef);
-                              ops.playSound('death');
-                            }
-                          });
-                        }
-                      }
-                    }
-                    // Also check if PRIMARY target has High Voltage
-                    if (defenderRef._statusHighVoltage && UnitAI.gameFrame < defenderRef._statusHighVoltage && defenderRef.currentHealth > 0) {
-                      defenderRef._statusHighVoltage = 0;
-                      defenderRef._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
-                      const hvDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
-                      defenderRef.currentHealth = Math.max(0, defenderRef.currentHealth - hvDmg);
-                      ops.updateHealthBar(defenderRef);
-                      ops.showCritText(defenderRef.worldPosition, 'HIGH VOLTAGE', hvDmg, '#44eeff');
-                      CombatLog.logCombo(attackerRef, defenderRef, 'high_voltage', hvDmg);
-
-                      // Arc cascade from primary target
-                      const hvPrimaryTargets = allUnits
-                        .filter(u => u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.currentHealth > 0 && u.state !== 'dead')
-                        .map(u => ({ unit: u, dist: CombatEventHandler.hexDist(u.position.q, u.position.r, defenderRef.position.q, defenderRef.position.r) }))
-                        .filter(e => e.dist <= hvCfg.cascadeChainRadius)
-                        .sort((a, b) => a.dist - b.dist)
-                        .slice(0, hvCfg.cascadeChainCount);
-
-                      for (const ct of hvPrimaryTargets) {
-                        const cDmg = Math.max(1, Math.round(attackerRef.stats.attack * hvCfg.cascadeDamageMultiplier));
-                        ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - cDmg);
-                        ct.unit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
-                        const cascRef = ct.unit;
-                        ops.queueDeferredEffect(100, () => {
-                          ops.fireLightningChain(defenderRef.worldPosition, cascRef.worldPosition, cascRef.id);
-                          ops.spawnElectrocuteEffect(cascRef.id);
-                          ops.flashUnit(cascRef.id, 0.2);
-                          ops.updateHealthBar(cascRef);
-                          if (cascRef.currentHealth <= 0) {
-                            cascRef.state = UnitState.DEAD;
-                            ops.removeUnitFromGame(cascRef, attackerRef);
-                            ops.playSound('death');
-                          }
-                        });
-                      }
-
-                      if (defenderRef.currentHealth <= 0) {
-                        defenderRef.state = UnitState.DEAD;
-                        ops.removeUnitFromGame(defenderRef, attackerRef);
-                        ops.playSound('death');
-                      }
-                    }
-                    ops.spawnElectrocuteEffect(defId);
-                    ops.playSound('hit_ranged');
-                    // CRIT text for Electrocute combo
-                    const ecDmg = ecEvt?.damage || GAME_CONFIG.combat.statusEffects.electrocuteCrit.damageMultiplier * attackerRef.stats.attack;
-                    ops.showCritText(defenderRef.worldPosition, 'ELECTROCUTE', ecDmg, '#ffee44');
-                  } else {
-                    // Normal chain lightning (no Wet status) — reduced chain
-                    const chainTargets = allUnits
-                      .filter(u => u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.state !== 'dead')
-                      .map(u => ({ unit: u, dist: Math.hypot(u.worldPosition.x - defenderRef.worldPosition.x, u.worldPosition.z - defenderRef.worldPosition.z) }))
-                      .filter(e => e.dist < 3.0)
-                      .sort((a, b) => a.dist - b.dist)
-                      .slice(0, 2);
-                    for (const ct of chainTargets) {
-                      const chainDmg = Math.max(1, Math.floor((event.result?.damage ?? 0) * 0.5));
-                      ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - chainDmg);
-                      ops.queueDeferredEffect(150, () => {
-                        ops.fireLightningChain(defenderRef.worldPosition, ct.unit.worldPosition, ct.unit.id);
-                        ops.spawnElectrocuteEffect(ct.unit.id);
-                        ops.updateHealthBar(ct.unit);
-                        if (ct.unit.currentHealth <= 0) {
-                          ct.unit.state = UnitState.DEAD;
-                          ops.removeUnitFromGame(ct.unit, attackerRef);
-                          ops.playSound('death');
-                        }
-                      });
-                    }
-                    ops.spawnElectrocuteEffect(defId);
-                  }
-                  // Handle remaining status events (consumed Charged, etc.)
-                  CombatEventHandler.handleStatusEvents(
-                    statusEvents.filter(e => e.effect !== 'electrocute'), ops, attackerRef
-                  );
+                  CombatEventHandler.handleLightningImpact(attackerRef, defenderRef, defId, elem, applyDamageVisuals, ops);
                 });
                 break;
               case ElementType.FIRE:
@@ -553,6 +459,41 @@ export default class CombatEventHandler {
           // Per-unit-type melee strike delay — synced to when the blade connects
           // in the attack animation (wind-up must complete before damage applies)
           const meleeStrikeDelay = CombatEventHandler.MELEE_STRIKE_DELAY[event.attacker.type] ?? 250;
+
+          // Secondary melee attack VFX
+          if (event.attacker._useSecondaryAttack) {
+            event.attacker._useSecondaryAttack = false;
+            const atkType = event.attacker.type;
+            const atkPos = event.attacker.worldPosition;
+            const defPos = event.defender.worldPosition;
+
+            if (atkType === UnitType.GREATSWORD) {
+              // Green glow charge-up → spin slash ring
+              ops.spawnGreatswordSpin(atkPos);
+              ops.playSound('hit_slash');
+            } else if (atkType === UnitType.WARRIOR) {
+              // Jump attack: leap up then slam down
+              ops.animateJumpAttack(event.attacker.id);
+              ops.queueDeferredEffect(300, () => {
+                ops.spawnJumpAttackImpact(defPos);
+                ops.playSound('hit_heavy');
+              });
+            } else if (atkType === UnitType.PALADIN) {
+              // Charge: blue force field during approach, white burst on impact
+              ops.spawnPaladinChargeField(event.attacker.id);
+              ops.queueDeferredEffect(meleeStrikeDelay, () => {
+                ops.spawnPaladinImpactBurst(defPos);
+                ops.playSound('shield_deflect');
+              });
+            } else if (atkType === UnitType.CHAMPION) {
+              // Hammer slam: ground shockwave on impact
+              ops.queueDeferredEffect(meleeStrikeDelay, () => {
+                ops.spawnJumpAttackImpact(defPos);
+                ops.playSound('hit_heavy');
+              });
+            }
+          }
+
           ops.queueDeferredEffect(meleeStrikeDelay, applyDamageVisuals);
         }
       }
@@ -639,6 +580,13 @@ export default class CombatEventHandler {
         }
       }
 
+      // ─── Greatsword Sweep Crit (level 2+ bonus, 4+ enemies hit) ───
+      if ((event as any).type === 'combat:sweepCrit') {
+        const sc = event as any;
+        ops.showCritText(sc.worldPos, `SWEEP x${sc.hitCount}`, sc.hitCount * 2, '#66ff44');
+        ops.playSound('hit_heavy');
+      }
+
       // ─── Mage Synergy: Arcane Convergence AoE burst ───
       if ((event as any).type === 'combat:synergy') {
         const se = event as any;
@@ -709,6 +657,8 @@ export default class CombatEventHandler {
         const unit = ops.getAllUnits().find(u => u.id === lvlEvt.unitId);
         if (unit) {
           ops.showLevelUpEffect(unit.id, unit.worldPosition, lvlEvt.newLevel);
+          // Permanent visual upgrades: size, badges, armor trim
+          ops.applyLevelUpVisuals(unit.id, lvlEvt.newLevel);
           ops.updateHealthBar(unit);
           ops.playSound('level_up', 0.5);
         }
@@ -816,6 +766,127 @@ export default class CombatEventHandler {
 
   // ─── Status Effect VFX Handlers ───
 
+  // ── Extracted helpers (reduce callback nesting) ─────────────────────
+
+  /** Check if a unit is dead, and if so mark + remove + play death sound. Returns true if dead. */
+  private static checkDeath(unit: Unit, ops: CombatEventOps, killer?: Unit): boolean {
+    if (unit.currentHealth <= 0) {
+      unit.state = UnitState.DEAD;
+      ops.removeUnitFromGame(unit, killer);
+      ops.playSound('death');
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Apply High Voltage cascade from a source unit: consume HV status, stun,
+   * deal cascade damage, and arc-chain to nearby enemies.
+   */
+  private static applyHighVoltageCascade(
+    source: Unit, attacker: Unit, defender: Unit,
+    allUnits: Unit[], ops: CombatEventOps,
+  ): void {
+    const hvCfg = GAME_CONFIG.combat.statusEffects.highVoltage;
+    if (!source._statusHighVoltage || UnitAI.gameFrame >= source._statusHighVoltage || source.currentHealth <= 0) return;
+
+    source._statusHighVoltage = 0; // consume
+    source._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
+    const hvDmg = Math.max(1, Math.round(attacker.stats.attack * hvCfg.cascadeDamageMultiplier));
+    source.currentHealth = Math.max(0, source.currentHealth - hvDmg);
+    ops.updateHealthBar(source);
+    ops.showCritText(source.worldPosition, 'HIGH VOLTAGE', hvDmg, '#44eeff');
+    ops.playSound('splash_aoe');
+    CombatLog.logCombo(attacker, source, 'high_voltage', hvDmg);
+
+    // Arc cascade to nearby enemies
+    const cascadeTargets = allUnits
+      .filter(u => u.id !== source.id && u.id !== defender.id && u.owner !== attacker.owner && u.currentHealth > 0 && u.state !== 'dead')
+      .map(u => ({ unit: u, dist: hexDistQR(u.position.q, u.position.r, source.position.q, source.position.r) }))
+      .filter(e => e.dist <= hvCfg.cascadeChainRadius)
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, hvCfg.cascadeChainCount);
+
+    for (const ct of cascadeTargets) {
+      const cDmg = Math.max(1, Math.round(attacker.stats.attack * hvCfg.cascadeDamageMultiplier));
+      ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - cDmg);
+      ct.unit._knockupUntil = UnitAI.gameFrame + Math.round(hvCfg.stunDuration * 60);
+      const cascRef = ct.unit;
+      ops.queueDeferredEffect(100, () => {
+        ops.fireLightningChain(source.worldPosition, cascRef.worldPosition, cascRef.id);
+        ops.spawnElectrocuteEffect(cascRef.id);
+        ops.flashUnit(cascRef.id, 0.2);
+        ops.updateHealthBar(cascRef);
+        CombatEventHandler.checkDeath(cascRef, ops, attacker);
+      });
+    }
+
+    CombatEventHandler.checkDeath(source, ops, attacker);
+  }
+
+  /**
+   * Lightning bolt impact handler — extracted from the deeply nested inline callback.
+   * Handles: damage visuals, electrocute crit chain, HV cascade, normal chain lightning.
+   */
+  private static handleLightningImpact(
+    attackerRef: Unit, defenderRef: Unit, defId: string,
+    elem: ElementType, applyDamageVisuals: () => void, ops: CombatEventOps,
+  ): void {
+    applyDamageVisuals();
+    const allUnits = ops.getAllUnits();
+    const statusEvents = StatusEffectSystem.applyMageElement(attackerRef, defenderRef, elem, allUnits);
+    const hasElectrocute = statusEvents.some(e => e.effect === 'electrocute');
+
+    if (hasElectrocute) {
+      ops.playSound('combo_electrocute');
+      const ecEvt = statusEvents.find(e => e.effect === 'electrocute');
+      if (ecEvt?.spreadTo) {
+        for (const sid of ecEvt.spreadTo) {
+          const chainUnit = allUnits.find(u => u.id === sid);
+          if (chainUnit) {
+            ops.queueDeferredEffect(150, () => {
+              ops.fireLightningChain(defenderRef.worldPosition, chainUnit.worldPosition, chainUnit.id);
+              ops.spawnElectrocuteEffect(chainUnit.id);
+              ops.updateHealthBar(chainUnit);
+              CombatEventHandler.applyHighVoltageCascade(chainUnit, attackerRef, defenderRef, allUnits, ops);
+              if (chainUnit.currentHealth > 0) return; // HV cascade may have killed it
+              // If still alive after HV check, see if electrocute itself killed it
+              CombatEventHandler.checkDeath(chainUnit, ops, attackerRef);
+            });
+          }
+        }
+      }
+      // Check if PRIMARY target has High Voltage
+      CombatEventHandler.applyHighVoltageCascade(defenderRef, attackerRef, defenderRef, allUnits, ops);
+      ops.spawnElectrocuteEffect(defId);
+      ops.playSound('hit_ranged');
+      const ecDmg = ecEvt?.damage || GAME_CONFIG.combat.statusEffects.electrocuteCrit.damageMultiplier * attackerRef.stats.attack;
+      ops.showCritText(defenderRef.worldPosition, 'ELECTROCUTE', ecDmg, '#ffee44');
+    } else {
+      // Normal chain lightning (no Wet status) — reduced chain
+      const chainTargets = allUnits
+        .filter(u => u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.state !== 'dead')
+        .map(u => ({ unit: u, dist: Math.hypot(u.worldPosition.x - defenderRef.worldPosition.x, u.worldPosition.z - defenderRef.worldPosition.z) }))
+        .filter(e => e.dist < 3.0)
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 2);
+      for (const ct of chainTargets) {
+        const chainDmg = Math.max(1, Math.floor(attackerRef.stats.attack * 0.5));
+        ct.unit.currentHealth = Math.max(0, ct.unit.currentHealth - chainDmg);
+        ops.queueDeferredEffect(150, () => {
+          ops.fireLightningChain(defenderRef.worldPosition, ct.unit.worldPosition, ct.unit.id);
+          ops.spawnElectrocuteEffect(ct.unit.id);
+          ops.updateHealthBar(ct.unit);
+          CombatEventHandler.checkDeath(ct.unit, ops, attackerRef);
+        });
+      }
+      ops.spawnElectrocuteEffect(defId);
+    }
+    CombatEventHandler.handleStatusEvents(
+      statusEvents.filter(e => e.effect !== 'electrocute'), ops, attackerRef
+    );
+  }
+
   /**
    * Process StatusEvents from the StatusEffectSystem and trigger appropriate VFX/SFX.
    * Called after mage/battlemage attacks land to show status application, interactions, etc.
@@ -868,7 +939,7 @@ export default class CombatEventHandler {
           if (evt.type === 'status:interaction') {
             ops.spawnElementalImpact(unit.worldPosition, ElementType.FIRE);
             ops.flashUnit(unit.id, 0.2);
-            ops.playSound('splash_aoe');
+            ops.playSound('combo_inferno');
             ops.updateHealthBar(unit);
             ops.showCritText(unit.worldPosition, 'INFERNO', evt.damage || GAME_CONFIG.combat.statusEffects.inferno.burstDamage, '#ff4422');
             if (evt.spreadTo) {
@@ -930,7 +1001,7 @@ export default class CombatEventHandler {
           if (evt.type === 'status:interaction') {
             ops.flashUnit(unit.id, 0.3);
             ops.updateHealthBar(unit);
-            ops.playSound('splash_aoe');
+            ops.playSound('combo_kamehameha');
             ops.showCritText(unit.worldPosition, 'KAMEHAMEHA', evt.damage || 9, '#aa44ff');
 
             // Draw dedicated Kamehameha laser beam from caster through all pierced enemies
@@ -1021,12 +1092,5 @@ export default class CombatEventHandler {
           break;
       }
     }
-  }
-
-  /** Hex distance helper for cascade range checks */
-  private static hexDist(q1: number, r1: number, q2: number, r2: number): number {
-    const dq = q1 - q2;
-    const dr = r1 - r2;
-    return Math.max(Math.abs(dq), Math.abs(dr), Math.abs(dq + dr));
   }
 }

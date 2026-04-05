@@ -29,6 +29,8 @@ export interface NatureOps {
   /** Forestry building awareness */
   getForestryBuildings(): ForestryBuildingInfo[];
   addWoodToStockpile(owner: number, amount: number): void;
+  /** Update farm patch visual for crop growth stage */
+  updateCropVisual(key: string, stage: number): void;
 }
 
 // ── Hex neighbor helper (offset coords) ─────────────────────────
@@ -102,6 +104,7 @@ export default class NatureSystem {
     this.updateGrassSpread(delta);
     this.updateForestryAutoPlant(delta);
     this.updateForestryTrickle(delta);
+    this.updateCropGrowth(delta);
   }
 
   // ── Record original forest tiles (call after map generation) ──
@@ -286,6 +289,43 @@ export default class NatureSystem {
         if (hexDistQR(fb.q, fb.r, tq, tr) <= radius) {
           this.forestryAuraTiles.add(key);
         }
+      }
+    }
+  }
+
+  // ── Crop growth ─────────────────────────────────────────────
+  /** Advance crop stages on farm patches: 0→1→2→3 (seedling→sprout→growing→mature) */
+  private updateCropGrowth(delta: number): void {
+    const growTime = GAME_CONFIG.economy.harvest.crops.growTime ?? 8;
+
+    for (const key of UnitAI.farmPatches) {
+      // Initialize new crops that don't have a stage yet
+      if (!UnitAI.cropStages.has(key)) {
+        UnitAI.cropStages.set(key, 0);
+        UnitAI.cropTimers.set(key, growTime);
+        this.ops.updateCropVisual(key, 0);
+      }
+
+      const stage = UnitAI.cropStages.get(key)!;
+      if (stage >= 3) continue; // Mature — wait for harvest
+
+      let timer = UnitAI.cropTimers.get(key) ?? growTime;
+      timer -= delta;
+      if (timer <= 0) {
+        const newStage = stage + 1;
+        UnitAI.cropStages.set(key, newStage);
+        UnitAI.cropTimers.set(key, growTime);
+        this.ops.updateCropVisual(key, newStage);
+      } else {
+        UnitAI.cropTimers.set(key, timer);
+      }
+    }
+
+    // Clean up orphaned crop state for removed farm patches
+    for (const key of UnitAI.cropStages.keys()) {
+      if (!UnitAI.farmPatches.has(key)) {
+        UnitAI.cropStages.delete(key);
+        UnitAI.cropTimers.delete(key);
       }
     }
   }

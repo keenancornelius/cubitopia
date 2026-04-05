@@ -137,6 +137,9 @@ export class InputManager {
       animatePreview: (group, unitType, state, time) => {
         this.game.unitRenderer.animatePreviewGroup(group, unitType, state, time);
       },
+      clearPreviewAnimation: () => {
+        this.game.unitRenderer.clearPreviewAnimation();
+      },
       applyUnitStatChange: (type, field: string, value: number) => {
         // Apply to all live units of this type
         for (const unit of this.game.allUnits) {

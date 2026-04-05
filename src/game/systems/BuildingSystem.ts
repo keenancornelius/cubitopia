@@ -5,7 +5,8 @@ import { UnitAI } from './UnitAI';
 import {
   buildForestryMesh, buildBarracksMesh, buildMasonryMesh,
   buildFarmhouseMesh, buildWorkshopMesh, buildSiloMesh,
-  buildSmelterMesh, buildArmoryMesh, buildWizardTowerMesh
+  buildSmelterMesh, buildArmoryMesh, buildWizardTowerMesh,
+  buildMineMesh, buildMarketMesh
 } from './BuildingMeshFactory';
 import { GAME_CONFIG } from '../GameConfig';
 import { mergeAllMeshes } from '../../engine/MeshMergeUtils';
@@ -23,7 +24,7 @@ class BuildingSystem {
 
   placedBuildings: PlacedBuilding[] = [];
   buildingSpawnIndex: Record<BuildingKind, number> = {
-    barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0
+    barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0, mine: 0, market: 0
   };
   wallConnectable: Set<string> = new Set();
 
@@ -237,6 +238,12 @@ class BuildingSystem {
   buildWizardTowerMesh(pos: HexCoord, owner: number): THREE.Group {
     return buildWizardTowerMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
   }
+  buildMineMesh(pos: HexCoord, owner: number): THREE.Group {
+    return buildMineMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
+  buildMarketMesh(pos: HexCoord, owner: number): THREE.Group {
+    return buildMarketMesh(pos, owner, this.ctx.scene, (p) => this.ctx.getElevation(p));
+  }
 
   /** Rebuild a building's mesh with its current owner (e.g. after zone capture) */
   refreshBuildingMesh(pb: PlacedBuilding): void {
@@ -260,6 +267,8 @@ class BuildingSystem {
       smelter: (p, o) => this.buildSmelterMesh(p, o),
       armory: (p, o) => this.buildArmoryMesh(p, o),
       wizard_tower: (p, o) => this.buildWizardTowerMesh(p, o),
+      mine: (p, o) => this.buildMineMesh(p, o),
+      market: (p, o) => this.buildMarketMesh(p, o),
     };
     const builder = meshBuilders[pb.kind];
     if (builder) {
@@ -367,7 +376,7 @@ class BuildingSystem {
     this.placedBuildings = [];
     this.wallConnectable.clear();
     this.buildingSpawnIndex = {
-      barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0
+      barracks: 0, forestry: 0, masonry: 0, farmhouse: 0, workshop: 0, silo: 0, smelter: 0, armory: 0, wizard_tower: 0, mine: 0, market: 0
     };
     nextBuildingId = 0;
     // Clear UnitAI static collections to prevent phantom buildings in new matches

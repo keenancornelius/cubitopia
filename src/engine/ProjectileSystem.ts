@@ -2293,8 +2293,180 @@ export class ProjectileSystem {
       });
       this.projectiles.splice(toRemove[i], 1);
     }
+
+    // Update cannon turret tracking each frame
+    this.updateCannonTurrets(delta);
   }
+  // ═══════════════════════════════════════════════════════════
+  // CANNON TURRET SYSTEM — visual cannon meshes on gates/towers
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Create and attach a cannon turret mesh at a building position.
+   * The cannon swivels to track the most recent target and fires cannonballs.
+   * @param buildingKey  Unique key for this building (e.g. "q,r")
+   * @param worldPos     World position to place the turret (top of gate/tower)
+   * @param playerColor  Team color for barrel accent
+   */
+  addCannonTurret(buildingKey: string, worldPos: { x: number; y: number; z: number }, playerColor: number = 0x888888): void {
+    if (this.cannonTurrets.has(buildingKey)) return;
+
+    const turretGroup = new THREE.Group();
+    turretGroup.position.set(worldPos.x, worldPos.y, worldPos.z);
+
+    // Base platform (dark stone octagon approximated with box)
+    const base = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.12, 0.5),
+      new THREE.MeshLambertMaterial({ color: 0x444444 })
+    );
+    base.position.y = 0;
+    turretGroup.add(base);
+
+    // Rotating swivel mount
+    const swivelBase = new THREE.Mesh(
+      new THREE.BoxGeometry(0.3, 0.1, 0.3),
+      new THREE.MeshLambertMaterial({ color: 0x333333 })
+    );
+    swivelBase.position.y = 0.1;
+    turretGroup.add(swivelBase);
+
+    // Barrel pivot (this group rotates to track target)
+    const barrelPivot = new THREE.Group();
+    barrelPivot.position.y = 0.2;
+    turretGroup.add(barrelPivot);
+
+    // Cannon barrel — main cylinder (approximated with long box)
+    const barrel = new THREE.Mesh(
+      new THREE.BoxGeometry(0.14, 0.14, 0.6),
+      new THREE.MeshLambertMaterial({ color: 0x2A2A2A })
+    );
+    barrel.position.z = 0.2; // barrel extends forward
+    barrelPivot.add(barrel);
+
+    // Barrel reinforcement rings (3 bands)
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.18, 0.04),
+        new THREE.MeshLambertMaterial({ color: 0x555555 })
+      );
+      ring.position.z = -0.05 + i * 0.2;
+      barrelPivot.add(ring);
+    }
+
+    // Muzzle flare (wider end)
+    const muzzle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.2, 0.06),
+      new THREE.MeshLambertMaterial({ color: 0x3A3A3A })
+    );
+    muzzle.position.z = 0.5;
+    barrelPivot.add(muzzle);
+
+    // Team color accent stripe on barrel
+    const accent = new THREE.Mesh(
+      new THREE.BoxGeometry(0.15, 0.15, 0.03),
+      new THREE.MeshLambertMaterial({ color: playerColor })
+    );
+    accent.position.z = -0.1;
+    barrelPivot.add(accent);
+
+    // Rear of cannon (breech)
+    const breech = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2, 0.2, 0.15),
+      new THREE.MeshLambertMaterial({ color: 0x2A2A2A })
+    );
+    breech.position.z = -0.15;
+    barrelPivot.add(breech);
+
+    this.scene.add(turretGroup);
+    this.cannonTurrets.set(buildingKey, {
+      turretGroup,
+      barrelPivot,
+      targetPos: null,
+      lastFireTime: 0,
+    });
+  }
+
+  /**
+   * Remove a cannon turret (when building is destroyed).
+   */
+  removeCannonTurret(buildingKey: string): void {
+    const turret = this.cannonTurrets.get(buildingKey);
+    if (!turret) return;
+    turret.turretGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (child.material instanceof THREE.Material) child.material.dispose();
+      }
+    });
+    this.scene.remove(turret.turretGroup);
+    this.cannonTurrets.delete(buildingKey);
+  }
+
+  /**
+   * Set a cannon turret's target position (it will smoothly rotate to track).
+   * Pass null to idle (cannon slowly returns to forward-facing).
+   */
+  setCannonTarget(buildingKey: string, targetPos: { x: number; y: number; z: number } | null): void {
+    const turret = this.cannonTurrets.get(buildingKey);
+    if (!turret) return;
+    turret.targetPos = targetPos ? new THREE.Vector3(targetPos.x, targetPos.y, targetPos.z) : null;
+  }
+
+  /**
+   * Update cannon turret rotations — call from updateProjectiles each frame.
+   */
+  private updateCannonTurrets(delta: number): void {
+    const smoothSpeed = 3.0; // radians/second rotation tracking speed
+
+    for (const [key, turret] of this.cannonTurrets) {
+      if (!turret.targetPos) {
+        // Idle: slowly return barrel to zero rotation
+        turret.barrelPivot.rotation.y *= (1 - delta * 1.5);
+        turret.barrelPivot.rotation.x *= (1 - delta * 1.5);
+        continue;
+      }
+
+      // Compute direction to target in turret-local space
+      const worldPos = new THREE.Vector3();
+      turret.turretGroup.getWorldPosition(worldPos);
+      const dir = new THREE.Vector3().subVectors(turret.targetPos, worldPos).normalize();
+
+      // Horizontal rotation (Y axis)
+      const targetYaw = Math.atan2(dir.x, dir.z);
+      const currentYaw = turret.barrelPivot.rotation.y;
+      let yawDiff = targetYaw - currentYaw;
+      // Normalize to [-PI, PI]
+      while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+      while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+      turret.barrelPivot.rotation.y += yawDiff * Math.min(1, smoothSpeed * delta);
+
+      // Vertical tilt (X axis) — slight depression toward target
+      const horizontalDist = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+      const targetPitch = -Math.atan2(dir.y, horizontalDist);
+      const pitchDiff = targetPitch - turret.barrelPivot.rotation.x;
+      turret.barrelPivot.rotation.x += pitchDiff * Math.min(1, smoothSpeed * delta);
+      // Clamp pitch
+      turret.barrelPivot.rotation.x = Math.max(-0.4, Math.min(0.3, turret.barrelPivot.rotation.x));
+    }
+  }
+
+  /** Get all active cannon turret keys (for external systems to query). */
+  getCannonTurretKeys(): string[] {
+    return Array.from(this.cannonTurrets.keys());
+  }
+
+  /** Check if a cannon turret exists for a given building key. */
+  hasCannonTurret(buildingKey: string): boolean {
+    return this.cannonTurrets.has(buildingKey);
+  }
+
   dispose(): void {
+    // Clean up cannon turrets
+    for (const [key] of this.cannonTurrets) {
+      this.removeCannonTurret(key);
+    }
+    this.cannonTurrets.clear();
+
     for (const proj of this.projectiles) {
       this.scene.remove(proj.mesh);
       proj.mesh.traverse((child) => {

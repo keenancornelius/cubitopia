@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { HexCoord, GameContext, TerrainType } from '../../types';
 import { UnitAI } from './UnitAI';
 import { Pathfinder } from './Pathfinder';
+import { GAME_CONFIG } from '../GameConfig';
 
 /** Slim interface for callbacks requiring main.ts state */
 export interface BlueprintOps {
@@ -414,10 +415,12 @@ export default class BlueprintSystem {
       return;
     }
 
-    // Otherwise mark as farm patch
+    // Otherwise mark as farm patch — start at stage 0 (seedling)
     if (UnitAI.farmPatches.has(key)) return;
     if (this.farmPatchMarkers.has(key)) return;
     UnitAI.farmPatches.add(key);
+    UnitAI.cropStages.set(key, 0);
+    UnitAI.cropTimers.set(key, GAME_CONFIG.economy.harvest.crops.growTime ?? 8);
     this.addFarmPatchMarker(coord);
   }
 
@@ -439,6 +442,32 @@ export default class BlueprintSystem {
     marker.name = `farm_${key}`;
     this.ctx.scene.add(marker);
     this.farmPatchMarkers.set(key, marker);
+  }
+
+  /** Crop growth stage colors: brown soil → green sprouts → lush green → golden harvest */
+  private static readonly CROP_COLORS = [0x8b6914, 0x6b8e23, 0x4caf50, 0xdaa520];
+  private static readonly CROP_HEIGHTS = [0.03, 0.08, 0.15, 0.22]; // Y offset above terrain
+
+  /** Update a farm patch marker to reflect crop growth stage (called by NatureSystem) */
+  updateCropVisual(key: string, stage: number): void {
+    const marker = this.farmPatchMarkers.get(key);
+    if (!marker) return;
+
+    const color = BlueprintSystem.CROP_COLORS[stage] ?? 0x8b6914;
+    const yOffset = BlueprintSystem.CROP_HEIGHTS[stage] ?? 0.03;
+
+    // Update color
+    const mat = marker.material as THREE.MeshLambertMaterial;
+    mat.color.setHex(color);
+    mat.opacity = stage >= 3 ? 0.9 : 0.7; // Mature crops are more visible
+
+    // Update height — parse base elevation from original position, add stage offset
+    const baseY = marker.position.y - 0.03; // Subtract the original offset
+    marker.position.y = baseY + yOffset;
+
+    // Scale up slightly as crops grow
+    const scale = 1.0 + stage * 0.08;
+    marker.scale.set(scale, scale, 1);
   }
 
   // ===================== HOVER GHOST =====================

@@ -152,6 +152,11 @@ export class DebugPanel {
   }
 
   switchTab(tab: 'tools' | 'army' | 'combat' | 'units' | 'tuning'): void {
+    // Stop preview animation loop when leaving Units tab — prevents leaked rAF
+    // loop from continuing to call animatePreviewGroup on shared UnitAnimations
+    if (this.activeTab === 'units' && tab !== 'units') {
+      this.cleanupPreview();
+    }
     this.activeTab = tab;
     this.lastEventCount = 0; // Reset so combat tab rebuilds fully
     this.logContainer = null;
@@ -1802,6 +1807,10 @@ export class DebugPanel {
       this.previewRenderer.dispose();
       this.previewRenderer = null;
     }
+    // Clear the shared preview animation entry to prevent any lingering state
+    if (this._callbacks) {
+      this._callbacks.clearPreviewAnimation();
+    }
     this.previewScene = null;
     this.previewCamera = null;
     this.previewGroup = null;
@@ -1837,4 +1846,5 @@ export interface DebugPanelCallbacks {
   getMapType(): string;
   applyUnitStatChange(type: UnitType, field: string, value: number): void;
   animatePreview(group: THREE.Group, unitType: UnitType, state: 'idle' | 'moving' | 'attacking' | 'hit' | 'block', time: number): void;
+  clearPreviewAnimation(): void;
 }

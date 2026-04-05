@@ -8,6 +8,7 @@
 import { Unit, UnitType, UnitState, HexCoord } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { GAME_CONFIG } from '../GameConfig';
+import { hexDist } from '../HexMath';
 
 // ── Tactical Roles ──────────────────────────────────────────────
 
@@ -95,12 +96,6 @@ function createBlackboard(): TacticalBlackboard {
 }
 
 // ── Vec2 helpers (hex-space, q/r) ───────────────────────────────
-
-function hexDist(a: HexCoord, b: HexCoord): number {
-  const dq = a.q - b.q;
-  const dr = a.r - b.r;
-  return (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
-}
 
 function centroidOf(units: Unit[]): HexCoord {
   if (units.length === 0) return { q: 0, r: 0 };

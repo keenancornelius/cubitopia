@@ -29,6 +29,7 @@ import { Unit, UnitType, ElementType } from '../../types';
 import { GAME_CONFIG } from '../GameConfig';
 import { GameRNG } from '../SeededRandom';
 import { UnitAI } from './UnitAI';
+import { hexDistQR } from '../HexMath';
 
 /** Convert seconds to deterministic game frames (~60fps). */
 const secToFrames = (s: number) => Math.round(s * 60);
@@ -153,7 +154,7 @@ export class StatusEffectSystem {
           // Sort by distance from target
           const withDist = candidates.map(u => ({
             unit: u,
-            dist: StatusEffectSystem.hexDist(u.position.q, u.position.r, target.position.q, target.position.r),
+            dist: hexDistQR(u.position.q, u.position.r, target.position.q, target.position.r),
           }));
           withDist.sort((a, b) => a.dist - b.dist);
 
@@ -190,7 +191,7 @@ export class StatusEffectSystem {
             .filter(u => u.owner !== attacker.owner && u.currentHealth > 0 && u.id !== target.id);
           const withDist = candidates.map(u => ({
             unit: u,
-            dist: StatusEffectSystem.hexDist(u.position.q, u.position.r, target.position.q, target.position.r),
+            dist: hexDistQR(u.position.q, u.position.r, target.position.q, target.position.r),
           }));
           withDist.sort((a, b) => a.dist - b.dist);
 
@@ -297,7 +298,7 @@ export class StatusEffectSystem {
 
     for (const ally of allUnits) {
       if (ally.owner !== healer.owner || ally === healer || ally.currentHealth <= 0) continue;
-      const dist = StatusEffectSystem.hexDist(
+      const dist = hexDistQR(
         ally.position.q, ally.position.r, healer.position.q, healer.position.r
       );
       if (dist > healRange) continue;
@@ -442,12 +443,5 @@ export class StatusEffectSystem {
     if (unit._cleanseLinger && now < unit._cleanseLinger) active.push('cleanse_linger');
     if (unit._speedBoostUntil && now < unit._speedBoostUntil) active.push('speed_boost');
     return active;
-  }
-
-  /** Hex distance helper */
-  private static hexDist(q1: number, r1: number, q2: number, r2: number): number {
-    const dq = q1 - q2;
-    const dr = r1 - r2;
-    return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
   }
 }

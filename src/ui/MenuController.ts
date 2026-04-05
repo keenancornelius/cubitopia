@@ -5,9 +5,11 @@
 
 import { MapType } from '../types';
 import { MAP_PRESETS } from '../game/MapPresets';
-import { MUSIC_GENRES, type MusicGenre } from '../engine/ProceduralMusic';
+import { TRIBES, type TribeId, type TribeConfig } from '../game/TribeConfig';
 import { UI, COLORS, FONT, BORDER, SHADOW, getCurrentSkin, setSkin, loadSavedSkin, type ThemeSkin } from './UITheme';
 import { showDevKanban } from './DevKanban';
+import { PixelTitle } from '../engine/PixelTitle';
+import { stripeService } from '../payments/StripeService';
 
 export interface GameOverStats {
   gameDuration: number;        // seconds
@@ -21,9 +23,10 @@ export interface GameOverStats {
 }
 
 export interface MenuCallbacks {
-  onStartGame(mode: 'pvai' | 'aivai' | 'ffa' | '2v2', mapType: MapType): void;
+  onStartGame(mode: 'pvai' | 'aivai' | 'ffa' | '2v2', mapType: MapType, tribeId: TribeId): void;
   onPlayAgain(): void;
   onGenreChanged?(genreId: string): void;
+  onTribeChanged?(tribeId: TribeId): void;
   onMenuShown?(): void;
   onMultiplayer?(): void;
   onSkinChanged?(skin: ThemeSkin): void;
@@ -35,15 +38,18 @@ export default class MenuController {
   private callbacks: MenuCallbacks;
   private selectedMap: MapType = MapType.STANDARD;
   private selectedMode: 'pvai' | 'aivai' | 'ffa' | '2v2' = 'pvai';
-  private selectedGenre: string = 'fantasy';
+  private selectedTribe: TribeId = 'fantasy';
+
+  /** Get the currently selected tribe id. */
+  getSelectedTribe(): TribeId { return this.selectedTribe; }
 
   constructor(callbacks: MenuCallbacks) {
     this.callbacks = callbacks;
-    // Restore saved genre
+    // Restore saved tribe/genre
     try {
       const saved = localStorage.getItem('cubitopia_music_genre');
-      if (saved && MUSIC_GENRES.some(g => g.id === saved)) {
-        this.selectedGenre = saved;
+      if (saved && TRIBES.some(t => t.id === saved)) {
+        this.selectedTribe = saved as TribeId;
       }
     } catch {}
   }
@@ -64,15 +70,13 @@ export default class MenuController {
       z-index:20000; backdrop-filter: blur(2px);
     `;
 
-    // Title
-    const title = document.createElement('div');
-    title.style.cssText = `
-      font-size:72px; font-weight:bold; color:#fff;
-      text-shadow: 0 0 40px rgba(52,152,219,0.8), 0 0 80px rgba(52,152,219,0.4), 0 2px 8px rgba(0,0,0,0.9);
-      letter-spacing:10px; margin-bottom:8px;
-    `;
-    title.textContent = 'CUBITOPIA';
-    overlay.appendChild(title);
+    // Pixel art title
+    const pixelTitle = new PixelTitle();
+    const titleCanvas = pixelTitle.getElement();
+    titleCanvas.style.cssText = 'max-width:600px; width:80%; height:auto; margin-bottom:8px; image-rendering:pixelated;';
+    overlay.appendChild(titleCanvas);
+    // Store reference for cleanup
+    (this as any)._pixelTitle = pixelTitle;
 
     const subtitle = document.createElement('div');
     subtitle.style.cssText = 'font-size:14px; color:#aaa; letter-spacing:4px; margin-bottom:40px; text-transform:uppercase; text-shadow: 0 1px 4px rgba(0,0,0,0.8);';
@@ -168,11 +172,11 @@ export default class MenuController {
     const MAP_ICONS: Record<string, string> = {
       [MapType.STANDARD]: '\u26f0\ufe0f',   // mountain
       [MapType.ARENA]: '\u2694\ufe0f',       // swords
-      [MapType.SUNKEN_RUINS]: '\ud83c\udfd4\ufe0f', // temple
+      [MapType.SUNKEN_RUINS]: '🏛️', // temple ruins
       [MapType.ARCHIPELAGO]: '\ud83c\udf0a',   // wave
-      [MapType.BADLANDS]: '\ud83c\udf3c',      // desert
+      [MapType.BADLANDS]: '🏜️',      // desert badlands
       [MapType.DESERT_TUNNELS]: '\ud83c\udfdc\ufe0f', // desert
-      [MapType.VOLCANIC]: '\ud83c\udf0b',      // volcano
+      [MapType.RIVER_CROSSING]: '\ud83c\udf09',  // bridge at night
       [MapType.TUNDRA]: '\u2744\ufe0f',        // snowflake
       [MapType.SKYLAND]: '\u2601\ufe0f',      // cloud
     };
@@ -247,59 +251,118 @@ export default class MenuController {
     overlay.appendChild(mapGrid);
     overlay.appendChild(descEl);
 
-    // --- Tribe Selector (maps to music genre) ---
+    // --- Tribe Selector (driven by TribeConfig, also sets music genre) ---
     overlay.appendChild(sectionLabel('TRIBE'));
 
-    const genreRow = document.createElement('div');
-    genreRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:12px; max-width:600px;';
+    const tribeRow = document.createElement('div');
+    tribeRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:12px; max-width:600px;';
 
-    const genreButtons: HTMLButtonElement[] = [];
-    const genreDescEl = document.createElement('div');
-    genreDescEl.style.cssText = 'font-size:12px; color:#777; text-align:center; margin-bottom:30px; min-height:18px; max-width:400px;';
+    const tribeButtons: HTMLButtonElement[] = [];
+    const tribeDescEl = document.createElement('div');
+    tribeDescEl.style.cssText = 'font-size:12px; color:#777; text-align:center; margin-bottom:30px; min-height:18px; max-width:400px;';
 
-    for (const genre of MUSIC_GENRES) {
-      const isPlayable = genre.id === 'fantasy'; // Only Ironveil is playable for now
+    for (const tribe of TRIBES) {
+      const btnColor = tribe.palette.primaryCSS;
+      const isUnlocked = stripeService.isUnlocked(tribe.id);
+      const isSelectable = tribe.playable && isUnlocked;
+
+      // Create tribe button wrapper (relative positioning for lock overlay)
+      const btnWrapper = document.createElement('div');
+      btnWrapper.style.cssText = 'position:relative; display:inline-block;';
+
       const btn = document.createElement('button');
       btn.style.cssText = `
-        background: transparent; color:${isPlayable ? genre.color : '#333'}; border:2px solid ${isPlayable ? genre.color : '#222'}; padding:6px 14px;
+        background: transparent; color:${isSelectable ? btnColor : '#333'}; border:2px solid ${isSelectable ? btnColor : '#222'}; padding:6px 14px;
         font-size:12px; font-family:${FONT.family}; font-weight:bold;
-        border-radius:4px; ${isPlayable ? 'cursor:pointer;' : 'cursor:not-allowed; opacity:0.4;'} letter-spacing:1px; min-width:90px;
+        border-radius:4px; ${isSelectable ? 'cursor:pointer;' : 'cursor:not-allowed; opacity:0.4;'} letter-spacing:1px; min-width:90px;
         transition: all 0.2s;
       `;
-      btn.textContent = `${genre.icon} ${genre.label}`;
-      btn.dataset.color = isPlayable ? genre.color : '#333';
-      btn.dataset.genreId = genre.id;
-      genreButtons.push(btn);
+      btn.textContent = `${tribe.icon} ${tribe.name}`;
+      btn.dataset.color = isSelectable ? btnColor : '#333';
+      btn.dataset.tribeId = tribe.id;
+      tribeButtons.push(btn);
+      btnWrapper.appendChild(btn);
 
-      const updateGenreSelection = () => {
-        genreButtons.forEach(b => {
-          const playable = b.dataset.genreId === 'fantasy';
-          b.style.background = 'transparent';
-          b.style.color = playable ? b.dataset.color! : '#333';
+      // Lock overlay for unpurchased tribes
+      if (tribe.playable && !isUnlocked) {
+        const lockOverlay = document.createElement('div');
+        lockOverlay.style.cssText = `
+          position:absolute; top:0; left:0; right:0; bottom:0;
+          background:rgba(0,0,0,0.6); border-radius:4px;
+          display:flex; align-items:center; justify-content:center;
+          cursor:pointer; transition:all 0.2s; z-index:10;
+        `;
+        lockOverlay.innerHTML = '\u{1F512}'; // 🔒
+        lockOverlay.style.fontSize = '14px';
+
+        // Unlock button on hover
+        const unlockBtn = document.createElement('button');
+        unlockBtn.style.cssText = `
+          position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+          background:${btnColor}; color:#000; border:none; padding:4px 8px;
+          font-size:10px; font-weight:bold; border-radius:3px;
+          cursor:pointer; opacity:0; transition:opacity 0.2s; z-index:11;
+          letter-spacing:1px;
+        `;
+        unlockBtn.textContent = 'UNLOCK';
+
+        lockOverlay.appendChild(unlockBtn);
+        btnWrapper.appendChild(lockOverlay);
+
+        // Show unlock button on hover
+        btnWrapper.addEventListener('mouseenter', () => {
+          unlockBtn.style.opacity = '1';
+          lockOverlay.style.background = 'rgba(0,0,0,0.75)';
         });
-        btn.style.background = genre.color;
-        btn.style.color = '#000';
-        genreDescEl.textContent = genre.description;
+
+        btnWrapper.addEventListener('mouseleave', () => {
+          unlockBtn.style.opacity = '0';
+          lockOverlay.style.background = 'rgba(0,0,0,0.6)';
+        });
+
+        // Handle unlock button click
+        unlockBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const priceId = stripeService.getPriceId(tribe.id);
+          console.log(`Initiating purchase for ${tribe.id} (${priceId})`);
+          await stripeService.purchaseTribeSkin(tribe.id, priceId);
+        });
+      }
+
+      const updateTribeSelection = () => {
+        tribeButtons.forEach(b => {
+          const t = TRIBES.find(tr => tr.id === b.dataset.tribeId);
+          const isUnlockedTribe = t ? stripeService.isUnlocked(t.id) : false;
+          b.style.background = 'transparent';
+          b.style.color = (t?.playable && isUnlockedTribe) ? b.dataset.color! : '#333';
+        });
+        if (isSelectable) {
+          btn.style.background = btnColor;
+          btn.style.color = '#000';
+        }
+        tribeDescEl.textContent = tribe.description;
       };
 
-      if (isPlayable) {
+      if (isSelectable) {
         btn.addEventListener('click', () => {
-          this.selectedGenre = genre.id;
-          updateGenreSelection();
-          this.callbacks.onGenreChanged?.(genre.id);
+          this.selectedTribe = tribe.id;
+          updateTribeSelection();
+          // Sync music genre with tribe selection
+          this.callbacks.onGenreChanged?.(tribe.musicFolder);
+          this.callbacks.onTribeChanged?.(tribe.id);
         });
       }
 
-      // Ironveil is always selected (only playable tribe)
-      if (genre.id === 'fantasy') {
-        setTimeout(() => updateGenreSelection(), 0);
+      // Auto-select the saved/default tribe
+      if (tribe.id === this.selectedTribe) {
+        setTimeout(() => updateTribeSelection(), 0);
       }
 
-      genreRow.appendChild(btn);
+      tribeRow.appendChild(btnWrapper);
     }
 
-    overlay.appendChild(genreRow);
-    overlay.appendChild(genreDescEl);
+    overlay.appendChild(tribeRow);
+    overlay.appendChild(tribeDescEl);
 
     // --- UI Skin Toggle ---
     overlay.appendChild(sectionLabel('UI THEME'));
@@ -390,7 +453,7 @@ export default class MenuController {
       e.stopPropagation(); // Prevent bubble to overlay (which would restart title scene)
       overlay.remove();
       this.mainMenuOverlay = null;
-      this.callbacks.onStartGame(this.selectedMode, this.selectedMap);
+      this.callbacks.onStartGame(this.selectedMode, this.selectedMap, this.selectedTribe);
     });
     overlay.appendChild(startBtn);
 

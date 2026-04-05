@@ -105,6 +105,12 @@ export const UNIT_CONFIG: Record<UnitType, UnitConfig> = {
     moveSpeed: 0.6, attackSpeed: 0.4, color: 0x4e342e,
     carryCapacity: 0, isSiege: true,  // Can smash walls/buildings
   },
+  // --- Champion: Tier 3 base reward — elite melee with war hammer, white/gold armor ---
+  [UnitType.CHAMPION]: {
+    stats: { maxHealth: 35, attack: 9, defense: 5, movement: 1, range: 1 },
+    moveSpeed: 0.8, attackSpeed: 0.6, color: 0xf5f5f5,
+    carryCapacity: 0, isSiege: false,
+  },
 };
 
 // Backward-compat export — UnitRenderer imports this

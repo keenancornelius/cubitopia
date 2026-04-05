@@ -66,6 +66,10 @@ export interface TooltipOps {
   assignBuildingToSquad(buildingHexKey: string, squadSlot: number | null): void;
   /** Create a new squad from scratch (no units yet), returns the slot number */
   createSquadForBuilding(buildingHexKey: string): number | null;
+  /** Get centroid world position of a squad by slot, or null if squad has no units */
+  getSquadCentroid(squadSlot: number): { x: number; y: number; z: number } | null;
+  /** Set the building's rally point to a squad's current centroid (dynamic rally) */
+  rallyBuildingToSquad(buildingHexKey: string, buildingKind: string, squadSlot: number): void;
 }
 
 export default class BuildingTooltipController {
@@ -313,16 +317,16 @@ export default class BuildingTooltipController {
     const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
 
     let html = `
-      <div style="font-size:15px;font-weight:bold;margin-bottom:6px;color:#f1c40f">${kindLabel}</div>
-      <div style="margin-bottom:4px">Owner: <span style="color:#3498db">${ownerLabel}</span></div>
-      <div style="margin-bottom:4px">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
+      <div style="font-size:${FONT.lg};font-weight:bold;margin-bottom:6px;color:${COLORS.yellow};font-family:${FONT.family}">${kindLabel}</div>
+      <div style="font-size:${FONT.sm};color:${COLORS.textSecondary};margin-bottom:4px;font-family:${FONT.family}">Owner: <span style="color:${COLORS.blue}">${ownerLabel}</span></div>
+      <div style="font-size:${FONT.sm};color:${COLORS.textSecondary};margin-bottom:4px;font-family:${FONT.family}">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
     `;
 
     // ── Unit queue section (QWERTY keys) ──
     const queueBtns = this.ops.getBuildingQueueOptions(pb.kind);
     if (queueBtns.length > 0 && pb.owner === 0) {
       html += DIV();
-      html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">Queue Units</div>`;
+      html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family};letter-spacing:0.5px;text-transform:uppercase">Queue Units</div>`;
       const qwertyKeys = ['Q', 'W', 'E', 'R', 'T', 'Y'];
       for (let i = 0; i < queueBtns.length; i++) {
         const btn = queueBtns[i];
@@ -337,7 +341,7 @@ export default class BuildingTooltipController {
     // ── Actions section (F = Rally, X = Demolish) ──
     if (pb.owner === 0) {
       html += DIV();
-      html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">Actions</div>`;
+      html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family};letter-spacing:0.5px;text-transform:uppercase">Actions</div>`;
       html += `<div style="display:flex;gap:4px;flex-wrap:wrap">`;
       html += `<span id="btt-rally" style="${B('#2980b9')}">${K('F')} Rally</span>`;
       html += `<span id="btt-demolish" style="${B('#c0392b')}">${K('X')} Demolish</span>`;
@@ -358,7 +362,7 @@ export default class BuildingTooltipController {
       const curSquad = this.ops.getBuildingSquadAssignment(buildingHexKey);
 
       html += DIV();
-      html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">Reinforcements \u2192 Squad</div>`;
+      html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family};letter-spacing:0.5px;text-transform:uppercase">Reinforcements \u2192 Squad</div>`;
       html += `<div id="btt-squad-btns" style="display:flex;gap:3px;flex-wrap:wrap;margin-bottom:4px">`;
 
       for (const [slot, info] of squads) {
@@ -393,7 +397,16 @@ export default class BuildingTooltipController {
 
       if (curSquad != null) {
         const lbl = SQ_LABELS[curSquad] ?? `${curSquad}`;
+        const centroid = this.ops.getSquadCentroid(curSquad);
         html += `<div style="font-size:9px;color:#4fc3f7;margin-bottom:2px">Spawned units auto-join Squad ${lbl}</div>`;
+        if (centroid) {
+          html += `<span id="btt-rally-squad" data-squad="${curSquad}" data-bkey="${buildingHexKey}" data-bkind="${pb.kind}" style="
+            display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;
+            cursor:pointer;font-size:10px;border:1px solid #2ecc71;color:#2ecc71;
+            background:rgba(46,204,113,0.12);transition:all 0.1s;user-select:none;
+            margin-bottom:3px;
+          ">Rally to Squad ${lbl} position</span>`;
+        }
       }
     }
 
@@ -405,7 +418,7 @@ export default class BuildingTooltipController {
       const gCount = garrisonInfo?.current ?? 0;
       const gMax = garrisonInfo?.max ?? 10;
       const garrisonColor = gCount > 0 ? '#e67e22' : '#666';
-      html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">Garrison: <span style="color:${garrisonColor}">${gCount}/${gMax}</span></div>`;
+      html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family}">Garrison: <span style="color:${garrisonColor}">${gCount}/${gMax}</span></div>`;
       if (gCount > 0 && garrisonInfo) {
         const typeCounts = new Map<string, number>();
         for (const u of garrisonInfo.units) {
@@ -490,6 +503,15 @@ export default class BuildingTooltipController {
     el.querySelector('#btt-squad-create')?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.ops.createSquadForBuilding(buildingHexKey);
+      this.hideTooltip();
+    });
+    el.querySelector('#btt-rally-squad')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const btn = e.currentTarget as HTMLElement;
+      const squadSlot = parseInt(btn.dataset.squad!, 10);
+      const bKey = btn.dataset.bkey!;
+      const bKind = btn.dataset.bkind!;
+      this.ops.rallyBuildingToSquad(bKey, bKind, squadSlot);
       this.hideTooltip();
     });
 
@@ -594,13 +616,21 @@ export default class BuildingTooltipController {
     else if (pb.kind === 'workshop') modifiers = '<div style="color:#8b4513;font-size:11px;margin-top:2px">Crafts siege weapons</div>';
     else if (pb.kind === 'smelter') modifiers = '<div style="color:#b87333;font-size:11px;margin-top:2px">Smelts steel from iron</div>';
 
+    // Garrison count for enemy buildings (show count, not detailed unit types)
+    const enemyStructKey = `${pb.position.q},${pb.position.r}`;
+    const enemyGarrison = this.ops.getGarrisonInfo(enemyStructKey);
+    const garrisonLine = enemyGarrison && enemyGarrison.current > 0
+      ? `<div style="font-size:${FONT.sm};color:#e67e22;margin-bottom:4px;font-family:${FONT.family}">Garrisoned: ${enemyGarrison.current} units</div>`
+      : '';
+
     let html = `
-      <div style="font-size:15px;font-weight:bold;margin-bottom:6px;color:${ownerColor}">${displayKind}</div>
-      <div style="margin-bottom:4px">Owner: <span style="color:${ownerColor}">${ownerLabel}</span></div>
-      <div style="margin-bottom:4px">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
+      <div style="font-size:${FONT.lg};font-weight:bold;margin-bottom:6px;color:${ownerColor};font-family:${FONT.family}">${displayKind}</div>
+      <div style="font-size:${FONT.sm};color:${COLORS.textSecondary};margin-bottom:4px;font-family:${FONT.family}">Owner: <span style="color:${ownerColor}">${ownerLabel}</span></div>
+      <div style="font-size:${FONT.sm};color:${COLORS.textSecondary};margin-bottom:4px;font-family:${FONT.family}">HP: <span style="color:${hpColor}">${pb.health}/${pb.maxHealth}</span> (${hpPct}%)</div>
+      ${garrisonLine}
       ${modifiers}
       ${DIV()}
-      <div style="font-size:11px;color:#aaa;margin-bottom:4px">Siege weapons deal full damage to buildings</div>
+      <div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family}">Siege weapons deal full damage to buildings</div>
       <div style="display:flex;gap:4px;flex-wrap:wrap">
         <span id="btt-attack" style="${B('#c0392b')}">${K('A')} Attack</span>
         <span id="btt-rally-to" style="${B('#2980b9')}">${K('F')} Rally Here</span>
@@ -804,7 +834,7 @@ export default class BuildingTooltipController {
       const networkLabel = netCount > 1 ? ` <span style="font-size:10px;color:#8e44ad">(${netCount} structures)</span>` : '';
 
       html += DIV();
-      html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">Garrison: <span style="color:${garrisonColor}">${gCount}/${gMax}</span>${networkLabel}</div>`;
+      html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family}">Garrison: <span style="color:${garrisonColor}">${gCount}/${gMax}</span>${networkLabel}</div>`;
 
       if (gCount > 0 && garrisonInfo) {
         // --- Unit type pills (toggleable for selective ungarrison) ---

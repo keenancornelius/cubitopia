@@ -145,7 +145,7 @@ function addWallSegments(
     // Center of segment shifted slightly toward the far end (because near
     // overlap is smaller than far overlap — the midpoint is biased outward)
     const bias = (overlapFar - overlapNear) / 2;
-    const centerT = 0.25; // fraction along the dx/dz line for center position
+    const centerT = 0.5; // fraction along the dx/dz line — true midpoint between hexes
     const midX = cn.dx * centerT + Math.sin(yawAngle) * bias * Math.cos(pitchAngle);
     const midZ = cn.dz * centerT + Math.cos(yawAngle) * bias * Math.cos(pitchAngle);
     const midY = halfDy * centerT + bias * Math.sin(pitchAngle);
@@ -399,7 +399,7 @@ function addGateBridgeSegments(
     const slopedHalf = Math.sqrt(halfDist * halfDist + halfDy * halfDy);
     const slopedLen = slopedHalf + overlapNear + overlapFar;
     const bias = (overlapFar - overlapNear) / 2;
-    const centerT = 0.25;
+    const centerT = 0.5; // fraction along the dx/dz line — true midpoint between hexes
     const midX = ag.dx * centerT + Math.sin(yawAngle) * bias * Math.cos(pitchAngle);
     const midZ = ag.dz * centerT + Math.cos(yawAngle) * bias * Math.cos(pitchAngle);
     const midY = halfDy * centerT + bias * Math.sin(pitchAngle);

@@ -23,7 +23,8 @@ import { injectUIThemeCSS, loadSavedSkin, setSkin } from './ui/UITheme';
 import { BaseRenderer } from './engine/BaseRenderer';
 import { CaptureZoneSystem } from './game/systems/CaptureZoneSystem';
 import type { CaptureEvent } from './game/systems/CaptureZoneSystem';
-import ResourceManager from './game/systems/ResourceManager';
+import ResourceManager, { ResourceManagerOps } from './game/systems/ResourceManager';
+import { ResourcePool } from './game/ResourcePool';
 import BuildingSystem from './game/systems/BuildingSystem';
 import WallSystem from './game/systems/WallSystem';
 import type { WallSystemOps } from './game/systems/WallSystem';
@@ -59,6 +60,7 @@ import { GAME_CONFIG } from './game/GameConfig';
 import { hexDist } from './game/HexMath';
 import { GameRNG } from './game/SeededRandom';
 import { getPlayerColor, getPlayerHex, getPlayerCSS, PLAYER_COLORS, NEUTRAL_OWNER } from './game/PlayerConfig';
+import { type TribeId, getTribe } from './game/TribeConfig';
 import { MultiplayerController } from './network';
 import { MultiplayerUI } from './ui/MultiplayerUI';
 import { processCommand, type CommandBridgeGame } from './network/CommandBridge';
@@ -148,6 +150,7 @@ class Cubitopia {
   private gameSpeed = 1;
   private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' = 'pvai';
   private mapType: MapType = MapType.STANDARD;
+  private playerTribe: TribeId = 'fantasy';
   private playerCount: number = 2;
   // debugOverlayContainer + debugOverlayLabels moved to DebugOverlayRenderer
   private resourceManager!: ResourceManager;
@@ -167,11 +170,13 @@ class Cubitopia {
   private _popInfoTimer = 0;
   private _unitById: Map<string, Unit> | null = null;
   private _enemyResCache: any = null;
+  private _ffaEnemyCache: any[] = [];
   private _aggroList: Array<{ attackerId: string; targetId: string }> | null = null;
   /** Accumulated kills from dead units — so team totals don't drop when a unit with kills dies */
   private _deadUnitKills: number[] = [0, 0];
   private _unitStatsPanelTimer = 0;
   private _selInfoTimer = 0;
+  private _lastSelectBarkId = '';
   private _spawnQueueHudTimer = 0;
   // Performance stats overlay
   private _perfOverlay: HTMLElement | null = null;
@@ -229,6 +234,9 @@ class Cubitopia {
     this.hud = new HUD();
     this.clock = new THREE.Clock();
     this.sound = new SoundManager();
+    this.captureZoneSystem.setOps({
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+    });
     this.music = new ProceduralMusic();
     this.debugPanel = new DebugPanel();
     this.debugOverlay = new DebugOverlayRenderer({
@@ -242,13 +250,14 @@ class Cubitopia {
       renderSquadIndicators: (squads, gameTime) => this.unitRenderer.updateSquadIndicators(squads, gameTime),
     });
     this.menuController = new MenuController({
-      onStartGame: (mode: 'pvai' | 'aivai' | 'ffa' | '2v2', mapType: MapType) => {
+      onStartGame: (mode: 'pvai' | 'aivai' | 'ffa' | '2v2', mapType: MapType, tribeId: TribeId) => {
         this.music.stopTitleMusic();
         this.music.resumeGameplay();
         this._stopTitleScene();
         this.hud.setVisible(true);
         this.gameMode = mode;
         this.mapType = mapType;
+        this.playerTribe = tribeId;
         this.startNewGame();
       },
       onPlayAgain: () => this.regenerateMap(),
@@ -746,6 +755,10 @@ class Cubitopia {
         targetUnitId: enemyAtTarget.id,
       });
       this.spawnClickIndicator(worldPos, 0xff2222, 1.0); // Red for attack
+      // Speech bubble: first selected unit barks an attack command
+      if (selected.length > 0) {
+        this.unitRenderer.triggerSpeechBubble(selected[0].id, selected[0].type, 'attack');
+      }
       return;
     }
 
@@ -912,6 +925,10 @@ class Cubitopia {
 
     // Visual click indicator
     this.spawnClickIndicator(worldPos, 0x4488ff, 0.8); // Blue for move
+    // Speech bubble: first selected unit barks a command acknowledgment
+    if (selected.length > 0) {
+      this.unitRenderer.triggerSpeechBubble(selected[0].id, selected[0].type, 'command');
+    }
     // Keep existing movement range flash
     const elev = this.getElevation(hexCoord);
     this.tileHighlighter.showMovementRange([hexCoord], () => elev);
@@ -1192,7 +1209,10 @@ class Cubitopia {
   /** Rebuild systems after state reset (e.g. regenerateMap) */
   private initSystems(): void {
     const ctx = this.buildGameContext();
-    this.resourceManager = new ResourceManager(ctx);
+    const resourceManagerOps = {
+      playSound: (name: string, vol?: number) => this.sound.play(name as any, vol),
+    };
+    this.resourceManager = new ResourceManager(ctx, resourceManagerOps);
 
     // BuildingSystem owns registry, mesh builders, and queries
     this.buildingSystem = new BuildingSystem(ctx);
@@ -1222,6 +1242,7 @@ class Cubitopia {
       getWallConnectable: () => this.buildingSystem.wallConnectable,
       getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
       unregisterBuilding: (pb) => this.buildingSystem.unregisterBuilding(pb),
+      playSound: (name, vol) => this.sound.play(name as any, vol),
     };
     this.wallSystem = new WallSystem(ctx, wallOps);
 
@@ -1313,6 +1334,7 @@ class Cubitopia {
         // Remove the wall
         this.wallSystem.damageWall(coord, 9999);
         this.garrisonSystem.markNetworkDirty();
+        this.sound.play('wall_destroy', 0.4);
         this.hud.showNotification(`Wall demolished (+${refund} stone)`, '#c0392b');
         this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
       },
@@ -1399,6 +1421,28 @@ class Cubitopia {
         this.hud.showNotification('All 5 squad slots are in use!', '#e74c3c');
         return null;
       },
+      getSquadCentroid: (squadSlot: number) => {
+        // Find all player-0 units in this squad and compute centroid
+        const units = this.allUnits.filter((u: Unit) => u.owner === 0 && u._squadId === squadSlot && (u.state as string) !== 'dead');
+        if (units.length === 0) return null;
+        let cx = 0, cy = 0, cz = 0;
+        for (const u of units) { cx += u.worldPosition.x; cy += u.worldPosition.y; cz += u.worldPosition.z; }
+        return { x: cx / units.length, y: cy / units.length, z: cz / units.length };
+      },
+      rallyBuildingToSquad: (buildingHexKey: string, buildingKind: string, squadSlot: number) => {
+        const centroid = tooltipOps.getSquadCentroid(squadSlot);
+        if (!centroid) {
+          this.hud.showNotification('Squad has no units to rally to!', '#e74c3c');
+          return;
+        }
+        // Convert world position to nearest hex for rally point
+        const q = Math.round(centroid.x / 1.5);
+        const zOffset = (q % 2 === 1) ? 0.75 : 0;
+        const r = Math.round((centroid.z - zOffset) / 1.5);
+        this.rallyPointSystem.setRallyPoint(buildingKind, { q, r });
+        const label = ['A', 'S', 'D', 'F', 'G'][squadSlot] ?? `${squadSlot}`;
+        this.hud.showNotification(`Rally set to Squad ${label} position`, '#2ecc71');
+      },
     };
     this.tooltipController = new BuildingTooltipController(ctx, tooltipOps);
 
@@ -1422,6 +1466,10 @@ class Cubitopia {
         return this.buildingSystem.placedBuildings
           .filter(pb => pb.kind === 'forestry' && !pb.isBlueprint)
           .map(pb => ({ q: pb.position.q, r: pb.position.r, owner: pb.owner }));
+      },
+      updateCropVisual: (key, stage) => {
+        this.terrainDecorator.updateCropVisual(key, stage);
+        this.blueprintSystem.updateCropVisual(key, stage);
       },
       addWoodToStockpile: (owner, amount) => {
         this.woodStockpile[owner] = (this.woodStockpile[owner] ?? 0) + amount;
@@ -1449,6 +1497,8 @@ class Cubitopia {
         this.unitRenderer.setWorldPosition(unit.id, unit.worldPosition.x, unit.worldPosition.y, unit.worldPosition.z);
       },
       fireArrow: (from, to, id, cb) => this.unitRenderer.fireArrow(from, to, id, cb),
+      fireArrowVolley: (from, to, count, cb) => this.unitRenderer.fireArrowVolley(from, to, count, cb),
+      fireCannonball: (from, to, cb) => this.unitRenderer.fireCannonball(from, to, cb),
       applyDamage: (target, damage) => {
         target.currentHealth = Math.max(0, target.currentHealth - damage);
         if (target.currentHealth <= 0) {
@@ -1460,6 +1510,9 @@ class Cubitopia {
       hexToWorld: (pos) => this.hexToWorld(pos),
       getAllUnits: () => this.allUnits,
       getElevation: (pos) => this.getElevation(pos),
+      addCannonTurret: (key, pos, color) => this.unitRenderer.addCannonTurret(key, pos, color),
+      removeCannonTurret: (key) => this.unitRenderer.removeCannonTurret(key),
+      setCannonTarget: (key, pos) => this.unitRenderer.setCannonTarget(key, pos),
       playSound: (name, vol) => this.sound.play(name as any, vol),
     };
     this.garrisonSystem = new GarrisonSystem(garrisonOps);
@@ -1540,6 +1593,13 @@ class Cubitopia {
       showXPText: (wp, xp) => this.unitRenderer.showXPText(wp, xp),
       showCritText: (wp, combo, dmg, color) => this.unitRenderer.showCritText(wp, combo, dmg, color),
       showLevelUpEffect: (id, wp, lvl) => this.unitRenderer.showLevelUpEffect(id, wp, lvl),
+      applyBleedTint: (id, hp) => this.unitRenderer.applyBleedTint(id, hp),
+      spawnGreatswordSpin: (wp) => this.unitRenderer.spawnGreatswordSpin(wp),
+      spawnJumpAttackImpact: (wp) => this.unitRenderer.spawnJumpAttackImpact(wp),
+      animateJumpAttack: (id) => this.unitRenderer.animateJumpAttack(id),
+      spawnPaladinChargeField: (id) => this.unitRenderer.spawnPaladinChargeField(id),
+      spawnPaladinImpactBurst: (wp) => this.unitRenderer.spawnPaladinImpactBurst(wp),
+      applyLevelUpVisuals: (id, lvl) => this.unitRenderer.applyLevelUpVisuals(id, lvl),
       playSound: (name, vol) => this.sound.play(name as any, vol),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
       updateResources: (player, w, f, s) => this.hud.updateResources(player, w, f, s),
@@ -1547,11 +1607,15 @@ class Cubitopia {
       getBuildingAt: (pos) => this.buildingSystem.getBuildingAt(pos),
       damageBarracks: (pos, dmg) => this.wallSystem.damageBarracks(pos, dmg),
       damageGate: (pos, dmg) => this.wallSystem.damageGate(pos, dmg),
-      damageWall: (pos, dmg) => this.wallSystem.damageWall(pos, dmg),
+      damageWall: (pos, dmg) => {
+        const destroyed = this.wallSystem.damageWall(pos, dmg);
+        if (destroyed) this.sound.play('wall_destroy', 0.5);
+        return destroyed;
+      },
       isGateAt: (key) => this.wallSystem.gatesBuilt.has(key),
       onStructureDestroyed: (key) => this.garrisonSystem.onStructureDestroyed(key),
-      handleBuildWall: (unit, pos) => { this.wallSystem.handleBuildWall(unit, pos); this.garrisonSystem.markNetworkDirty(); },
-      handleBuildGate: (unit, pos) => { this.wallSystem.handleBuildGate(unit, pos); this.garrisonSystem.markNetworkDirty(); },
+      handleBuildWall: (unit, pos) => { this.wallSystem.handleBuildWall(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === 0) this.sound.play('wall_build', 0.4); },
+      handleBuildGate: (unit, pos) => { this.wallSystem.handleBuildGate(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === 0) this.sound.play('wall_build', 0.3); },
       handleChopWood: (unit, pos) => this.handleChopWood(unit, pos),
       handleWoodDeposit: (unit) => this.resourceManager.handleWoodDeposit(unit),
       handleMineTerrain: (unit, pos) => this.handleMineTerrain(unit, pos),
@@ -1576,6 +1640,7 @@ class Cubitopia {
           this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
         }
       },
+      triggerSpeechBubble: (unitId, unitType, context) => this.unitRenderer.triggerSpeechBubble(unitId, unitType, context),
     });
 
     // Spawn queue system
@@ -1661,6 +1726,7 @@ class Cubitopia {
         return count;
       },
       hexDistance: hexDist,
+      playSound: (name, vol) => this.sound.play(name as any, vol),
     });
 
     // Population System — food-based population cap with morale
@@ -1678,8 +1744,8 @@ class Cubitopia {
       },
       getFarmhouseCount: (owner) => {
         let count = 0;
-        for (const [, bld] of this.buildingSystem.buildings) {
-          if (bld.kind === 'farmhouse' && bld.owner === owner && !bld.destroyed) count++;
+        for (const bld of this.buildingSystem.placedBuildings) {
+          if (bld.kind === 'farmhouse' && bld.owner === owner && !bld.isBlueprint && bld.health > 0) count++;
         }
         return count;
       },
@@ -1776,6 +1842,7 @@ class Cubitopia {
             this.wallSystem.placeWallDirect(pos, owner);
           }
         }
+        if (positions.length > 0) this.sound.play('wall_build', 0.35);
       },
 
       queueUnit: (unitType: string, buildingKind: string, owner: number) => {
@@ -1814,6 +1881,7 @@ class Cubitopia {
         if (buildingPosition) {
           const key = `${buildingPosition.q},${buildingPosition.r}`;
           this.garrisonSystem.garrison(units, key);
+          this.sound.play('garrison_enter', 0.4);
         }
       },
 
@@ -1821,6 +1889,7 @@ class Cubitopia {
         if (buildingPosition) {
           const key = `${buildingPosition.q},${buildingPosition.r}`;
           this.garrisonSystem.ungarrison(key);
+          this.sound.play('garrison_exit', 0.4);
         }
       },
 
@@ -1892,18 +1961,7 @@ class Cubitopia {
     this.players = [];
     this.bases = [];
     this.gameOver = false;
-    const _n = this.playerCount;
-    this.woodStockpile = Array(_n).fill(30); // Start with some wood so players can build immediately
-    this.stoneStockpile = Array(_n).fill(0);
-    this.goldStockpile = Array(_n).fill(0);
-    this.foodStockpile = Array(_n).fill(GAME_CONFIG.population.startingFood);
-    this.grassFiberStockpile = Array(_n).fill(0);
-    this.clayStockpile = Array(_n).fill(0);
-    this.ropeStockpile = Array(_n).fill(0);
-    this.ironStockpile = Array(_n).fill(0);
-    this.charcoalStockpile = Array(_n).fill(0);
-    this.steelStockpile = Array(_n).fill(0);
-    this.crystalStockpile = Array(_n).fill(0);
+    this.resetStockpiles(this.playerCount);
     this.wallSystem.cleanup();
     UnitAI.wallsBuilt.clear();
     UnitAI.wallOwners.clear();
@@ -1925,14 +1983,7 @@ class Cubitopia {
     this.tooltipController.cleanup();
     this.spawnQueueSystem.cleanup();
     this.garrisonSystem.cleanup();
-    this.foodStockpile = Array(this.playerCount).fill(GAME_CONFIG.population.startingFood);
-    this.stoneStockpile = Array(this.playerCount).fill(0);
-    this.grassFiberStockpile = Array(this.playerCount).fill(0);
-    this.clayStockpile = Array(this.playerCount).fill(0);
-    this.ropeStockpile = Array(this.playerCount).fill(0);
-    this.ironStockpile = Array(this.playerCount).fill(0);
-    this.charcoalStockpile = Array(this.playerCount).fill(0);
-    this.steelStockpile = Array(this.playerCount).fill(0);
+    this.resetStockpiles(this.playerCount);
     // Farm patch markers cleared by blueprintSystem.cleanup()
     UnitAI.farmPatches.clear();
     UnitAI.playerGrassBlueprint.clear();
@@ -1972,6 +2023,7 @@ class Cubitopia {
 
   /** Clean up old game state and start a new game without showing the main menu. */
   restartGame(): void {
+    this.sound.stopAmbient();
     this.voxelBuilder.clearAll();
     this.terrainDecorator.dispose();
     this.unitRenderer.dispose();
@@ -2061,52 +2113,52 @@ class Cubitopia {
     // Soft light fog instead of dark space fog
     scene.fog = new THREE.FogExp2(0xf0e8ff, 0.004); // very light lavender, gentle density
 
-    // Brighten ambient light
+    // Brighten ambient light — sky islands should feel radiant
     scene.traverse((child) => {
       if (child instanceof THREE.AmbientLight) {
         child.color.set(0xfff8ff); // warm white-pink
-        child.intensity = 0.7;     // brighter ambient
+        child.intensity = 0.85;    // bright ambient — above the clouds
       }
       if (child instanceof THREE.DirectionalLight && child.castShadow) {
         child.color.set(0xfffae8); // warm golden sun
-        child.intensity = 1.8;     // slightly softer than default 2.2
+        child.intensity = 2.0;     // bright unobstructed sunlight
       }
     });
   }
 
-  private applyVolcanicAtmosphere(): void {
+  private applyRiverCrossingAtmosphere(): void {
     const scene = this.renderer.scene;
 
-    // Dark apocalyptic sky gradient — deep red to smoky black
+    // Lush green-blue sky — river valley atmosphere
     const canvas = document.createElement('canvas');
     canvas.width = 2;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
     const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-    gradient.addColorStop(0, '#1a0505');   // near-black smoky zenith
-    gradient.addColorStop(0.2, '#2a0a08'); // very dark red
-    gradient.addColorStop(0.4, '#4a1510'); // dark crimson
-    gradient.addColorStop(0.6, '#6a2015'); // deep volcanic red
-    gradient.addColorStop(0.8, '#8a3020'); // glowing horizon red
-    gradient.addColorStop(1, '#aa4422');   // bright ember horizon
+    gradient.addColorStop(0, '#1a3a5a');   // deep blue zenith
+    gradient.addColorStop(0.3, '#3a6a8a'); // medium blue
+    gradient.addColorStop(0.5, '#5a9ab0'); // light blue
+    gradient.addColorStop(0.7, '#7abac8'); // pale sky blue
+    gradient.addColorStop(0.9, '#a0d4dd'); // horizon haze
+    gradient.addColorStop(1, '#c8e8ee');   // bright horizon
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 2, 256);
     const tex = new THREE.CanvasTexture(canvas);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     scene.background = tex;
 
-    // Heavy dark smoke/ember fog
-    scene.fog = new THREE.FogExp2(0x1a0808, 0.006);
+    // Light river mist fog
+    scene.fog = new THREE.FogExp2(0x8ab8c8, 0.003);
 
-    // Harsh volcanic lighting
+    // Soft natural lighting
     scene.traverse((child) => {
       if (child instanceof THREE.AmbientLight) {
-        child.color.set(0x4a2020); // dim reddish ambient
-        child.intensity = 0.5;
+        child.color.set(0x6a8a6a); // warm green-tinted ambient
+        child.intensity = 0.7;
       }
       if (child instanceof THREE.DirectionalLight && child.castShadow) {
-        child.color.set(0xff6030); // fiery orange-red sun
-        child.intensity = 2.5;    // harsh directional
+        child.color.set(0xffe8b0); // warm golden sun
+        child.intensity = 1.8;
       }
     });
   }
@@ -2195,15 +2247,15 @@ class Cubitopia {
     // Light snow haze — visibility is good but there's a cold mist
     scene.fog = new THREE.FogExp2(0xd8e4f0, 0.004);
 
-    // Cold bright lighting — harsh low-angle winter sun
+    // Cold desaturated lighting — overcast grey winter sky
     scene.traverse((child) => {
       if (child instanceof THREE.AmbientLight) {
-        child.color.set(0xd0e0f0); // cold blue-white ambient
-        child.intensity = 0.7;
+        child.color.set(0xc0d0e0); // cold grey-blue ambient
+        child.intensity = 0.55;    // dimmer — overcast
       }
       if (child instanceof THREE.DirectionalLight && child.castShadow) {
-        child.color.set(0xf0f4ff); // cool white sunlight
-        child.intensity = 1.8;
+        child.color.set(0xe8ecf4); // pale grey-white sunlight (filtered through clouds)
+        child.intensity = 1.4;     // weaker sun — heavy cloud cover
       }
     });
   }
@@ -2304,26 +2356,38 @@ class Cubitopia {
     // Determine player count from game mode
     this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
 
+    // Reset FFA enemy bar state so it rebuilds for new player count
+    this.hud.resetFfaEnemyBar();
+
     // Ensure AI and capture systems are sized for the player count
     this.aiController.ensurePlayerCount(this.playerCount);
     this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene, this.playerCount);
+    this.captureZoneSystem.setOps({
+      playSound: (name, vol) => this.sound.play(name as any, vol),
+    });
 
     // Apply map-specific decoration modes BEFORE setupMap so decorateTile uses correct mode
     this.terrainDecorator.desertMode = false;
     this.terrainDecorator.skylandMode = false;
-    this.terrainDecorator.volcanicMode = false;
+    this.terrainDecorator.riverCrossingMode = false;
     this.terrainDecorator.archipelagoMode = false;
     this.terrainDecorator.tundraMode = false;
+    this.terrainDecorator.ruinsMode = false;
+    this.terrainDecorator.badlandsMode = false;
     if (this.mapType === MapType.DESERT_TUNNELS) {
       this.terrainDecorator.desertMode = true;
     } else if (this.mapType === MapType.SKYLAND) {
       this.terrainDecorator.skylandMode = true;
-    } else if (this.mapType === MapType.VOLCANIC) {
-      this.terrainDecorator.volcanicMode = true;
+    } else if (this.mapType === MapType.RIVER_CROSSING) {
+      this.terrainDecorator.riverCrossingMode = true;
     } else if (this.mapType === MapType.ARCHIPELAGO) {
       this.terrainDecorator.archipelagoMode = true;
     } else if (this.mapType === MapType.TUNDRA) {
       this.terrainDecorator.tundraMode = true;
+    } else if (this.mapType === MapType.SUNKEN_RUINS) {
+      this.terrainDecorator.ruinsMode = true;
+    } else if (this.mapType === MapType.BADLANDS) {
+      this.terrainDecorator.badlandsMode = true;
     }
 
     // Step 1: Initialize map (terrain, bases, decorations)
@@ -2355,8 +2419,8 @@ class Cubitopia {
       this.skyCloudSystem = new SkyCloudSystem(this.renderer.scene);
       this.skyCloudSystem.build(MAP_SIZE);
       this.applySkylandAtmosphere();
-    } else if (this.mapType === MapType.VOLCANIC) {
-      this.applyVolcanicAtmosphere();
+    } else if (this.mapType === MapType.RIVER_CROSSING) {
+      this.applyRiverCrossingAtmosphere();
     } else if (this.mapType === MapType.ARCHIPELAGO) {
       this.applyArchipelagoAtmosphere();
     } else if (this.mapType === MapType.TUNDRA) {
@@ -2389,8 +2453,12 @@ class Cubitopia {
         technology: [],
         isAI: !isHuman,
         defeated: false,
+        tribeId: isHuman ? this.playerTribe : undefined,
       });
     }
+
+    // Register tribe assignments with the renderer so unit models use tribe palette colors
+    this.unitRenderer.setPlayerTribes(this.players);
 
     if (isArena) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
@@ -2578,6 +2646,9 @@ class Cubitopia {
       this.voxelBuilder.setSliceY(y);
       this.terrainDecorator.setDecorationClipPlane(y !== null ? this.voxelBuilder.getClipPlane() : null);
     };
+
+    // Start ambient soundscape (wind, birds, distant combat rumble)
+    this.sound.startAmbient();
   }
 
   // --- RTS Game Loop ---
@@ -2783,6 +2854,10 @@ class Cubitopia {
     }
     this.unitRenderer.updateAggroIndicators(aggroList, gameTime);
 
+    // Update ambient combat intensity based on number of active combats
+    const combatIntensity = Math.min(1, aggroList.length / 10);
+    this.sound.setAmbientCombatIntensity(combatIntensity);
+
     // ── Squad indicators: collect active squads and render labels + rings ──
     this.squadIndicatorSystem.update(gameTime);
 
@@ -2819,13 +2894,37 @@ class Cubitopia {
     }
 
     // Update enemy resource bar (reuse cached object to avoid per-frame allocation)
-    if (!this._enemyResCache) this._enemyResCache = { wood: 0, food: 0, stone: 0, iron: 0, crystal: 0, grassFiber: 0, clay: 0, charcoal: 0, rope: 0, steel: 0, gold: 0 };
-    const erc = this._enemyResCache;
-    erc.wood = this.woodStockpile[1]; erc.food = this.foodStockpile[1]; erc.stone = this.stoneStockpile[1];
-    erc.iron = this.ironStockpile[1]; erc.crystal = this.crystalStockpile[1]; erc.grassFiber = this.grassFiberStockpile[1];
-    erc.clay = this.clayStockpile[1]; erc.charcoal = this.charcoalStockpile[1]; erc.rope = this.ropeStockpile[1];
-    erc.steel = this.steelStockpile[1]; erc.gold = this.goldStockpile[1];
-    this.hud.updateEnemyResources(this.players[1], erc);
+    if (this.playerCount > 2) {
+      // FFA mode: show all enemy players' resources
+      if (!this._ffaEnemyCache) this._ffaEnemyCache = [];
+      const cache = this._ffaEnemyCache;
+      cache.length = 0;
+      for (let i = 1; i < this.playerCount; i++) {
+        const p = this.players[i];
+        if (!p) continue;
+        cache.push({
+          playerId: i,
+          name: HUD.TEAM_NAMES[i] || `Player ${i + 1}`,
+          color: getPlayerCSS(i),
+          units: p.units,
+          stockpiles: {
+            wood: this.woodStockpile[i], food: this.foodStockpile[i],
+            stone: this.stoneStockpile[i], iron: this.ironStockpile[i],
+            crystal: this.crystalStockpile[i], gold: this.goldStockpile[i],
+          },
+          defeated: p.defeated,
+        });
+      }
+      this.hud.updateFfaEnemyResources(cache);
+    } else {
+      if (!this._enemyResCache) this._enemyResCache = { wood: 0, food: 0, stone: 0, iron: 0, crystal: 0, grassFiber: 0, clay: 0, charcoal: 0, rope: 0, steel: 0, gold: 0 };
+      const erc = this._enemyResCache;
+      erc.wood = this.woodStockpile[1]; erc.food = this.foodStockpile[1]; erc.stone = this.stoneStockpile[1];
+      erc.iron = this.ironStockpile[1]; erc.crystal = this.crystalStockpile[1]; erc.grassFiber = this.grassFiberStockpile[1];
+      erc.clay = this.clayStockpile[1]; erc.charcoal = this.charcoalStockpile[1]; erc.rope = this.ropeStockpile[1];
+      erc.steel = this.steelStockpile[1]; erc.gold = this.goldStockpile[1];
+      this.hud.updateEnemyResources(this.players[1], erc);
+    }
 
     // Nature simulation (tree regrowth, grass growth/spread)
     if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
@@ -2854,7 +2953,15 @@ class Cubitopia {
 
     // Army strength comparison bar (throttled to 2Hz internally)
     if (this.players.length >= 2) {
-      this.hud.updateArmyStrength(this.players[0].units, this.players[1].units);
+      const allPlayersForBar = this.players.map((p, i) => ({
+        units: p.units,
+        color: getPlayerCSS(i),
+      }));
+      this.hud.updateArmyStrength(
+        this.players[0].units,
+        this.players[1].units,
+        this.players.length > 2 ? allPlayersForBar : undefined,
+      );
     }
 
     // Update wall build mode cost preview when in wall mode
@@ -2882,6 +2989,14 @@ class Cubitopia {
       const sel = this.selectionManager.getSelectedUnits();
       if (sel.length > 0) {
         this.hud.updateSelectionInfo(sel);
+        // Speech bubble: bark 'select' when selection changes (detect via lead unit id)
+        const leadId = sel[0].id;
+        if (leadId !== this._lastSelectBarkId) {
+          this._lastSelectBarkId = leadId;
+          this.unitRenderer.triggerSpeechBubble(sel[0].id, sel[0].type, 'select');
+        }
+      } else {
+        this._lastSelectBarkId = '';
       }
     }
   }
@@ -2988,9 +3103,12 @@ class Cubitopia {
           });
         }
 
+        this.sound.stopAmbient();
+        this.sound.play(isVictory ? 'victory' : 'defeat', 0.8);
         this.showGameOverScreen(winner, isVictory);
       }
     } else {
+      this.sound.play('zone_captured', 0.5);
       this.hud.showNotification(`${capturerName} captured an ${baseLabel}!`, capturerCSS);
     }
   }
@@ -3059,14 +3177,16 @@ class Cubitopia {
     this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats);
   }
 
-  // --- Wood stockpile per player: each tree = 4 wall blocks ---
-  private woodStockpile: number[] = [0, 0]; // Resized in startNewGame
+  // --- Centralized resource pool (backing store for all stockpiles) ---
+  private resourcePool = new ResourcePool(2);
+  // Legacy array references — point to ResourcePool's backing arrays for backward compatibility
+  private woodStockpile: number[] = this.resourcePool.array('wood');
   // Wall/gate state is managed by WallSystem (this.wallSystem)
 
   /** Y-level from slicer for troop commands — null means surface, number means underground */
   commandYLevel: number | null = null;
   // Interaction mode state fully managed by InteractionStateMachine (legacy getters removed 2026-04-01)
-  private stoneStockpile: number[] = [0, 0]; // Resized in startNewGame
+  private stoneStockpile: number[] = this.resourcePool.array('stone');
 
   // Query/registry methods are in BuildingSystem — accessed via this.buildingSystem.*
 
@@ -3087,6 +3207,8 @@ class Cubitopia {
       smelter: GAME_CONFIG.buildings.smelter.refund.wood,
       armory: GAME_CONFIG.buildings.armory.refund.wood,
       wizard_tower: GAME_CONFIG.buildings.wizard_tower.refund.wood,
+      mine: 3,
+      market: 3,
     };
     const refund = refunds[pb.kind] ?? 3;
     this.woodStockpile[0] += refund;
@@ -3232,7 +3354,7 @@ class Cubitopia {
   }
 
   // Placement mode flags & rotation → replaced by InteractionStateMachine
-  private foodStockpile: number[] = [0, 0]; // [player0, player1]
+  private foodStockpile: number[] = this.resourcePool.array('food');
   // clearedPlains moved to NatureSystem
 
   // Workshop, Smelter, Armory, Wizard Tower → placement managed by InteractionStateMachine
@@ -3241,14 +3363,36 @@ class Cubitopia {
   private _attackMoveIndicator: THREE.Mesh | null = null;
 
   // --- Grass Fiber, Clay, Rope Stockpiles ---
-  private grassFiberStockpile: number[] = [0, 0];
-  private clayStockpile: number[] = [0, 0];
-  private ropeStockpile: number[] = [0, 0];
-  private ironStockpile: number[] = [0, 0];
-  private charcoalStockpile: number[] = [0, 0];
-  private steelStockpile: number[] = [0, 0];
-  private crystalStockpile: number[] = [0, 0];
-  private goldStockpile: number[] = [0, 0];
+  private grassFiberStockpile: number[] = this.resourcePool.array('grass_fiber');
+  private clayStockpile: number[] = this.resourcePool.array('clay');
+  private ropeStockpile: number[] = this.resourcePool.array('rope');
+  private ironStockpile: number[] = this.resourcePool.array('iron');
+  private charcoalStockpile: number[] = this.resourcePool.array('charcoal');
+  private steelStockpile: number[] = this.resourcePool.array('steel');
+  private crystalStockpile: number[] = this.resourcePool.array('crystal');
+  private goldStockpile: number[] = this.resourcePool.array('gold');
+
+  /** Reset all stockpiles via ResourcePool and rebind legacy array references */
+  private resetStockpiles(playerCount: number): void {
+    this.resourcePool.reset(playerCount);
+    // Rebind all legacy array references to the new backing arrays
+    this.woodStockpile = this.resourcePool.array('wood');
+    this.stoneStockpile = this.resourcePool.array('stone');
+    this.foodStockpile = this.resourcePool.array('food');
+    this.grassFiberStockpile = this.resourcePool.array('grass_fiber');
+    this.clayStockpile = this.resourcePool.array('clay');
+    this.ropeStockpile = this.resourcePool.array('rope');
+    this.ironStockpile = this.resourcePool.array('iron');
+    this.charcoalStockpile = this.resourcePool.array('charcoal');
+    this.steelStockpile = this.resourcePool.array('steel');
+    this.crystalStockpile = this.resourcePool.array('crystal');
+    this.goldStockpile = this.resourcePool.array('gold');
+    // Set starting values
+    for (let i = 0; i < playerCount; i++) {
+      this.woodStockpile[i] = 30;
+      this.foodStockpile[i] = GAME_CONFIG.population.startingFood;
+    }
+  }
 
   // --- Nested Menu System ---
   // Category 0 = none, 1 = combat, 2 = economy, 3 = crafting
@@ -3330,6 +3474,18 @@ class Cubitopia {
             { key: 'Q', label: 'Trebuchet', action: 'spawn:workshop:TREBUCHET' },
             { key: 'W', label: 'Craft Rope', action: 'craft:rope' },
             { key: 'E', label: 'Sell Wood', action: 'action:sellWood' },
+          ],
+        },
+        {
+          kind: 'mine', label: 'Mine', color: '#8b8682',
+          actions: [
+            { key: 'Q', label: `+2g/tick (${GAME_CONFIG.buildings.mine.cost.player.wood}w+${GAME_CONFIG.buildings.mine.cost.player.stone}s)`, action: 'info' },
+          ],
+        },
+        {
+          kind: 'market', label: 'Market', color: '#daa520',
+          actions: [
+            { key: 'Q', label: 'Sell Wood', action: 'action:sellWood' },
           ],
         },
       ],
@@ -3508,6 +3664,8 @@ class Cubitopia {
     smelter:       { woodCost: GAME_CONFIG.buildings.smelter.cost.player.wood, stoneCost: GAME_CONFIG.buildings.smelter.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: `Smelter built! Smelt steel with [Z] (${GAME_CONFIG.economy.recipes.steel.input.iron} iron + ${GAME_CONFIG.economy.recipes.steel.input.charcoal} charcoal)` },
     armory:        { woodCost: GAME_CONFIG.buildings.armory.cost.player.wood, stoneCost: GAME_CONFIG.buildings.armory.cost.player.stone, steelCost: GAME_CONFIG.buildings.armory.cost.player.steel, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Armory built! Train advanced melee units [6-9]' },
     wizard_tower:  { woodCost: GAME_CONFIG.buildings.wizard_tower.cost.player.wood, stoneCost: GAME_CONFIG.buildings.wizard_tower.cost.player.stone, crystalCost: GAME_CONFIG.buildings.wizard_tower.cost.player.crystal, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Wizard Tower built! Train magic units [0, Shift+1-2]' },
+    mine:          { woodCost: GAME_CONFIG.buildings.mine.cost.player.wood, stoneCost: GAME_CONFIG.buildings.mine.cost.player.stone, allowedTerrain: [TerrainType.MOUNTAIN], notification: 'Mine built! Generates +2 gold per tick.' },
+    market:        { woodCost: GAME_CONFIG.buildings.market.cost.player.wood, stoneCost: GAME_CONFIG.buildings.market.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Market built! Trade routes generate gold per owned base.' },
   };
 
   /** Generic building placement — replaces 6 individual placeX methods */
@@ -3845,12 +4003,16 @@ class Cubitopia {
     if (UnitAI.farmPatches.has(key)) return;
     if (Pathfinder.blockedTiles.has(key)) return;
 
-    // Place farm patch
+    // Place farm patch — start at stage 0 (seedling), grows to stage 3 (harvestable)
     UnitAI.farmPatches.add(key);
+    UnitAI.cropStages.set(key, 0);
+    UnitAI.cropTimers.set(key, GAME_CONFIG.economy.harvest.crops.growTime ?? 8);
     this.natureSystem.clearedPlains.add(key);
 
-    // Add visual marker
+    // Add soil marker + initial crop seedling visual
     this.blueprintSystem.addFarmPatchMarker(coord);
+    this.terrainDecorator.updateCropVisual(key, 0);
+    this.hud.showNotification('🌱 Crops planted! They will grow over time.', '#4a7023');
   }
 
   /** Check if terrain is any water type (ocean, river, lake, or waterfall) */
@@ -3882,6 +4044,7 @@ class Cubitopia {
       this.terrainDecorator.updateGrass(rawDelta);
       this.terrainDecorator.flushBounds();
       this.unitRenderer.updateBillboards(this.camera.camera);
+      this.unitRenderer.updateSpeechBubbles(rawDelta);
       this.hud.update();
       this.debugOverlay.update();
       this.renderer.render(this.camera.camera);

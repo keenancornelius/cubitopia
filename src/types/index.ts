@@ -289,6 +289,16 @@ export interface Unit {
   _axeThrowTargets?: Set<string>;  // Set of target unit IDs already thrown at (once per unique target)
   _chaseBoostUntil?: number;       // Game frame until which berserker has chase speed boost
 
+  // --- Red bleed (wounded visual) ---
+  _bleedActive?: boolean;          // True once unit takes damage — persistent red tint for rest of fight
+
+  // --- Secondary melee attacks ---
+  _secondaryAttackCooldown?: number;  // Game frame when secondary attack becomes available again
+  _useSecondaryAttack?: boolean;      // Flag: next attack should use secondary animation
+  _paladinChargeReady?: boolean;      // Paladin: charge ability available (resets after cooldown)
+  _paladinChargeTarget?: HexCoord;    // Paladin: charge destination hex
+  _paladinRallyUntil?: number;        // Game frame until rally buff expires (speed + shield for nearby allies)
+
   // --- Elevation transition state (set by UnitAI, read by renderer for organic movement) ---
   _elevActive?: boolean;           // True while unit is in an elevation transition (Y is changing)
   _elevGoingUp?: boolean;          // True = climbing, False = descending
@@ -314,6 +324,7 @@ export enum UnitType {
   BATTLEMAGE = 'battlemage',
   GREATSWORD = 'greatsword',
   OGRE = 'ogre',
+  CHAMPION = 'champion',
 }
 
 /** Elemental damage types — mage-only for now */
@@ -366,6 +377,9 @@ export interface Player {
   technology: TechNode[];
   isAI: boolean;
   defeated: boolean;
+  /** Tribe identifier — determines visual palette, unit model overrides, building style.
+   *  Defaults to 'fantasy' (Ironveil). See TribeConfig.ts. */
+  tribeId?: string;
 }
 
 export interface PlayerResources {
@@ -452,7 +466,7 @@ export enum MapType {
   ARCHIPELAGO = 'archipelago',
   BADLANDS = 'badlands',
   DESERT_TUNNELS = 'desert_tunnels',
-  VOLCANIC = 'volcanic',
+  RIVER_CROSSING = 'river_crossing',
   TUNDRA = 'tundra',
   SKYLAND = 'skyland',
 }
@@ -499,7 +513,7 @@ export type EventCallback = (event: GameEvent) => void;
 
 // --- Building System Types ---
 
-export type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo' | 'smelter' | 'armory' | 'wizard_tower';
+export type BuildingKind = 'barracks' | 'forestry' | 'masonry' | 'farmhouse' | 'workshop' | 'silo' | 'smelter' | 'armory' | 'wizard_tower' | 'mine' | 'market';
 
 export interface PlacedBuilding {
   id: string;

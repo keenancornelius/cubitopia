@@ -38,6 +38,8 @@ export interface WallSystemOps {
   getBuildingAt(pos: HexCoord): PlacedBuilding | null;
   /** Unregister a destroyed building */
   unregisterBuilding(pb: PlacedBuilding): void;
+  /** Play a sound effect */
+  playSound(name: string, volume?: number): void;
 }
 
 // --- Damage visual constants ---
@@ -152,6 +154,7 @@ export default class WallSystem {
     }
 
     this.ops.updateStockpileVisual(unit.owner);
+    this.ops.playSound('wall_build', 0.5);
   }
 
   handleBuildGate(unit: Unit, gatePos: HexCoord): void {
@@ -206,6 +209,7 @@ export default class WallSystem {
     }
 
     this.ops.updateStockpileVisual(unit.owner);
+    this.ops.playSound('wall_build', 0.5);
   }
 
   // --- Direct Placement (arena/scenario — skips resource checks) ---
@@ -289,6 +293,7 @@ export default class WallSystem {
         }
       }
 
+      this.ops.playSound('wall_destroy', 0.5);
       return true;
     } else {
       this.wallHealth.set(key, newHealth);
@@ -340,6 +345,7 @@ export default class WallSystem {
         }
       }
 
+      this.ops.playSound('wall_destroy', 0.5);
       return true;
     } else {
       this.gateHealth.set(key, newHealth);

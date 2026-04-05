@@ -38,7 +38,7 @@ export const MUSIC_GENRES: MusicGenre[] = [
     description: 'Tanks, mages, and healers — outlast through steel and sorcery',
     color: '#7f8c8d',
     icon: '\uD83D\uDEE1\uFE0F',  // 🛡️
-    folder: 'fantasy',
+    folder: 'Ironveil',
     peacefulCount: 8,
     combatCount: 6,
   },
@@ -362,7 +362,7 @@ export class ProceduralMusic {
 
     // Build track URLs from genre folder
     const genre = MUSIC_GENRES.find(g => g.id === this._currentGenre);
-    const folder = genre ? `music/${genre.folder}` : 'music/fantasy';
+    const folder = genre ? `music/${genre.folder}` : 'music/Ironveil';
     const maxPeaceful = genre?.peacefulCount ?? 8;
     const maxCombat = genre?.combatCount ?? 6;
 
@@ -591,7 +591,7 @@ export class ProceduralMusic {
 
     // Load title track if not cached or genre changed
     const genre = MUSIC_GENRES.find(g => g.id === this._currentGenre);
-    const genreFolder = genre?.folder ?? 'fantasy';
+    const genreFolder = genre?.folder ?? 'Ironveil';
     if ((!this._titleBuffer || this._titleGenre !== this._currentGenre) && !this._titleLoading) {
       this._titleLoading = true;
       this._titleBuffer = null; // Clear stale buffer

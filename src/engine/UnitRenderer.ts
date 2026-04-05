@@ -4,7 +4,10 @@ import { UnitAnimations } from './UnitAnimations';
 import { UnitModels } from './UnitModels';
 import { ProjectileSystem } from './ProjectileSystem';
 import { getPlayerHex } from '../game/PlayerConfig';
+import { TRIBE_BY_ID, type TribeId, type TribeConfig } from '../game/TribeConfig';
 import { UnitVFX } from './UnitVFX';
+import { SpeechBubbleSystem } from './SpeechBubbleSystem';
+import type { DialogueContext } from './UnitDialogue';
 
 export interface UnitMeshGroup {
   group: THREE.Group;
@@ -56,6 +59,7 @@ export class UnitRenderer {
   private readonly animations: UnitAnimations;
   private readonly projectileSystem: ProjectileSystem;
   private readonly vfx: UnitVFX;
+  private readonly speechBubbles: SpeechBubbleSystem;
   private aggroLines: Map<string, THREE.Line> = new Map();
   private aggroRings: Map<string, THREE.Mesh> = new Map();
   private squadRings: Map<string, THREE.Mesh> = new Map();
@@ -69,12 +73,31 @@ export class UnitRenderer {
     UnitType.GREATSWORD,
   ]);
   private strafePhases: Map<string, number> = new Map();
+  /** Per-player tribe color override (unused — team colors remain primary). */
+  private playerTribeColors: Map<number, number> = new Map();
+  /** Per-player tribe config for model skinning. */
+  private playerTribeConfigs: Map<number, TribeConfig> = new Map();
+
+  /** Register tribe assignments for all players. Call after game start.
+   *  Stores tribe configs so UnitModels can apply tribe-specific armor/accent/trim
+   *  colors. Does NOT override playerColor — team colors remain primary identifier. */
+  setPlayerTribes(players: Array<{ id: number; tribeId?: string }>): void {
+    this.playerTribeColors.clear();
+    this.playerTribeConfigs.clear();
+    for (const p of players) {
+      if (p.tribeId) {
+        const tribe = TRIBE_BY_ID.get(p.tribeId as TribeId);
+        if (tribe) this.playerTribeConfigs.set(p.id, tribe);
+      }
+    }
+  }
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
     this.models = new UnitModels(scene);
     this.vfx = new UnitVFX(scene, { getUnitMeshes: () => this.unitMeshes });
     this.projectileSystem = new ProjectileSystem(scene, { getUnitMeshes: () => this.unitMeshes });
+    this.speechBubbles = new SpeechBubbleSystem(scene, { getUnitMeshes: () => this.unitMeshes });
     this.animations = new UnitAnimations(scene, {
       getUnitMeshes: () => this.unitMeshes,
       spawnSwingTrail: (unitId, trailType, time) => this.vfx.spawnSwingTrail(unitId, trailType, time),
@@ -94,8 +117,13 @@ export class UnitRenderer {
     const group = new THREE.Group();
     const pos = this.hexToWorld(unit.position, elevation);
     group.position.copy(pos);
-    const playerColor = PLAYER_COLORS[unit.owner % PLAYER_COLORS.length];
-    this.models.buildUnitModel(group, unit.type, playerColor);
+    const playerColor = this.playerTribeColors.get(unit.owner)
+      ?? PLAYER_COLORS[unit.owner % PLAYER_COLORS.length];
+    const tribeConf = this.playerTribeConfigs.get(unit.owner);
+    const tribeSkin = tribeConf
+      ? { secondary: tribeConf.palette.secondary, accent: tribeConf.palette.accent, trim: tribeConf.palette.trim }
+      : undefined;
+    this.models.buildUnitModel(group, unit.type, playerColor, tribeSkin);
     const isSiege = unit.type === UnitType.TREBUCHET;
     const label = this.createLabel(unit.type);
     label.position.y = isSiege ? 2.5 : 1.4;
@@ -464,6 +492,11 @@ export class UnitRenderer {
     this.animations.animatePreviewGroup(group, unitType, state, time);
   }
 
+  /** Clear preview animation state — call when debug preview is destroyed */
+  clearPreviewAnimation(): void {
+    this.animations.clearPreviewEntry();
+  }
+
   fireArrow(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, targetUnitId?: string, onImpact?: () => void): void {
     this.projectileSystem.fireArrow(fromPos, toPos, targetUnitId, onImpact);
   }
@@ -502,6 +535,22 @@ export class UnitRenderer {
 
   fireCannonball(fromPos: { x: number; y: number; z: number }, toPos: { x: number; y: number; z: number }, onImpact?: () => void): void {
     this.projectileSystem.fireCannonball(fromPos, toPos, onImpact);
+  }
+
+  addCannonTurret(buildingKey: string, worldPos: { x: number; y: number; z: number }, playerColor?: number): void {
+    this.projectileSystem.addCannonTurret(buildingKey, worldPos, playerColor);
+  }
+
+  removeCannonTurret(buildingKey: string): void {
+    this.projectileSystem.removeCannonTurret(buildingKey);
+  }
+
+  setCannonTarget(buildingKey: string, targetPos: { x: number; y: number; z: number } | null): void {
+    this.projectileSystem.setCannonTarget(buildingKey, targetPos);
+  }
+
+  hasCannonTurret(buildingKey: string): boolean {
+    return this.projectileSystem.hasCannonTurret(buildingKey);
   }
 
   spawnElectrocuteEffect(unitId: string): void {
@@ -584,13 +633,56 @@ export class UnitRenderer {
     this.vfx.showLevelUpEffect(unitId, worldPos, newLevel);
   }
 
+  applyBleedTint(unitId: string, healthPercent: number): void {
+    this.vfx.applyBleedTint(unitId, healthPercent);
+  }
+
+  // Secondary melee attack VFX
+  spawnGreatswordSpin(worldPos: { x: number; y: number; z: number }): void {
+    this.vfx.spawnGreatswordSpin(worldPos);
+  }
+  spawnJumpAttackImpact(worldPos: { x: number; y: number; z: number }): void {
+    this.vfx.spawnJumpAttackImpact(worldPos);
+  }
+  animateJumpAttack(unitId: string): void {
+    this.vfx.animateJumpAttack(unitId);
+  }
+  spawnPaladinChargeField(unitId: string): void {
+    this.vfx.spawnPaladinChargeField(unitId);
+  }
+  spawnPaladinImpactBurst(worldPos: { x: number; y: number; z: number }): void {
+    this.vfx.spawnPaladinImpactBurst(worldPos);
+  }
+  applyLevelUpVisuals(unitId: string, newLevel: number): void {
+    this.vfx.applyLevelUpVisuals(unitId, newLevel);
+  }
+
   updateBillboards(camera: THREE.Camera): void {
     this.vfx.updateBillboards(camera);
+  }
+
+  // ── Speech Bubble facade ──────────────────────────────
+  /** Trigger a speech bubble + voice bark on a unit (throttled internally). */
+  triggerSpeechBubble(unitId: string, unitType: UnitType, context: DialogueContext): void {
+    this.speechBubbles.trigger(unitId, unitType, context);
+  }
+  /** Call per-frame to animate active speech bubbles. */
+  updateSpeechBubbles(time: number): void {
+    this.speechBubbles.update(time);
+  }
+  /** Enable/disable text-to-speech voice output. */
+  setSpeechTTSEnabled(enabled: boolean): void {
+    this.speechBubbles.setTTSEnabled(enabled);
+  }
+  /** Set speech volume (0–1). */
+  setSpeechVolume(vol: number): void {
+    this.speechBubbles.setSpeechVolume(vol);
   }
 
   dispose(): void {
     this.projectileSystem.dispose();
     this.vfx.dispose();
+    this.speechBubbles.cleanup();
     for (const unitId of [...this.unitMeshes.keys()]) {
       this.removeUnit(unitId);
     }

@@ -56,11 +56,11 @@ const ALL_MAP_PRESETS: MapPreset[] = [
     color: '#d4a056',
   },
   {
-    type: MapType.VOLCANIC,
-    label: 'VOLCANIC PASS',
-    description: 'Narrow chokepoints between towering peaks and lava lakes — control the passes or die',
+    type: MapType.RIVER_CROSSING,
+    label: 'RIVER CROSSING',
+    description: 'A wide river bisects the map — control the bridge crossings or get stranded',
     size: 50,
-    color: '#c0392b',
+    color: '#2980b9',
   },
   {
     type: MapType.TUNDRA,
@@ -178,9 +178,11 @@ export function generateArenaMap(size: number, seed?: number): ArenaMap {
         explored: true,
       });
 
-      // Compute wall ring positions
+      // Compute wall ring positions — tighter radius to avoid grabbing
+      // tiles from adjacent elevation zones (floor=0, tiers=2+), which
+      // caused extreme pitch angles and "arched" wall segments.
       const ringDist = Math.abs(dist - wallRadius);
-      if (ringDist < 0.8 && terrain !== TerrainType.WATER) {
+      if (ringDist < 0.6 && terrain !== TerrainType.WATER) {
         const dq = q - center;
         const dr = r - center;
         // Gates at 4 cardinal entries
@@ -189,6 +191,25 @@ export function generateArenaMap(size: number, seed?: number): ArenaMap {
           (dr > floorRadius - 0.5 && Math.abs(dq) <= 1) ||   // South
           (dq > floorRadius - 0.5 && Math.abs(dr) <= 1) ||   // East
           (dq < -floorRadius + 0.5 && Math.abs(dr) <= 1);    // West
+
+        // Force wall/gate tiles to uniform elevation 1 — prevents
+        // sloped wall segments from tiles straddling elevation zones
+        const tileRef = tiles.get(key);
+        if (tileRef && tileRef.elevation !== 1) {
+          tileRef.elevation = 1;
+          tileRef.walkableFloor = 1;
+          if (tileRef.voxelData) {
+            tileRef.voxelData.blocks = [];
+            for (let y = -1; y <= 1; y++) {
+              tileRef.voxelData.blocks.push({
+                localPosition: { x: 0, y, z: 0 },
+                type: y === 1 ? BlockType.STONE : (y >= 0 ? BlockType.STONE : BlockType.DIRT),
+                health: 100, maxHealth: 100,
+              });
+            }
+            tileRef.voxelData.heightMap = [[1]];
+          }
+        }
 
         if (isGate) {
           gateRing.push({ q, r });
@@ -246,13 +267,13 @@ export const MAP_GEN_PARAMS: Partial<Record<MapType, MapGenParams>> = {
     mountainClusters: [0, 1],
     riverCount: [2, 4],
   },
-  [MapType.VOLCANIC]: {
-    elevScale: [0.10, 0.16],
-    mountainWeight: [0.35, 0.55],
-    valleyWeight: [0.25, 0.40],
-    waterLevel: 0.30,
-    mountainClusters: [6, 10],
-    riverCount: [0, 1],
+  [MapType.RIVER_CROSSING]: {
+    elevScale: [0.06, 0.10],
+    mountainWeight: [0.08, 0.15],
+    valleyWeight: [0.05, 0.10],
+    waterLevel: 0.20,
+    mountainClusters: [1, 3],
+    riverCount: [0, 0],  // river placed procedurally by custom generator
   },
   [MapType.TUNDRA]: {
     elevScale: [0.06, 0.10],
@@ -766,9 +787,9 @@ export function generateSkylandMap(size: number, seed?: number, playerCount: num
   });
 
   // Outpost islands: more for FFA to give more strategic points
-  // 2-player: 4-6 outposts, 4-player: 5-8 outposts
-  const numOutposts = playerCount <= 2 ? rng.range(4, 6) : rng.range(5, 8);
-  const maxSpread = size * 0.38;
+  // 2-player: 5-7 outposts, 4-player: 6-9 outposts (increased for more strategic variety)
+  const numOutposts = playerCount <= 2 ? rng.range(5, 7) : rng.range(6, 9);
+  const maxSpread = size * 0.42; // wider spread for less clustered islands
   const angleOffset = rng.next() * Math.PI * 2;
   const outpostResources: ResourceType[][] = [
     [ResourceType.WOOD, ResourceType.FOOD],
@@ -795,13 +816,13 @@ export function generateSkylandMap(size: number, seed?: number, playerCount: num
     // Ensure minimum distance from existing islands
     const tooClose = islands.some(isl => {
       const d = Math.sqrt((iq - isl.center.q) ** 2 + (ir - isl.center.r) ** 2);
-      return d < isl.radius + 4;
+      return d < isl.radius + 5; // slightly larger minimum spacing
     });
     if (tooClose) continue;
 
     islands.push({
       center: { q: iq, r: ir },
-      radius: rng.range(3, 5),
+      radius: rng.range(4, 6), // larger outposts for more buildable area
       elevation: rng.range(2, 4),
       role: 'outpost',
       resources: outpostResources[i % outpostResources.length],
@@ -914,11 +935,11 @@ export function generateSkylandMap(size: number, seed?: number, playerCount: num
           // Scatter remaining resources
           if (edgeFactor < 0.7) {
             const RESOURCE_RATES: Partial<Record<ResourceType, number>> = {
-              [ResourceType.FOOD]: 0.10,
-              [ResourceType.STONE]: 0.06,
-              [ResourceType.IRON]: 0.04,
-              [ResourceType.CRYSTAL]: 0.03,
-              [ResourceType.GOLD]: 0.03,
+              [ResourceType.FOOD]: 0.12,
+              [ResourceType.STONE]: 0.10,
+              [ResourceType.IRON]: 0.12,
+              [ResourceType.CRYSTAL]: 0.10,
+              [ResourceType.GOLD]: 0.06,
             };
             for (const res of island.resources) {
               if (res === ResourceType.WOOD) continue;
@@ -1037,8 +1058,8 @@ export function generateSkylandMap(size: number, seed?: number, playerCount: num
     bridgeData.push({ from: edge.from, to: edge.to, tiles: bridgeTiles });
   }
 
-  // Add 1-2 extra bridge connections for alternate routes
-  const extraBridges = rng.range(1, 2);
+  // Add 2-3 extra bridge connections for alternate routes (more strategic options)
+  const extraBridges = rng.range(2, 3);
   for (let e = 0; e < extraBridges; e++) {
     const a = rng.range(0, islands.length - 1);
     let b = rng.range(0, islands.length - 1);
@@ -1222,48 +1243,68 @@ function makeTile(q: number, r: number, terrain: TerrainType, elevation: number,
 }
 
 // ============================================
-// VOLCANIC PASS MAP GENERATOR
-// Volcanic wasteland with towering basalt peaks, lava rivers,
-// obsidian formations, ash plains, and narrow passes.
+// RIVER CROSSING MAP GENERATOR
+// A wide river bisects the map with limited bridge crossings.
+// Players start on opposite banks. Bridges are chokepoints.
+// Resource asymmetry encourages crossing (iron-heavy vs wood-heavy).
 // ============================================
 
-export interface VolcanicMap extends GameMap {
-  volcanoes: Array<{ q: number; r: number; radius: number; height: number }>;
-  lavaRivers: Array<HexCoord[]>;
+export interface RiverCrossingMap extends GameMap {
+  riverTiles: Set<string>;
+  bridges: Array<{ center: HexCoord; width: number }>;
 }
 
-class VolcRng {
+class RiverRng {
   private state: number;
   constructor(seed: number) { this.state = seed; }
   next(): number {
-    this.state = (this.state * 16807 + 0) % 2147483647;
-    return (this.state & 0xffffff) / 0xffffff;
+    this.state = (this.state * 16807 + 12345) & 0x7fffffff;
+    return this.state / 0x7fffffff;
   }
   range(min: number, max: number): number {
     return min + Math.floor(this.next() * (max - min + 1));
   }
 }
 
-class VolcNoise {
+class RiverNoise {
   private perm: number[];
   constructor(seed: number) {
     this.perm = [];
     let s = seed;
     for (let i = 0; i < 256; i++) {
-      s = (s * 16807 + 0) % 2147483647;
-      this.perm.push(s);
+      s = (s * 16807 + 12345) & 0x7fffffff;
+      this.perm.push(i);
+    }
+    for (let i = 255; i > 0; i--) {
+      s = (s * 16807 + 12345) & 0x7fffffff;
+      const j = s % (i + 1);
+      [this.perm[i], this.perm[j]] = [this.perm[j], this.perm[i]];
     }
   }
+  private fade(t: number) { return t * t * t * (t * (t * 6 - 15) + 10); }
+  private lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
+  private grad(hash: number, x: number, y: number) {
+    const h = hash & 3;
+    const u = h < 2 ? x : y;
+    const v = h < 2 ? y : x;
+    return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+  }
   noise2d(x: number, y: number): number {
-    const ix = Math.floor(x) & 255;
-    const iy = Math.floor(y) & 255;
-    const fx = x - Math.floor(x);
-    const fy = y - Math.floor(y);
-    const sx = fx * fx * (3 - 2 * fx);
-    const sy = fy * fy * (3 - 2 * fy);
-    const h = (a: number, b: number) => (this.perm[(this.perm[a & 255] + b) & 255] & 0xffffff) / 0xffffff;
-    return h(ix, iy) * (1 - sx) * (1 - sy) + h(ix + 1, iy) * sx * (1 - sy) +
-           h(ix, iy + 1) * (1 - sx) * sy + h(ix + 1, iy + 1) * sx * sy;
+    const X = Math.floor(x) & 255;
+    const Y = Math.floor(y) & 255;
+    const xf = x - Math.floor(x);
+    const yf = y - Math.floor(y);
+    const u = this.fade(xf);
+    const v = this.fade(yf);
+    const aa = this.perm[(this.perm[X] + Y) & 255];
+    const ab = this.perm[(this.perm[X] + Y + 1) & 255];
+    const ba = this.perm[(this.perm[(X + 1) & 255] + Y) & 255];
+    const bb = this.perm[(this.perm[(X + 1) & 255] + Y + 1) & 255];
+    return this.lerp(
+      this.lerp(this.grad(aa, xf, yf), this.grad(ba, xf - 1, yf), u),
+      this.lerp(this.grad(ab, xf, yf - 1), this.grad(bb, xf - 1, yf - 1), u),
+      v,
+    );
   }
   fbm(x: number, y: number, octaves: number): number {
     let val = 0, amp = 1, freq = 1, max = 0;
@@ -1271,152 +1312,173 @@ class VolcNoise {
       val += this.noise2d(x * freq, y * freq) * amp;
       max += amp; amp *= 0.5; freq *= 2;
     }
-    return val / max;
+    return (val / max + 1) * 0.5; // normalise to 0..1
   }
 }
 
-export function generateVolcanicMap(size: number, seed?: number, playerCount: number = 2): VolcanicMap {
+export function generateRiverCrossingMap(size: number, seed?: number, playerCount: number = 2): RiverCrossingMap {
   const actualSeed = seed ?? GameRNG.rng.nextRange(0, 999999);
-  const rng = new VolcRng(actualSeed);
-  const noise = new VolcNoise(actualSeed);
+  const rng = new RiverRng(actualSeed);
+  const noise = new RiverNoise(actualSeed);
   const tiles = new Map<string, Tile>();
   const offsets = [-0.5, 0, 0.5]; // 3x3 sub-voxel for solid rendering
-
-  // ── Step 1: Place volcanic peaks ──
-  // Central ridge runs diagonally with additional scattered volcanic cones
-  const volcanoes: Array<{ q: number; r: number; radius: number; height: number }> = [];
+  const riverTiles = new Set<string>();
   const center = Math.floor(size / 2);
 
-  // Central mega-volcano
-  volcanoes.push({ q: center, r: center, radius: 7, height: 12 });
+  // ── Step 1: Define the river path ──
+  // River runs roughly from one edge to the opposite, with meandering
+  // The river bisects the map — players spawn on opposite sides
+  const RIVER_WIDTH = 3; // base river width in hexes (will vary with noise)
+  const bridgeCount = rng.range(2, 4);
+  const bridges: Array<{ center: HexCoord; width: number }> = [];
 
-  // Ridge volcanoes along diagonal
-  const ridgeCount = rng.range(3, 5);
-  for (let i = 0; i < ridgeCount; i++) {
-    const t = (i + 1) / (ridgeCount + 1);
-    const rq = Math.floor(size * 0.15 + t * size * 0.7) + rng.range(-3, 3);
-    const rr = Math.floor(size * 0.85 - t * size * 0.7) + rng.range(-3, 3);
-    volcanoes.push({ q: rq, r: rr, radius: rng.range(4, 6), height: rng.range(8, 11) });
+  // River flows roughly along the r-axis center (left to right through the map)
+  // with noise-based meandering
+  const riverCenterR: number[] = [];
+  const baseR = center;
+  for (let q = 0; q < size; q++) {
+    const meander = noise.fbm(q * 0.06 + 500, 0.5, 3) * 2 - 1; // -1 to 1
+    riverCenterR[q] = baseR + Math.round(meander * 6); // ±6 hex meander
   }
 
-  // Scattered smaller volcanic cones
-  const coneCount = rng.range(4, 7);
-  for (let i = 0; i < coneCount; i++) {
-    const cq = rng.range(4, size - 5);
-    const cr = rng.range(4, size - 5);
-    // Don't overlap with existing volcanoes too much
-    const tooClose = volcanoes.some(v => Math.sqrt((cq - v.q) ** 2 + (cr - v.r) ** 2) < v.radius + 3);
-    if (!tooClose) {
-      volcanoes.push({ q: cq, r: cr, radius: rng.range(2, 4), height: rng.range(5, 8) });
+  // Place bridges at evenly spaced intervals along the river
+  const bridgeSpacing = Math.floor(size / (bridgeCount + 1));
+  for (let i = 0; i < bridgeCount; i++) {
+    const bq = bridgeSpacing * (i + 1) + rng.range(-2, 2);
+    const clampedQ = Math.max(4, Math.min(size - 5, bq));
+    const br = riverCenterR[clampedQ] ?? baseR;
+    const bWidth = rng.range(2, 3);
+    bridges.push({ center: { q: clampedQ, r: br }, width: bWidth });
+  }
+
+  // Helper: is a tile within a bridge zone?
+  const isOnBridge = (q: number, r: number): boolean => {
+    for (const b of bridges) {
+      const dq = Math.abs(q - b.center.q);
+      const dr = Math.abs(r - b.center.r);
+      if (dq <= b.width && dr <= 1) return true;
     }
-  }
+    return false;
+  };
 
-  // ── Step 2: Generate base terrain for all tiles ──
+  // Helper: distance from river center for a given tile
+  const riverDistAt = (q: number, r: number): number => {
+    const rc = riverCenterR[q] ?? baseR;
+    return Math.abs(r - rc);
+  };
+
+  // ── Step 2: Generate base terrain ──
   for (let q = 0; q < size; q++) {
     for (let r = 0; r < size; r++) {
       const key = `${q},${r}`;
+      const nx = q * 0.08;
+      const ny = r * 0.08;
 
-      // Base elevation from noise
-      const baseNoise = noise.fbm(q * 0.08, r * 0.08, 3);
-      let elev = 2 + Math.round(baseNoise * 3);
+      // Base elevation from noise — gentle rolling terrain
+      const baseElev = noise.fbm(nx, ny, 3);
+      const hillNoise = noise.fbm(q * 0.04 + 200, r * 0.04 + 200, 2);
+      let elev = Math.round(baseElev * 4 + hillNoise * 2 + 5);
+      elev = Math.max(4, Math.min(elev, 10));
 
-      // Volcanic influence — peaks raise nearby terrain
-      let volcInfluence = 0;
-      let closestVolcDist = Infinity;
-      let closestVolc: typeof volcanoes[0] | null = null;
-      for (const v of volcanoes) {
-        const dist = Math.sqrt((q - v.q) ** 2 + (r - v.r) ** 2);
-        if (dist < closestVolcDist) {
-          closestVolcDist = dist;
-          closestVolc = v;
-        }
-        if (dist < v.radius * 2) {
-          const factor = 1 - dist / (v.radius * 2);
-          volcInfluence = Math.max(volcInfluence, factor);
-        }
-      }
+      const rDist = riverDistAt(q, r);
+      const onBridge = isOnBridge(q, r);
+      const widthNoise = noise.fbm(q * 0.15 + 700, r * 0.15 + 700, 2);
+      const localWidth = RIVER_WIDTH + Math.round(widthNoise * 2); // 3-5 hex width
 
-      // Terrain zone noise
+      // Zone noise for terrain variety
       const zoneNoise = noise.fbm(q * 0.12 + 100, r * 0.12 + 100, 2);
-      const lavaNoiseVal = noise.fbm(q * 0.2 + 300, r * 0.2 + 300, 3);
+      const forestNoise = noise.fbm(q * 0.15 + 150, r * 0.15 + 150, 2);
 
-      // Determine terrain type and blocks
-      let terrain = TerrainType.MOUNTAIN;
-      let topBlock = BlockType.BASALT;
-      let subBlock = BlockType.BASALT;
+      let terrain: TerrainType;
+      let topBlock: BlockType;
+      let subBlock: BlockType;
       let resource: ResourceType | null = null;
 
-      // Inside volcano cone — steep peak
-      if (closestVolc && closestVolcDist < closestVolc.radius) {
-        const peakFactor = 1 - closestVolcDist / closestVolc.radius;
-        elev = closestVolc.height - 2 + Math.round(peakFactor * 4);
-        // Very center of volcano = crater (lower)
-        if (closestVolcDist < 1.5) {
-          elev = closestVolc.height - 3;
-          topBlock = BlockType.MAGMA;
-          subBlock = BlockType.OBSIDIAN;
+      // ── River tiles (water) ──
+      if (rDist <= localWidth && !onBridge) {
+        terrain = TerrainType.WATER;
+        topBlock = BlockType.WATER;
+        subBlock = BlockType.SAND;
+        elev = 2; // shallow river floor
+        riverTiles.add(key);
+      }
+      // ── Bridge tiles — land crossing over river ──
+      else if (rDist <= localWidth && onBridge) {
+        terrain = TerrainType.PLAINS;
+        topBlock = BlockType.STONE;
+        subBlock = BlockType.STONE;
+        elev = 4; // raised bridge surface
+      }
+      // ── Riverbank (1-2 hexes from water) ──
+      else if (rDist <= localWidth + 2) {
+        terrain = TerrainType.DESERT;
+        topBlock = BlockType.SAND;
+        subBlock = BlockType.CLAY;
+        elev = Math.max(3, elev - 1); // slightly lower near water
+        if (rng.next() < 0.08) resource = ResourceType.CLAY;
+        else if (rng.next() < 0.05) resource = ResourceType.FOOD;
+      }
+      // ── North bank (r < river center) — iron-heavy, fewer trees ──
+      else if (r < (riverCenterR[q] ?? baseR)) {
+        if (elev >= 9) {
           terrain = TerrainType.MOUNTAIN;
+          topBlock = BlockType.STONE;
+          subBlock = BlockType.STONE;
+          if (rng.next() < 0.15) resource = ResourceType.IRON;
+          else if (rng.next() < 0.10) resource = ResourceType.CRYSTAL;
+          else if (rng.next() < 0.06) resource = ResourceType.GOLD;
+        } else if (forestNoise > 0.62 && elev >= 5) {
+          terrain = TerrainType.FOREST;
+          topBlock = BlockType.GRASS;
+          subBlock = BlockType.DIRT;
+          if (rng.next() < 0.08) resource = ResourceType.WOOD;
         } else {
-          topBlock = BlockType.OBSIDIAN;
-          subBlock = BlockType.BASALT;
-          terrain = TerrainType.MOUNTAIN;
-          if (rng.next() < 0.12) resource = ResourceType.CRYSTAL;
-          else if (rng.next() < 0.10) resource = ResourceType.IRON;
+          terrain = TerrainType.PLAINS;
+          topBlock = rng.next() < 0.3 ? BlockType.DIRT : BlockType.GRASS;
+          subBlock = BlockType.DIRT;
+          if (rng.next() < 0.10) resource = ResourceType.IRON;
+          else if (rng.next() < 0.06) resource = ResourceType.STONE;
+          else if (rng.next() < 0.04) resource = ResourceType.FOOD;
         }
       }
-      // Lava rivers/pools — low areas between volcanoes
-      else if (lavaNoiseVal > 0.62 && volcInfluence > 0.15 && volcInfluence < 0.7) {
-        elev = 1;
-        topBlock = BlockType.LAVA;
-        subBlock = BlockType.MAGMA;
-        terrain = TerrainType.WATER; // pathfinding: impassable
-      }
-      // Volcanic slopes — near volcanoes
-      else if (volcInfluence > 0.3) {
-        elev += Math.round(volcInfluence * 4);
-        topBlock = BlockType.BASALT;
-        subBlock = BlockType.BASALT;
-        terrain = TerrainType.MOUNTAIN;
-        if (rng.next() < 0.08) resource = ResourceType.IRON;
-        else if (rng.next() < 0.06) resource = ResourceType.STONE;
-      }
-      // Ash plains — medium distance from volcanoes
-      else if (zoneNoise < 0.4 && volcInfluence < 0.3) {
-        terrain = TerrainType.PLAINS;
-        topBlock = BlockType.ASH;
-        subBlock = BlockType.SCORCHED_EARTH;
-        if (rng.next() < 0.08) resource = ResourceType.FOOD;
-        else if (rng.next() < 0.04) resource = ResourceType.STONE;
-      }
-      // Scorched forest — some areas have charred trees
-      else if (zoneNoise > 0.55 && volcInfluence < 0.25) {
-        terrain = TerrainType.FOREST;
-        topBlock = BlockType.SCORCHED_EARTH;
-        subBlock = BlockType.BASALT;
-        elev = Math.max(2, elev);
-        if (rng.next() < 0.15) resource = ResourceType.WOOD;
-        else if (rng.next() < 0.05) resource = ResourceType.STONE;
-      }
-      // Default scorched terrain
+      // ── South bank (r > river center) — wood-heavy, more forests ──
       else {
-        terrain = TerrainType.MOUNTAIN;
-        topBlock = BlockType.SCORCHED_EARTH;
-        subBlock = BlockType.BASALT;
-        if (rng.next() < 0.06) resource = ResourceType.STONE;
-        else if (rng.next() < 0.04) resource = ResourceType.GOLD;
+        if (elev >= 9) {
+          terrain = TerrainType.MOUNTAIN;
+          topBlock = BlockType.STONE;
+          subBlock = BlockType.STONE;
+          if (rng.next() < 0.08) resource = ResourceType.STONE;
+          else if (rng.next() < 0.05) resource = ResourceType.GOLD;
+        } else if (forestNoise > 0.42 && elev >= 5) {
+          // Dense forests on south bank
+          terrain = TerrainType.FOREST;
+          topBlock = BlockType.GRASS;
+          subBlock = BlockType.DIRT;
+          if (rng.next() < 0.18) resource = ResourceType.WOOD;
+          else if (rng.next() < 0.04) resource = ResourceType.FOOD;
+        } else if (zoneNoise > 0.6) {
+          terrain = TerrainType.FOREST;
+          topBlock = BlockType.GRASS;
+          subBlock = BlockType.DIRT;
+          if (rng.next() < 0.12) resource = ResourceType.WOOD;
+        } else {
+          terrain = TerrainType.PLAINS;
+          topBlock = BlockType.GRASS;
+          subBlock = BlockType.DIRT;
+          if (rng.next() < 0.06) resource = ResourceType.FOOD;
+          else if (rng.next() < 0.04) resource = ResourceType.STONE;
+        }
       }
 
-      elev = Math.max(1, Math.min(elev, 14));
-
-      // ── Build voxel column with 3x3 sub-voxel offsets ──
+      // ── Build voxel column ──
       const blocks: VoxelBlock[] = [];
       for (const lx of offsets) {
         for (const lz of offsets) {
-          for (let y = -1; y < elev; y++) {
+          for (let y = 0; y < elev; y++) {
             let blockType: BlockType;
             if (y === elev - 1) blockType = topBlock;
             else if (y >= elev - 3) blockType = subBlock;
-            else blockType = BlockType.BASALT; // deep = basalt
+            else blockType = BlockType.STONE;
             blocks.push({
               localPosition: { x: lx, y, z: lz },
               type: blockType, health: 100, maxHealth: 100,
@@ -1428,21 +1490,21 @@ export function generateVolcanicMap(size: number, seed?: number, playerCount: nu
       // ── Inject ore veins ──
       if (resource === ResourceType.IRON) {
         for (const b of blocks) {
-          if (b.type === BlockType.BASALT && b.localPosition.y < elev - 2 && rng.next() < 0.25) {
+          if (b.type === BlockType.STONE && b.localPosition.y < elev - 2 && rng.next() < 0.25) {
             b.type = BlockType.IRON;
           }
         }
       }
       if (resource === ResourceType.CRYSTAL) {
         for (const b of blocks) {
-          if ((b.type === BlockType.OBSIDIAN || b.type === BlockType.BASALT) && b.localPosition.y < elev - 1 && rng.next() < 0.20) {
+          if (b.type === BlockType.STONE && b.localPosition.y < elev - 1 && rng.next() < 0.20) {
             b.type = BlockType.CRYSTAL;
           }
         }
       }
       if (resource === ResourceType.GOLD) {
         for (const b of blocks) {
-          if (b.type === BlockType.BASALT && b.localPosition.y < elev - 1 && rng.next() < 0.15) {
+          if (b.type === BlockType.STONE && b.localPosition.y < elev - 1 && rng.next() < 0.15) {
             b.type = BlockType.GOLD;
           }
         }
@@ -1464,95 +1526,52 @@ export function generateVolcanicMap(size: number, seed?: number, playerCount: nu
     }
   }
 
-  // ── Step 3: Carve lava rivers from volcano craters downhill ──
-  const lavaRivers: Array<HexCoord[]> = [];
-  for (const v of volcanoes) {
-    if (v.radius < 4) continue; // only big volcanoes get rivers
-    const riverCount = rng.range(1, 3);
-    for (let ri = 0; ri < riverCount; ri++) {
-      const angle = rng.next() * Math.PI * 2;
-      const river: HexCoord[] = [];
-      let rq = v.q + Math.round(Math.cos(angle) * 1.5);
-      let rr = v.r + Math.round(Math.sin(angle) * 1.5);
-      const dirQ = Math.cos(angle + (rng.next() - 0.5) * 0.5);
-      const dirR = Math.sin(angle + (rng.next() - 0.5) * 0.5);
-
-      for (let step = 0; step < 15; step++) {
-        if (rq < 1 || rr < 1 || rq >= size - 1 || rr >= size - 1) break;
-        const key = `${rq},${rr}`;
+  // ── Step 3: Place bridge island features ──
+  // Add a small neutral-base island in the middle of each bridge
+  for (const b of bridges) {
+    // Reinforce bridge tiles — ensure solid stone path
+    for (let dq = -b.width; dq <= b.width; dq++) {
+      for (let dr = -1; dr <= 1; dr++) {
+        const tq = b.center.q + dq;
+        const tr = b.center.r + dr;
+        if (tq < 0 || tr < 0 || tq >= size || tr >= size) continue;
+        const key = `${tq},${tr}`;
         const tile = tiles.get(key);
-        if (tile && tile.terrain !== TerrainType.WATER) {
-          // Convert to lava river
-          tile.terrain = TerrainType.WATER;
-          tile.elevation = Math.max(1, tile.elevation - 2);
-          tile.walkableFloor = tile.elevation;
-          tile.voxelData.heightMap = [[tile.elevation]];
-          // Rebuild blocks as lava
+        if (tile && tile.terrain === TerrainType.WATER) {
+          tile.terrain = TerrainType.PLAINS;
+          tile.elevation = 4;
+          tile.walkableFloor = 4;
+          tile.voxelData.heightMap = [[4]];
           tile.voxelData.blocks = [];
           for (const lx of offsets) {
             for (const lz of offsets) {
-              for (let y = -1; y < tile.elevation; y++) {
-                let blockType: BlockType;
-                if (y === tile.elevation - 1) blockType = BlockType.LAVA;
-                else blockType = BlockType.MAGMA;
+              for (let y = 0; y < 4; y++) {
                 tile.voxelData.blocks.push({
                   localPosition: { x: lx, y, z: lz },
-                  type: blockType, health: 100, maxHealth: 100,
+                  type: y === 3 ? BlockType.STONE : BlockType.STONE,
+                  health: 100, maxHealth: 100,
                 });
               }
             }
           }
-          river.push({ q: rq, r: rr });
-          // Also widen the river — set adjacent tiles
-          const adj = [
-            { q: rq + 1, r: rr }, { q: rq - 1, r: rr },
-            { q: rq, r: rr + 1 }, { q: rq, r: rr - 1 },
-          ];
-          for (const a of adj) {
-            if (rng.next() < 0.35) {
-              const aKey = `${a.q},${a.r}`;
-              const at = tiles.get(aKey);
-              if (at && at.terrain !== TerrainType.WATER) {
-                at.terrain = TerrainType.WATER;
-                at.elevation = Math.max(1, at.elevation - 2);
-                at.walkableFloor = at.elevation;
-                at.voxelData.heightMap = [[at.elevation]];
-                at.voxelData.blocks = [];
-                for (const lx of offsets) {
-                  for (const lz of offsets) {
-                    for (let y = -1; y < at.elevation; y++) {
-                      at.voxelData.blocks.push({
-                        localPosition: { x: lx, y, z: lz },
-                        type: y === at.elevation - 1 ? BlockType.LAVA : BlockType.MAGMA,
-                        health: 100, maxHealth: 100,
-                      });
-                    }
-                  }
-                }
-              }
-            }
-          }
+          riverTiles.delete(key);
         }
-        // Meander downhill
-        rq += Math.round(dirQ + (rng.next() - 0.5) * 0.8);
-        rr += Math.round(dirR + (rng.next() - 0.5) * 0.8);
       }
-      if (river.length > 0) lavaRivers.push(river);
     }
   }
 
   // ── Step 4: Clear safe zones around player bases ──
+  // Players spawn on opposite banks of the river
   const BASE_INSET = 6;
   const homePositions = [
-    { q: BASE_INSET, r: size - 1 - BASE_INSET },           // P0: bottom-left
-    { q: size - 1 - BASE_INSET, r: BASE_INSET },           // P1: top-right
-    { q: BASE_INSET, r: BASE_INSET },                       // P2: top-left
-    { q: size - 1 - BASE_INSET, r: size - 1 - BASE_INSET }, // P3: bottom-right
+    { q: BASE_INSET, r: BASE_INSET },                         // P0: north bank (low r)
+    { q: size - 1 - BASE_INSET, r: size - 1 - BASE_INSET },  // P1: south bank (high r)
+    { q: size - 1 - BASE_INSET, r: BASE_INSET },              // P2: north bank
+    { q: BASE_INSET, r: size - 1 - BASE_INSET },              // P3: south bank
   ];
   const usedHomes = homePositions.slice(0, playerCount);
 
   for (const home of usedHomes) {
-    // Clear a safe area around each base — ash plains with resources
     for (let dq = -4; dq <= 4; dq++) {
       for (let dr = -4; dr <= 4; dr++) {
         const tq = home.q + dq;
@@ -1565,41 +1584,42 @@ export function generateVolcanicMap(size: number, seed?: number, playerCount: nu
         const tile = tiles.get(key);
         if (!tile) continue;
 
-        // Flatten and make habitable
         tile.terrain = dist < 2 ? TerrainType.PLAINS : TerrainType.FOREST;
-        tile.elevation = 3;
-        tile.walkableFloor = 3;
-        tile.voxelData.heightMap = [[3]];
+        tile.elevation = 5;
+        tile.walkableFloor = 5;
+        tile.voxelData.heightMap = [[5]];
 
-        const sBlock = dist < 2 ? BlockType.SCORCHED_EARTH : BlockType.ASH;
-        const dBlock = BlockType.BASALT;
+        const sBlock = dist < 2 ? BlockType.GRASS : BlockType.GRASS;
+        const dBlock = BlockType.DIRT;
         tile.voxelData.blocks = [];
         for (const lx of offsets) {
           for (const lz of offsets) {
-            for (let y = -1; y < 3; y++) {
+            for (let y = 0; y < 5; y++) {
               tile.voxelData.blocks.push({
                 localPosition: { x: lx, y, z: lz },
-                type: y === 2 ? sBlock : dBlock,
+                type: y === 4 ? sBlock : dBlock,
                 health: 100, maxHealth: 100,
               });
             }
           }
         }
 
-        // Scatter resources around base
         if (dist > 1.5 && dist < 4) {
           if (rng.next() < 0.15) tile.resource = ResourceType.WOOD;
           else if (rng.next() < 0.12) tile.resource = ResourceType.FOOD;
           else if (rng.next() < 0.10) tile.resource = ResourceType.STONE;
           else if (rng.next() < 0.06) tile.resource = ResourceType.IRON;
         }
+        riverTiles.delete(key);
       }
     }
   }
 
+  Logger.info('MapGen', `River Crossing generated: ${riverTiles.size} water tiles, ${bridges.length} bridges`);
+
   return {
-    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.VOLCANIC,
-    volcanoes, lavaRivers,
+    width: size, height: size, tiles, seed: actualSeed, mapType: MapType.RIVER_CROSSING,
+    riverTiles, bridges,
   };
 }
 
@@ -2145,8 +2165,8 @@ export function generateTundraMap(size: number, seed?: number, playerCount: numb
       const ridgeRaw = noise.fbm(q * 0.04 + 200, r * 0.04 + 200, 2);
       const ridgeFactor = Math.pow(Math.abs(ridgeRaw * 2 - 1), 0.5) * 0.4;
 
-      let elev = Math.round(baseElev * 5 + ridgeFactor * 4 + 2);
-      elev = Math.max(2, Math.min(elev, 10));
+      let elev = Math.round(baseElev * 5 + ridgeFactor * 4 + 5);
+      elev = Math.max(5, Math.min(elev, 12));
 
       // Determine terrain type using noise layers
       const moistureNoise = noise.fbm(q * 0.12 + 50, r * 0.12 + 50, 2);
@@ -2157,38 +2177,45 @@ export function generateTundraMap(size: number, seed?: number, playerCount: numb
       let subBlock: BlockType;
       let resource: ResourceType | null = null;
 
-      if (elev >= 7 && ridgeFactor > 0.15) {
-        // ── Icy ridge peaks ──
+      if (elev >= 10 && ridgeFactor > 0.15) {
+        // ── Icy ridge peaks — rich mineral veins ──
         terrain = TerrainType.MOUNTAIN;
         topBlock = BlockType.ICE;
         subBlock = BlockType.STONE;
-        if (rng.next() < 0.08) resource = ResourceType.CRYSTAL;
-        else if (rng.next() < 0.06) resource = ResourceType.IRON;
-      } else if (elev >= 6) {
-        // ── Snowy highlands ──
+        const ridgeRoll = rng.next();
+        if (ridgeRoll < 0.15) resource = ResourceType.CRYSTAL;
+        else if (ridgeRoll < 0.28) resource = ResourceType.IRON;
+        else if (ridgeRoll < 0.34) resource = ResourceType.STONE;
+      } else if (elev >= 9) {
+        // ── Snowy highlands — iron and crystal deposits ──
         terrain = TerrainType.MOUNTAIN;
         topBlock = BlockType.PACKED_SNOW;
         subBlock = BlockType.STONE;
-        if (rng.next() < 0.06) resource = ResourceType.STONE;
-        else if (rng.next() < 0.04) resource = ResourceType.IRON;
-      } else if (forestNoise > 0.58 && elev >= 3 && elev <= 5) {
+        const highRoll = rng.next();
+        if (highRoll < 0.12) resource = ResourceType.IRON;
+        else if (highRoll < 0.22) resource = ResourceType.CRYSTAL;
+        else if (highRoll < 0.28) resource = ResourceType.STONE;
+      } else if (forestNoise > 0.58 && elev >= 6 && elev <= 8) {
         // ── Sparse pine forest ──
         terrain = TerrainType.FOREST;
         topBlock = BlockType.PACKED_SNOW;
         subBlock = BlockType.FROZEN_DIRT;
         if (rng.next() < 0.12) resource = ResourceType.WOOD;
-      } else if (moistureNoise < 0.32 && elev <= 3) {
+      } else if (moistureNoise < 0.32 && elev <= 6) {
         // ── Frozen lake beds (will be overridden in Step 2) ──
         terrain = TerrainType.PLAINS;
         topBlock = BlockType.PACKED_SNOW;
         subBlock = BlockType.FROZEN_DIRT;
       } else {
-        // ── Open snow plains ──
+        // ── Open snow plains — occasional surface deposits ──
         terrain = TerrainType.PLAINS;
         topBlock = rng.next() < 0.7 ? BlockType.SNOW : BlockType.PACKED_SNOW;
         subBlock = BlockType.FROZEN_DIRT;
-        if (rng.next() < 0.04) resource = ResourceType.FOOD;
-        else if (rng.next() < 0.02) resource = ResourceType.GOLD;
+        const plainRoll = rng.next();
+        if (plainRoll < 0.04) resource = ResourceType.FOOD;
+        else if (plainRoll < 0.07) resource = ResourceType.IRON;
+        else if (plainRoll < 0.10) resource = ResourceType.CRYSTAL;
+        else if (plainRoll < 0.12) resource = ResourceType.GOLD;
       }
 
       // Build voxel column
@@ -2257,16 +2284,20 @@ export function generateTundraMap(size: number, seed?: number, playerCount: numb
         if (dist > effectiveRadius) continue;
 
         const key = `${q},${r}`;
-        const lakeElev = 2;
+        const lakeElev = 5;
 
-        // Frozen lake: flat ice surface
+        // Frozen lake: flat ice surface with solid frozen ground beneath
         const blocks: VoxelBlock[] = [];
         for (const lx of offsets) {
           for (const lz of offsets) {
             for (let y = 0; y < lakeElev; y++) {
+              let bt: BlockType;
+              if (y === lakeElev - 1) bt = BlockType.ICE;
+              else if (y >= lakeElev - 3) bt = BlockType.FROZEN_DIRT;
+              else bt = BlockType.STONE;
               blocks.push({
                 localPosition: { x: lx, y, z: lz },
-                type: y === lakeElev - 1 ? BlockType.ICE : BlockType.FROZEN_DIRT,
+                type: bt,
                 health: 100, maxHealth: 100,
               });
             }
@@ -2293,22 +2324,22 @@ export function generateTundraMap(size: number, seed?: number, playerCount: numb
     }
   }
 
-  // ── Step 3: Place resource clusters (scarce!) ──
-  // Crystal veins near ridges
-  const crystalClusters = rng.range(2, 4);
+  // ── Step 3: Place resource clusters ──
+  // Crystal veins — on ridges and frozen highland (MOUNTAIN or SNOW with high elevation)
+  const crystalClusters = rng.range(5, 8);
   for (let c = 0; c < crystalClusters; c++) {
-    const cq = rng.range(5, size - 6);
-    const cr = rng.range(5, size - 6);
-    for (let dq = -1; dq <= 1; dq++) {
-      for (let dr = -1; dr <= 1; dr++) {
-        if (rng.next() > 0.6) continue;
+    const cq = rng.range(4, size - 5);
+    const cr = rng.range(4, size - 5);
+    for (let dq = -2; dq <= 2; dq++) {
+      for (let dr = -2; dr <= 2; dr++) {
+        if (rng.next() > 0.5) continue;
         const key = `${cq + dq},${cr + dr}`;
         const tile = tiles.get(key);
-        if (tile && tile.terrain === TerrainType.MOUNTAIN) {
+        if (tile && (tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.SNOW)) {
           tile.resource = ResourceType.CRYSTAL;
           // Inject crystal blocks into subsurface
           for (const b of tile.voxelData.blocks) {
-            if (b.type === BlockType.STONE && b.localPosition.y < tile.elevation - 2 && rng.next() < 0.3) {
+            if (b.type === BlockType.STONE && b.localPosition.y < tile.elevation - 2 && rng.next() < 0.35) {
               b.type = BlockType.CRYSTAL;
             }
           }
@@ -2317,20 +2348,20 @@ export function generateTundraMap(size: number, seed?: number, playerCount: numb
     }
   }
 
-  // Iron deposits in highlands
-  const ironClusters = rng.range(3, 5);
+  // Iron deposits — in highlands and frozen ground
+  const ironClusters = rng.range(6, 9);
   for (let c = 0; c < ironClusters; c++) {
-    const iq = rng.range(5, size - 6);
-    const ir = rng.range(5, size - 6);
-    for (let dq = -1; dq <= 1; dq++) {
-      for (let dr = -1; dr <= 1; dr++) {
-        if (rng.next() > 0.5) continue;
+    const iq = rng.range(4, size - 5);
+    const ir = rng.range(4, size - 5);
+    for (let dq = -2; dq <= 2; dq++) {
+      for (let dr = -2; dr <= 2; dr++) {
+        if (rng.next() > 0.45) continue;
         const key = `${iq + dq},${ir + dr}`;
         const tile = tiles.get(key);
-        if (tile && (tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.PLAINS)) {
+        if (tile && (tile.terrain === TerrainType.MOUNTAIN || tile.terrain === TerrainType.SNOW || tile.terrain === TerrainType.PLAINS)) {
           tile.resource = ResourceType.IRON;
           for (const b of tile.voxelData.blocks) {
-            if (b.type === BlockType.STONE && rng.next() < 0.25) {
+            if (b.type === BlockType.STONE && rng.next() < 0.3) {
               b.type = BlockType.IRON;
             }
           }

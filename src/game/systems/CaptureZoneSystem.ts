@@ -10,6 +10,11 @@ import { Pathfinder } from './Pathfinder';
 import { GAME_CONFIG } from '../GameConfig';
 import { getPlayerHex } from '../PlayerConfig';
 
+/** Operations interface for CaptureZoneSystem dependencies */
+export interface CaptureZoneOps {
+  playSound(name: string, volume?: number): void;
+}
+
 /** How long (seconds) full-majority capture takes */
 const CAPTURE_DURATION = GAME_CONFIG.captureZone.captureDuration;
 /** Hex radius of the capture zone */
@@ -57,10 +62,17 @@ export class CaptureZoneSystem {
   private scene: THREE.Scene;
   private zones: CaptureZoneState[] = [];
   private playerCount: number;
+  private ops?: CaptureZoneOps;
 
-  constructor(scene: THREE.Scene, playerCount: number = 2) {
+  constructor(scene: THREE.Scene, playerCount: number = 2, ops?: CaptureZoneOps) {
     this.scene = scene;
     this.playerCount = playerCount;
+    this.ops = ops;
+  }
+
+  /** Set the ops interface (can be called after construction) */
+  setOps(ops: CaptureZoneOps): void {
+    this.ops = ops;
   }
 
   /** Register a base as a capture zone */
@@ -185,6 +197,11 @@ export class CaptureZoneSystem {
           zone.base.owner = majorityTeam;
           zone.progress = 0;
           zone.capturer = -1;
+
+          // Play zone capture sound
+          if (this.ops) {
+            this.ops.playSound('zone_captured', 0.6);
+          }
 
           events.push({
             baseId: zone.base.id,

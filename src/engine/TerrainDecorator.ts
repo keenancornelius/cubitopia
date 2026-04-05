@@ -4,6 +4,7 @@
 // ============================================
 
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TerrainType, ResourceType, HexCoord } from '../types';
 import { InstancedObjectManager } from './InstancedObjectManager';
 
@@ -359,13 +360,15 @@ export class TerrainDecorator {
   private mistClouds: THREE.Mesh[] = [];
   private waterTime = 0;
   grassClumpsByTile: Map<string, GrassInstanceData> = new Map();
+  /** Crop instance data per tile key — tracks instanced crop visuals at growth stages */
+  private cropsByTile: Map<string, { type: string; instanceId: number }[]> = new Map();
   private grassTime = 0;
   /** When true, MOUNTAIN tiles get desert decorations (cacti/rocks) instead of trees */
   desertMode = false;
   /** When true, trees use pastel foliage (pink/lavender/mint) for Skyland maps */
   skylandMode = false;
-  /** When true, use volcanic decorations: scorched trees, dark rocks, ember particles */
-  volcanicMode = false;
+  /** When true, use river crossing decorations: riverside reeds, willows, riverbank stones */
+  riverCrossingMode = false;
   /** When true, use tropical decorations: palm/jungle trees, no snow pines */
   archipelagoMode = false;
   /** When true, use frozen tundra decorations: sparse pine trees, ice rocks, snow drifts */
@@ -471,11 +474,16 @@ export class TerrainDecorator {
             this.addSnowPine(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.55) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
             if (rng.next() > 0.8) this.addRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
-          } else if (this.volcanicMode) {
-            // Scorched forest: charred dead trees, volcanic rocks, no greenery
-            this.addScorchedTree(worldX, treeElevation, worldZ, rng, tileKey);
-            if (rng.next() > 0.5) this.addScorchedTree(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
-            if (rng.next() > 0.6) this.addVolcanicRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
+          } else if (this.ruinsMode) {
+            // Ruins forest: dense vines, mossy rocks, occasional broken pillar
+            if (rng.next() > 0.4) this.addRock(worldX, treeElevation, worldZ, rng, tileKey); // mossy rocks
+            if (rng.next() > 0.5) this.addRock(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
+            if (rng.next() > 0.8) this.addRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
+          } else if (this.badlandsMode) {
+            // Badlands forest: sparse dead trees, scattered rocks
+            if (rng.next() > 0.6) this.addScorchedTree(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.75) this.addDesertRock(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
+            if (rng.next() > 0.8) this.addDesertRock(worldX - 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
           } else if (elevation >= 6.5 && !this.skylandMode) {
             this.addSnowPine(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.6) this.addSnowPine(worldX + 0.3, treeElevation, worldZ + 0.3, rng, tileKey);
@@ -494,11 +502,16 @@ export class TerrainDecorator {
             // Frozen plains: sparse rocks, very occasional lone pine
             if (rng.next() > 0.75) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
             if (rng.next() > 0.92) this.addSnowPine(worldX + 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
-          } else if (this.volcanicMode) {
-            // Ash plains: sparse volcanic rocks, no grass or flowers
-            if (rng.next() > 0.55) this.addVolcanicRock(worldX, treeElevation, worldZ, rng, tileKey);
-            if (rng.next() > 0.75) this.addVolcanicRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
-            if (rng.next() > 0.9) this.addScorchedTree(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
+          } else if (this.ruinsMode) {
+            // Ruins plains: scattered mossy rocks, overgrown grass tufts
+            if (rng.next() > 0.6) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.7) {
+              this.addGrassAtStage(coord, treeElevation, 1);
+            }
+          } else if (this.badlandsMode) {
+            // Badlands plains: very sparse (occasional dead shrub, tumbleweeds)
+            if (rng.next() > 0.8) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
+            if (rng.next() > 0.9) this.addCactus(worldX + 0.2, treeElevation, worldZ - 0.1, rng, tileKey);
           } else if (this.archipelagoMode) {
             // Tropical clearing: lush grass, bright flowers, occasional jungle tree
             if (rng.next() > 0.3) this.addFlowers(worldX, treeElevation, worldZ, rng, tileKey);
@@ -528,16 +541,22 @@ export class TerrainDecorator {
           if (rng.next() > 0.3) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
           if (rng.next() > 0.45) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
           if (rng.next() > 0.6) this.addRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+        } else if (this.ruinsMode) {
+          // Ruins mountains: dense stone rubble, broken walls
+          if (rng.next() > 0.4) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.5) this.addRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.6) this.addRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+          if (rng.next() > 0.75) this.addRock(worldX + 0.1, treeElevation, worldZ + 0.3, rng, tileKey);
+        } else if (this.badlandsMode) {
+          // Badlands mesas: dense layered mesa stones and rocks
+          if (rng.next() > 0.3) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
+          if (rng.next() > 0.4) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
+          if (rng.next() > 0.5) this.addDesertRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
+          if (rng.next() > 0.7) this.addDesertRock(worldX + 0.1, treeElevation, worldZ + 0.3, rng, tileKey);
         } else if (this.desertMode) {
           if (rng.next() > 0.6) this.addDesertRock(worldX, treeElevation, worldZ, rng, tileKey);
           if (rng.next() > 0.8) this.addDesertRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
           if (!neighborTooTall && rng.next() > 0.7) this.addCactus(worldX - 0.2, treeElevation, worldZ + 0.1, rng, tileKey);
-        } else if (this.volcanicMode) {
-          // Volcanic peak: dense dark rocks, iron ore veins, no trees
-          if (rng.next() > 0.3) this.addVolcanicRock(worldX, treeElevation, worldZ, rng, tileKey);
-          if (rng.next() > 0.4) this.addVolcanicRock(worldX + 0.3, treeElevation, worldZ - 0.2, rng, tileKey);
-          if (rng.next() > 0.5) this.addVolcanicRock(worldX - 0.2, treeElevation, worldZ + 0.3, rng, tileKey);
-          if (rng.next() > 0.7) this.addVolcanicRock(worldX + 0.1, treeElevation, worldZ + 0.3, rng, tileKey);
         } else if (this.skylandMode) {
           // Cloud Peak: dense rocky terrain with occasional hardy pastel tree
           if (rng.next() > 0.35) this.addRock(worldX, treeElevation, worldZ, rng, tileKey);
@@ -848,6 +867,68 @@ export class TerrainDecorator {
 
     this.grassClumpsByTile.set(tileKey, grassData);
     this.trackInstanceDecoration(tileKey, type, instanceId);
+  }
+
+
+  // ── Crop visuals (4 growth stages) ────────────────────────
+  /**
+   * Place crop instances for a farm patch at a given growth stage.
+   * Stage 0=seedling, 1=sprout, 2=growing, 3=mature (golden, harvestable).
+   * Each farm tile gets a small cluster of 3-5 crop instances for visual fullness.
+   */
+  updateCropVisual(tileKey: string, stage: number): void {
+    this.removeCropVisual(tileKey);
+
+    const [q, r] = tileKey.split(',').map(Number);
+    const { x: worldX, z: worldZ } = worldFromCoord({ q, r });
+    const clampedStage = Math.min(Math.max(stage, 0), 3);
+    const type = `crop_stage_${clampedStage}`;
+
+    const rng = new SeededRand(q * 773 + r * 337 + 42);
+    const instances: { type: string; instanceId: number }[] = [];
+
+    const cropCount = 3 + Math.floor(rng.next() * 3);
+    for (let i = 0; i < cropCount; i++) {
+      const offsetX = (rng.next() - 0.5) * 0.6;
+      const offsetZ = (rng.next() - 0.5) * 0.6;
+      const rotY = rng.next() * Math.PI * 2;
+      const scale = 0.8 + rng.next() * 0.4;
+      const y = this.getCropElevation(tileKey);
+      const instanceId = this.instancedObjects.addInstance(
+        type,
+        { x: worldX + offsetX, y, z: worldZ + offsetZ },
+        new THREE.Euler(0, rotY, 0),
+        { x: scale, y: scale, z: scale }
+      );
+      instances.push({ type, instanceId });
+      this.trackInstanceDecoration(tileKey, type, instanceId);
+    }
+
+    this.cropsByTile.set(tileKey, instances);
+  }
+
+  removeCropVisual(tileKey: string): void {
+    const instances = this.cropsByTile.get(tileKey);
+    if (!instances) return;
+    for (const inst of instances) {
+      this.instancedObjects.removeInstance(inst.type, inst.instanceId);
+    }
+    this.cropsByTile.delete(tileKey);
+    const decos = this.decorationsByTile.get(tileKey);
+    if (decos) {
+      const filtered = decos.filter(d => d.kind !== 'instance' || !d.type.startsWith('crop_stage_'));
+      if (filtered.length > 0) {
+        this.decorationsByTile.set(tileKey, filtered);
+      } else {
+        this.decorationsByTile.delete(tileKey);
+      }
+    }
+  }
+
+  private getCropElevation(tileKey: string): number {
+    const grass = this.grassClumpsByTile.get(tileKey);
+    if (grass) return grass.position.y;
+    return 0;
   }
 
   private addCactus(x: number, elevation: number, z: number, rng: SeededRand, tileKey?: string): void {
@@ -1487,6 +1568,56 @@ export class TerrainDecorator {
         );
       }
     }
+
+    // ── Crop growth stage archetypes ──────────────────────────
+    // Stage 0: tiny seedling sprout (small green nub)
+    const cropMat = new THREE.MeshLambertMaterial({ color: 0x4a7023 });
+    const cropStage0 = new THREE.BufferGeometry();
+    {
+      const stem = new THREE.BoxGeometry(0.06, 0.12, 0.06);
+      stem.translate(0, 0.06, 0);
+      cropStage0.copy(stem);
+    }
+    this.instancedObjects.registerType('crop_stage_0', cropStage0, cropMat.clone(), { castShadow: false, initialCapacity: 256 });
+
+    // Stage 1: small sprout with leaf
+    const cropStage1 = new THREE.BufferGeometry();
+    {
+      const merged = new THREE.BoxGeometry(0.08, 0.22, 0.08);
+      merged.translate(0, 0.11, 0);
+      const leaf = new THREE.BoxGeometry(0.14, 0.04, 0.06);
+      leaf.translate(0.08, 0.18, 0);
+      cropStage1.copy(mergeGeometries([merged, leaf])!);
+    }
+    this.instancedObjects.registerType('crop_stage_1', cropStage1, new THREE.MeshLambertMaterial({ color: 0x5a8a2f }), { castShadow: false, initialCapacity: 256 });
+
+    // Stage 2: medium crop stalk with leaves
+    const cropStage2 = new THREE.BufferGeometry();
+    {
+      const stalk = new THREE.BoxGeometry(0.1, 0.36, 0.1);
+      stalk.translate(0, 0.18, 0);
+      const leafL = new THREE.BoxGeometry(0.18, 0.05, 0.06);
+      leafL.translate(-0.1, 0.26, 0);
+      const leafR = new THREE.BoxGeometry(0.18, 0.05, 0.06);
+      leafR.translate(0.1, 0.3, 0);
+      cropStage2.copy(mergeGeometries([stalk, leafL, leafR])!);
+    }
+    this.instancedObjects.registerType('crop_stage_2', cropStage2, new THREE.MeshLambertMaterial({ color: 0x6a9a3a }), { castShadow: true, initialCapacity: 256 });
+
+    // Stage 3: mature crop — tall golden wheat sheaf ready for harvest
+    const cropStage3 = new THREE.BufferGeometry();
+    {
+      const stalk = new THREE.BoxGeometry(0.1, 0.45, 0.1);
+      stalk.translate(0, 0.225, 0);
+      const head = new THREE.BoxGeometry(0.16, 0.14, 0.16);
+      head.translate(0, 0.48, 0);
+      const leafL = new THREE.BoxGeometry(0.2, 0.04, 0.06);
+      leafL.translate(-0.12, 0.3, 0);
+      const leafR = new THREE.BoxGeometry(0.2, 0.04, 0.06);
+      leafR.translate(0.12, 0.36, 0);
+      cropStage3.copy(mergeGeometries([stalk, head, leafL, leafR])!);
+    }
+    this.instancedObjects.registerType('crop_stage_3', cropStage3, new THREE.MeshLambertMaterial({ color: 0xd4a017 }), { castShadow: true, initialCapacity: 256 });
   }
 
   private trackInstanceDecoration(tileKey: string, type: string, instanceId: number): void {

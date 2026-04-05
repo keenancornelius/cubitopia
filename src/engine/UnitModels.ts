@@ -2,17 +2,26 @@ import * as THREE from 'three';
 import { UnitType } from '../types';
 import { UNIT_COLORS } from '../game/entities/UnitFactory';
 import { mergeStaticMeshes, getCachedLambert, getCachedBasic } from './MeshMergeUtils';
+import {
+  SKIN, BOOT_BROWN, BLACK, WHITE_ISH,
+  addEyes, addSimpleEyes, addEyebrows, addMouth, addNose,
+  addBelt, addTabard, addPauldrons,
+  addHead, addTorso, addMirroredPair,
+  EyeOpts, BeltOpts, TabardOpts, PauldronOpts,
+  TribeSkin, DEFAULT_SKIN, lightenColor, darkenColor,
+} from './UnitModelHelpers';
 
 export class UnitModels {
   constructor(_scene: THREE.Scene) {
     void _scene;
   }
 
-  buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number): void {
-    UnitModels.buildUnitModel(group, type, playerColor);
+  buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number, skin?: TribeSkin): void {
+    UnitModels.buildUnitModel(group, type, playerColor, skin);
   }
 
-  static buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number): void {
+  static buildUnitModel(group: THREE.Group, type: UnitType, playerColor: number, skin?: TribeSkin): void {
+    const s = skin ?? DEFAULT_SKIN;
     // Helper: create an arm group with a mesh inside, so weapons can be children of the arm
     const makeArmGroup = (name: string, color: number, posX: number, posY: number): THREE.Group => {
       const armGroup = new THREE.Group();
@@ -83,12 +92,12 @@ export class UnitModels {
         // === WARRIOR — Armored Knight with broadsword & buckler ===
         // The backbone melee unit. Medium plate armor, distinctive helm with team plume.
 
-        // --- Shared materials ---
-        const wPlateMat = getCachedLambert(0x9e9e9e); // polished steel
-        const wPlateHiMat = getCachedLambert(0xbdbdbd); // bright steel highlight
-        const wPlateDkMat = getCachedLambert(0x757575); // shadow steel
-        const wGoldMat = getCachedLambert(0xb8860b); // brass/gold
-        const wGoldBright = getCachedLambert(0xffd700); // bright gold
+        // --- Shared materials (tribe-skinned) ---
+        const wPlateMat = getCachedLambert(s.secondary);
+        const wPlateHiMat = getCachedLambert(lightenColor(s.secondary, 0.12));
+        const wPlateDkMat = getCachedLambert(darkenColor(s.secondary, 0.25));
+        const wGoldMat = getCachedLambert(s.accent);
+        const wGoldBright = getCachedLambert(s.trim);
         const wLeatherMat = getCachedLambert(0x5d4037); // dark leather
         const wTeamMat = getCachedLambert(playerColor);
         const wBladeMat = getCachedLambert(0xe0e0e0); // polished blade
@@ -129,37 +138,44 @@ export class UnitModels {
           tRivet.position.set(tx, 0.14, 0.22);
           group.add(tRivet);
         }
-        // Pauldrons — two-tier on each shoulder
+        // Pauldrons — two-tier on each shoulder (tribe-skinned)
+        addPauldrons(group, {
+          baseColor: s.secondary,
+          topColor: lightenColor(s.secondary, 0.12),
+          offsetX: 0.32,
+          y: 0.58,
+          baseSize: [0.20, 0.09, 0.24],
+          topSize: [0.16, 0.06, 0.20],
+          gap: 0.06,
+        });
+        // Gold trim on lower edge (custom detail not in helper)
         for (const px of [-0.32, 0.32]) {
-          const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.09, 0.24), wPlateMat);
-          p1.position.set(px, 0.58, 0);
-          group.add(p1);
-          const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.20), wPlateHiMat);
-          p2.position.set(px, 0.64, 0);
-          group.add(p2);
-          // Gold trim on lower edge
           const pTrim = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.025, 0.04), wGoldMat);
           pTrim.position.set(px, 0.55, 0.10);
           group.add(pTrim);
         }
 
         // ─── PASS 3: ORNAMENTATION — belt, emblem, studs, plume ───
-        // Leather belt
-        const wBelt = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.07, 0.48), wLeatherMat);
-        wBelt.position.y = 0.18;
-        group.add(wBelt);
-        // Belt buckle (gold)
-        const wBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.10, 0.05), wGoldBright);
-        wBuckle.position.set(0, 0.18, 0.24);
-        group.add(wBuckle);
+        // Leather belt with buckle (tribe-skinned)
+        addBelt(group, {
+          color: 0x5d4037,
+          y: 0.18,
+          width: 0.54,
+          height: 0.07,
+          depth: 0.48,
+          buckleColor: s.trim,
+          buckleZ: 0.24,
+          buckleSize: [0.10, 0.10, 0.05],
+        });
         // Team-color tabard front (hangs from belt)
-        const wTabard = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.04), wTeamMat);
-        wTabard.position.set(0, 0.08, 0.22);
-        group.add(wTabard);
-        // Gold tabard border
-        const wTabBorder = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.02, 0.05), wGoldMat);
-        wTabBorder.position.set(0, 0.02, 0.22);
-        group.add(wTabBorder);
+        addTabard(group, {
+          teamColor: playerColor,
+          y: 0.08,
+          z: 0.22,
+          size: [0.16, 0.14, 0.04],
+          borderColor: s.accent,
+          borderHeight: 0.02,
+        });
         // Chest emblem — team-color cross
         const wEmbH = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.40), wTeamMat);
         wEmbH.position.set(0, 0.48, 0);
@@ -220,7 +236,7 @@ export class UnitModels {
 
         // ─── PASS 4: WEAPONS — Broadsword + Buckler ───
         // RIGHT ARM — Broadsword (tilted 25° forward)
-        const armRight = makeArmGroup('arm-right', 0x9e9e9e, 0.3, 0.55);
+        const armRight = makeArmGroup('arm-right', s.secondary, 0.3, 0.55);
         const wElbowR = armRight.getObjectByName('arm-right-elbow')!;
         const wSwordGrp = new THREE.Group();
         wSwordGrp.name = 'sword-group';
@@ -282,7 +298,7 @@ export class UnitModels {
         group.add(armRight);
 
         // LEFT ARM — Buckler Shield (round-ish, held forward)
-        const armLeft = makeArmGroup('arm-left', 0x9e9e9e, -0.3, 0.55);
+        const armLeft = makeArmGroup('arm-left', s.secondary, -0.3, 0.55);
         const wElbowL = armLeft.getObjectByName('arm-left-elbow')!;
         // Buckler face (team color, multi-layered)
         const bucklerMain = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.30, 0.30), wTeamMat);
@@ -366,15 +382,15 @@ export class UnitModels {
         // fletched quiver, back cloak, team-color accents
         // ════════════════════════════════════════════════════════
 
-        // Shared materials
-        const aLeatherMat = getCachedLambert(0x4a6b3a); // forest green leather
-        const aLeatherDkMat = getCachedLambert(0x3a5530); // dark green
-        const aLeatherLtMat = getCachedLambert(0x5d8248); // lighter green
-        const aBrownMat = getCachedLambert(0x6b4226); // rich brown leather
+        // Shared materials (tribe-skinned: leather uses secondary, fittings use accent/trim)
+        const aLeatherMat = getCachedLambert(s.secondary);
+        const aLeatherDkMat = getCachedLambert(darkenColor(s.secondary, 0.15));
+        const aLeatherLtMat = getCachedLambert(lightenColor(s.secondary, 0.10));
+        const aBrownMat = getCachedLambert(0x6b4226); // rich brown leather (strap/belt — universal)
         const aBrownDkMat = getCachedLambert(0x4a2e1a); // dark brown
         const aBrownLtMat = getCachedLambert(0x8b5e3c); // light brown
         const aTeamMat = getCachedLambert(playerColor);
-        const aGoldMat = getCachedLambert(0xc8a832); // brass fittings
+        const aGoldMat = getCachedLambert(s.accent); // fittings
         const aSkinMat = getCachedLambert(0xffdbac);
         const aBlackMat = getCachedLambert(0x1a1a1a);
         const aBowWoodMat = getCachedLambert(0x8b5a2b); // yew wood
@@ -412,12 +428,16 @@ export class UnitModels {
         }
 
         // Belt with buckle
-        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.06, 0.40), aBrownMat);
-        aBelt.position.y = 0.18;
-        group.add(aBelt);
-        const aBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.04), aGoldMat);
-        aBuckle.position.set(0, 0.18, 0.22);
-        group.add(aBuckle);
+        addBelt(group, {
+          color: 0x6b4226,
+          y: 0.18,
+          width: 0.46,
+          height: 0.06,
+          depth: 0.40,
+          buckleColor: 0xc8a832,
+          buckleZ: 0.22,
+          buckleSize: [0.08, 0.07, 0.04],
+        });
         // Belt pouches (small utility bags on sides)
         for (const px of [-0.20, 0.18]) {
           const pouch = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.06, 0.06), aBrownDkMat);
@@ -439,15 +459,9 @@ export class UnitModels {
         group.add(aClasp);
 
         // ─── HEAD with deep ranger hood ───
-        const aHead = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.30, 0.30), aSkinMat);
-        aHead.position.y = 0.76;
-        group.add(aHead);
+        addHead(group, 0.76, [0.30, 0.30, 0.30], 0xffdbac);
         // Eyes (dark, narrowed — ranger's focus)
-        for (const ex of [-0.06, 0.06]) {
-          const eye = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.03, 0.03), aBlackMat);
-          eye.position.set(ex, 0.78, 0.16);
-          group.add(eye);
-        }
+        addSimpleEyes(group, 0.06, 0.78, 0.16, [0.05, 0.03, 0.03], 0x1a1a1a);
         // ─── Robin Hood hat — pointed cap with upturned brim & feather ───
         // Hat base / brim (wide, upturned at front)
         const aHatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.05, 0.44), aLeatherDkMat);
@@ -686,15 +700,15 @@ export class UnitModels {
       case UnitType.RIDER: {
         // === ELABORATE MOUNTED KNIGHT — Ornate horse with plate barding, armored rider, lance & shield ===
 
-        // --- Shared Materials ---
-        const rHorseBody = getCachedLambert(0x8B4513); // chestnut
+        // --- Shared Materials (tribe-skinned: armor uses secondary, fittings use accent/trim) ---
+        const rHorseBody = getCachedLambert(0x8B4513); // chestnut (horse body — universal)
         const rHorseBarding = getCachedLambert(playerColor); // team color armor
-        const rArmorSteel = getCachedLambert(0xa8a8a8); // bright steel
-        const rArmorDark = getCachedLambert(0x6b6b6b); // shadow steel
-        const rGoldMat = getCachedLambert(0xb8860b); // brass trim
+        const rArmorSteel = getCachedLambert(s.secondary); // armor plates
+        const rArmorDark = getCachedLambert(darkenColor(s.secondary, 0.20)); // shadow armor
+        const rGoldMat = getCachedLambert(s.accent); // brass/decorative trim
         const rSkinMat = getCachedLambert(0xffdbac); // skin
         const rLeatherMat = getCachedLambert(0x5d4037); // dark brown leather
-        const rSilverMat = getCachedLambert(0xd8d8d8); // polished silver
+        const rSilverMat = getCachedLambert(s.trim); // polished metallic highlights
 
         // ─── HORSE: MUSCULAR BODY WITH LAYERED PLATE ARMOR ───
         // Core muscular body
@@ -809,22 +823,20 @@ export class UnitModels {
         group.add(shoulderTrimRight);
 
         // Head (face beneath helm — visible through visor)
-        const riderHead = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.24), rSkinMat);
-        riderHead.position.set(0, 0.88, 0);
-        group.add(riderHead);
+        addHead(group, 0.88, [0.24, 0.26, 0.24], 0xffdbac);
         // Eyes — fierce and focused, visible through visor slit
-        for (const ex of [-0.06, 0.06]) {
-          const rEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.035, 0.02), getCachedLambert(0xf0f0f0));
-          rEyeWhite.position.set(ex, 0.90, 0.13);
-          group.add(rEyeWhite);
-          const rEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.035, 0.02), getCachedLambert(0x1a3a5c));
-          rEyePupil.position.set(ex, 0.90, 0.135);
-          group.add(rEyePupil);
-        }
+        addEyes(group, {
+          spacing: 0.06,
+          y: 0.90,
+          z: 0.13,
+          whiteSize: [0.06, 0.035, 0.02],
+          pupilSize: [0.035, 0.035, 0.02],
+          whiteColor: 0xf0f0f0,
+          pupilColor: 0x1a3a5c,
+          pupilZOffset: 0.005,
+        });
         // Nose bridge (barely visible, hints at face beneath)
-        const rNose = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.06, 0.03), rSkinMat);
-        rNose.position.set(0, 0.87, 0.14);
-        group.add(rNose);
+        addNose(group, 0.87, 0.14, [0.03, 0.06, 0.03], 0xffdbac);
 
         // Great helm — full enclosed helm with visor
         // Lower helm shell (jaw/neck protection)
@@ -970,38 +982,50 @@ export class UnitModels {
       case UnitType.PALADIN: {
         // === PALADIN — Holy knight, ornate gilded plate, great mace, tower shield, divine aura ===
 
+        // --- Shared materials (tribe-skinned) ---
+        const palPlate = getCachedLambert(s.secondary);
+        const palPlateHi = getCachedLambert(lightenColor(s.secondary, 0.10));
+        const palPlateXHi = getCachedLambert(lightenColor(s.secondary, 0.18));
+        const palPlateDk = getCachedLambert(darkenColor(s.secondary, 0.10));
+        const palGold = getCachedLambert(s.trim);
+        const palAccent = getCachedLambert(s.accent);
+
         // --- TORSO: Layered ornate plate armor ---
-        const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.65, 0.5), getCachedLambert(0xc0c0c0));
+        const pBody = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.65, 0.5), palPlate);
         pBody.position.y = 0.32;
         pBody.castShadow = true;
         group.add(pBody);
         // Polished front breastplate (bright steel, slightly forward)
-        const pBreast = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.45, 0.08), getCachedLambert(0xd8d8d8));
+        const pBreast = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.45, 0.08), palPlateHi);
         pBreast.position.set(0, 0.38, 0.26);
         group.add(pBreast);
         // Gold chest emblem — sunburst cross
-        const pEmbV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), getCachedLambert(0xffd700));
+        const pEmbV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.28, 0.02), palGold);
         pEmbV.position.set(0, 0.38, 0.31);
         group.add(pEmbV);
-        const pEmbH = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.02), getCachedLambert(0xffd700));
+        const pEmbH = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.06, 0.02), palGold);
         pEmbH.position.set(0, 0.38, 0.31);
         group.add(pEmbH);
         // Sunburst rays (4 diagonal)
         for (const rz of [-0.78, 0.78, -2.36, 2.36]) {
-          const ray = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.02), getCachedLambert(0xffd700));
+          const ray = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.16, 0.02), palGold);
           ray.position.set(0, 0.38, 0.31);
           ray.rotation.z = rz;
           group.add(ray);
         }
-        // Belt with ornate buckle
-        const pBelt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.1, 0.54), getCachedLambert(0x6d4c41));
-        pBelt.position.set(0, 0.05, 0);
-        group.add(pBelt);
-        const pBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.1, 0.06), getCachedLambert(0xffd700));
-        pBuckle.position.set(0, 0.05, 0.28);
-        group.add(pBuckle);
+        // Belt with ornate buckle (tribe-skinned)
+        addBelt(group, {
+          color: 0x6d4c41,
+          y: 0.05,
+          width: 0.62,
+          height: 0.1,
+          depth: 0.54,
+          buckleColor: s.trim,
+          buckleZ: 0.28,
+          buckleSize: [0.14, 0.1, 0.06],
+        });
         // Gorget (neck armor)
-        const pGorget = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.46), getCachedLambert(0xc0c0c0));
+        const pGorget = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.12, 0.46), palPlate);
         pGorget.position.set(0, 0.68, 0);
         group.add(pGorget);
         // Tabard / battle skirt — front (team color)
@@ -1015,62 +1039,62 @@ export class UnitModels {
 
         // --- BACK DECORATIONS: polished backplate, spine ridge, holy symbol ---
         // Polished back plate (bright steel)
-        const pBackPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.44, 0.08), getCachedLambert(0xd8d8d8));
+        const pBackPlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.44, 0.08), palPlateHi);
         pBackPlate.position.set(0, 0.38, -0.26);
         group.add(pBackPlate);
         // Raised spine ridge (center of back)
-        const pSpine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.48, 0.06), getCachedLambert(0xe8e8e8));
+        const pSpine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.48, 0.06), palPlateXHi);
         pSpine.position.set(0, 0.36, -0.30);
         group.add(pSpine);
         // Gold cross emblem on back (matching front sunburst cross)
-        const pBackCrossV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), getCachedLambert(0xffd700));
+        const pBackCrossV = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.22, 0.02), palGold);
         pBackCrossV.position.set(0, 0.38, -0.31);
         group.add(pBackCrossV);
-        const pBackCrossH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.02), getCachedLambert(0xffd700));
+        const pBackCrossH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.05, 0.02), palGold);
         pBackCrossH.position.set(0, 0.40, -0.31);
         group.add(pBackCrossH);
-        // Gold trim lines flanking spine (decorative channels)
+        // Trim lines flanking spine (decorative channels)
         for (const bx of [-0.12, 0.12]) {
-          const channel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.36, 0.02), getCachedLambert(0xffd700));
+          const channel = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.36, 0.02), palGold);
           channel.position.set(bx, 0.36, -0.31);
           group.add(channel);
         }
         // Back of helm — raised guard plate
-        const pHelmBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.08), getCachedLambert(0xc0c0c0));
+        const pHelmBack = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.08), palPlate);
         pHelmBack.position.set(0, 0.88, -0.24);
         group.add(pHelmBack);
-        // Gold trim on back of helm
-        const pHelmBackTrim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.09), getCachedLambert(0xffd700));
+        // Trim on back of helm
+        const pHelmBackTrim = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.04, 0.09), palGold);
         pHelmBackTrim.position.set(0, 0.80, -0.24);
         group.add(pHelmBackTrim);
 
-        // --- SHOULDER PAULDRONS: massive ornate layered plates ---
+        // --- SHOULDER PAULDRONS: massive ornate layered plates (tribe-skinned) ---
         for (const sx of [-0.36, 0.36]) {
           // Main pauldron
-          const ppMain = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.38), getCachedLambert(0xd8d8d8));
+          const ppMain = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.18, 0.38), palPlateHi);
           ppMain.position.set(sx, 0.68, 0);
           group.add(ppMain);
-          // Gold trim on bottom edge
-          const ppTrim = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.4), getCachedLambert(0xffd700));
+          // Trim on bottom edge
+          const ppTrim = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.04, 0.4), palGold);
           ppTrim.position.set(sx, 0.60, 0);
           group.add(ppTrim);
           // Raised top ridge
-          const ppRidge = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.3), getCachedLambert(0xe8e8e8));
+          const ppRidge = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.06, 0.3), palPlateXHi);
           ppRidge.position.set(sx, 0.78, 0);
           group.add(ppRidge);
-          // Gold stud on pauldron face
-          const ppStud = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), getCachedLambert(0xffd700));
+          // Stud on pauldron face
+          const ppStud = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), palGold);
           ppStud.position.set(sx, 0.68, 0.18);
           group.add(ppStud);
         }
 
-        // --- HELMET: Great helm with crown crest, visor, cheek plates ---
+        // --- HELMET: Great helm with crown crest, visor, cheek plates (tribe-skinned) ---
         // Main helm
-        const pHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), getCachedLambert(0xd8d8d8));
+        const pHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.46, 0.46), palPlateHi);
         pHelm.position.y = 0.96;
         group.add(pHelm);
         // Darker faceplate
-        const pFace = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.32, 0.08), getCachedLambert(0xaaaaaa));
+        const pFace = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.32, 0.08), palPlateDk);
         pFace.position.set(0, 0.92, 0.24);
         group.add(pFace);
         // Eye slit (dark)
@@ -1086,23 +1110,23 @@ export class UnitModels {
         // Crown crest on top — 5 points like a crown
         for (let ci = -2; ci <= 2; ci++) {
           const h = ci === 0 ? 0.14 : (Math.abs(ci) === 1 ? 0.10 : 0.07);
-          const crestPt = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), getCachedLambert(0xffd700));
+          const crestPt = new THREE.Mesh(new THREE.BoxGeometry(0.06, h, 0.06), palGold);
           crestPt.position.set(ci * 0.08, 1.19 + h / 2, 0);
           group.add(crestPt);
         }
         // Crown base band
-        const crownBand = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.06, 0.48), getCachedLambert(0xffd700));
+        const crownBand = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.06, 0.48), palGold);
         crownBand.position.set(0, 1.19, 0);
         group.add(crownBand);
         // Cheek guards
         for (const cx of [-0.24, 0.24]) {
-          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.1), getCachedLambert(0xc0c0c0));
+          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.1), palPlate);
           cheek.position.set(cx, 0.88, 0.2);
           group.add(cheek);
         }
 
         // --- LEFT ARM + TOWER SHIELD (unique design) — pushed out to avoid body clipping ---
-        const pArmL = makeArmGroup('arm-left', 0xc0c0c0, -0.36, 0.55);
+        const pArmL = makeArmGroup('arm-left', s.secondary, -0.36, 0.55);
         // Shield body — tall tower shield (offset further from arm)
         const shZ = 0.32; // shield Z offset — farther out from body
         const shX = 0.18; // shield X offset
@@ -1111,28 +1135,28 @@ export class UnitModels {
         pShield.position.set(shX, -0.05, shZ);
         pArmL.add(pShield);
         // Steel rim — top
-        const pRimT = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), getCachedLambert(0xc0c0c0));
+        const pRimT = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), palPlate);
         pRimT.position.set(shX, 0.35, shZ);
         pArmL.add(pRimT);
         // Steel rim — bottom
-        const pRimB = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), getCachedLambert(0xc0c0c0));
+        const pRimB = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.12), palPlate);
         pRimB.position.set(shX, -0.45, shZ);
         pArmL.add(pRimB);
         // Steel rim — sides
         for (const rx of [-0.28, 0.28]) {
-          const pRimS = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.12), getCachedLambert(0xc0c0c0));
+          const pRimS = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.8, 0.12), palPlate);
           pRimS.position.set(shX + rx, -0.05, shZ);
           pArmL.add(pRimS);
         }
-        // Large golden sun boss
-        const pBoss = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.14), getCachedLambert(0xffd700));
+        // Large sun boss
+        const pBoss = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.14), palGold);
         pBoss.position.set(shX, 0.05, shZ + 0.07);
         pArmL.add(pBoss);
         // Sun rays from boss (8 directions)
         for (let ri = 0; ri < 8; ri++) {
           const angle = (ri / 8) * Math.PI * 2;
           const rayLen = 0.15;
-          const sunRay = new THREE.Mesh(new THREE.BoxGeometry(0.04, rayLen, 0.02), getCachedLambert(0xffd700));
+          const sunRay = new THREE.Mesh(new THREE.BoxGeometry(0.04, rayLen, 0.02), palGold);
           sunRay.position.set(
             shX + Math.sin(angle) * 0.16,
             0.05 + Math.cos(angle) * 0.16,
@@ -1141,32 +1165,32 @@ export class UnitModels {
           sunRay.rotation.z = -angle;
           pArmL.add(sunRay);
         }
-        // Vertical gold stripe on shield
-        const pStripeV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.02), getCachedLambert(0xffd700));
+        // Vertical tribe-colored stripe on shield
+        const pStripeV = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.7, 0.02), palGold);
         pStripeV.position.set(shX, -0.05, shZ + 0.06);
         pArmL.add(pStripeV);
-        // Horizontal gold stripe
-        const pStripeH = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.06, 0.02), getCachedLambert(0xffd700));
+        // Horizontal tribe-colored stripe
+        const pStripeH = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.06, 0.02), palGold);
         pStripeH.position.set(shX, 0.05, shZ + 0.06);
         pArmL.add(pStripeH);
         group.add(pArmL);
 
         // --- RIGHT ARM + GREAT MACE (ornate holy weapon — held in hand) ---
-        const pArmR = makeArmGroup('arm-right', 0xc0c0c0, 0.3, 0.55);
+        const pArmR = makeArmGroup('arm-right', s.secondary, 0.3, 0.55);
         const pElbowR = pArmR.getObjectByName('arm-right-elbow')!;
         // Long mace handle (dark wood with gold wrap)
         const pMHandle = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.55), getCachedLambert(0x5d4037));
         pMHandle.name = 'mace-shaft';
         pMHandle.position.set(0, -0.16, 0.28);
         pElbowR.add(pMHandle);
-        // Gold grip wrapping (two bands)
+        // Grip wrapping (two bands)
         for (const gz of [0.1, 0.2]) {
-          const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), getCachedLambert(0xffd700));
+          const grip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.04), palGold);
           grip.position.set(0, -0.16, gz);
           pElbowR.add(grip);
         }
-        // Pommel (gold ball at base)
-        const pPommel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), getCachedLambert(0xffd700));
+        // Pommel (ball at base)
+        const pPommel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), palGold);
         pPommel.position.set(0, -0.16, 0.02);
         pElbowR.add(pPommel);
         // Mace head — large ornate flanged ball (bright steel)
@@ -1175,7 +1199,7 @@ export class UnitModels {
         pMHead.position.set(0, -0.16, 0.57);
         pElbowR.add(pMHead);
         // 6 big flanges radiating from mace head
-        const flMat = getCachedLambert(0xc0c0c0);
+        const flMat = palPlate;
         const flangePositions: [number, number][] = [[0.12, 0], [-0.12, 0], [0, 0.12], [0, -0.12], [0.08, 0.08], [-0.08, -0.08]];
         for (const [fx, fy] of flangePositions) {
           const fl = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 0.16), flMat);
@@ -1183,22 +1207,22 @@ export class UnitModels {
           fl.position.set(fx, -0.16 + fy, 0.57);
           pElbowR.add(fl);
         }
-        // Gold cap on mace tip
-        const pMTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), getCachedLambert(0xffd700));
+        // Cap on mace tip
+        const pMTip = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.06), palGold);
         pMTip.name = 'mace-tip';
         pMTip.position.set(0, -0.16, 0.68);
         pElbowR.add(pMTip);
         group.add(pArmR);
 
-        // --- LEGS with ornate greaves ---
-        group.add(makeLegGroup('leg-left', 0xc0c0c0, -0.12, 0));
-        group.add(makeLegGroup('leg-right', 0xc0c0c0, 0.12, 0));
-        // Knee guards (gold-trimmed)
+        // --- LEGS with ornate greaves (tribe-skinned) ---
+        group.add(makeLegGroup('leg-left', s.secondary, -0.12, 0));
+        group.add(makeLegGroup('leg-right', s.secondary, 0.12, 0));
+        // Knee guards (tribe-trimmed)
         for (const kx of [-0.12, 0.12]) {
-          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), getCachedLambert(0xd8d8d8));
+          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), palPlateHi);
           knee.position.set(kx, 0.05, 0.08);
           group.add(knee);
-          const kneeTrim = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.13), getCachedLambert(0xffd700));
+          const kneeTrim = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.03, 0.13), palGold);
           kneeTrim.position.set(kx, 0.02, 0.08);
           group.add(kneeTrim);
         }
@@ -1257,12 +1281,12 @@ export class UnitModels {
 
         // --- Shared Materials ---
         const bTunicMat = getCachedLambert(0xc9a876); // tan work tunic
-        const bLeatherMat = getCachedLambert(0x5d4037); // dark brown leather
+        const bLeatherMat = getCachedLambert(darkenColor(s.secondary, 0.20)); // tribe leather
         const bBeltMat = getCachedLambert(playerColor); // team color accents
         const bSkinMat = getCachedLambert(0xffdbac); // skin tone
-        const bGloveMat = getCachedLambert(0x8B6914); // tan reinforced leather
-        const bBootMat = getCachedLambert(0x3c2415); // dark boot
-        const bMetalMat = getCachedLambert(0x757575); // tool metal
+        const bGloveMat = getCachedLambert(s.secondary); // tribe reinforced leather
+        const bBootMat = getCachedLambert(darkenColor(s.secondary, 0.30)); // tribe boot
+        const bMetalMat = getCachedLambert(s.accent); // tribe tool metal
         const bWoodMat = getCachedLambert(0x8B5A3C); // hammer handle wood
 
         // ─── TORSO: LAYERED WORK TUNIC ───
@@ -1341,10 +1365,30 @@ export class UnitModels {
         group.add(backPanel);
 
         // ─── HEAD & HAT ───
-        // Face
-        const workerFace = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), bSkinMat);
-        workerFace.position.set(0, 0.78, 0);
-        group.add(workerFace);
+        // Face with determined expression
+        addHead(group, 0.78, [0.32, 0.32, 0.32], 0xffdbac);
+
+        // Eyes — focused, determined (steely blue)
+        addEyes(group, {
+          spacing: 0.07,
+          y: 0.80,
+          z: -0.15,
+          whiteSize: [0.055, 0.04, 0.03],
+          pupilSize: [0.03, 0.04, 0.03],
+          whiteColor: 0xf0f0f0,
+          pupilColor: 0x3b5998,
+          pupilZOffset: -0.01,
+        });
+        // Thick eyebrows (working man)
+        addEyebrows(group, 0.07, 0.835, -0.15, [0.08, 0.025, 0.04], 0x3c2415);
+        // Firm mouth
+        addMouth(group, 0.71, -0.15, [0.08, 0.02, 0.03], 0xa06050);
+        // Stubble/chin detail
+        const bldChin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.04), getCachedLambert(0xe8c8a0));
+        bldChin.position.set(0, 0.67, -0.14);
+        group.add(bldChin);
+        // Nose
+        addNose(group, 0.76, -0.18, [0.05, 0.05, 0.06], 0xf0c8a0);
 
         // Hard hat base (team color)
         const hatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.06, 0.42), bBeltMat);
@@ -1441,13 +1485,13 @@ export class UnitModels {
       case UnitType.LUMBERJACK: {
         // ═══ LUMBERJACK — Rugged woodsman with character ═══
         const lumbTunic = getCachedLambert(0x558020);
-        const lumbBrown = getCachedLambert(0x6b4423);
-        const lumbLeather = getCachedLambert(0x3e2723);
+        const lumbBrown = getCachedLambert(darkenColor(s.secondary, 0.15)); // tribe plaid
+        const lumbLeather = getCachedLambert(darkenColor(s.secondary, 0.25)); // tribe leather
         const lumbTeam = getCachedLambert(playerColor);
-        const lumbFur = getCachedLambert(0x4a3728);
-        const lumbMetal = getCachedLambert(0x999999);
+        const lumbFur = getCachedLambert(darkenColor(s.secondary, 0.20)); // tribe fur
+        const lumbMetal = getCachedLambert(s.accent); // tribe metal
         const lumbWood = getCachedLambert(0x8B4513);
-        const lumbBoot = getCachedLambert(0x2c1810);
+        const lumbBoot = getCachedLambert(darkenColor(s.secondary, 0.35));
 
         // Body with plaid pattern
         const bodyBase = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.55, 0.40), lumbTunic);
@@ -1475,10 +1519,27 @@ export class UnitModels {
         holster.position.set(0.18, 0.05, 0.15);
         group.add(holster);
 
-        // Head with beard and cap
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), getCachedLambert(0xffdbac));
-        head.position.y = 0.78;
-        group.add(head);
+        // Head with face, beard, and cap
+        addHead(group, 0.78, [0.35, 0.35, 0.35], 0xffdbac);
+
+        // Eyes — squinting, rugged focus (front = +Z for lumberjack)
+        addEyes(group, {
+          spacing: 0.08,
+          y: 0.80,
+          z: 0.16,
+          whiteSize: [0.06, 0.035, 0.03],
+          pupilSize: [0.035, 0.035, 0.03],
+          whiteColor: 0xf0f0f0,
+          pupilColor: 0x4a3728,
+          pupilZOffset: 0.01,
+        });
+        // Bushy eyebrows
+        addEyebrows(group, 0.08, 0.83, 0.16, [0.08, 0.025, 0.04], 0x4a3728);
+        // Mouth — slight grin
+        addMouth(group, 0.72, 0.16, [0.10, 0.025, 0.03], 0x8B4513);
+        // Nose
+        addNose(group, 0.76, 0.19, [0.05, 0.06, 0.06], 0xf0c8a0);
+
         const beard = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.12, 0.15), lumbFur);
         beard.position.set(0, 0.65, 0.12);
         group.add(beard);
@@ -1563,13 +1624,13 @@ export class UnitModels {
 
       case UnitType.VILLAGER: {
         // ═══ VILLAGER — Peasant farmer with warmth and personality ═══
-        const vilTunic = getCachedLambert(0xd4a574);
-        const vilVest = getCachedLambert(0x8b6f47);
+        const vilTunic = getCachedLambert(lightenColor(s.secondary, 0.20)); // tribe tunic
+        const vilVest = getCachedLambert(darkenColor(s.secondary, 0.10)); // tribe vest
         const vilCloth = getCachedLambert(playerColor);
         const vilStraw = getCachedLambert(0xf5deb3);
-        const vilWoven = getCachedLambert(0xd2b48c);
+        const vilWoven = getCachedLambert(s.secondary); // tribe woven
         const vilWood = getCachedLambert(0x8B4513);
-        const vilMetal = getCachedLambert(0xaaaaaa);
+        const vilMetal = getCachedLambert(s.accent); // tribe metal
         const vilGreen = getCachedLambert(0x7cb342);
 
         // Layered tunic body
@@ -1616,10 +1677,32 @@ export class UnitModels {
           group.add(patch);
         }
 
-        // Head: Friendly face
-        const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.35, 0.35), getCachedLambert(0xffdbac));
-        head.position.y = 0.78;
-        group.add(head);
+        // Head: Friendly face with eyes, freckles, and warm smile
+        addHead(group, 0.78, [0.35, 0.35, 0.35], 0xffdbac);
+
+        // Eyes — warm, friendly (front = +Z for villager, green eyes for farmer)
+        addEyes(group, {
+          spacing: 0.08,
+          y: 0.80,
+          z: 0.16,
+          whiteSize: [0.06, 0.04, 0.03],
+          pupilSize: [0.035, 0.04, 0.03],
+          whiteColor: 0xf0f0f0,
+          pupilColor: 0x4a7023,
+          pupilZOffset: 0.01,
+        });
+        // Gentle eyebrows
+        addEyebrows(group, 0.08, 0.835, 0.16, [0.07, 0.02, 0.03], 0x8B6914);
+        // Warm smile
+        addMouth(group, 0.72, 0.16, [0.12, 0.02, 0.03], 0xc47a5a);
+        // Rosy cheeks (freckled farmer look)
+        for (const cx of [-0.10, 0.10]) {
+          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.03), getCachedLambert(0xf0a090));
+          cheek.position.set(cx, 0.74, 0.16);
+          group.add(cheek);
+        }
+        // Nose
+        addNose(group, 0.76, 0.19, [0.04, 0.05, 0.05], 0xf0c8a0);
 
         // Wide-brim straw hat with woven texture (layered)
         const hatBrim = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.04, 0.48), vilStraw);
@@ -1744,15 +1827,15 @@ export class UnitModels {
         const mWoodDark = getCachedLambert(0x5d4037);
         const mWoodMed = getCachedLambert(0x6d4c2a);
         const mWoodLight = getCachedLambert(0x8B6914);
-        const mIron = getCachedLambert(0x555555);
-        const mIronDark = getCachedLambert(0x3a3a3a);
+        const mIron = getCachedLambert(darkenColor(s.secondary, 0.25)); // tribe iron
+        const mIronDark = getCachedLambert(darkenColor(s.secondary, 0.35)); // tribe dark iron
         const mRope = getCachedLambert(0xc4a56a);
-        const mGold = getCachedLambert(0xd4a017);
+        const mGold = getCachedLambert(s.accent); // tribe gold trim
         const mTeam = getCachedLambert(playerColor);
         const mSkin = getCachedLambert(0xffdbac);
-        const mLeather = getCachedLambert(0x6b5b45);
-        const mLeatherDark = getCachedLambert(0x4a3728);
-        const mBone = getCachedLambert(0xd7ccc8);
+        const mLeather = getCachedLambert(s.secondary); // tribe leather
+        const mLeatherDark = getCachedLambert(darkenColor(s.secondary, 0.20)); // tribe dark leather
+        const mBone = getCachedLambert(lightenColor(s.trim, 0.15)); // tribe bone
 
         const tg = trebGroup;
 
@@ -2071,23 +2154,19 @@ export class UnitModels {
         tg.add(toolHead);
 
         // --- Head (with face, helmet) ---
-        const opHead = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.24), mSkin);
-        opHead.position.set(0, 0.78, opZ);
-        opHead.name = 'head';
-        tg.add(opHead);
+        const opHead = addHead(tg, 0.78, [0.24, 0.24, 0.24], 0xffdbac);
+        opHead.position.z = opZ;
 
         // Eyes (white surround + brown pupils)
-        const eyeWhiteMat = getCachedLambert(0xf0f0f0);
-        const eyePupilMat = getCachedLambert(0x3b2507);
         for (const ex of [-0.05, 0.05]) {
-          const eWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.03), eyeWhiteMat);
+          const eWhite = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.04, 0.03), getCachedLambert(0xf0f0f0));
           eWhite.position.set(ex, 0.80, opZ + 0.13);
           tg.add(eWhite);
-          const ePupil = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.02), eyePupilMat);
+          const ePupil = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 0.02), getCachedLambert(0x3b2507));
           ePupil.position.set(ex, 0.80, opZ + 0.145);
           tg.add(ePupil);
         }
-        // Eyebrows (focused/determined — angled inward)
+        // Eyebrows (focused/determined — angled inward) — custom rotation
         const browCol = getCachedLambert(0x3e2723);
         const opBrowL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.03), browCol);
         opBrowL.position.set(-0.05, 0.835, opZ + 0.13);
@@ -2098,21 +2177,20 @@ export class UnitModels {
         opBrowR.rotation.z = 0.15;
         tg.add(opBrowR);
         // Nose
-        const opNose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), mSkin);
-        opNose.position.set(0, 0.78, opZ + 0.14);
-        tg.add(opNose);
+        addNose(tg, 0.78, 0.14, [0.04, 0.04, 0.04], 0xffdbac);
+        // adjust position to trebuchet's opZ offset
+        const noseMesh = tg.children[tg.children.length - 1] as THREE.Mesh;
+        noseMesh.position.z = opZ;
         // Mouth (thin line, slight grin)
-        const mouthMat = getCachedLambert(0x8d5524);
-        const opMouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.015, 0.02), mouthMat);
+        const opMouth = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.015, 0.02), getCachedLambert(0x8d5524));
         opMouth.position.set(0, 0.745, opZ + 0.13);
         tg.add(opMouth);
         // Chin
-        const opChin = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.03, 0.06), mSkin);
+        const opChin = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.03, 0.06), getCachedLambert(0xffdbac));
         opChin.position.set(0, 0.72, opZ + 0.08);
         tg.add(opChin);
         // Stubble / beard shadow
-        const stubbleMat = getCachedLambert(0xc8a882);
-        const opStubble = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), stubbleMat);
+        const opStubble = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.04), getCachedLambert(0xc8a882));
         opStubble.position.set(0, 0.73, opZ + 0.10);
         tg.add(opStubble);
 
@@ -2237,12 +2315,16 @@ export class UnitModels {
         hCrossH.position.set(0, 0.44, 0.27);
         group.add(hCrossH);
         // Ornate belt with team color + gold buckle
-        const hBelt = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.08, 0.48), getCachedLambert(playerColor));
-        hBelt.position.set(0, 0.06, 0);
-        group.add(hBelt);
-        const hBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.08, 0.04), getCachedLambert(0xffd700));
-        hBuckle.position.set(0, 0.06, 0.25);
-        group.add(hBuckle);
+        addBelt(group, {
+          color: playerColor,
+          y: 0.06,
+          width: 0.52,
+          height: 0.08,
+          depth: 0.48,
+          buckleColor: s.accent,
+          buckleZ: 0.25,
+          buckleSize: [0.1, 0.08, 0.04],
+        });
         // Sash hanging from belt (team color, diagonal)
         const hSash = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.25, 0.04), getCachedLambert(playerColor));
         hSash.position.set(0.12, -0.08, 0.2);
@@ -2275,19 +2357,19 @@ export class UnitModels {
         }
 
         // --- HEAD: warm, kind face with flowing hood ---
-        const hHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.32, 0.32), getCachedLambert(0xffdbac));
-        hHead.position.y = 0.86;
-        group.add(hHead);
+        addHead(group, 0.86, [0.32, 0.32, 0.32], 0xffdbac);
         // Kind eyes — warm brown with white surround, gentle shape
-        for (const ex of [-0.08, 0.08]) {
-          const hEyeWhite = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.04, 0.02), getCachedLambert(0xf5f5f5));
-          hEyeWhite.position.set(ex, 0.89, 0.17);
-          group.add(hEyeWhite);
-          const hEyePupil = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), getCachedLambert(0x5d4037));
-          hEyePupil.position.set(ex, 0.89, 0.175);
-          group.add(hEyePupil);
-        }
-        // Gentle eyebrows — slightly raised (kind expression)
+        addEyes(group, {
+          spacing: 0.08,
+          y: 0.89,
+          z: 0.17,
+          whiteSize: [0.07, 0.04, 0.02],
+          pupilSize: [0.04, 0.04, 0.02],
+          whiteColor: 0xf5f5f5,
+          pupilColor: 0x5d4037,
+          pupilZOffset: 0.005,
+        });
+        // Gentle eyebrows — slightly raised (kind expression) — custom rotation
         for (const [bx, bz] of [[-0.08, 0.05], [0.08, -0.05]] as [number, number][]) {
           const hBrow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.02), getCachedLambert(0x8d6e4a));
           hBrow.position.set(bx, 0.92, 0.17);
@@ -2295,13 +2377,9 @@ export class UnitModels {
           group.add(hBrow);
         }
         // Nose — soft rounded ridge
-        const hNose = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.04), getCachedLambert(0xf5d0a0));
-        hNose.position.set(0, 0.86, 0.18);
-        group.add(hNose);
+        addNose(group, 0.86, 0.18, [0.04, 0.06, 0.04], 0xf5d0a0);
         // Mouth — gentle smile (slightly upturned)
-        const hMouth = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.02, 0.02), getCachedLambert(0xc08060));
-        hMouth.position.set(0, 0.8, 0.17);
-        group.add(hMouth);
+        addMouth(group, 0.8, 0.17, [0.1, 0.02, 0.02], 0xc08060);
         // Smile corners (tiny upward ticks)
         for (const mx of [-0.055, 0.055]) {
           const corner = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02), getCachedLambert(0xc08060));
@@ -2380,7 +2458,7 @@ export class UnitModels {
         // Staff head — golden cradle/cage holding a crystal
         const hCradleRing = new THREE.Mesh(
           new THREE.TorusGeometry(0.08, 0.015, 6, 8),
-          getCachedLambert(0xffd700)
+          getCachedLambert(s.accent)
         );
         hCradleRing.position.set(0, 0.75, 0.1);
         hCradleRing.rotation.x = Math.PI / 2;
@@ -2388,7 +2466,7 @@ export class UnitModels {
         // Four gold prongs curving up to hold crystal
         for (let pi = 0; pi < 4; pi++) {
           const pAngle = (pi / 4) * Math.PI * 2;
-          const prong = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), getCachedLambert(0xffd700));
+          const prong = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.02), getCachedLambert(s.accent));
           prong.position.set(Math.cos(pAngle) * 0.06, 0.82, 0.1 + Math.sin(pAngle) * 0.06);
           prong.rotation.x = Math.sin(pAngle) * 0.2;
           prong.rotation.z = -Math.cos(pAngle) * 0.2;
@@ -2414,7 +2492,7 @@ export class UnitModels {
         for (const gy of [-0.1, 0.15, 0.4]) {
           const band = new THREE.Mesh(
             new THREE.CylinderGeometry(0.035, 0.035, 0.03, 6),
-            getCachedLambert(0xffd700)
+            getCachedLambert(s.accent)
           );
           band.position.set(0, gy, 0.1);
           hStaffGrp.add(band);
@@ -2422,8 +2500,8 @@ export class UnitModels {
         group.add(hArmR);
 
         // --- LEGS (hidden under robe, just peeks of boots) ---
-        group.add(makeLegGroup('leg-left', 0x795548, -0.12, 0));
-        group.add(makeLegGroup('leg-right', 0x795548, 0.12, 0));
+        group.add(makeLegGroup('leg-left', darkenColor(s.secondary, 0.20), -0.12, 0));
+        group.add(makeLegGroup('leg-right', darkenColor(s.secondary, 0.20), 0.12, 0));
 
         // --- AMBIENT HEAL PARTICLES (2 small green motes orbiting, animated) ---
         for (let mi = 0; mi < 3; mi++) {
@@ -2440,13 +2518,16 @@ export class UnitModels {
       }
       case UnitType.ASSASSIN: {
         // === ASSASSIN — Slim, hooded rogue with daggers attached to arms ===
+        // Shared skinned materials
+        const assBodyColor = darkenColor(s.secondary, 0.40); // very dark version of tribe secondary
+        const assStrapColor = darkenColor(s.secondary, 0.25); // slightly lighter straps
         // Slim torso — dark leather armor
-        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.55, 0.35), getCachedLambert(0x1a0033));
+        const aBody = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.55, 0.35), getCachedLambert(assBodyColor));
         aBody.position.y = 0.28;
         aBody.castShadow = true;
         group.add(aBody);
         // Leather straps across chest (X pattern)
-        const strapMat = getCachedLambert(0x2d1b4e);
+        const strapMat = getCachedLambert(assStrapColor);
         const strapL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.45, 0.37), strapMat);
         strapL.position.set(0, 0.3, 0);
         strapL.rotation.z = 0.35;
@@ -2456,9 +2537,14 @@ export class UnitModels {
         strapR.rotation.z = -0.35;
         group.add(strapR);
         // Team color belt with poison vials
-        const aBelt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.06, 0.37), getCachedLambert(playerColor));
-        aBelt.position.y = 0.05;
-        group.add(aBelt);
+        addBelt(group, {
+          color: playerColor,
+          y: 0.05,
+          width: 0.4,
+          height: 0.06,
+          depth: 0.37,
+          buckleColor: null,
+        });
         // Tiny poison vials on belt
         const vialMat = new THREE.MeshLambertMaterial({ color: 0x76ff03, emissive: 0x76ff03, emissiveIntensity: 0.4 });
         for (const vx of [-0.1, 0.0, 0.1]) {
@@ -2537,26 +2623,37 @@ export class UnitModels {
         // === SHIELDBEARER — Bulky ornate plate armor, imposing great helm, heater shield ===
         // All box geometry — voxel aesthetic, but heavily ornamented
 
+        // --- Shared materials (tribe-skinned) ---
+        const sbPlate = getCachedLambert(s.secondary);
+        const sbPlateHi = getCachedLambert(lightenColor(s.secondary, 0.08));
+        const sbPlateXHi = getCachedLambert(lightenColor(s.secondary, 0.15));
+        const sbPlateDk = getCachedLambert(darkenColor(s.secondary, 0.15));
+        const sbPlateMd = getCachedLambert(darkenColor(s.secondary, 0.05));
+        const sbGoldMat = getCachedLambert(s.trim);
+
         // --- TORSO: layered plate armor ---
         // Inner breastplate
-        const sbChest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.55), getCachedLambert(0x78909c));
+        const sbChest = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.7, 0.55), sbPlate);
         sbChest.position.y = 0.35;
         sbChest.castShadow = true;
         group.add(sbChest);
         // Front plate overlay (slightly protruding, lighter steel)
-        const sbFrontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), getCachedLambert(0x90a4ae));
+        const sbFrontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.1), sbPlateHi);
         sbFrontPlate.position.set(0, 0.4, 0.28);
         group.add(sbFrontPlate);
-        // Belt / waist guard
-        const sbBelt = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.1, 0.58), getCachedLambert(0x5d4037));
-        sbBelt.position.set(0, 0.05, 0);
-        group.add(sbBelt);
-        // Belt buckle
-        const sbBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.05), getCachedLambert(0xffd700));
-        sbBuckle.position.set(0, 0.05, 0.3);
-        group.add(sbBuckle);
+        // Belt / waist guard with buckle (tribe-skinned)
+        addBelt(group, {
+          color: 0x5d4037,
+          y: 0.05,
+          width: 0.68,
+          height: 0.1,
+          depth: 0.58,
+          buckleColor: s.trim,
+          buckleZ: 0.3,
+          buckleSize: [0.12, 0.08, 0.05],
+        });
         // Gorget (neck guard)
-        const sbGorget = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.48), getCachedLambert(0x607d8b));
+        const sbGorget = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.48), sbPlateMd);
         sbGorget.position.set(0, 0.72, 0);
         group.add(sbGorget);
 
@@ -2567,18 +2664,18 @@ export class UnitModels {
           pauldron.position.set(sx, 0.68, 0);
           group.add(pauldron);
           // Pauldron top ridge
-          const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.28), getCachedLambert(0xb0bec5));
+          const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.28), sbPlateXHi);
           ridge.position.set(sx, 0.77, 0);
           group.add(ridge);
-          // Pauldron edge trim (gold)
-          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.03, 0.38), getCachedLambert(0xffd700));
+          // Pauldron edge trim
+          const trim = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.03, 0.38), sbGoldMat);
           trim.position.set(sx, 0.62, 0);
           group.add(trim);
         }
 
-        // --- HELMET: Great helm with T-visor, crest, and face plate ---
+        // --- HELMET: Great helm with T-visor, crest, and face plate (tribe-skinned) ---
         // Main helm block
-        const sbHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.44, 0.46), getCachedLambert(0x546e7a));
+        const sbHelm = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.44, 0.46), sbPlateDk);
         sbHelm.position.y = 0.95;
         group.add(sbHelm);
         // Helm top crest / ridge (raised stripe on top)
@@ -2586,7 +2683,7 @@ export class UnitModels {
         sbCrest.position.set(0, 1.2, 0);
         group.add(sbCrest);
         // Face plate (slightly forward, darker)
-        const sbFacePlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.08), getCachedLambert(0x455a64));
+        const sbFacePlate = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.35, 0.08), getCachedLambert(darkenColor(s.secondary, 0.25)));
         sbFacePlate.position.set(0, 0.92, 0.25);
         group.add(sbFacePlate);
         // T-shaped visor slit (horizontal bar + vertical bar)
@@ -2597,18 +2694,18 @@ export class UnitModels {
         sbVisorV.position.set(0, 0.88, 0.28);
         group.add(sbVisorV);
         // Chin guard (protruding lower jaw plate)
-        const sbChin = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, 0.12), getCachedLambert(0x546e7a));
+        const sbChin = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.08, 0.12), sbPlateDk);
         sbChin.position.set(0, 0.76, 0.24);
         group.add(sbChin);
         // Helm side cheek guards
         for (const hx of [-0.24, 0.24]) {
-          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.08), getCachedLambert(0x546e7a));
+          const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.2, 0.08), sbPlateDk);
           cheek.position.set(hx, 0.88, 0.22);
           group.add(cheek);
         }
 
         // --- LEFT ARM + HEATER SHIELD ---
-        const sbArmLeft = makeArmGroup('arm-left', 0x78909c, -0.35, 0.55);
+        const sbArmLeft = makeArmGroup('arm-left', s.secondary, -0.35, 0.55);
         const sbArmLeftElbow = sbArmLeft.getObjectByName('arm-left-elbow')!;
         const shieldGroup = new THREE.Group();
         shieldGroup.name = 'shield-group';
@@ -2627,37 +2724,37 @@ export class UnitModels {
         shPointR.position.set(0.07, -0.32, 0);
         shPointR.rotation.z = 0.25;
         shieldGroup.add(shPointR);
-        // Steel rim — top edge
-        const shTopRim = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.1), getCachedLambert(0x607d8b));
+        // Rim — top edge
+        const shTopRim = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.1), sbPlateMd);
         shTopRim.position.set(0, 0.35, 0);
         shieldGroup.add(shTopRim);
-        // Steel rim — side edges
+        // Rim — side edges
         for (const rx of [-0.28, 0.28]) {
-          const shRim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.1), getCachedLambert(0x607d8b));
+          const shRim = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.6, 0.1), sbPlateMd);
           shRim.position.set(rx, 0.05, 0);
           shieldGroup.add(shRim);
         }
         // Center boss (square, raised)
-        const shBoss = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), getCachedLambert(0xffd700));
+        const shBoss = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.14), sbGoldMat);
         shBoss.position.set(0, 0.05, 0.06);
         shieldGroup.add(shBoss);
         // Boss spike
-        const shSpike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.14), getCachedLambert(0xcccccc));
+        const shSpike = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.14), sbPlateHi);
         shSpike.position.set(0, 0.05, 0.15);
         shieldGroup.add(shSpike);
-        // Gold chevron emblem (upper shield)
-        const chevron1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), getCachedLambert(0xffd700));
+        // Chevron emblem (upper shield)
+        const chevron1 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.09), sbGoldMat);
         chevron1.position.set(0, 0.2, 0.01);
         shieldGroup.add(chevron1);
-        const chevron2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.09), getCachedLambert(0xffd700));
+        const chevron2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.04, 0.09), sbGoldMat);
         chevron2.position.set(0, -0.1, 0.01);
         shieldGroup.add(chevron2);
         // Diagonal cross on lower shield
-        const diagL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), getCachedLambert(0xffd700));
+        const diagL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), sbGoldMat);
         diagL.position.set(-0.06, -0.08, 0.01);
         diagL.rotation.z = 0.35;
         shieldGroup.add(diagL);
-        const diagR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), getCachedLambert(0xffd700));
+        const diagR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.25, 0.09), sbGoldMat);
         diagR.position.set(0.06, -0.08, 0.01);
         diagR.rotation.z = -0.35;
         shieldGroup.add(diagR);
@@ -2667,14 +2764,14 @@ export class UnitModels {
         group.add(sbArmLeft);
 
         // --- RIGHT ARM (gauntleted fist) ---
-        group.add(makeArmGroup('arm-right', 0x78909c, 0.35, 0.55));
+        group.add(makeArmGroup('arm-right', s.secondary, 0.35, 0.55));
 
-        // --- LEGS with armored greaves ---
-        group.add(makeLegGroup('leg-left', 0x546e7a, -0.15, 0));
-        group.add(makeLegGroup('leg-right', 0x546e7a, 0.15, 0));
+        // --- LEGS with armored greaves (tribe-skinned) ---
+        group.add(makeLegGroup('leg-left', darkenColor(s.secondary, 0.15), -0.15, 0));
+        group.add(makeLegGroup('leg-right', darkenColor(s.secondary, 0.15), 0.15, 0));
         // Knee guards
         for (const kx of [-0.15, 0.15]) {
-          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), getCachedLambert(0x607d8b));
+          const knee = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.12), sbPlateMd);
           knee.position.set(kx, 0.05, 0.08);
           group.add(knee);
         }
@@ -2685,19 +2782,19 @@ export class UnitModels {
         // Design: massive bare torso, chainmail skirt, wolf-pelt mantle, horned helm, rune tattoos,
         // dual bearded axes in tilted wrapper groups with blades facing correct chopping direction.
 
-        // --- Shared materials ---
-        const bkSkinMat = getCachedLambert(0xd4a574); // weathered Norse skin
+        // --- Shared materials (tribe-skinned: chainmail/iron use secondary, bronze uses accent) ---
+        const bkSkinMat = getCachedLambert(0xd4a574); // weathered Norse skin (universal)
         const bkSkinShadow = getCachedLambert(0xb8895a); // muscle shadow
-        const bkChainMat = getCachedLambert(0x6d6d6d); // chainmail
-        const bkChainDark = getCachedLambert(0x555555); // chainmail shadow
-        const bkFurMat = getCachedLambert(0x4e3b2a); // wolf pelt
+        const bkChainMat = getCachedLambert(s.secondary); // chainmail
+        const bkChainDark = getCachedLambert(darkenColor(s.secondary, 0.15)); // chainmail shadow
+        const bkFurMat = getCachedLambert(0x4e3b2a); // wolf pelt (universal)
         const bkFurLight = getCachedLambert(0x6d5640); // lighter fur tufts
         const bkFurDark = getCachedLambert(0x3e2d1c); // dark fur underside
-        const bkLeatherMat = getCachedLambert(0x5d4037); // leather straps
+        const bkLeatherMat = getCachedLambert(0x5d4037); // leather straps (universal)
         const bkLeatherDark = getCachedLambert(0x3e2723); // dark leather
-        const bkIronMat = getCachedLambert(0x78909c); // dark iron
-        const bkSteelMat = getCachedLambert(0xb0bec5); // polished steel edge
-        const bkBronzeMat = getCachedLambert(0xcd7f32); // bronze fittings
+        const bkIronMat = getCachedLambert(darkenColor(s.secondary, 0.10)); // dark iron/armor
+        const bkSteelMat = getCachedLambert(lightenColor(s.secondary, 0.15)); // polished edge
+        const bkBronzeMat = getCachedLambert(s.accent); // decorative fittings
         const bkBoneMat = getCachedLambert(0xe8dcc8); // bone/skull
         const bkPaintMat = getCachedLambert(0x1565c0); // woad blue war paint
         const bkRuneMat = new THREE.MeshBasicMaterial({ color: 0x42a5f5, transparent: true, opacity: 0.8 }); // glowing rune
@@ -2751,12 +2848,16 @@ export class UnitModels {
           group.add(rivet);
         }
         // Leather belt with bronze buckle
-        const bkBelt = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.08, 0.52), bkLeatherMat);
-        bkBelt.position.y = 0.24;
-        group.add(bkBelt);
-        const bkBuckle = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.10, 0.04), bkBronzeMat);
-        bkBuckle.position.set(0, 0.24, 0.26);
-        group.add(bkBuckle);
+        addBelt(group, {
+          color: 0x5d4037,
+          y: 0.24,
+          width: 0.64,
+          height: 0.08,
+          depth: 0.52,
+          buckleColor: 0xcd7f32,
+          buckleZ: 0.26,
+          buckleSize: [0.10, 0.10, 0.04],
+        });
         // Team-color buckle gem
         const bkBuckleGem = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), bkTeamMat);
         bkBuckleGem.position.set(0, 0.24, 0.29);
@@ -3060,13 +3161,13 @@ export class UnitModels {
         // Design: layered plate + enchanted robes, glowing rune channels, ornate helm.
 
         // --- Shared materials ---
-        const bmPlateMat = getCachedLambert(0x263238); // dark gunmetal plate
-        const bmPlateHighMat = getCachedLambert(0x37474f); // lighter plate accent
-        const bmRobeMat = getCachedLambert(0x1a0066); // deep indigo fabric
-        const bmRobeDeepMat = getCachedLambert(0x0d0033); // darker robe shadow
-        const bmGoldMat = getCachedLambert(0xffd700); // gold trim
-        const bmRuneMat = new THREE.MeshLambertMaterial({ color: 0x7c4dff, emissive: 0x7c4dff, emissiveIntensity: 0.7 }); // glowing arcane purple
-        const bmRuneDimMat = new THREE.MeshLambertMaterial({ color: 0x4a148c, emissive: 0x4a148c, emissiveIntensity: 0.3 }); // subtle rune glow
+        const bmPlateMat = getCachedLambert(darkenColor(s.secondary, 0.30)); // tribe dark plate
+        const bmPlateHighMat = getCachedLambert(darkenColor(s.secondary, 0.15)); // tribe lighter plate
+        const bmRobeMat = getCachedLambert(darkenColor(s.secondary, 0.40)); // tribe deep robe
+        const bmRobeDeepMat = getCachedLambert(darkenColor(s.secondary, 0.50)); // tribe darker robe shadow
+        const bmGoldMat = getCachedLambert(s.accent); // tribe gold trim
+        const bmRuneMat = new THREE.MeshLambertMaterial({ color: s.trim, emissive: s.trim, emissiveIntensity: 0.7 }); // tribe glowing rune
+        const bmRuneDimMat = new THREE.MeshLambertMaterial({ color: darkenColor(s.trim, 0.30), emissive: darkenColor(s.trim, 0.30), emissiveIntensity: 0.3 }); // tribe subtle rune
         const bmTeamMat = getCachedLambert(playerColor);
         const bmSkinMat = getCachedLambert(0xffdbac);
 
@@ -3385,15 +3486,15 @@ export class UnitModels {
         // The heaviest melee unit. Wide, imposing silhouette. Every surface is layered plate.
 
         // --- Shared materials ---
-        const gsPlateMat = getCachedLambert(0x455a64); // blue-grey steel
-        const gsPlateHiMat = getCachedLambert(0x546e7a); // lighter accent steel
-        const gsPlateDkMat = getCachedLambert(0x37474f); // dark steel
-        const gsGoldMat = getCachedLambert(0xb8860b); // dark gold / brass
-        const gsGoldBright = getCachedLambert(0xffd700); // bright gold trim
-        const gsLeatherMat = getCachedLambert(0x3e2723); // dark leather
+        const gsPlateMat = getCachedLambert(s.secondary); // tribe steel
+        const gsPlateHiMat = getCachedLambert(lightenColor(s.secondary, 0.10)); // tribe lighter steel
+        const gsPlateDkMat = getCachedLambert(darkenColor(s.secondary, 0.15)); // tribe dark steel
+        const gsGoldMat = getCachedLambert(darkenColor(s.accent, 0.15)); // tribe dark brass
+        const gsGoldBright = getCachedLambert(s.accent); // tribe bright trim
+        const gsLeatherMat = getCachedLambert(darkenColor(s.secondary, 0.30)); // tribe dark leather
         const gsTeamMat = getCachedLambert(playerColor);
-        const gsBladeMat = getCachedLambert(0xe0e0e0); // polished steel blade
-        const gsEdgeMat = getCachedLambert(0xffffff); // razor edge highlight
+        const gsBladeMat = getCachedLambert(lightenColor(s.trim, 0.10)); // tribe polished blade
+        const gsEdgeMat = getCachedLambert(lightenColor(s.trim, 0.30)); // tribe razor edge
         const gsBlackMat = getCachedLambert(0x1a1a1a); // visor slits
 
         // ─── PASS 1: SILHOUETTE — wide, tall, heavy ───
@@ -3697,14 +3798,14 @@ export class UnitModels {
         // === AGILE RANGER/SCOUT — Hooded cloak with layered armor, studded details, throwing knives ===
 
         // --- Shared Materials ---
-        const sLeatherMat = getCachedLambert(0x5d4037); // light leather
+        const sLeatherMat = getCachedLambert(s.secondary); // tribe leather
         const sCloakMat = getCachedLambert(playerColor); // team color cloak
-        const sStudMat = getCachedLambert(0xb8860b); // brass studs
+        const sStudMat = getCachedLambert(s.accent); // tribe brass studs
         const sSkinMat = getCachedLambert(0xffdbac); // skin
-        const sBootMat = getCachedLambert(0x3e2723); // dark boot
-        const sMetalMat = getCachedLambert(0x909090); // tool steel
-        const sSilverMat = getCachedLambert(0xe0e0e0); // blade silver
-        const sRibbonMat = getCachedLambert(0xd4a574); // tan wrapping
+        const sBootMat = getCachedLambert(darkenColor(s.secondary, 0.25)); // tribe dark boot
+        const sMetalMat = getCachedLambert(s.trim); // tribe tool steel
+        const sSilverMat = getCachedLambert(lightenColor(s.trim, 0.15)); // tribe blade silver
+        const sRibbonMat = getCachedLambert(lightenColor(s.secondary, 0.15)); // tribe tan wrapping
 
         // ─── TORSO: LAYERED LIGHT LEATHER ARMOR ───
         // Core body (lean, agile frame)
@@ -3930,13 +4031,13 @@ export class UnitModels {
         // PASS 1 — SILHOUETTE (flowing robed figure)
         const innerRobe = new THREE.Mesh(
           new THREE.BoxGeometry(0.48, 0.68, 0.42),
-          getCachedLambert(0x1a237e) // dark indigo inner robe
+          getCachedLambert(darkenColor(s.secondary, 0.35)) // tribe dark inner robe
         );
         innerRobe.position.y = 0.32; innerRobe.castShadow = true;
         group.add(innerRobe);
         const outerRobe = new THREE.Mesh(
           new THREE.BoxGeometry(0.52, 0.68, 0.46),
-          getCachedLambert(0x1565C0) // deep blue outer robe
+          getCachedLambert(darkenColor(s.secondary, 0.15)) // tribe outer robe
         );
         outerRobe.position.y = 0.32; outerRobe.castShadow = true;
         group.add(outerRobe);
@@ -3944,7 +4045,7 @@ export class UnitModels {
         for (const sx of [-0.32, 0.32]) {
           const sidePanel = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.65, 0.48),
-            getCachedLambert(0x0D47A1) // darker blue for sides
+            getCachedLambert(darkenColor(s.secondary, 0.25)) // tribe darker sides
           );
           sidePanel.position.set(sx, 0.3, 0);
           group.add(sidePanel);
@@ -3952,14 +4053,14 @@ export class UnitModels {
         // Robe hem — wider at bottom with decorative trim, slight taper
         const robeHem = new THREE.Mesh(
           new THREE.BoxGeometry(0.62, 0.18, 0.56),
-          getCachedLambert(0x0D47A1) // darker hem
+          getCachedLambert(darkenColor(s.secondary, 0.25)) // tribe darker hem
         );
         robeHem.position.y = 0.05;
         group.add(robeHem);
         // Decorative trim at hem edge
         const hemTrim = new THREE.Mesh(
           new THREE.BoxGeometry(0.65, 0.03, 0.59),
-          getCachedLambert(0xc8a832) // brass trim
+          getCachedLambert(s.accent) // tribe brass trim
         );
         hemTrim.position.y = 0.15;
         group.add(hemTrim);
@@ -3967,7 +4068,7 @@ export class UnitModels {
         // Leather chest harness
         const chestHarness = new THREE.Mesh(
           new THREE.BoxGeometry(0.48, 0.5, 0.38),
-          getCachedLambert(0x4e342e) // dark brown leather
+          getCachedLambert(darkenColor(s.secondary, 0.30)) // tribe dark leather
         );
         chestHarness.position.y = 0.45;
         group.add(chestHarness);
@@ -3975,7 +4076,7 @@ export class UnitModels {
         for (let bi = 0; bi < 3; bi++) {
           const buckle = new THREE.Mesh(
             new THREE.BoxGeometry(0.06, 0.06, 0.02),
-            getCachedLambert(0xc8a832)
+            getCachedLambert(s.accent) // tribe buckle
           );
           buckle.position.set(0, 0.65 - bi * 0.12, 0.21);
           group.add(buckle);
@@ -3983,13 +4084,13 @@ export class UnitModels {
         // Ornate belt with gold buckle
         const belt = new THREE.Mesh(
           new THREE.BoxGeometry(0.54, 0.08, 0.48),
-          getCachedLambert(0x4e342e) // dark brown belt
+          getCachedLambert(darkenColor(s.secondary, 0.30)) // tribe dark belt
         );
         belt.position.y = 0.28;
         group.add(belt);
         const beltBuckle = new THREE.Mesh(
           new THREE.BoxGeometry(0.1, 0.08, 0.02),
-          getCachedLambert(0xFFD700) // gold buckle
+          getCachedLambert(s.accent) // tribe gold buckle
         );
         beltBuckle.position.set(0, 0.28, 0.25);
         group.add(beltBuckle);
@@ -3997,13 +4098,13 @@ export class UnitModels {
         for (const px of [-0.15, 0.15]) {
           const pouch = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.12, 0.08),
-            getCachedLambert(0x4e342e)
+            getCachedLambert(darkenColor(s.secondary, 0.30)) // tribe pouch
           );
           pouch.position.set(px, 0.18, 0.2);
           group.add(pouch);
           const pouchAccent = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.03, 0.08),
-            getCachedLambert(0xc8a832)
+            getCachedLambert(s.accent) // tribe pouch accent
           );
           pouchAccent.position.set(px, 0.25, 0.2);
           group.add(pouchAccent);
@@ -4018,13 +4119,13 @@ export class UnitModels {
         // Layered collar/cowl around neck area
         const collar = new THREE.Mesh(
           new THREE.BoxGeometry(0.4, 0.12, 0.38),
-          getCachedLambert(0x0D47A1) // darker shade
+          getCachedLambert(darkenColor(s.secondary, 0.25)) // tribe collar
         );
         collar.position.y = 0.7;
         group.add(collar);
         const innerCollar = new THREE.Mesh(
           new THREE.BoxGeometry(0.35, 0.08, 0.33),
-          getCachedLambert(0x1565C0)
+          getCachedLambert(darkenColor(s.secondary, 0.15)) // tribe inner collar
         );
         innerCollar.position.y = 0.68;
         group.add(innerCollar);
@@ -4032,7 +4133,7 @@ export class UnitModels {
         for (const cx of [-0.27, 0.27]) {
           const cuff = new THREE.Mesh(
             new THREE.BoxGeometry(0.08, 0.68, 0.02),
-            getCachedLambert(0xFFD700)
+            getCachedLambert(s.accent) // tribe gold cuff
           );
           cuff.position.set(cx, 0.32, 0.24);
           group.add(cuff);
@@ -4063,21 +4164,21 @@ export class UnitModels {
         // ELABORATE WIZARD HAT — tall, dramatic, with bends/tilts
         const hatBrim = new THREE.Mesh(
           new THREE.BoxGeometry(0.54, 0.05, 0.54),
-          getCachedLambert(0x0D47A1) // dark blue brim
+          getCachedLambert(darkenColor(s.secondary, 0.25)) // tribe hat brim
         );
         hatBrim.position.y = 0.98;
         group.add(hatBrim);
         // Wide cone base
         const hatConeLower = new THREE.Mesh(
           new THREE.BoxGeometry(0.32, 0.25, 0.32),
-          getCachedLambert(0x1565C0)
+          getCachedLambert(darkenColor(s.secondary, 0.15)) // tribe hat
         );
         hatConeLower.position.y = 1.18;
         group.add(hatConeLower);
         // Tall cone upper section
         const hatConeUpper = new THREE.Mesh(
           new THREE.BoxGeometry(0.22, 0.35, 0.22),
-          getCachedLambert(0x1565C0)
+          getCachedLambert(darkenColor(s.secondary, 0.15)) // tribe hat
         );
         hatConeUpper.position.y = 1.48;
         group.add(hatConeUpper);
@@ -4236,11 +4337,11 @@ export class UnitModels {
       case UnitType.OGRE: {
         // ═══ OGRE — Fearsome brute with tribal decorations ═══
         const ogreSkin = getCachedLambert(0x6d4c41);
-        const ogreBone = getCachedLambert(0xd7ccc8);
-        const ogreArmor = getCachedLambert(0x4e342e);
+        const ogreBone = getCachedLambert(lightenColor(s.trim, 0.15)); // tribe bone
+        const ogreArmor = getCachedLambert(darkenColor(s.secondary, 0.25)); // tribe armor
         const ogreTeam = getCachedLambert(playerColor);
         const ogreWood = getCachedLambert(0x5d4037);
-        const ogreMetal = getCachedLambert(0x616161);
+        const ogreMetal = getCachedLambert(s.accent); // tribe metal
         const ogreTattoo = getCachedLambert(playerColor);
 
         // --- Core body with scarred skin texture ---
@@ -4679,6 +4780,196 @@ export class UnitModels {
         group.scale.set(1.4, 1.4, 1.4);
         break;
       }
+
+      // ═══════════════════════════════════════════════════════════════
+      // CHAMPION — Tier 3 base reward. Over-the-top white/gold plate
+      // armor, feathered crew helm, giant war hammer. Comically
+      // exaggerated muscular proportions (wide shoulders, thin waist).
+      // ═══════════════════════════════════════════════════════════════
+      case UnitType.CHAMPION: {
+        // ─── PASS 1: BODY — Exaggerated muscular torso ───
+        // Wide chest plate — white ornate armor
+        const cChestGeo = new THREE.BoxGeometry(0.72, 0.52, 0.44);
+        const cChestMat = getCachedLambert(lightenColor(s.secondary, 0.30)); // tribe ornate plate
+        const cChest = new THREE.Mesh(cChestGeo, cChestMat);
+        cChest.position.set(0, 0.42, 0);
+        cChest.castShadow = true;
+        group.add(cChest);
+
+        // Gold trim — horizontal line across chest
+        const cTrimGeo = new THREE.BoxGeometry(0.74, 0.04, 0.46);
+        const cTrimMat = getCachedLambert(s.accent); // tribe gold trim
+        const cTrim = new THREE.Mesh(cTrimGeo, cTrimMat);
+        cTrim.position.set(0, 0.52, 0);
+        group.add(cTrim);
+
+        // Diamond-shaped chest emblem (gold, rotated 45°)
+        const cEmblemGeo = new THREE.BoxGeometry(0.12, 0.12, 0.04);
+        const cEmblem = new THREE.Mesh(cEmblemGeo, cTrimMat);
+        cEmblem.position.set(0, 0.44, 0.23);
+        cEmblem.rotation.z = Math.PI / 4;
+        group.add(cEmblem);
+
+        // Thin waist — dark under-armor showing through
+        const cWaistGeo = new THREE.BoxGeometry(0.40, 0.14, 0.32);
+        const cWaistMat = getCachedLambert(darkenColor(s.secondary, 0.30)); // tribe under-armor
+        const cWaist = new THREE.Mesh(cWaistGeo, cWaistMat);
+        cWaist.position.set(0, 0.14, 0);
+        group.add(cWaist);
+
+        // Gold belt buckle
+        const cBuckleGeo = new THREE.BoxGeometry(0.14, 0.06, 0.05);
+        const cBuckle = new THREE.Mesh(cBuckleGeo, cTrimMat);
+        cBuckle.position.set(0, 0.20, 0.17);
+        group.add(cBuckle);
+
+        // Team-color shoulder marks
+        const cMarkMat = getCachedLambert(playerColor);
+        for (const sx of [-0.38, 0.38]) {
+          const mark = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.06, 0.18), cMarkMat);
+          mark.position.set(sx, 0.66, 0);
+          group.add(mark);
+        }
+
+        // ─── PASS 2: MASSIVE PAULDRONS ───
+        // Comically oversized shoulder plates
+        const cPauldronMat = getCachedLambert(lightenColor(s.secondary, 0.25)); // tribe pauldron
+        for (const sx of [-1, 1]) {
+          // Main pauldron dome
+          const pGeo = new THREE.BoxGeometry(0.28, 0.18, 0.30);
+          const p = new THREE.Mesh(pGeo, cPauldronMat);
+          p.position.set(sx * 0.44, 0.68, 0);
+          p.rotation.z = sx * -0.15; // angled outward
+          group.add(p);
+          // Gold rim on pauldron
+          const rimGeo = new THREE.BoxGeometry(0.30, 0.03, 0.32);
+          const rim = new THREE.Mesh(rimGeo, cTrimMat);
+          rim.position.set(sx * 0.44, 0.60, 0);
+          group.add(rim);
+          // Spike on top of each pauldron
+          const spikeGeo = new THREE.BoxGeometry(0.05, 0.10, 0.05);
+          const spike = new THREE.Mesh(spikeGeo, cTrimMat);
+          spike.position.set(sx * 0.44, 0.79, 0);
+          group.add(spike);
+        }
+
+        // ─── PASS 3: HEAD — Feathered crew helm ───
+        // Face (skin)
+        const cFaceGeo = new THREE.BoxGeometry(0.30, 0.28, 0.30);
+        const cFaceMat = getCachedLambert(0xffdbac);
+        const cFace = new THREE.Mesh(cFaceGeo, cFaceMat);
+        cFace.position.y = 0.84;
+        cFace.name = 'head';
+        group.add(cFace);
+
+        // Helm shell — white with gold brim
+        const cHelmGeo = new THREE.BoxGeometry(0.34, 0.20, 0.34);
+        const cHelm = new THREE.Mesh(cHelmGeo, cPauldronMat);
+        cHelm.position.set(0, 0.94, 0);
+        cHelm.name = 'helm';
+        group.add(cHelm);
+
+        // Gold brim all the way around
+        const cBrimGeo = new THREE.BoxGeometry(0.38, 0.04, 0.38);
+        const cBrim = new THREE.Mesh(cBrimGeo, cTrimMat);
+        cBrim.position.set(0, 0.85, 0);
+        group.add(cBrim);
+
+        // Dark visor slit
+        const cVisorGeo = new THREE.BoxGeometry(0.22, 0.04, 0.04);
+        const cVisorMat = getCachedLambert(0x1a1a1a);
+        const cVisor = new THREE.Mesh(cVisorGeo, cVisorMat);
+        cVisor.position.set(0, 0.86, 0.16);
+        group.add(cVisor);
+
+        // Team-color plume — tall feather crest on top
+        const cPlumeGeo = new THREE.BoxGeometry(0.08, 0.22, 0.20);
+        const cPlumeMat = getCachedLambert(playerColor);
+        const cPlume = new THREE.Mesh(cPlumeGeo, cPlumeMat);
+        cPlume.position.set(0, 1.10, -0.04);
+        cPlume.rotation.x = 0.15; // slight backward tilt
+        cPlume.name = 'plume';
+        group.add(cPlume);
+
+        // ─── PASS 4: ARMS + WAR HAMMER ───
+        // Arms at wider offset for exaggerated proportions
+        const cArmL = makeArmGroup('arm-left', 0xe0e0e0, -0.42, 0.55);
+        const cArmR = makeArmGroup('arm-right', 0xe0e0e0, 0.42, 0.55);
+        group.add(cArmL);
+        group.add(cArmR);
+
+        // Giant war hammer on right arm
+        const cElbowR = cArmR.getObjectByName('arm-right-elbow')!;
+        const hammerGrp = new THREE.Group();
+        hammerGrp.name = 'weapon-group';
+
+        // Shaft — dark wood, long handle
+        const shaftGeo = new THREE.BoxGeometry(0.06, 0.70, 0.06);
+        const shaftMat = getCachedLambert(0x4e342e);
+        const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+        shaft.position.set(0, -0.40, 0);
+        hammerGrp.add(shaft);
+
+        // Hammer head — massive steel block
+        const headBlockGeo = new THREE.BoxGeometry(0.22, 0.16, 0.18);
+        const headBlockMat = getCachedLambert(0x9e9e9e);
+        const headBlock = new THREE.Mesh(headBlockGeo, headBlockMat);
+        headBlock.position.set(0, -0.76, 0);
+        hammerGrp.add(headBlock);
+
+        // Gold inlay on hammer head
+        const inlayGeo = new THREE.BoxGeometry(0.14, 0.04, 0.20);
+        const inlay = new THREE.Mesh(inlayGeo, cTrimMat);
+        inlay.position.set(0, -0.76, 0);
+        hammerGrp.add(inlay);
+
+        // Spike on back of hammer
+        const hamSpikeGeo = new THREE.BoxGeometry(0.06, 0.06, 0.14);
+        const hamSpike = new THREE.Mesh(hamSpikeGeo, getCachedLambert(0x757575));
+        hamSpike.position.set(0, -0.76, -0.14);
+        hammerGrp.add(hamSpike);
+
+        // Grip wrap near hand
+        const gripGeo = new THREE.BoxGeometry(0.08, 0.10, 0.08);
+        const gripMat = getCachedLambert(0x5d4037);
+        const grip = new THREE.Mesh(gripGeo, gripMat);
+        grip.position.set(0, -0.12, 0);
+        hammerGrp.add(grip);
+
+        hammerGrp.rotation.x = 0.3; // slight forward tilt at rest
+        cElbowR.add(hammerGrp);
+
+        // Left arm — small buckler/gauntlet shield
+        const cElbowL = cArmL.getObjectByName('arm-left-elbow')!;
+        const gauntletGeo = new THREE.BoxGeometry(0.16, 0.14, 0.10);
+        const gauntlet = new THREE.Mesh(gauntletGeo, cPauldronMat);
+        gauntlet.position.set(0, -0.10, 0.06);
+        cElbowL.add(gauntlet);
+        // Gold trim on gauntlet
+        const gTrimGeo = new THREE.BoxGeometry(0.17, 0.03, 0.11);
+        const gTrim = new THREE.Mesh(gTrimGeo, cTrimMat);
+        gTrim.position.set(0, -0.05, 0.06);
+        cElbowL.add(gTrim);
+
+        // ─── PASS 5: LEGS — Heavy plate greaves ───
+        const cLegL = makeLegGroup('leg-left', 0xe0e0e0, -0.16, 0);
+        const cLegR = makeLegGroup('leg-right', 0xe0e0e0, 0.16, 0);
+        group.add(cLegL);
+        group.add(cLegR);
+
+        // Gold knee guards
+        for (const [legName, lx] of [['leg-left', -0.16], ['leg-right', 0.16]] as const) {
+          const kneeGeo = new THREE.BoxGeometry(0.14, 0.06, 0.10);
+          const knee = new THREE.Mesh(kneeGeo, cTrimMat);
+          knee.position.set(lx, 0.02, 0.08);
+          group.add(knee);
+        }
+
+        // Scale up slightly — Champion is imposing (1.25x)
+        group.scale.set(1.25, 1.25, 1.25);
+        break;
+      }
+
       default: {
         // Generic unit: simple body + head + limbs + team color shoulder marks
         const unitColor = UNIT_COLORS[type] || 0xffffff;

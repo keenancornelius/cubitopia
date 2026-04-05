@@ -22,6 +22,7 @@ import * as THREE from 'three';
 import { Pathfinder, tileKey } from '../game/systems/Pathfinder';
 import { MapGenerator } from './MapGenerator';
 import { Logger } from '../engine/Logger';
+import { hexDistFromDeltas } from './HexMath';
 import {
   GameMap,
   HexCoord,
@@ -33,7 +34,7 @@ import {
   VoxelBlock,
   ENABLE_UNDERGROUND,
 } from '../types';
-import { getPreset, generateArenaMap, generateDesertTunnelsMap, generateSkylandMap, generateVolcanicMap, generateArchipelagoMap, generateTundraMap, generateSunkenRuinsMap, generateBadlandsMap, ArenaMap, DesertTunnelsMap, SkylandMap, VolcanicMap, ArchipelagoMap, TundraMap, MAP_GEN_PARAMS } from './MapPresets';
+import { getPreset, generateArenaMap, generateDesertTunnelsMap, generateSkylandMap, generateRiverCrossingMap, generateArchipelagoMap, generateTundraMap, generateSunkenRuinsMap, generateBadlandsMap, ArenaMap, DesertTunnelsMap, SkylandMap, RiverCrossingMap, ArchipelagoMap, TundraMap, MAP_GEN_PARAMS } from './MapPresets';
 import { NEUTRAL_OWNER } from './PlayerConfig';
 
 /**
@@ -223,14 +224,12 @@ export default class MapInitializer {
       // Smooth neutral surface bases
       if (map.surfaceBases) {
         const MIN_DIST = 12;
-        const hexDist = (a: HexCoord, b: HexCoord) =>
-          (Math.abs(a.q - b.q) + Math.abs(a.r - b.r) + Math.abs((-a.q - a.r) - (-b.q - b.r))) / 2;
         const placed: HexCoord[] = [];
         for (const sb of map.surfaceBases) {
           const c = sb.center;
           // Skip if too close to ANY player base
-          if (basePositions.some(bp => hexDist(c, bp) < MIN_DIST)) continue;
-          if (placed.some(p => hexDist(c, p) < MIN_DIST)) continue;
+          if (basePositions.some(bp => hexDistFromDeltas(c.q - bp.q, c.r - bp.r) < MIN_DIST)) continue;
+          if (placed.some(p => hexDistFromDeltas(c.q - p.q, c.r - p.r) < MIN_DIST)) continue;
           placed.push(c);
           Logger.debug('BaseSmooth', `Smoothing neutral ${sb.terrain} base at (${c.q},${c.r})`);
           this.smoothNeutralBaseArea(map, c, sb.terrain);
@@ -290,7 +289,7 @@ export default class MapInitializer {
 
     // Step 9: Add underground/neutral bases
     this.addUndergroundBases(map, bases);
-    this.addSurfaceBases(map, bases, baseCoords[0], baseCoords[1] ?? baseCoords[0]);
+    this.addSurfaceBases(map, bases, baseCoords);
 
     // Step 10: Setup capture zones
     this.ops.disposeCaptureSystems();
@@ -358,8 +357,8 @@ export default class MapInitializer {
       return generateDesertTunnelsMap(MAP_SIZE);
     } else if (mapType === MapType.SKYLAND) {
       return generateSkylandMap(MAP_SIZE, undefined, playerCount);
-    } else if (mapType === MapType.VOLCANIC) {
-      return generateVolcanicMap(MAP_SIZE, undefined, playerCount);
+    } else if (mapType === MapType.RIVER_CROSSING) {
+      return generateRiverCrossingMap(MAP_SIZE, undefined, playerCount);
     } else if (mapType === MapType.ARCHIPELAGO) {
       return generateArchipelagoMap(MAP_SIZE, undefined, playerCount);
     } else if (mapType === MapType.TUNDRA) {
@@ -371,7 +370,7 @@ export default class MapInitializer {
     } else {
       const params = MAP_GEN_PARAMS[mapType];
       const mapGen = new MapGenerator(undefined, params);
-      const gameMap = mapGen.generate(MAP_SIZE, MAP_SIZE);
+      const gameMap = mapGen.generate(MAP_SIZE, MAP_SIZE, undefined, playerCount);
       gameMap.mapType = mapType;
       return gameMap;
     }
@@ -403,7 +402,7 @@ export default class MapInitializer {
       for (let dr = -totalRadius; dr <= totalRadius; dr++) {
         const q = baseQ + dq;
         const r = baseR + dr;
-        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
+        const hexDist = hexDistFromDeltas(dq, dr);
         if (hexDist > totalRadius) continue;
 
         const key = `${q},${r}`;
@@ -489,7 +488,7 @@ export default class MapInitializer {
         for (let dr = -totalRadius; dr <= totalRadius; dr++) {
           const q = coord.q + dq;
           const r = coord.r + dr;
-          const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
+          const hexDist = hexDistFromDeltas(dq, dr);
           if (hexDist > totalRadius) continue;
 
           const key = `${q},${r}`;
@@ -581,7 +580,7 @@ export default class MapInitializer {
       for (let dr = -OUTER_RADIUS; dr <= OUTER_RADIUS; dr++) {
         const q = baseQ + dq;
         const r = baseR + dr;
-        const hexDist = (Math.abs(dq) + Math.abs(dr) + Math.abs(-dq - dr)) / 2;
+        const hexDist = hexDistFromDeltas(dq, dr);
         if (hexDist < INNER_RADIUS || hexDist > OUTER_RADIUS) continue;
 
         const key = `${q},${r}`;
@@ -635,6 +634,7 @@ export default class MapInitializer {
       [BlockType.DIRT]: BlockType.FROZEN_DIRT,
       [BlockType.JUNGLE]: BlockType.PACKED_SNOW,
       [BlockType.SAND]: BlockType.PACKED_SNOW,
+      [BlockType.WATER]: BlockType.ICE, // frozen lake surfaces
     };
 
     map.tiles.forEach((tile) => {
@@ -890,7 +890,7 @@ export default class MapInitializer {
   /**
    * Add surface neutral bases (desert outposts, mountain forts).
    */
-  private addSurfaceBases(map: GameMap, bases: Base[], p1BaseCoord: HexCoord, p2BaseCoord: HexCoord): void {
+  private addSurfaceBases(map: GameMap, bases: Base[], allBaseCoords: HexCoord[]): void {
     const MIN_DIST_FROM_CAPITAL = 12;
     if (!map.surfaceBases || map.surfaceBases.length === 0) return;
 
@@ -898,21 +898,21 @@ export default class MapInitializer {
       const sb = map.surfaceBases[i];
       const coord = sb.center;
 
-      // Skip if too close to either player capital
-      const distP1 =
-        (Math.abs(coord.q - p1BaseCoord.q) +
-          Math.abs(coord.r - p1BaseCoord.r) +
-          Math.abs((-coord.q - coord.r) - (-p1BaseCoord.q - p1BaseCoord.r))) /
-        2;
-      const distP2 =
-        (Math.abs(coord.q - p2BaseCoord.q) +
-          Math.abs(coord.r - p2BaseCoord.r) +
-          Math.abs((-coord.q - coord.r) - (-p2BaseCoord.q - p2BaseCoord.r))) /
-        2;
-      if (distP1 < MIN_DIST_FROM_CAPITAL || distP2 < MIN_DIST_FROM_CAPITAL) {
-        Logger.debug('Surface', `Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d1=${distP1}, d2=${distP2})`);
-        continue;
+      // Skip if too close to ANY player capital (supports 2-player and FFA)
+      let tooCloseToCapital = false;
+      for (const bc of allBaseCoords) {
+        const dist =
+          (Math.abs(coord.q - bc.q) +
+            Math.abs(coord.r - bc.r) +
+            Math.abs((-coord.q - coord.r) - (-bc.q - bc.r))) /
+          2;
+        if (dist < MIN_DIST_FROM_CAPITAL) {
+          Logger.debug('Surface', `Skipped neutral ${sb.terrain} base at (${coord.q},${coord.r}) — too close to capital (d=${dist})`);
+          tooCloseToCapital = true;
+          break;
+        }
       }
+      if (tooCloseToCapital) continue;
 
       // Also skip if too close to any existing neutral base
       const tooCloseToOther = bases.some((b) => {

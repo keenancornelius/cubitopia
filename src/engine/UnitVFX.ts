@@ -877,6 +877,413 @@ export class UnitVFX {
     }, springTime);
   }
 
+  // === Persistent bleed tint tracking ===
+  private bleedTintedUnits = new Set<string>();
+  /** Original (pre-tint) material colors per unit, keyed by unitId → (mesh → original color) */
+  private bleedOriginalColors = new Map<string, Map<THREE.Mesh, THREE.Color>>();
+
+  /**
+   * Apply a persistent red bleed tint to a wounded unit.
+   * Intensity scales with damage taken (healthPercent 0–1 where 1 = full health).
+   * The tint persists for the rest of the fight — never auto-restores.
+   * Also spawns periodic red drip particles from the unit.
+   *
+   * FIX: On first application, clone materials (so cached shared materials are untouched)
+   * and store original colors. On subsequent calls, recompute tint from stored originals
+   * instead of re-cloning (which caused compounding red shift — the "everything red" bug).
+   */
+  applyBleedTint(unitId: string, healthPercent: number): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+
+    // Bleed intensity: stronger as health drops. 0 at full health, ~0.4 at near-death.
+    const intensity = Math.min(0.4, (1 - healthPercent) * 0.5);
+    if (intensity < 0.02) return; // negligible damage, skip
+
+    this.bleedTintedUnits.add(unitId);
+
+    // First time: clone materials and store original colors
+    // Subsequent times: reuse existing clones and recompute from stored originals
+    let origColors = this.bleedOriginalColors.get(unitId);
+    const isFirstApplication = !origColors;
+    if (!origColors) {
+      origColors = new Map();
+      this.bleedOriginalColors.set(unitId, origColors);
+    }
+
+    const bloodR = 0x88 / 255;
+    const bloodG = 0x00 / 255;
+    const bloodB = 0x00 / 255;
+
+    entry.group.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+        if (isFirstApplication) {
+          // First time: save original color, then clone material so shared cache is untouched
+          origColors!.set(child, child.material.color.clone());
+          child.material = child.material.clone();
+        }
+        // Always compute tint from ORIGINAL color (not current tinted color)
+        const orig = origColors!.get(child);
+        if (orig && child.material instanceof THREE.MeshLambertMaterial) {
+          child.material.color.setRGB(
+            orig.r + (bloodR - orig.r) * intensity,
+            orig.g + (bloodG - orig.g) * intensity,
+            orig.b + (bloodB - orig.b) * intensity,
+          );
+        }
+      }
+    });
+
+    // Spawn a slow red drip particle
+    this.spawnBleedDrip(entry.group.position);
+  }
+
+  /**
+   * Spawn a single red drip particle falling from a wounded unit's position.
+   */
+  private spawnBleedDrip(worldPos: THREE.Vector3): void {
+    const geo = UnitVFX.getDamageGeo();
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xaa0000, transparent: true, opacity: 0.8,
+    });
+    const drip = new THREE.Mesh(geo, mat);
+    drip.scale.setScalar(0.4 + Math.random() * 0.3);
+    drip.position.set(
+      worldPos.x + (Math.random() - 0.5) * 0.3,
+      worldPos.y + 0.2 + Math.random() * 0.3,
+      worldPos.z + (Math.random() - 0.5) * 0.3,
+    );
+    this.scene.add(drip);
+
+    let elapsed = 0;
+    const lifetime = 0.5 + Math.random() * 0.3;
+    const animate = () => {
+      elapsed += 0.016;
+      drip.position.y -= 1.5 * 0.016; // slow fall
+      const t = elapsed / lifetime;
+      mat.opacity = 0.8 * Math.max(0, 1 - t);
+      drip.scale.y *= 0.98; // stretch vertically as it falls
+
+      if (elapsed < lifetime) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(drip);
+        mat.dispose();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Clear bleed tint tracking (call on game reset / new game).
+   */
+  clearBleedTints(): void {
+    this.bleedTintedUnits.clear();
+    this.bleedOriginalColors.clear();
+  }
+
+  /**
+   * Check if a unit has bleed tint applied.
+   */
+  hasBleedTint(unitId: string): boolean {
+    return this.bleedTintedUnits.has(unitId);
+  }
+
+  // === Secondary Melee Attack VFX ===
+
+  /**
+   * Greatsword spin attack: green glow charge-up ring → expanding green slash arc.
+   */
+  spawnGreatswordSpin(worldPos: { x: number; y: number; z: number }): void {
+    // Green charge-up glow sphere
+    const chargeMat = new THREE.MeshBasicMaterial({
+      color: 0x44ff44, transparent: true, opacity: 0.6,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const chargeGeo = new THREE.SphereGeometry(0.2, 8, 8);
+    const charge = new THREE.Mesh(chargeGeo, chargeMat);
+    charge.position.set(worldPos.x, worldPos.y + 0.5, worldPos.z);
+    this.scene.add(charge);
+
+    // Charge-up phase: grow for 0.25s
+    let elapsed = 0;
+    const chargeTime = 0.25;
+    const animateCharge = () => {
+      elapsed += 0.016;
+      const t = Math.min(1, elapsed / chargeTime);
+      charge.scale.setScalar(1 + t * 2);
+      chargeMat.opacity = 0.6 * (1 - t * 0.3);
+      if (elapsed < chargeTime) {
+        requestAnimationFrame(animateCharge);
+      } else {
+        this.scene.remove(charge);
+        chargeMat.dispose();
+        chargeGeo.dispose();
+        // Spin slash ring
+        this._spawnSpinRing(worldPos);
+      }
+    };
+    requestAnimationFrame(animateCharge);
+  }
+
+  private _spawnSpinRing(worldPos: { x: number; y: number; z: number }): void {
+    const ringGeo = new THREE.RingGeometry(0.3, 1.2, 16);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x66ff66, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(worldPos.x, worldPos.y + 0.4, worldPos.z);
+    ring.rotation.x = -Math.PI / 2; // horizontal
+    this.scene.add(ring);
+
+    // Green slash particles in a ring
+    const particleCount = 8;
+    const particles: THREE.Mesh[] = [];
+    const geo = UnitVFX.getDamageGeo();
+    for (let i = 0; i < particleCount; i++) {
+      const angle = (Math.PI * 2 * i) / particleCount;
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x44ff44, transparent: true, opacity: 0.9,
+      });
+      const p = new THREE.Mesh(geo, mat);
+      p.scale.setScalar(0.6);
+      p.position.set(
+        worldPos.x + Math.cos(angle) * 0.5,
+        worldPos.y + 0.4,
+        worldPos.z + Math.sin(angle) * 0.5,
+      );
+      this.scene.add(p);
+      particles.push(p);
+    }
+
+    let elapsed = 0;
+    const duration = 0.4;
+    const animate = () => {
+      elapsed += 0.016;
+      const t = elapsed / duration;
+      ring.scale.setScalar(1 + t * 2);
+      ringMat.opacity = 0.7 * Math.max(0, 1 - t);
+      ring.rotation.z += 0.3; // spin
+
+      for (let i = 0; i < particles.length; i++) {
+        const angle = (Math.PI * 2 * i) / particleCount + elapsed * 8;
+        const radius = 0.5 + t * 1.5;
+        particles[i].position.x = worldPos.x + Math.cos(angle) * radius;
+        particles[i].position.z = worldPos.z + Math.sin(angle) * radius;
+        (particles[i].material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.max(0, 1 - t);
+      }
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(ring);
+        ringMat.dispose();
+        ringGeo.dispose();
+        for (const p of particles) {
+          this.scene.remove(p);
+          (p.material as THREE.Material).dispose();
+        }
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Warrior jump attack: unit leaps up then slams down with dust impact.
+   */
+  spawnJumpAttackImpact(worldPos: { x: number; y: number; z: number }): void {
+    // Ground slam shockwave
+    const ringGeo = new THREE.RingGeometry(0.1, 0.8, 12);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffcc44, transparent: true, opacity: 0.7, side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.position.set(worldPos.x, worldPos.y + 0.1, worldPos.z);
+    ring.rotation.x = -Math.PI / 2;
+    this.scene.add(ring);
+
+    // Dust particles on impact
+    const dustCount = 6;
+    const geo = UnitVFX.getDamageGeo();
+    const dustParticles: { mesh: THREE.Mesh; vx: number; vz: number }[] = [];
+    for (let i = 0; i < dustCount; i++) {
+      const angle = (Math.PI * 2 * i) / dustCount;
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xbbaa88, transparent: true, opacity: 0.8,
+      });
+      const p = new THREE.Mesh(geo, mat);
+      p.scale.setScalar(0.5 + Math.random() * 0.3);
+      p.position.set(worldPos.x, worldPos.y + 0.15, worldPos.z);
+      this.scene.add(p);
+      dustParticles.push({ mesh: p, vx: Math.cos(angle) * 2, vz: Math.sin(angle) * 2 });
+    }
+
+    let elapsed = 0;
+    const duration = 0.5;
+    const animate = () => {
+      elapsed += 0.016;
+      const t = elapsed / duration;
+      ring.scale.setScalar(1 + t * 3);
+      ringMat.opacity = 0.7 * Math.max(0, 1 - t);
+
+      for (const d of dustParticles) {
+        d.mesh.position.x += d.vx * 0.016;
+        d.mesh.position.z += d.vz * 0.016;
+        d.mesh.position.y += 0.5 * 0.016;
+        (d.mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * Math.max(0, 1 - t);
+      }
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(ring);
+        ringMat.dispose();
+        ringGeo.dispose();
+        for (const d of dustParticles) {
+          this.scene.remove(d.mesh);
+          (d.mesh.material as THREE.Material).dispose();
+        }
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Animate a unit jumping up (for warrior jump attack).
+   * Lifts the unit mesh up and back down over ~0.4s.
+   */
+  animateJumpAttack(unitId: string): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+    const baseY = entry.group.position.y;
+    const jumpHeight = 0.8;
+    let elapsed = 0;
+    const duration = 0.4;
+
+    const animate = () => {
+      elapsed += 0.016;
+      const t = Math.min(1, elapsed / duration);
+      // Parabolic arc: up then down
+      const arc = 4 * t * (1 - t); // peaks at t=0.5
+      entry.group.position.y = baseY + arc * jumpHeight;
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        entry.group.position.y = baseY;
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Paladin charge: blue force field sphere around unit during charge,
+   * white light burst on arrival, golden rally particles on nearby allies.
+   */
+  spawnPaladinChargeField(unitId: string): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+
+    // Blue force field sphere around the paladin
+    const shieldGeo = new THREE.SphereGeometry(0.6, 12, 12);
+    const shieldMat = new THREE.MeshBasicMaterial({
+      color: 0x4488ff, transparent: true, opacity: 0.3,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const shield = new THREE.Mesh(shieldGeo, shieldMat);
+    entry.group.add(shield); // attach to unit so it moves with them
+    shield.position.set(0, 0.3, 0);
+
+    // Pulsing animation for 1.5s (duration of charge movement)
+    let elapsed = 0;
+    const duration = 1.5;
+    const animate = () => {
+      elapsed += 0.016;
+      const t = elapsed / duration;
+      const pulse = 1 + Math.sin(elapsed * 12) * 0.1;
+      shield.scale.setScalar(pulse);
+      shieldMat.opacity = 0.3 * Math.max(0, 1 - t * 0.5);
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        entry.group.remove(shield);
+        shieldMat.dispose();
+        shieldGeo.dispose();
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
+  /**
+   * Paladin charge arrival: white light burst at impact position.
+   */
+  spawnPaladinImpactBurst(worldPos: { x: number; y: number; z: number }): void {
+    // White expanding sphere burst
+    const burstGeo = new THREE.SphereGeometry(0.2, 8, 8);
+    const burstMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const burst = new THREE.Mesh(burstGeo, burstMat);
+    burst.position.set(worldPos.x, worldPos.y + 0.5, worldPos.z);
+    this.scene.add(burst);
+
+    // Golden rally particles rising from impact
+    const particleCount = 10;
+    const geo = UnitVFX.getDamageGeo();
+    const rallyParticles: THREE.Mesh[] = [];
+    for (let i = 0; i < particleCount; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffdd44, transparent: true, opacity: 0.9,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      });
+      const p = new THREE.Mesh(geo, mat);
+      p.scale.setScalar(0.3 + Math.random() * 0.2);
+      const angle = (Math.PI * 2 * i) / particleCount;
+      p.position.set(
+        worldPos.x + Math.cos(angle) * 0.3,
+        worldPos.y + 0.3,
+        worldPos.z + Math.sin(angle) * 0.3,
+      );
+      this.scene.add(p);
+      rallyParticles.push(p);
+    }
+
+    let elapsed = 0;
+    const duration = 0.6;
+    const animate = () => {
+      elapsed += 0.016;
+      const t = elapsed / duration;
+      burst.scale.setScalar(1 + t * 5);
+      burstMat.opacity = 0.9 * Math.max(0, 1 - t);
+
+      for (let i = 0; i < rallyParticles.length; i++) {
+        const angle = (Math.PI * 2 * i) / particleCount;
+        const radius = 0.3 + t * 1.5;
+        rallyParticles[i].position.x = worldPos.x + Math.cos(angle) * radius;
+        rallyParticles[i].position.y = worldPos.y + 0.3 + t * 1.2;
+        rallyParticles[i].position.z = worldPos.z + Math.sin(angle) * radius;
+        (rallyParticles[i].material as THREE.MeshBasicMaterial).opacity = 0.9 * Math.max(0, 1 - t);
+      }
+
+      if (elapsed < duration) {
+        requestAnimationFrame(animate);
+      } else {
+        this.scene.remove(burst);
+        burstMat.dispose();
+        burstGeo.dispose();
+        for (const p of rallyParticles) {
+          this.scene.remove(p);
+          (p.material as THREE.Material).dispose();
+        }
+      }
+    };
+    requestAnimationFrame(animate);
+  }
+
   /**
    * Show floating XP text (+1 XP, +3 XP) rising from a unit
    */
@@ -1142,6 +1549,90 @@ export class UnitVFX {
           }
         });
       }, 500);
+    }
+  }
+
+  /**
+   * Apply permanent visual upgrades to a unit based on its new level.
+   * Called once per level-up, after the temporary VFX plays.
+   *
+   * Level 2+: 3% size increase per level, subtle emissive shimmer on armor
+   * Level 3+: Shoulder badge (colored cube) — silver at 3, gold at 5+
+   * Level 5+: Captain-tier gold trim on armor meshes, fancier helmet glow
+   */
+  applyLevelUpVisuals(unitId: string, newLevel: number): void {
+    const entry = this.unitMeshes.get(unitId);
+    if (!entry) return;
+
+    // --- Scale increase: 3% per level above 1 ---
+    const scaleFactor = 1 + (newLevel - 1) * 0.03;
+    entry.group.scale.setScalar(scaleFactor);
+
+    // --- Emissive shimmer on armor at level 2+ ---
+    if (newLevel >= 2) {
+      const emissiveColor = newLevel >= 5 ? 0xFFAA00 : newLevel >= 3 ? 0x888888 : 0x444444;
+      const emissiveIntensity = newLevel >= 5 ? 0.15 : newLevel >= 3 ? 0.1 : 0.05;
+      entry.group.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+          // Only tint armor-like meshes (not eyes, not weapons held in hand)
+          const name = child.name || '';
+          if (name.includes('eye') || name.includes('pupil')) return;
+          // Clone material to avoid mutating the global cache
+          const cloned = child.material.clone();
+          child.material = cloned;
+          cloned.emissive = new THREE.Color(emissiveColor);
+          cloned.emissiveIntensity = emissiveIntensity;
+        }
+      });
+    }
+
+    // --- Shoulder badge at level 3+ ---
+    if (newLevel >= 3) {
+      // Remove old badge if upgrading
+      const oldBadge = entry.group.getObjectByName('level-badge');
+      if (oldBadge) entry.group.remove(oldBadge);
+
+      const badgeColor = newLevel >= 5 ? 0xFFD700 : 0xC0C0C0; // gold vs silver
+      const badgeSize = newLevel >= 5 ? 0.09 : 0.07;
+      const badgeGeo = new THREE.BoxGeometry(badgeSize, badgeSize, badgeSize);
+      const badgeMat = new THREE.MeshLambertMaterial({
+        color: badgeColor,
+        emissive: newLevel >= 5 ? 0xFFAA00 : 0x666666,
+        emissiveIntensity: newLevel >= 5 ? 0.3 : 0.15,
+      });
+      const badge = new THREE.Mesh(badgeGeo, badgeMat);
+      badge.name = 'level-badge';
+      // Position on left shoulder area
+      badge.position.set(-0.22, 0.55, 0);
+      entry.group.add(badge);
+
+      // Second badge on right shoulder at level 5+
+      if (newLevel >= 5) {
+        const oldBadge2 = entry.group.getObjectByName('level-badge-r');
+        if (oldBadge2) entry.group.remove(oldBadge2);
+
+        const badge2 = new THREE.Mesh(badgeGeo, badgeMat);
+        badge2.name = 'level-badge-r';
+        badge2.position.set(0.22, 0.55, 0);
+        entry.group.add(badge2);
+      }
+    }
+
+    // --- Captain helmet glow at level 5+ ---
+    if (newLevel >= 5) {
+      // Find helmet-like meshes and add a subtle halo
+      const helmNames = ['helm', 'helmet', 'head', 'plume', 'crest', 'visor', 'crown'];
+      entry.group.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          const name = (child.name || '').toLowerCase();
+          if (helmNames.some(h => name.includes(h))) {
+            if (child.material instanceof THREE.MeshLambertMaterial) {
+              child.material.emissive = new THREE.Color(0xFFD700);
+              child.material.emissiveIntensity = 0.2;
+            }
+          }
+        }
+      });
     }
   }
 

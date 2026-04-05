@@ -21,6 +21,7 @@
 import { Unit, HexCoord, UnitType, UnitState, CommandType, PlacedBuilding } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
+import { getPlayerHex } from '../PlayerConfig';
 
 // --- Types ---
 
@@ -70,6 +71,10 @@ export interface GarrisonOps {
   // Ranged fire visuals
   fireArrow(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number },
     targetId: string, onImpact: () => void): void;
+  fireArrowVolley(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number },
+    count: number, onImpact?: () => void): void;
+  fireCannonball(from: { x: number; y: number; z: number }, to: { x: number; y: number; z: number },
+    onImpact?: () => void): void;
 
   // Damage
   applyDamage(target: Unit, damage: number, attacker: Unit | null): void;
@@ -80,6 +85,11 @@ export interface GarrisonOps {
   getAllUnits(): Unit[];
   getElevation(pos: HexCoord): number;
 
+  // Cannon turret lifecycle
+  addCannonTurret(key: string, pos: { x: number; y: number; z: number }, color: number): void;
+  removeCannonTurret(key: string): void;
+  setCannonTarget(key: string, pos: { x: number; y: number; z: number } | null): void;
+
   // Notifications
   playSound(name: string, volume?: number): void;
 }
@@ -89,14 +99,24 @@ export interface GarrisonOps {
 const BUILDING_CAPACITY = 10;
 const GATE_CAPACITY = 5;
 
-/** Seconds between garrison ranged attacks */
-const GARRISON_FIRE_INTERVAL = 2.0;
-/** Base damage per garrisoned unit firing */
-const GARRISON_FIRE_DAMAGE = 3;
-/** Range in hexes for garrison fire */
+/** Base seconds between garrison attacks (reduced by unit count) */
+const GARRISON_FIRE_INTERVAL_BASE = 2.5;
+/** Cooldown reduction per garrisoned unit (seconds) */
+const GARRISON_FIRE_INTERVAL_PER_UNIT = 0.15;
+/** Minimum fire interval (hard floor) */
+const GARRISON_FIRE_INTERVAL_MIN = 1.0;
+/** Damage multiplier for ranged units (applied to unit's ATK stat) */
+const RANGED_GARRISON_MULTIPLIER = 0.75;
+/** Damage multiplier for melee units (applied to unit's ATK stat) */
+const MELEE_GARRISON_MULTIPLIER = 0.35;
+/** Base range in hexes for garrison fire */
 const GARRISON_FIRE_RANGE = 4;
+/** Extended range when 5+ units garrisoned */
+const GARRISON_FIRE_RANGE_EXTENDED = 5;
 /** Height offset above structure for arrow origin */
 const ARROW_Y_OFFSET = 3.0;
+/** Minimum arrow volley count to use volley VFX */
+const VOLLEY_THRESHOLD = 3;
 
 export default class GarrisonSystem {
   private ops: GarrisonOps;
@@ -164,6 +184,17 @@ export default class GarrisonSystem {
       this.ops.hideUnit(unit);
     }
 
+    if (toGarrison.length > 0) {
+      this.ops.playSound('garrison_enter', 0.5);
+
+      // Add cannon turret visual when first unit enters a gate
+      if (type === 'gate' && slot.units.length === toGarrison.length) {
+        const world = this.ops.hexToWorld(slot.position);
+        const elev = this.ops.getElevation(slot.position);
+        this.ops.addCannonTurret(structureKey, { x: world.x, y: elev + ARROW_Y_OFFSET, z: world.z }, getPlayerHex(slot.owner));
+      }
+    }
+
     return toGarrison;
   }
 
@@ -227,6 +258,10 @@ export default class GarrisonSystem {
         released.push(unit);
       }
       slot.units = [];
+      // Remove cannon turret when gate empties
+      if (slot.structureType === 'gate') {
+        this.ops.removeCannonTurret(key);
+      }
     }
 
     return released;
@@ -260,6 +295,10 @@ export default class GarrisonSystem {
         }
       }
       slot.units = toKeep;
+      // Remove cannon turret when gate empties
+      if (slot.structureType === 'gate' && toKeep.length === 0) {
+        this.ops.removeCannonTurret(key);
+      }
     }
 
     return released;
@@ -282,6 +321,13 @@ export default class GarrisonSystem {
       this.releaseUnit(unit, exitPos);
     }
     slot.units = [];
+    if (units.length > 0) {
+      this.ops.playSound('garrison_exit', 0.5);
+      // Remove cannon turret when gate empties
+      if (slot.structureType === 'gate') {
+        this.ops.removeCannonTurret(structureKey);
+      }
+    }
     return units;
   }
 
@@ -308,6 +354,13 @@ export default class GarrisonSystem {
     for (const unit of toRelease) {
       this.releaseUnit(unit, exitPos);
     }
+    if (toRelease.length > 0) {
+      this.ops.playSound('garrison_exit', 0.5);
+      // Remove cannon turret when gate empties
+      if (slot.structureType === 'gate' && toKeep.length === 0) {
+        this.ops.removeCannonTurret(structureKey);
+      }
+    }
     return toRelease;
   }
 
@@ -322,12 +375,27 @@ export default class GarrisonSystem {
       slot.fireCooldown = Math.max(0, slot.fireCooldown - delta);
       if (slot.fireCooldown > 0) continue;
 
-      // Find nearest enemy in range
+      // Find nearest enemy in range (extended range for large garrisons)
       const target = this.findFireTarget(slot, allUnits);
-      if (!target) continue;
+      if (!target) {
+        // No target — clear cannon turret aim if this is a gate
+        if (slot.structureType === 'gate') {
+          this.ops.setCannonTarget(key, null);
+        }
+        continue;
+      }
 
-      // Fire!
-      slot.fireCooldown = GARRISON_FIRE_INTERVAL;
+      // Update cannon turret aim toward target
+      if (slot.structureType === 'gate') {
+        this.ops.setCannonTarget(key, target.worldPosition);
+      }
+
+      // Fire interval scales with garrison count — more units = faster fire
+      const interval = Math.max(
+        GARRISON_FIRE_INTERVAL_MIN,
+        GARRISON_FIRE_INTERVAL_BASE - slot.units.length * GARRISON_FIRE_INTERVAL_PER_UNIT,
+      );
+      slot.fireCooldown = interval;
       this.executeGarrisonFire(slot, target);
     }
   }
@@ -638,6 +706,8 @@ export default class GarrisonSystem {
   private findFireTarget(slot: GarrisonSlot, allUnits: Unit[]): Unit | null {
     let bestTarget: Unit | null = null;
     let bestDist = Infinity;
+    // Extended range for large garrisons (5+ units)
+    const range = slot.units.length >= 5 ? GARRISON_FIRE_RANGE_EXTENDED : GARRISON_FIRE_RANGE;
 
     for (const unit of allUnits) {
       if (unit.owner === slot.owner) continue;
@@ -645,7 +715,7 @@ export default class GarrisonSystem {
       if (unit._garrisoned) continue;
 
       const dist = Pathfinder.heuristic(unit.position, slot.position);
-      if (dist <= GARRISON_FIRE_RANGE && dist < bestDist) {
+      if (dist <= range && dist < bestDist) {
         bestDist = dist;
         bestTarget = unit;
       }
@@ -654,16 +724,39 @@ export default class GarrisonSystem {
     return bestTarget;
   }
 
-  private executeGarrisonFire(slot: GarrisonSlot, target: Unit): void {
-    const numArchers = slot.units.filter(u =>
-      u.type === UnitType.ARCHER || u.type === UnitType.MAGE ||
-      u.type === UnitType.BATTLEMAGE).length;
-    const numOther = slot.units.length - numArchers;
+  /** Check if a unit type is ranged for garrison purposes */
+  private static isRangedType(type: UnitType): boolean {
+    return type === UnitType.ARCHER || type === UnitType.MAGE ||
+      type === UnitType.BATTLEMAGE;
+  }
 
-    const totalDamage = Math.max(1,
-      numArchers * GARRISON_FIRE_DAMAGE +
-      Math.floor(numOther * GARRISON_FIRE_DAMAGE * 0.5)
-    );
+  /** Check if a unit type is siege for garrison purposes */
+  private static isSiegeType(type: UnitType): boolean {
+    return type === UnitType.TREBUCHET || type === UnitType.OGRE ||
+      type === UnitType.CHAMPION;
+  }
+
+  private executeGarrisonFire(slot: GarrisonSlot, target: Unit): void {
+    // ─── Stat-based damage calculation ───
+    // Each garrisoned unit contributes damage proportional to its ATK stat.
+    // Ranged units: 75% of ATK. Melee units: 35% of ATK. Siege units: full ATK.
+    let totalDamage = 0;
+    let numRanged = 0;
+    let hasSiege = false;
+
+    for (const u of slot.units) {
+      const atk = u.stats.attack;
+      if (GarrisonSystem.isSiegeType(u.type)) {
+        totalDamage += atk; // Siege units contribute full ATK
+        hasSiege = true;
+      } else if (GarrisonSystem.isRangedType(u.type)) {
+        totalDamage += Math.ceil(atk * RANGED_GARRISON_MULTIPLIER);
+        numRanged++;
+      } else {
+        totalDamage += Math.ceil(atk * MELEE_GARRISON_MULTIPLIER);
+      }
+    }
+    totalDamage = Math.max(1, totalDamage);
 
     const structWorld = this.ops.hexToWorld(slot.position);
     const structElev = this.ops.getElevation(slot.position);
@@ -673,12 +766,37 @@ export default class GarrisonSystem {
       z: structWorld.z,
     };
 
-    this.ops.fireArrow(from, target.worldPosition, target.id, () => {
-      this.ops.applyDamage(target, totalDamage, slot.units[0] ?? null);
-      this.ops.updateHealthBar(target);
-    });
-
-    this.ops.playSound('arrow', 0.3);
+    // ─── VFX dispatch based on garrison composition ───
+    // Siege units → cannonball (heavy single projectile, carries all damage)
+    // 3+ ranged → arrow volley (multiple arrows, looks impressive)
+    // Default → single arrow
+    if (hasSiege) {
+      // Fire cannonball for siege damage (main damage payload)
+      this.ops.fireCannonball(from, target.worldPosition, () => {
+        this.ops.applyDamage(target, totalDamage, slot.units[0] ?? null);
+        this.ops.updateHealthBar(target);
+      });
+      this.ops.playSound('hit_heavy', 0.5);
+      // Also fire arrows if ranged units are present (no extra damage, just visual)
+      if (numRanged > 0) {
+        this.ops.fireArrowVolley(from, target.worldPosition, Math.min(numRanged, 6));
+        this.ops.playSound('arrow', 0.2);
+      }
+    } else if (numRanged >= VOLLEY_THRESHOLD) {
+      // Arrow volley — multiple arrows rain down
+      this.ops.fireArrowVolley(from, target.worldPosition, Math.min(numRanged, 8), () => {
+        this.ops.applyDamage(target, totalDamage, slot.units[0] ?? null);
+        this.ops.updateHealthBar(target);
+      });
+      this.ops.playSound('arrow', 0.4);
+    } else {
+      // Standard single arrow
+      this.ops.fireArrow(from, target.worldPosition, target.id, () => {
+        this.ops.applyDamage(target, totalDamage, slot.units[0] ?? null);
+        this.ops.updateHealthBar(target);
+      });
+      this.ops.playSound('arrow', 0.3);
+    }
   }
 
   /** Convert a "q,r" key to HexCoord */

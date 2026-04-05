@@ -1,132 +1,73 @@
 import * as THREE from 'three';
 import { HexCoord, GameContext, Unit, ResourceType } from '../../types';
 import { GAME_CONFIG } from '../GameConfig';
+import { StockpileResource, RESOURCE_DISPLAY } from '../ResourcePool';
+
+export interface ResourceManagerOps {
+  playSound(name: string, volume?: number): void;
+}
+
+/** Maps StockpileResource to the legacy stockpile array on GameContext */
+const STOCKPILE_ARRAY_KEY: Record<StockpileResource, keyof GameContext> = {
+  wood: 'woodStockpile',
+  stone: 'stoneStockpile',
+  food: 'foodStockpile',
+  grass_fiber: 'grassFiberStockpile',
+  clay: 'clayStockpile',
+  rope: 'ropeStockpile',
+  iron: 'ironStockpile',
+  charcoal: 'charcoalStockpile',
+  steel: 'steelStockpile',
+  crystal: 'crystalStockpile',
+  gold: 'goldStockpile',
+};
 
 class ResourceManager {
   ctx: GameContext;
+  ops: ResourceManagerOps;
   stockpileMeshes: Map<string, THREE.Group> = new Map();
 
-  constructor(ctx: GameContext) {
+  constructor(ctx: GameContext, ops: ResourceManagerOps) {
     this.ctx = ctx;
+    this.ops = ops;
   }
 
-  handleWoodDeposit(unit: Unit): void {
-    const woodAmount = unit.carryAmount;
-    if (woodAmount <= 0) return;
-
-    this.ctx.woodStockpile[unit.owner] += woodAmount;
-    this.ctx.players[unit.owner].resources.wood += woodAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`🪵 +${woodAmount} wood`, '#8b6914');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleStoneDeposit(unit: Unit): void {
-    const stoneAmount = unit.carryAmount;
-    if (stoneAmount <= 0) return;
-
-    this.ctx.stoneStockpile[unit.owner] += stoneAmount;
-    this.ctx.players[unit.owner].resources.stone += stoneAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`🪨 +${stoneAmount} stone`, '#888888');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleFoodDeposit(unit: Unit): void {
-    const foodAmount = unit.carryAmount;
-    if (foodAmount <= 0) return;
-
-    this.ctx.foodStockpile[unit.owner] += foodAmount;
-    this.ctx.players[unit.owner].resources.food += foodAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`🌾 +${foodAmount} food`, '#daa520');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleGrassFiberDeposit(unit: Unit): void {
-    const amount = unit.carryAmount;
-    if (amount <= 0) return;
-    this.ctx.grassFiberStockpile[unit.owner] += amount;
-    this.ctx.players[unit.owner].resources.grass_fiber += amount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`🌿 +${amount} grass fiber`, '#8bc34a');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleClayDeposit(unit: Unit): void {
-    const amount = unit.carryAmount;
-    if (amount <= 0) return;
-    this.ctx.clayStockpile[unit.owner] += amount;
-    this.ctx.players[unit.owner].resources.clay += amount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`🧱 +${amount} clay`, '#c2703e');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleGoldDeposit(unit: Unit): void {
-    const goldAmount = unit.carryAmount;
-    if (goldAmount <= 0) return;
-
-    this.ctx.goldStockpile[unit.owner] += goldAmount;
-    this.ctx.players[unit.owner].resources.gold += goldAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`💰 +${goldAmount} gold`, '#ffd700');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleIronDeposit(unit: Unit): void {
-    const ironAmount = unit.carryAmount;
-    if (ironAmount <= 0) return;
-
-    this.ctx.ironStockpile[unit.owner] += ironAmount;
-    this.ctx.players[unit.owner].resources.iron += ironAmount;
-    this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
-      this.updateHUD();
-      this.ctx.hud.showNotification(`⛏ +${ironAmount} iron`, '#b87333');
-    }
-    unit.carryAmount = 0;
-    unit.carryType = null;
-  }
-
-  handleCrystalDeposit(unit: Unit): void {
+  // ── Unified deposit handler ────────────────────────────────
+  /**
+   * Generic resource deposit — one method for all 11 resource types.
+   * Replaces the 8 individual handleXxxDeposit methods.
+   */
+  handleDeposit(unit: Unit, resource: StockpileResource): void {
     const amount = unit.carryAmount;
     if (amount <= 0) return;
 
-    this.ctx.crystalStockpile[unit.owner] += amount;
-    this.ctx.players[unit.owner].resources.crystal += amount;
+    // Update stockpile array + player resources
+    const arrKey = STOCKPILE_ARRAY_KEY[resource];
+    (this.ctx[arrKey] as number[])[unit.owner] += amount;
+    (this.ctx.players[unit.owner].resources as unknown as Record<string, number>)[resource] += amount;
+
     this.updateStockpileVisual(unit.owner);
     if (unit.owner === 0) {
       this.updateHUD();
-      this.ctx.hud.showNotification(`💎 +${amount} crystal`, '#9b59b6');
+      const display = RESOURCE_DISPLAY[resource];
+      this.ctx.hud.showNotification(`${display.emoji} +${amount} ${display.label}`, display.color);
+      if (display.soundName) {
+        this.ops.playSound(display.soundName, 0.2);
+      }
     }
     unit.carryAmount = 0;
     unit.carryType = null;
   }
+
+  // ── Legacy convenience wrappers (delegate to handleDeposit) ──
+  handleWoodDeposit(unit: Unit): void { this.handleDeposit(unit, 'wood'); }
+  handleStoneDeposit(unit: Unit): void { this.handleDeposit(unit, 'stone'); }
+  handleFoodDeposit(unit: Unit): void { this.handleDeposit(unit, 'food'); }
+  handleGrassFiberDeposit(unit: Unit): void { this.handleDeposit(unit, 'grass_fiber'); }
+  handleClayDeposit(unit: Unit): void { this.handleDeposit(unit, 'clay'); }
+  handleGoldDeposit(unit: Unit): void { this.handleDeposit(unit, 'gold'); }
+  handleIronDeposit(unit: Unit): void { this.handleDeposit(unit, 'iron'); }
+  handleCrystalDeposit(unit: Unit): void { this.handleDeposit(unit, 'crystal'); }
 
   handleCropHarvest(unit: Unit, _farmPos: HexCoord): void {
     const foodYield = GAME_CONFIG.economy.harvest.crops.foodYield;

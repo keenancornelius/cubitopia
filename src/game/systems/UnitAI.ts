@@ -10,78 +10,64 @@ import { StatusEffectSystem } from './StatusEffectSystem';
 import { CombatLog } from '../../ui/ArenaDebugConsole';
 import { TacticalGroupManager, TacticalGroup, getTacticalRole, TacticalRole, isAlive } from './TacticalGroup';
 import { GAME_CONFIG } from '../GameConfig';
+import { SharedGameState, MineTarget, UnitAIDebugFlags } from '../SharedGameState';
 import { Logger } from '../../engine/Logger';
 
-/** Mine blueprint: defines a Y range to excavate. Miners remove blocks top-down
- *  from startY to (startY - depth + 1). Works for both surface and tunnel mining. */
-export interface MineTarget {
-  startY: number;   // Highest Y level to mine
-  depth: number;    // Number of layers to remove downward
-}
-
-export interface UnitAIDebugFlags {
-  disableChop?: boolean;
-  disableMine?: boolean;
-  disableHarvest?: boolean;
-  disableBuild?: boolean;
-  disableDeposit?: boolean;
-  disableAutoReturn?: boolean;
-  disableCombat?: boolean;
-}
+// Re-export interfaces so existing imports from './UnitAI' keep working
+export type { MineTarget, UnitAIDebugFlags };
 
 export class UnitAI {
-  /** Track which tree tile each lumberjack is targeting — prevents stacking */
-  static claimedTrees: Map<string, string> = new Map(); // "q,r" → unitId
+  // ── SharedGameState: single injectable container for all mutable game state ──
+  // All 30+ statics that were here are now in SharedGameState.
+  // Forwarding getters/setters below keep `UnitAI.xxx` working everywhere.
+  static state: SharedGameState = new SharedGameState();
 
-  /** Farm patch positions set by player */
-  static farmPatches: Set<string> = new Set(); // "q,r" keys
-  /** Grass harvest tiles marked by player — villagers harvest tall grass for hay */
-  static playerGrassBlueprint: Set<string> = new Set(); // "q,r" keys
-  /** Auto-harvestable grass tiles (populated by main.ts with harvestable grass stages) */
-  static grassTiles: Set<string> = new Set(); // "q,r" keys
-  /** Silo position per player */
-  static siloPositions: Map<number, HexCoord> = new Map();
-  /** Farmhouse position per player */
-  static farmhousePositions: Map<number, HexCoord> = new Map();
-  /** Forestry building positions per player (lumberjacks use as drop-off) */
-  static forestryPositions: Map<number, HexCoord[]> = new Map();
-  /** Track which farm patch each villager is targeting */
-  static claimedFarms: Map<string, string> = new Map(); // "q,r" → unitId
-  /** Track built walls (set by main.ts) */
-  static wallsBuilt: Set<string> = new Set(); // "q,r" keys (walls, gates, buildings)
-  /** Building positions (non-wall structures) — all units can attack these */
-  static buildingPositions: Set<string> = new Set(); // "q,r" keys
-  static buildingOwners: Map<string, number> = new Map(); // "q,r" → owner
-  /** Track wall owners (set by main.ts) */
-  static wallOwners: Map<string, number> = new Map(); // "q,r" → owner
-  /** Stockpile references (synced from main.ts each frame) */
-  static stoneStockpile: number[] = [0, 0];
-  static ironStockpile: number[] = [0, 0];
-  static clayStockpile: number[] = [0, 0];
-  static crystalStockpile: number[] = [0, 0];
-  static charcoalStockpile: number[] = [0, 0];
-  static steelStockpile: number[] = [0, 0];
-  static goldStockpile: number[] = [0, 0];
-  /** Morale modifiers per player — attack/move speed multiplier from food ratio (set by main.ts each frame) */
-  static moraleModifiers: number[] = [1.0, 1.0];
-  /** Reference to placed buildings (synced from main.ts) for builder auto-construct */
-  static placedBuildings: PlacedBuilding[] = [];
-
-  /** Reference to all bases for proximity checks (set by main.ts) */
-  static bases: Base[] = [];
-
-  /** Tactical group manager — set by main.ts, used for squad coordination */
-  static tacticalGroupManager: TacticalGroupManager | null = null;
+  // ── Forwarding getters/setters (backward-compatible) ──────────
+  static get claimedTrees() { return UnitAI.state.claimedTrees; }
+  static get farmPatches() { return UnitAI.state.farmPatches; }
+  static get cropStages() { return UnitAI.state.cropStages; }
+  static get cropTimers() { return UnitAI.state.cropTimers; }
+  static get playerGrassBlueprint() { return UnitAI.state.playerGrassBlueprint; }
+  static get grassTiles() { return UnitAI.state.grassTiles; }
+  static get siloPositions() { return UnitAI.state.siloPositions; }
+  static get farmhousePositions() { return UnitAI.state.farmhousePositions; }
+  static get forestryPositions() { return UnitAI.state.forestryPositions; }
+  static get claimedFarms() { return UnitAI.state.claimedFarms; }
+  static get wallsBuilt() { return UnitAI.state.wallsBuilt; }
+  static get buildingPositions() { return UnitAI.state.buildingPositions; }
+  static get buildingOwners() { return UnitAI.state.buildingOwners; }
+  static get wallOwners() { return UnitAI.state.wallOwners; }
+  static get stoneStockpile() { return UnitAI.state.stoneStockpile; }
+  static set stoneStockpile(v) { UnitAI.state.stoneStockpile = v; }
+  static get ironStockpile() { return UnitAI.state.ironStockpile; }
+  static set ironStockpile(v) { UnitAI.state.ironStockpile = v; }
+  static get clayStockpile() { return UnitAI.state.clayStockpile; }
+  static set clayStockpile(v) { UnitAI.state.clayStockpile = v; }
+  static get crystalStockpile() { return UnitAI.state.crystalStockpile; }
+  static set crystalStockpile(v) { UnitAI.state.crystalStockpile = v; }
+  static get charcoalStockpile() { return UnitAI.state.charcoalStockpile; }
+  static set charcoalStockpile(v) { UnitAI.state.charcoalStockpile = v; }
+  static get steelStockpile() { return UnitAI.state.steelStockpile; }
+  static set steelStockpile(v) { UnitAI.state.steelStockpile = v; }
+  static get goldStockpile() { return UnitAI.state.goldStockpile; }
+  static set goldStockpile(v) { UnitAI.state.goldStockpile = v; }
+  static get moraleModifiers() { return UnitAI.state.moraleModifiers; }
+  static set moraleModifiers(v) { UnitAI.state.moraleModifiers = v; }
+  static get placedBuildings() { return UnitAI.state.placedBuildings; }
+  static set placedBuildings(v) { UnitAI.state.placedBuildings = v; }
+  static get bases() { return UnitAI.state.bases; }
+  static set bases(v) { UnitAI.state.bases = v; }
+  static get tacticalGroupManager() { return UnitAI.state.tacticalGroupManager; }
+  static set tacticalGroupManager(v) { UnitAI.state.tacticalGroupManager = v; }
 
   // ── Reusable scratch arrays/collections (avoid per-frame allocations) ──
   private static _focusCountScratch: Map<string, number> = new Map();
   private static _peelTargetsScratch: Set<string> = new Set();
   private static readonly _HEX_DIRS: readonly HexCoord[] = [{q:1,r:0},{q:-1,r:0},{q:0,r:1},{q:0,r:-1},{q:1,r:-1},{q:-1,r:1}];
 
-  /** Cached player references (set each frame in update) — used by static methods that only receive owner id */
-  static players: Map<number, Player> = new Map();
-  /** Number of players in the current game (set by main.ts at game start) */
-  static playerCount: number = 2;
+  static get players() { return UnitAI.state.players; }
+  static get playerCount() { return UnitAI.state.playerCount; }
+  static set playerCount(v) { UnitAI.state.playerCount = v; }
 
   /** Check if a position is an underground base — used to force tunnel pathing */
   static isUndergroundBase(pos: HexCoord, map: GameMap): boolean {
@@ -111,6 +97,29 @@ export class UnitAI {
     UnitAI.unreachableCache.clear();
   }
 
+  /** Prune unreachable cache: remove entries for dead units + expired tile entries.
+   *  Called periodically from update() to prevent memory leaks. */
+  private static readonly PRUNE_INTERVAL = 300; // ~5 seconds at 60fps
+  private static lastPruneFrame = 0;
+
+  static pruneUnreachableCache(liveUnitIds: Map<string, unknown>): void {
+    const cache = UnitAI.unreachableCache;
+    const now = UnitAI.gameFrame;
+    for (const [unitId, tileMap] of cache) {
+      // Remove entire entry if unit is dead/gone
+      if (!liveUnitIds.has(unitId)) {
+        cache.delete(unitId);
+        continue;
+      }
+      // Remove expired tile entries
+      for (const [tileKey, expiry] of tileMap) {
+        if (now > expiry) tileMap.delete(tileKey);
+      }
+      // Remove empty maps
+      if (tileMap.size === 0) cache.delete(unitId);
+    }
+  }
+
   /** Check if a tile is still marked unreachable for a unit */
   static isUnreachable(unitId: string, tileKey: string): boolean {
     const unitCache = UnitAI.unreachableCache.get(unitId);
@@ -127,13 +136,10 @@ export class UnitAI {
   /**
    * Update all units for one frame
    */
-  /** Debug flags passed from HUD — controls worker/combat behaviors */
-  static debugFlags: UnitAIDebugFlags = {};
-
-  /** Deterministic game frame counter — set by main.ts each updateRTS call.
-   *  Use instead of Date.now()/performance.now() in any game logic.
-   *  ~60 frames/second. Convert: 10s timeout → 600 frames. */
-  static gameFrame = 0;
+  static get debugFlags() { return UnitAI.state.debugFlags; }
+  static set debugFlags(v) { UnitAI.state.debugFlags = v; }
+  static get gameFrame() { return UnitAI.state.gameFrame; }
+  static set gameFrame(v) { UnitAI.state.gameFrame = v; }
 
   /** True if unit is dead or dying to a ranged projectile still in flight */
   static isDead(unit: Unit): boolean {
@@ -195,6 +201,12 @@ export class UnitAI {
     UnitAI.players.clear();
     for (const p of players) {
       UnitAI.players.set(p.id, p);
+    }
+
+    // Periodic prune of unreachable cache — removes dead unit entries + expired tiles
+    if (UnitAI.gameFrame - UnitAI.lastPruneFrame >= UnitAI.PRUNE_INTERVAL) {
+      UnitAI.lastPruneFrame = UnitAI.gameFrame;
+      UnitAI.pruneUnreachableCache(unitById);
     }
 
     for (const player of players) {
@@ -1060,9 +1072,11 @@ export class UnitAI {
       let farmTile: HexCoord | null = null;
       let grassTile: HexCoord | null = null;
 
-      // Find nearest unclaimed ready farm patch
+      // Find nearest unclaimed mature farm patch (stage 3 = harvestable)
       let bestFarmDist = Infinity;
       for (const key of UnitAI.farmPatches) {
+        const stage = UnitAI.cropStages.get(key) ?? 0;
+        if (stage < 3) continue; // Only target mature crops
         const claimer = UnitAI.claimedFarms.get(key);
         if (claimer && claimer !== unit.id) continue;
         const [q, r] = key.split(',').map(Number);
@@ -1580,6 +1594,18 @@ export class UnitAI {
       const isGrass = isPlayerGrass || isAutoGrass;
 
       if (isFarm || isGrass) {
+        // Farm patches: only harvest when crops are mature (stage 3)
+        if (isFarm) {
+          const cropStage = UnitAI.cropStages.get(tileKey) ?? 0;
+          if (cropStage < 3) {
+            // Crops not ready — skip and go idle
+            UnitAI.claimedFarms.delete(tileKey);
+            unit.state = UnitState.IDLE;
+            unit.command = null;
+            return;
+          }
+        }
+
         // Calculate food yield — farm patches get bonus from nearby farmhouse
         let foodYield = isFarm ? GAME_CONFIG.economy.harvest.crops.foodYield : GAME_CONFIG.economy.harvest.grass.hayBase;
         if (isFarm) {
@@ -1590,11 +1616,14 @@ export class UnitAI {
               foodYield += GAME_CONFIG.population.farmhouseYieldBonus;
             }
           }
+          // Reset crop to seedling after harvest — regrow cycle
+          UnitAI.cropStages.set(tileKey, 0);
+          UnitAI.cropTimers.set(tileKey, GAME_CONFIG.economy.harvest.crops.growTime ?? 8);
         }
 
         // Accumulate food (multi-harvest like lumberjack multi-chop)
         unit.carryAmount = Math.min((unit.carryAmount || 0) + foodYield, unit.carryCapacity);
-        unit.carryType = 'food';
+        unit.carryType = ResourceType.FOOD;
 
         const eventType = isGrass ? 'villager:harvest_grass' : 'villager:harvest';
         events.push({
@@ -1933,14 +1962,13 @@ export class UnitAI {
   private static keepWallPlans: Map<number, HexCoord[]> = new Map();
   private static keepGatePlans: Map<number, HexCoord[]> = new Map();
 
-  /** Arena mode: all units seek and destroy, no rally/wave */
-  static arenaMode = false;
-
-  /** Base positions per player — set by main.ts on game init */
-  static basePositions: Map<number, HexCoord> = new Map();
-  /** Map dimensions — set by main.ts at game start for direction calculations */
-  static mapWidth: number = 40;
-  static mapHeight: number = 40;
+  static get arenaMode() { return UnitAI.state.arenaMode; }
+  static set arenaMode(v) { UnitAI.state.arenaMode = v; }
+  static get basePositions() { return UnitAI.state.basePositions; }
+  static get mapWidth() { return UnitAI.state.mapWidth; }
+  static set mapWidth(v) { UnitAI.state.mapWidth = v; }
+  static get mapHeight() { return UnitAI.state.mapHeight; }
+  static set mapHeight(v) { UnitAI.state.mapHeight = v; }
 
   /** Get stockpile offset from base toward map center (for resource drop-off) */
   static getStockpileOffset(owner: number): HexCoord {
@@ -1953,12 +1981,9 @@ export class UnitAI {
     return { q: dq * 2, r: dr };
   }
 
-  /** Barracks positions per player — set by main.ts when barracks is built */
-  static barracksPositions: Map<number, HexCoord> = new Map();
-
-  /** Player's wall blueprint queue — tiles the player has clicked to designate */
-  static playerWallBlueprint: Set<string> = new Set(); // "q,r" keys
-  static playerGateBlueprint: Set<string> = new Set(); // "q,r" keys — gates marked for building
+  static get barracksPositions() { return UnitAI.state.barracksPositions; }
+  static get playerWallBlueprint() { return UnitAI.state.playerWallBlueprint; }
+  static get playerGateBlueprint() { return UnitAI.state.playerGateBlueprint; }
 
   /** Add a tile to the player's wall blueprint */
   static addBlueprint(coord: HexCoord): boolean {
@@ -1990,8 +2015,7 @@ export class UnitAI {
     UnitAI.playerGateBlueprint.clear();
   }
 
-  /** Player's harvest blueprint queue — trees the player wants chopped */
-  static playerHarvestBlueprint: Set<string> = new Set(); // "q,r" keys
+  static get playerHarvestBlueprint() { return UnitAI.state.playerHarvestBlueprint; }
 
   /** Add a tree tile to the player's harvest blueprint */
   static addHarvestBlueprint(coord: HexCoord): boolean {
@@ -2010,15 +2034,16 @@ export class UnitAI {
     UnitAI.claimedTrees.clear();
     UnitAI.claimedFarms.clear();
     UnitAI.farmPatches.clear();
+    UnitAI.cropStages.clear();
+    UnitAI.cropTimers.clear();
     UnitAI.playerMineBlueprint = new Map();
     UnitAI.claimedMines.clear();
     UnitAI.grassTiles.clear();
   }
 
-  /** Player mine blueprints — unified: each stores startY + depth */
-  static playerMineBlueprint: Map<string, MineTarget> = new Map();
-  /** Track which mine tile each worker is targeting */
-  static claimedMines: Map<string, string> = new Map(); // "q,r" → unitId
+  static get playerMineBlueprint() { return UnitAI.state.playerMineBlueprint; }
+  static set playerMineBlueprint(v) { UnitAI.state.playerMineBlueprint = v; }
+  static get claimedMines() { return UnitAI.state.claimedMines; }
 
   /** Check if a mine blueprint is fully excavated (no blocks remain in the Y range) */
   static isMineComplete(key: string, tile: { voxelData: { blocks: { localPosition: { y: number } }[] } }): boolean {
@@ -3410,6 +3435,8 @@ export class UnitAI {
     if (dist <= unit.stats.range) {
       // In range — attack if cooldown is ready
       if (unit.attackCooldown <= 0) {
+        // Check if this attack should be a secondary (spin/jump/charge)
+        CombatSystem.checkSecondaryAttack(unit);
         const result = CombatSystem.resolve(unit, target, allUnits, map);
         const applyInfo2 = CombatSystem.apply(unit, target, result);
         unit.attackCooldown = UnitAI.getAttackCooldown(unit);
@@ -3434,6 +3461,12 @@ export class UnitAI {
         for (const pr of cycloneResult2.pulled) events.push({ type: 'combat:cyclone', unitId: pr.unitId, knockQ: pr.knockQ, knockR: pr.knockR } as any);
         const cleaveResults2 = CombatSystem.applyGreatswordCleave(unit, target, allUnits, isTileBlocked2);
         for (const cr of cleaveResults2) events.push({ type: 'combat:cleave', unitId: cr.unitId, knockQ: cr.knockQ, knockR: cr.knockR } as any);
+        // Greatsword level-up sweep crit VFX
+        if ((unit as any)._sweepCritHitCount) {
+          const hitCount = (unit as any)._sweepCritHitCount;
+          events.push({ type: 'combat:sweepCrit', attackerId: unit.id, hitCount, worldPos: unit.worldPosition } as any);
+          delete (unit as any)._sweepCritHitCount;
+        }
         // Ogre club swipe — 2-hex AOE knockback with ground pound VFX
         const ogreResults2 = CombatSystem.applyOgreClubSwipe(unit, target, allUnits, isTileBlocked2);
         if (ogreResults2.length > 0) events.push({ type: 'combat:ogreSlam', attackerWorldPos: { x: unit.worldPosition.x, y: unit.worldPosition.y, z: unit.worldPosition.z }, targetWorldPos: { x: target.worldPosition.x, y: target.worldPosition.y, z: target.worldPosition.z } } as any);
@@ -3441,6 +3474,21 @@ export class UnitAI {
         // Shieldbearer shield bash knockback
         const bashResult2 = CombatSystem.applyShieldBash(unit, target, isTileBlocked2);
         if (bashResult2) events.push({ type: 'combat:cleave', unitId: bashResult2.unitId, knockQ: bashResult2.knockQ, knockR: bashResult2.knockR } as any);
+        // Secondary attack AoE: greatsword spin hits nearby enemies, paladin rally buffs allies
+        if (unit._useSecondaryAttack && unit.type === UnitType.GREATSWORD) {
+          // Spin was used this attack — apply AoE splash to nearby enemies
+          const spinHits = CombatSystem.applyGreatswordSpin(unit, target, allUnits);
+          for (const sid of spinHits) events.push({ type: 'combat:splash', unitId: sid, attackerId: unit.id } as any);
+        }
+        if (unit._useSecondaryAttack && unit.type === UnitType.PALADIN) {
+          // Charge was used — apply rally buff to nearby allies
+          CombatSystem.applyPaladinRally(unit, allUnits);
+        }
+        if (unit._useSecondaryAttack && unit.type === UnitType.CHAMPION) {
+          // Hammer slam — AoE ground pound hits nearby enemies
+          const slamHits = CombatSystem.applyChampionHammerSlam(unit, target, allUnits);
+          for (const sid of slamHits) events.push({ type: 'combat:splash', unitId: sid, attackerId: unit.id } as any);
+        }
 
         if (!result.defenderSurvived) {
           // Ranged kills: defer DEAD state until projectile lands (avoids "frozen unit" visual)
