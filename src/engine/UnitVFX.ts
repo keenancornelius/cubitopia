@@ -794,10 +794,10 @@ export class UnitVFX {
       requestAnimationFrame(animate);
     }
 
-    // === Layer 2: Quick white hit flash at impact point ===
+    // === Layer 2: Quick warm hit flash at impact point ===
     const flashMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff, transparent: true, opacity: 0.7,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      color: 0xffe8c0, transparent: true, opacity: 0.5,
+      blending: THREE.NormalBlending, depthWrite: false,
     });
     const flash = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), flashMat);
     flash.position.set(worldPos.x, worldPos.y + 0.5, worldPos.z);
@@ -827,16 +827,15 @@ export class UnitVFX {
     const entry = this.unitMeshes.get(unitId);
     if (!entry) return;
 
-    const originalMaterials = new Map<THREE.Mesh, THREE.Material>();
+    const originalColors = new Map<THREE.Mesh, THREE.Color>();
 
-    // Store original materials and apply red tint
+    // Store original colors and apply red tint via emissive (preserves lighting response)
     entry.group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-        originalMaterials.set(child, child.material.clone());
-        const tintedMat = new THREE.MeshLambertMaterial({
-          color: 0xff4444,
-        });
-        child.material = tintedMat;
+        originalColors.set(child, child.material.color.clone());
+        // Lerp toward red instead of fully replacing — avoids gray-out from ACES tonemapping
+        child.material.emissive.set(0xff2222);
+        child.material.emissiveIntensity = 0.6;
       }
     });
 
@@ -862,8 +861,9 @@ export class UnitVFX {
 
     setTimeout(() => {
       entry.group.traverse((child) => {
-        if (child instanceof THREE.Mesh && originalMaterials.has(child)) {
-          child.material = originalMaterials.get(child)!;
+        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial && originalColors.has(child)) {
+          child.material.emissive.set(0x000000);
+          child.material.emissiveIntensity = 0;
         }
       });
     }, restoreTime);

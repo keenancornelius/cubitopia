@@ -188,11 +188,11 @@ export class Renderer {
     geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
     const material = new THREE.PointsMaterial({
-      color: 0xffffff,
-      size: 0.15,
+      color: 0xccccdd,
+      size: 0.12,
       transparent: true,
-      opacity: 0.4,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.15,
+      blending: THREE.NormalBlending,
       depthWrite: false,
       sizeAttenuation: true,
     });
