@@ -24,8 +24,7 @@ export class Renderer {
     // Sky gradient background
     this.scene.background = this.createSkyGradient();
 
-    // Atmospheric fog (dark space-like)
-    this.scene.fog = new THREE.FogExp2(0x0a0a15, 0.008);
+    // No fog — removed to prevent terrain visibility issues
 
     // Create WebGL renderer
     const canvas = document.getElementById(config.canvasId) as HTMLCanvasElement;

@@ -11,7 +11,6 @@ import { VoxelBuilder } from './engine/VoxelBuilder';
 import { UnitRenderer } from './engine/UnitRenderer';
 import { TileHighlighter } from './engine/TileHighlighter';
 import { TerrainDecorator } from './engine/TerrainDecorator';
-import { SkyCloudSystem } from './engine/SkyCloudSystem';
 import { MapGenerator } from './game/MapGenerator';
 import MapInitializer, { MapInitOps } from './game/MapInitializer';
 import { UnitFactory } from './game/entities/UnitFactory';
@@ -130,7 +129,7 @@ class Cubitopia {
   private unitRenderer: UnitRenderer;
   private tileHighlighter: TileHighlighter;
   private terrainDecorator: TerrainDecorator;
-  private skyCloudSystem: SkyCloudSystem | null = null;
+  // SkyCloudSystem removed — was causing terrain visibility issues
   // Torches removed for performance
   private selectionManager: SelectionManager;
   private hud: HUD;
@@ -2110,8 +2109,7 @@ class Cubitopia {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     scene.background = tex;
 
-    // Soft light fog instead of dark space fog
-    scene.fog = new THREE.FogExp2(0xf0e8ff, 0.004); // very light lavender, gentle density
+    // Fog removed — was obscuring terrain
 
     // Brighten ambient light — sky islands should feel radiant
     scene.traverse((child) => {
@@ -2147,8 +2145,7 @@ class Cubitopia {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     scene.background = tex;
 
-    // Light river mist fog
-    scene.fog = new THREE.FogExp2(0x8ab8c8, 0.003);
+    // Fog removed — was obscuring terrain
 
     // Soft natural lighting
     scene.traverse((child) => {
@@ -2184,8 +2181,7 @@ class Cubitopia {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     scene.background = tex;
 
-    // Light oceanic haze
-    scene.fog = new THREE.FogExp2(0xc0e8f8, 0.003);
+    // Fog removed — was obscuring terrain
 
     // Bright warm tropical lighting
     scene.traverse((child) => {
@@ -2244,8 +2240,7 @@ class Cubitopia {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     scene.background = tex;
 
-    // Light snow haze — visibility is good but there's a cold mist
-    scene.fog = new THREE.FogExp2(0xd8e4f0, 0.004);
+    // Fog removed — was obscuring terrain
 
     // Cold desaturated lighting — overcast grey winter sky
     scene.traverse((child) => {
@@ -2273,7 +2268,7 @@ class Cubitopia {
     const tex = new THREE.CanvasTexture(canvas);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     this.renderer.scene.background = tex;
-    this.renderer.scene.fog = new THREE.FogExp2(0xc8d8c0, 0.005);
+    // Fog removed — was obscuring terrain
     // Dappled green-tinted lighting
     const amb = this.renderer.scene.children.find((c: any) => c.isAmbientLight) as THREE.AmbientLight | undefined;
     if (amb) { amb.color.set(0xb0c8a0); amb.intensity = 0.7; }
@@ -2294,7 +2289,7 @@ class Cubitopia {
     const tex = new THREE.CanvasTexture(canvas);
     tex.mapping = THREE.EquirectangularReflectionMapping;
     this.renderer.scene.background = tex;
-    this.renderer.scene.fog = new THREE.FogExp2(0xd8b888, 0.004);
+    // Fog removed — was obscuring terrain
     // Hot harsh sunlight
     const amb = this.renderer.scene.children.find((c: any) => c.isAmbientLight) as THREE.AmbientLight | undefined;
     if (amb) { amb.color.set(0xd8b090); amb.intensity = 0.6; }
@@ -2410,14 +2405,8 @@ class Cubitopia {
     this.bases = bases;
     this._deadUnitKills = Array(this.playerCount).fill(0);
 
-    // Skyland: create cloud void plane instead of ocean
-    if (this.skyCloudSystem) {
-      this.skyCloudSystem.dispose();
-      this.skyCloudSystem = null;
-    }
+    // Per-map atmosphere (lighting/sky only, no fog)
     if (this.mapType === MapType.SKYLAND) {
-      this.skyCloudSystem = new SkyCloudSystem(this.renderer.scene);
-      this.skyCloudSystem.build(MAP_SIZE);
       this.applySkylandAtmosphere();
     } else if (this.mapType === MapType.RIVER_CROSSING) {
       this.applyRiverCrossingAtmosphere();
@@ -4037,7 +4026,7 @@ class Cubitopia {
 
       this.renderer.updateParticles(rawDelta);
       this.terrainDecorator.updateWater(rawDelta);
-      if (this.skyCloudSystem) this.skyCloudSystem.update(rawDelta);
+      // SkyCloudSystem removed
       const camPos = this.camera.camera.position;
       this.terrainDecorator.cameraWorldPos.x = camPos.x;
       this.terrainDecorator.cameraWorldPos.z = camPos.z;

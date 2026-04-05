@@ -136,7 +136,7 @@ export class TitleScene {
   constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = this._createSkyGradient();
-    this.scene.fog = new THREE.FogExp2(0x0a0a15, 0.010);
+    // Fog removed
 
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 250);
 
