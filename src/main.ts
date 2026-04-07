@@ -1205,7 +1205,14 @@ class Cubitopia {
         if (!this.gameOver) {
           this.hud.showNotification('Opponent disconnected — you win!', 'color:#2ecc71;font-weight:bold;');
           this.gameOver = true;
-          // Award win by default
+          this.multiplayer.reportMatchResult(true).catch(() => {});
+          this.showGameOverScreen('PLAYER', true);
+        }
+      },
+      onOpponentSurrender: () => {
+        if (!this.gameOver) {
+          this.hud.showNotification('Opponent surrendered — you win!', 'color:#2ecc71;font-weight:bold;');
+          this.gameOver = true;
           this.multiplayer.reportMatchResult(true).catch(() => {});
           this.showGameOverScreen('PLAYER', true);
         }
@@ -1957,6 +1964,13 @@ class Cubitopia {
   /** Spawn queue config for simple (single-resource) buildings */
 
   regenerateMap(): void {
+    // ── PvP forfeit: if leaving a live PvP match, surrender first ──
+    if (this.gameMode === 'pvp' && !this.gameOver) {
+      this.gameOver = true;
+      this.multiplayer.surrender().catch(() => {});
+      this.hud.showNotification('You left the match — defeat!', 'color:#e74c3c;font-weight:bold;');
+    }
+
     this.voxelBuilder.clearAll();
     this.terrainDecorator.dispose();
     this.unitRenderer.dispose();

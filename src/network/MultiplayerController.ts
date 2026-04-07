@@ -51,6 +51,7 @@ export interface MultiplayerEvents {
   onStateChange?: (state: MultiplayerState) => void;
   onMatchFound?: (result: MatchFoundResult) => void;
   onOpponentDisconnect?: () => void;
+  onOpponentSurrender?: () => void;
   onDesync?: (tick: number) => void;
   onPingUpdate?: (ms: number) => void;
   onError?: (msg: string) => void;
@@ -170,7 +171,12 @@ export class MultiplayerController {
         }
       },
       onCommand: (cmd: NetworkCommand) => {
-        // Commands are routed through CommandQueue
+        // Handle surrender command explicitly
+        if (cmd.type === 'surrender') {
+          this._events.onOpponentSurrender?.();
+          return;
+        }
+        // Other commands are routed through CommandQueue
       },
       onDisconnect: () => {
         this._events.onOpponentDisconnect?.();
