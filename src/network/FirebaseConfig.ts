@@ -234,6 +234,21 @@ export function watchMatch(matchId: string, cb: (match: MatchRecord) => void): U
   });
 }
 
+/**
+ * Watch for new match records where the given uid is player2 (guest).
+ * Used by the guest to discover the match the host created for them.
+ */
+export function watchMatchesAsGuest(uid: string, cb: (match: MatchRecord) => void): Unsubscribe {
+  const matchesRef = ref(getDb(), 'matches');
+  return onChildAdded(matchesRef, (snap: DataSnapshot) => {
+    if (!snap.exists()) return;
+    const match = snap.val() as MatchRecord;
+    if (match.player2 === uid && match.status === 'signaling' && !match.isGhost) {
+      cb(match);
+    }
+  });
+}
+
 // ============================================
 // Signaling (WebRTC offer/answer/ICE)
 // ============================================

@@ -20,6 +20,7 @@ import {
   createMatch,
   updateMatch,
   getProfile,
+  watchMatchesAsGuest,
   type QueueEntry,
   type MatchRecord,
   type PlayerProfile,
@@ -186,6 +187,7 @@ export class MatchmakingService {
   private events: MatchmakingEvents = {};
   private queueUnsubs: Unsubscribe[] = [];
   private ghostTimer: ReturnType<typeof setTimeout> | null = null;
+  private _guestWatchUnsub: Unsubscribe | null = null;
   private searchStartTime = 0;
 
   // Current player info
@@ -290,16 +292,15 @@ export class MatchmakingService {
     if (this.state !== 'searching') return;
     if (Math.abs(opponent.elo - this._elo) > MAX_ELO_DIFF) return;
 
-    this.setState('found');
-
     // Deterministic host selection: lower UID is host
     const isHost = this._uid < opponent.uid;
-    const mapSeed = Math.floor(Math.random() * 999999);
 
-    // Only the host creates the match record to avoid double-creation
-    let matchId: string;
     if (isHost) {
-      matchId = await createMatch({
+      // ── HOST: create the match and notify ──
+      this.setState('found');
+      const mapSeed = Math.floor(Math.random() * 999999);
+
+      const matchId = await createMatch({
         player1: this._uid,
         player2: opponent.uid,
         mapSeed,
@@ -312,24 +313,41 @@ export class MatchmakingService {
         leaveQueue(this._uid),
         leaveQueue(opponent.uid),
       ]);
+
+      this._lastMatchResult = {
+        matchId,
+        mapSeed,
+        mapType: 'standard',
+        isHost: true,
+        opponentName: opponent.displayName,
+        opponentElo: opponent.elo,
+        isGhost: false,
+      };
+
+      this.cleanupSearch();
+      this.events.onMatchFound?.(this._lastMatchResult);
     } else {
-      // Guest waits for host to create match — poll briefly
-      // In practice, the watchMatch listener in the game will handle this
-      matchId = `pending-${opponent.uid}`;
+      // ── GUEST: wait for host to create the match record ──
+      // Don't fire onMatchFound yet — watch /matches for a record where we're player2
+      if (this._guestWatchUnsub) return; // already watching
+      this._guestWatchUnsub = watchMatchesAsGuest(this._uid, (match: MatchRecord) => {
+        if (this.state !== 'searching') return;
+        this.setState('found');
+
+        this._lastMatchResult = {
+          matchId: match.matchId,
+          mapSeed: match.mapSeed,
+          mapType: match.mapType,
+          isHost: false,
+          opponentName: opponent.displayName,
+          opponentElo: opponent.elo,
+          isGhost: false,
+        };
+
+        this.cleanupSearch();
+        this.events.onMatchFound?.(this._lastMatchResult);
+      });
     }
-
-    this._lastMatchResult = {
-      matchId,
-      mapSeed,
-      mapType: 'standard',
-      isHost,
-      opponentName: opponent.displayName,
-      opponentElo: opponent.elo,
-      isGhost: false,
-    };
-
-    this.cleanupSearch();
-    this.events.onMatchFound?.(this._lastMatchResult);
   }
 
   // ============================================
@@ -401,6 +419,10 @@ export class MatchmakingService {
     if (this.ghostTimer) {
       clearTimeout(this.ghostTimer);
       this.ghostTimer = null;
+    }
+    if (this._guestWatchUnsub) {
+      this._guestWatchUnsub();
+      this._guestWatchUnsub = null;
     }
     for (const unsub of this.queueUnsubs) {
       unsub();

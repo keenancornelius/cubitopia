@@ -2991,12 +2991,15 @@ class Cubitopia {
     }
 
     // Update enemy resource bar (reuse cached object to avoid per-frame allocation)
+    // In PvP, the "enemy" is whichever player is NOT the local player
+    const enemyIdx = this._localPlayerIndex === 0 ? 1 : 0;
     if (this.playerCount > 2) {
       // FFA mode: show all enemy players' resources
       if (!this._ffaEnemyCache) this._ffaEnemyCache = [];
       const cache = this._ffaEnemyCache;
       cache.length = 0;
-      for (let i = 1; i < this.playerCount; i++) {
+      for (let i = 0; i < this.playerCount; i++) {
+        if (i === this._localPlayerIndex) continue; // skip self
         const p = this.players[i];
         if (!p) continue;
         cache.push({
@@ -3016,11 +3019,11 @@ class Cubitopia {
     } else {
       if (!this._enemyResCache) this._enemyResCache = { wood: 0, food: 0, stone: 0, iron: 0, crystal: 0, grassFiber: 0, clay: 0, charcoal: 0, rope: 0, steel: 0, gold: 0 };
       const erc = this._enemyResCache;
-      erc.wood = this.woodStockpile[1]; erc.food = this.foodStockpile[1]; erc.stone = this.stoneStockpile[1];
-      erc.iron = this.ironStockpile[1]; erc.crystal = this.crystalStockpile[1]; erc.grassFiber = this.grassFiberStockpile[1];
-      erc.clay = this.clayStockpile[1]; erc.charcoal = this.charcoalStockpile[1]; erc.rope = this.ropeStockpile[1];
-      erc.steel = this.steelStockpile[1]; erc.gold = this.goldStockpile[1];
-      this.hud.updateEnemyResources(this.players[1], erc);
+      erc.wood = this.woodStockpile[enemyIdx]; erc.food = this.foodStockpile[enemyIdx]; erc.stone = this.stoneStockpile[enemyIdx];
+      erc.iron = this.ironStockpile[enemyIdx]; erc.crystal = this.crystalStockpile[enemyIdx]; erc.grassFiber = this.grassFiberStockpile[enemyIdx];
+      erc.clay = this.clayStockpile[enemyIdx]; erc.charcoal = this.charcoalStockpile[enemyIdx]; erc.rope = this.ropeStockpile[enemyIdx];
+      erc.steel = this.steelStockpile[enemyIdx]; erc.gold = this.goldStockpile[enemyIdx];
+      this.hud.updateEnemyResources(this.players[enemyIdx], erc);
     }
 
     // Nature simulation (tree regrowth, grass growth/spread)
