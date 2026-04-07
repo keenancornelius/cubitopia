@@ -42,13 +42,13 @@ import {
 // For alpha: these are public client-side keys (safe to commit).
 // Security comes from Firebase Rules, not secret keys.
 const FIREBASE_CONFIG = {
-  apiKey: 'PLACEHOLDER_API_KEY',
+  apiKey: 'AIzaSyBj-sKwi4wDH8fxSVNoLZcezN3GJ2kEkdU',
   authDomain: 'cubitopia-alpha.firebaseapp.com',
   databaseURL: 'https://cubitopia-alpha-default-rtdb.firebaseio.com',
   projectId: 'cubitopia-alpha',
-  storageBucket: 'cubitopia-alpha.appspot.com',
-  messagingSenderId: '000000000000',
-  appId: '1:000000000000:web:0000000000000000',
+  storageBucket: 'cubitopia-alpha.firebasestorage.app',
+  messagingSenderId: '585732130708',
+  appId: '1:585732130708:web:378e3e73c3bb53705eb181',
 };
 
 // --- Singleton ---
