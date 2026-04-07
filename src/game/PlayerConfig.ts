@@ -152,6 +152,14 @@ export const GAME_MODES: Record<string, GameModeConfig> = {
     humanPlayers: [0],
     teams: [0, 1, 0, 1], // P0+P2 vs P1+P3
   },
+  'pvp': {
+    type: '1v1',
+    label: 'Player vs Player',
+    description: '1v1 ranked multiplayer',
+    playerCount: 2,
+    humanPlayers: [0, 1], // Both players are human
+    teams: null,
+  },
 };
 
 /** Check if two players are enemies */

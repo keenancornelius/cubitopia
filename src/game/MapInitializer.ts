@@ -162,9 +162,10 @@ export default class MapInitializer {
    */
   public setupMap(
     mapType: MapType,
-    gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2',
+    gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' | 'pvp',
     isArena: boolean,
     playerCount: number = 2,
+    seed?: number,
   ): {
     map: GameMap;
     bases: Base[];
@@ -178,7 +179,7 @@ export default class MapInitializer {
     mapSize: number;
   } {
     // Step 1: Generate map
-    const map = this.generateMap(mapType, playerCount);
+    const map = this.generateMap(mapType, playerCount, seed);
     const preset = getPreset(mapType);
     const MAP_SIZE = preset.size;
     const BASE_INSET = mapType === MapType.ARENA ? 3 : 5;
@@ -347,7 +348,7 @@ export default class MapInitializer {
   /**
    * Generate map from preset or map generator.
    */
-  private generateMap(mapType: MapType, playerCount: number = 2): GameMap {
+  private generateMap(mapType: MapType, playerCount: number = 2, seed?: number): GameMap {
     const preset = getPreset(mapType);
     const MAP_SIZE = preset.size;
 
@@ -356,21 +357,21 @@ export default class MapInitializer {
     } else if (ENABLE_UNDERGROUND && mapType === MapType.DESERT_TUNNELS) {
       return generateDesertTunnelsMap(MAP_SIZE);
     } else if (mapType === MapType.SKYLAND) {
-      return generateSkylandMap(MAP_SIZE, undefined, playerCount);
+      return generateSkylandMap(MAP_SIZE, seed, playerCount);
     } else if (mapType === MapType.RIVER_CROSSING) {
-      return generateRiverCrossingMap(MAP_SIZE, undefined, playerCount);
+      return generateRiverCrossingMap(MAP_SIZE, seed, playerCount);
     } else if (mapType === MapType.ARCHIPELAGO) {
-      return generateArchipelagoMap(MAP_SIZE, undefined, playerCount);
+      return generateArchipelagoMap(MAP_SIZE, seed, playerCount);
     } else if (mapType === MapType.TUNDRA) {
-      return generateTundraMap(MAP_SIZE, undefined, playerCount);
+      return generateTundraMap(MAP_SIZE, seed, playerCount);
     } else if (mapType === MapType.SUNKEN_RUINS) {
-      return generateSunkenRuinsMap(MAP_SIZE, undefined, playerCount);
+      return generateSunkenRuinsMap(MAP_SIZE, seed, playerCount);
     } else if (mapType === MapType.BADLANDS) {
-      return generateBadlandsMap(MAP_SIZE, undefined, playerCount);
+      return generateBadlandsMap(MAP_SIZE, seed, playerCount);
     } else {
       const params = MAP_GEN_PARAMS[mapType];
-      const mapGen = new MapGenerator(undefined, params);
-      const gameMap = mapGen.generate(MAP_SIZE, MAP_SIZE, undefined, playerCount);
+      const mapGen = new MapGenerator(seed, params);
+      const gameMap = mapGen.generate(MAP_SIZE, MAP_SIZE, seed, playerCount);
       gameMap.mapType = mapType;
       return gameMap;
     }

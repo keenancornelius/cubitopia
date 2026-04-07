@@ -3150,12 +3150,13 @@ export class HUD {
     // Called each frame — can be used for animations or time display
   }
 
-  setGameMode(mode: 'pvai' | 'aivai' | 'ffa' | '2v2'): void {
+  setGameMode(mode: 'pvai' | 'aivai' | 'ffa' | '2v2' | 'pvp'): void {
     const labels: Record<string, [string, string]> = {
       'pvai': ['Player vs AI', '#3498db'],
       'aivai': ['AI vs AI', '#e74c3c'],
       'ffa': ['Free-For-All', '#2ecc71'],
       '2v2': ['2v2 Teams', '#f39c12'],
+      'pvp': ['Ranked PvP', '#e74c3c'],
     };
     const [label, color] = labels[mode] ?? ['Unknown', '#888'];
     this.elements.titleBar.innerHTML = `<strong>CUBITOPIA</strong><br><span style="font-size:12px;color:${color}">${label}</span>`;

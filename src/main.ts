@@ -147,7 +147,14 @@ class Cubitopia {
   private _gameFrame = 0;
   // gameOverOverlay and mainMenuOverlay moved to MenuController
   private gameSpeed = 1;
-  private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' = 'pvai';
+  private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' | 'pvp' = 'pvai';
+  /** In multiplayer PvP, which player index (0 or 1) the local client controls */
+  private _localPlayerIndex: number = 0;
+  /** Map seed override for deterministic multiplayer maps (null = random) */
+  private _mapSeedOverride: number | null = null;
+
+  /** Convenience: get the local player's index for HUD/resource display */
+  private get _lp(): number { return this._localPlayerIndex; }
   private mapType: MapType = MapType.STANDARD;
   private playerTribe: TribeId = 'fantasy';
   private playerCount: number = 2;
@@ -332,7 +339,7 @@ class Cubitopia {
         this.players[unit.owner].units.push(unit);
         this.allUnits.push(unit);
         this.unitRenderer.addUnit(unit, this.getElevation(unit.position));
-        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+        this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
       },
       removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
       updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
@@ -380,7 +387,7 @@ class Cubitopia {
       setPlayerFoodResource: (pid, v) => { this.players[pid].resources.food = v; },
       rebuildAllUnits: () => {
         this.allUnits = this.players.flatMap(p => p.units);
-        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+        this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
       },
       getArmyComposition: () => this.debugPanel.getArmyComposition(),
       getPlayerCount: () => this.playerCount,
@@ -1163,10 +1170,18 @@ class Cubitopia {
           processCommand(this._commandBridgeAdapter, cmd);
         });
 
-        // TODO Phase 5D: Wire mapSeed into map generator for deterministic maps
         this.hud.setVisible(true);
         this.mapType = mapType;
-        this.gameMode = 'pvai'; // Multiplayer uses PvAI mode with networked/ghost AI
+        this._mapSeedOverride = mapSeed; // Wire seed for deterministic maps
+        if (isGhost) {
+          // Ghost matches: local player vs AI impersonation
+          this.gameMode = 'pvai';
+          this._localPlayerIndex = 0;
+        } else {
+          // Real PvP: each player controls their own team
+          this.gameMode = 'pvp';
+          this._localPlayerIndex = this.multiplayer.network.isHost ? 0 : 1;
+        }
         this._multiplayerOpponentName = opponentName;
         this.startNewGame();
       },
@@ -1178,6 +1193,7 @@ class Cubitopia {
         });
         this._mpTickAccumulator = 0;
         this._multiplayerOpponentName = '';
+        this._localPlayerIndex = 0;
         this.multiplayerUI!.showLobby();
       },
     });
@@ -1233,8 +1249,8 @@ class Cubitopia {
       rebuildTileShell: (coord) => this.rebuildTileShell(coord),
       rebuildVoxels: () => { if (this.currentMap) this.voxelBuilder.rebuildFromMap(this.currentMap); },
       updateResourceDisplay: (owner) => {
-        if (owner === 0) {
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        if (owner === this._localPlayerIndex) {
+          this.hud.updateResources(this.players[this._lp], this.woodStockpile[this._lp], this.foodStockpile[this._lp], this.stoneStockpile[this._lp]);
         }
       },
       updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
@@ -1669,7 +1685,7 @@ class Cubitopia {
       addUnitToGame: (unit) => {
         this.players[0].units.push(unit);
         this.allUnits.push(unit);
-        this.selectionManager.setPlayerUnits(this.allUnits, 0);
+        this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
       },
       getRallyFormationSlot: (kind, unit) => this.rallyPointSystem.getRallyFormationSlot(kind, unit),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
@@ -2398,6 +2414,8 @@ class Cubitopia {
 
     // Determine player count from game mode
     this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
+    // Reset local player index for non-PvP modes
+    if (this.gameMode !== 'pvp') this._localPlayerIndex = 0;
 
     // Reset FFA enemy bar state so it rebuilds for new player count
     this.hud.resetFfaEnemyBar();
@@ -2436,7 +2454,8 @@ class Cubitopia {
     }
 
     // Step 1: Initialize map (terrain, bases, decorations)
-    const mapSetupResult = this.mapInitializer.setupMap(this.mapType, this.gameMode, isArena, this.playerCount);
+    const mapSetupResult = this.mapInitializer.setupMap(this.mapType, this.gameMode, isArena, this.playerCount, this._mapSeedOverride ?? undefined);
+    this._mapSeedOverride = null; // consume the seed
     const map = mapSetupResult.map;
     const MAP_SIZE = mapSetupResult.mapSize;
     const bases = mapSetupResult.bases;
@@ -2507,21 +2526,26 @@ class Cubitopia {
       : { food: 50, wood: 50, stone: 20, iron: 0, gold: 25, crystal: 0, grass_fiber: 0, clay: 0, rope: 0, charcoal: 0, steel: 0 };
 
     const p1IsAI = this.gameMode === 'aivai';
+    const isPvP = this.gameMode === 'pvp';
     const colorNames = ['Blue', 'Red', 'Green', 'Gold'];
     this.players = [];
     for (let i = 0; i < this.playerCount; i++) {
       const pc = getPlayerColor(i);
-      const isHuman = (i === 0 && !p1IsAI);
+      // In PvP both players are human; in aivai both are AI; otherwise only player 0 is human
+      const isHuman = isPvP ? true : (i === 0 && !p1IsAI);
+      const isLocal = (i === this._localPlayerIndex);
       this.players.push({
         id: i,
-        name: isHuman ? 'Player 1' : `AI ${colorNames[i] ?? i}`,
+        name: isPvP
+          ? (isLocal ? 'You' : (this._multiplayerOpponentName || `Player ${i + 1}`))
+          : (isHuman ? 'Player 1' : `AI ${colorNames[i] ?? i}`),
         color: new THREE.Color(pc.primary),
         cities: [], units: [],
         resources: makeResources(),
         technology: [],
         isAI: !isHuman,
         defeated: false,
-        tribeId: isHuman ? this.playerTribe : undefined,
+        tribeId: isLocal ? this.playerTribe : undefined,
       });
     }
 
@@ -2639,7 +2663,7 @@ class Cubitopia {
     }
 
     this.allUnits = this.players.flatMap(p => p.units);
-    this.selectionManager.setPlayerUnits(this.allUnits, 0);
+    this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
 
     // Sync internal stockpiles with player resources (critical for arena mode
     // where resources.food=999 but foodStockpile was reset to [10,10] in cleanup)
@@ -2696,9 +2720,14 @@ class Cubitopia {
     // Set camera bounds to prevent panning off the map
     this.camera.setMapBounds(-3, -3, MAP_SIZE * 1.5 + 3, MAP_SIZE * 1.5 + 3);
 
-    // Camera focuses on map center
-    const centerQ = Math.floor(MAP_SIZE / 2);
-    this.camera.focusOn(new THREE.Vector3(centerQ * 1.5, 2, midR * 1.5));
+    // Camera focuses on local player's base (or map center for spectator modes)
+    if (baseCoords[this._localPlayerIndex]) {
+      const bc = baseCoords[this._localPlayerIndex];
+      this.camera.focusOn(new THREE.Vector3(bc.q * 1.5, 2, bc.r * 1.5));
+    } else {
+      const centerQ = Math.floor(MAP_SIZE / 2);
+      this.camera.focusOn(new THREE.Vector3(centerQ * 1.5, 2, midR * 1.5));
+    }
 
     // Display initial stockpiles for all players
     for (let i = 0; i < this.playerCount; i++) {
@@ -3012,12 +3041,12 @@ class Cubitopia {
       this._popInfoTimer = 0;
       if (this.populationSystem) {
         this._popInfoCache = {
-          current: this.populationSystem.getCombatUnitCount(0),
-          cap: this.populationSystem.getPopulationCap(0),
+          current: this.populationSystem.getCombatUnitCount(this._lp),
+          cap: this.populationSystem.getPopulationCap(this._lp),
         };
       }
     }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0], this._popInfoCache);
+    this.hud.updateResources(this.players[this._lp], this.woodStockpile[this._lp], this.foodStockpile[this._lp], this.stoneStockpile[this._lp], this._popInfoCache);
 
     // Army strength comparison bar (throttled to 2Hz internally)
     if (this.players.length >= 2) {
@@ -3143,10 +3172,7 @@ class Cubitopia {
 
         // Determine if the LOCAL player won.
         // In multiplayer, the local player may be owner 0 (host) or 1 (guest).
-        let localOwner = 0;
-        if (this.multiplayer.commandQueue.isMultiplayer && this.multiplayer.network.isConnected) {
-          localOwner = this.multiplayer.network.isHost ? 0 : 1;
-        }
+        const localOwner = this._localPlayerIndex;
         const isVictory = winnerId === localOwner && this.gameMode !== 'aivai';
 
         let winner: string;
@@ -3937,7 +3963,7 @@ class Cubitopia {
     }
     this.allUnits = this.allUnits.filter(u => u !== unit);
     this.unitRenderer.removeUnit(unit.id);
-    this.selectionManager.setPlayerUnits(this.allUnits, 0);
+    this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
   }
 
   // Debug helpers
