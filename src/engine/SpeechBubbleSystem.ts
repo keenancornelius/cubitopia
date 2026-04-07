@@ -50,7 +50,7 @@ export class SpeechBubbleSystem {
   private activeBubbles: ActiveBubble[] = [];
   private perUnitCooldowns: Map<string, number> = new Map();  // unitId → timestamp
   private lastGlobalBark = 0;
-  private ttsEnabled = true;
+  private ttsEnabled = false;  // Disabled — browser TTS cancel+speak causes audio static pops
   private speechVolume = 0.3;
 
   constructor(
