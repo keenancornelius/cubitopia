@@ -317,6 +317,7 @@ export class MatchmakingService {
     const isHost = this._uid < opponent.uid;
     this.log(`tryPairWith ${opponent.displayName}: I am ${isHost ? 'HOST' : 'GUEST'} (my=${this._uid.slice(0,8)} vs ${opponent.uid.slice(0,8)})`, isHost ? '#2ecc71' : '#3498db');
 
+    try {
     if (isHost) {
       // ── HOST: create the match and notify ──
       this.setState('found');
@@ -332,12 +333,9 @@ export class MatchmakingService {
       });
       this.log(`HOST: Match created: ${matchId.slice(0,8)}`, '#2ecc71');
 
-      // Remove both players from queue
-      await Promise.all([
-        leaveQueue(this._uid),
-        leaveQueue(opponent.uid),
-      ]);
-      this.log('HOST: Both removed from queue');
+      // Remove ourselves from queue (opponent removes themselves when they find the match)
+      await leaveQueue(this._uid).catch(() => {});
+      this.log('HOST: Removed self from queue');
 
       this._lastMatchResult = {
         matchId,
@@ -366,6 +364,8 @@ export class MatchmakingService {
         const match = await findMatchAsGuest(this._uid);
         if (match) {
           this.log(`GUEST: Found match! id=${match.matchId.slice(0,8)} host=${match.player1.slice(0,8)}`, '#2ecc71');
+          // Remove ourselves from queue
+          await leaveQueue(this._uid).catch(() => {});
           this.setState('found');
           this._lastMatchResult = {
             matchId: match.matchId,
@@ -383,6 +383,10 @@ export class MatchmakingService {
           if (pollCount % 5 === 0) this.log(`GUEST: Poll #${pollCount} — no match yet`);
         }
       }, 1000); // poll every 1s
+    }
+    } catch (err) {
+      this.log(`ERROR in tryPairWith: ${err}`, '#e74c3c');
+      this.events.onError?.(`Pairing failed: ${err}`);
     }
   }
 
