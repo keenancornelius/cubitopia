@@ -211,6 +211,13 @@ export class MatchmakingService {
     this.events.onStateChange?.(s);
   }
 
+  /** Debug logger — writes to on-screen debug panel if available */
+  private log(msg: string, color?: string): void {
+    const dbg = (window as any).__mmDebug;
+    if (dbg) dbg(msg, color);
+    else console.log(`[MM] ${msg}`);
+  }
+
   // ============================================
   // Start searching for a match
   // ============================================
@@ -222,6 +229,7 @@ export class MatchmakingService {
     this._elo = elo;
     this.searchStartTime = Date.now();
     this.setState('searching');
+    this.log(`Joined queue as ${displayName} (uid=${uid.slice(0,8)}, elo=${elo})`);
 
     // Add ourselves to the matchmaking queue
     const entry: QueueEntry = {
@@ -231,6 +239,7 @@ export class MatchmakingService {
       timestamp: Date.now(),
     };
     await joinQueue(entry);
+    this.log('Queue entry written to Firebase');
 
     // Check for existing players in the queue
     this.checkForOpponent();
@@ -239,6 +248,7 @@ export class MatchmakingService {
     this.queueUnsubs = watchQueue(
       (newEntry: QueueEntry) => {
         if (newEntry.uid !== uid) {
+          this.log(`Watcher saw: ${newEntry.displayName} (uid=${newEntry.uid.slice(0,8)})`);
           this.tryPairWith(newEntry);
         }
       },
@@ -251,6 +261,7 @@ export class MatchmakingService {
     // Start ghost timer — if no opponent in GHOST_TIMEOUT, spawn ghost
     this.ghostTimer = setTimeout(() => {
       if (this.state === 'searching') {
+        this.log('Ghost timeout — creating AI match', '#e67e22');
         this.createGhostMatch();
       }
     }, GHOST_TIMEOUT);
@@ -272,9 +283,12 @@ export class MatchmakingService {
   // ============================================
   private async checkForOpponent(): Promise<void> {
     const entries = await getQueueEntries();
+    this.log(`Queue has ${entries.length} entries`);
     const candidates = entries
       .filter(e => e.uid !== this._uid)
       .sort((a, b) => Math.abs(a.elo - this._elo) - Math.abs(b.elo - this._elo));
+
+    this.log(`Found ${candidates.length} candidate(s): ${candidates.map(c => c.displayName).join(', ') || 'none'}`);
 
     for (const candidate of candidates) {
       if (Math.abs(candidate.elo - this._elo) <= MAX_ELO_DIFF) {
@@ -290,17 +304,25 @@ export class MatchmakingService {
   // Try to pair with a specific opponent
   // ============================================
   private async tryPairWith(opponent: QueueEntry): Promise<void> {
-    if (this.state !== 'searching') return;
-    if (Math.abs(opponent.elo - this._elo) > MAX_ELO_DIFF) return;
+    if (this.state !== 'searching') {
+      this.log(`tryPairWith skipped — state=${this.state}`);
+      return;
+    }
+    if (Math.abs(opponent.elo - this._elo) > MAX_ELO_DIFF) {
+      this.log(`tryPairWith skipped — ELO too far (${opponent.elo} vs ${this._elo})`);
+      return;
+    }
 
     // Deterministic host selection: lower UID is host
     const isHost = this._uid < opponent.uid;
+    this.log(`tryPairWith ${opponent.displayName}: I am ${isHost ? 'HOST' : 'GUEST'} (my=${this._uid.slice(0,8)} vs ${opponent.uid.slice(0,8)})`, isHost ? '#2ecc71' : '#3498db');
 
     if (isHost) {
       // ── HOST: create the match and notify ──
       this.setState('found');
       const mapSeed = Math.floor(Math.random() * 999999);
 
+      this.log('HOST: Creating match in Firebase...');
       const matchId = await createMatch({
         player1: this._uid,
         player2: opponent.uid,
@@ -308,12 +330,14 @@ export class MatchmakingService {
         mapType: 'standard',
         status: 'signaling',
       });
+      this.log(`HOST: Match created: ${matchId.slice(0,8)}`, '#2ecc71');
 
       // Remove both players from queue
       await Promise.all([
         leaveQueue(this._uid),
         leaveQueue(opponent.uid),
       ]);
+      this.log('HOST: Both removed from queue');
 
       this._lastMatchResult = {
         matchId,
@@ -330,11 +354,18 @@ export class MatchmakingService {
       this.events.onMatchFound?.(this._lastMatchResult);
     } else {
       // ── GUEST: poll for the match the host will create ──
-      if (this._guestPollTimer) return; // already polling
+      if (this._guestPollTimer) {
+        this.log('GUEST: Already polling, skip');
+        return;
+      }
+      this.log('GUEST: Starting poll for host-created match...');
+      let pollCount = 0;
       this._guestPollTimer = setInterval(async () => {
         if (this.state !== 'searching') return;
+        pollCount++;
         const match = await findMatchAsGuest(this._uid);
         if (match) {
+          this.log(`GUEST: Found match! id=${match.matchId.slice(0,8)} host=${match.player1.slice(0,8)}`, '#2ecc71');
           this.setState('found');
           this._lastMatchResult = {
             matchId: match.matchId,
@@ -348,6 +379,8 @@ export class MatchmakingService {
           };
           this.cleanupSearch();
           this.events.onMatchFound?.(this._lastMatchResult);
+        } else {
+          if (pollCount % 5 === 0) this.log(`GUEST: Poll #${pollCount} — no match yet`);
         }
       }, 1000); // poll every 1s
     }

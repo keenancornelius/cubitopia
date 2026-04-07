@@ -373,9 +373,32 @@ export class MultiplayerUI {
 
     // ELO range info
     const eloInfo = document.createElement('div');
-    eloInfo.style.cssText = `font-size:11px; color:#555; font-family:${FONT}; margin-bottom:32px;`;
-    eloInfo.textContent = `Your ELO: ${this.mp.profile?.elo ?? 1000} | Matching range: ±300`;
+    eloInfo.style.cssText = `font-size:11px; color:#555; font-family:${FONT}; margin-bottom:8px;`;
+    eloInfo.textContent = `Your ELO: ${this.mp.profile?.elo ?? 1000} | UID: ${this.mp.profile?.uid?.slice(0, 8) ?? '?'}`;
     ov.appendChild(eloInfo);
+
+    // Debug log panel (visible on screen)
+    const debugLog = document.createElement('div');
+    debugLog.style.cssText = `
+      font-size:10px; color:#666; font-family:monospace; margin-bottom:16px;
+      max-height:120px; overflow-y:auto; text-align:left; padding:8px;
+      background:rgba(0,0,0,0.3); border-radius:4px; width:80%; max-width:400px;
+    `;
+    debugLog.innerHTML = '<div style="color:#555;margin-bottom:4px;">── Debug Log ──</div>';
+    ov.appendChild(debugLog);
+
+    const addDebug = (msg: string, color = '#888') => {
+      const line = document.createElement('div');
+      line.style.color = color;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      debugLog.appendChild(line);
+      debugLog.scrollTop = debugLog.scrollHeight;
+      console.log(`[MM] ${msg}`);
+    };
+
+    // Expose debug logger globally so MatchmakingService can use it
+    (window as any).__mmDebug = addDebug;
+    addDebug('Starting matchmaking...');
 
     // Cancel button
     const cancelBtn = makeOutlineButton('CANCEL', RED);
@@ -390,10 +413,12 @@ export class MultiplayerUI {
     this.mp.setEvents({
       onMatchFound: (result: MatchFoundResult) => {
         clearInterval(dotInterval);
+        addDebug(`Match found! host=${result.isHost} ghost=${result.isGhost} id=${result.matchId.slice(0,8)}`, GREEN);
         this.showOpponentFound(result);
       },
       onError: (msg: string) => {
         clearInterval(dotInterval);
+        addDebug(`ERROR: ${msg}`, RED);
         title.textContent = 'ERROR';
         title.style.color = RED;
         timerEl.textContent = msg;
@@ -402,6 +427,7 @@ export class MultiplayerUI {
 
     this.mp.findMatch().catch((err) => {
       clearInterval(dotInterval);
+      addDebug(`findMatch error: ${err}`, RED);
       timerEl.textContent = `Error: ${err}`;
     });
   }

@@ -161,10 +161,19 @@ export class MultiplayerController {
   // ============================================
   // Connect to peer (WebRTC)
   // ============================================
+  private log(msg: string, color?: string): void {
+    const dbg = (window as any).__mmDebug;
+    if (dbg) dbg(msg, color);
+    else console.log(`[MP] ${msg}`);
+  }
+
   private async connectToPeer(result: MatchFoundResult): Promise<void> {
+    this.log(`connectToPeer: ${result.isHost ? 'HOST' : 'GUEST'} matchId=${result.matchId.slice(0,8)} opponent=${result.opponentUid.slice(0,8)}`);
+
     // Set up network events
     this.network.setEvents({
       onStateChange: (cs: ConnectionState) => {
+        this.log(`WebRTC state: ${cs}`, cs === 'connected' ? '#2ecc71' : '#f39c12');
         if (cs === 'connected') {
           this.commandQueue.initMultiplayer(this.network, false);
           this.setState('playing');
@@ -179,6 +188,7 @@ export class MultiplayerController {
         // Other commands are routed through CommandQueue
       },
       onDisconnect: () => {
+        this.log('WebRTC: opponent disconnected', '#e74c3c');
         this._events.onOpponentDisconnect?.();
       },
       onPingUpdate: (ms: number) => {
@@ -188,6 +198,7 @@ export class MultiplayerController {
         this._events.onDesync?.(tick);
       },
       onError: (err: string) => {
+        this.log(`WebRTC error: ${err}`, '#e74c3c');
         this.setState('error');
         this._events.onError?.(err);
       },
@@ -195,19 +206,24 @@ export class MultiplayerController {
 
     try {
       if (result.isHost) {
+        this.log('HOST: Creating PeerJS peer, waiting for guest...');
         await this.network.connectAsHost(
           result.matchId,
           this._profile!.uid,
           result.opponentUid,
         );
+        this.log('HOST: Peer connected!', '#2ecc71');
       } else {
+        this.log('GUEST: Creating PeerJS peer, looking for host signal...');
         await this.network.connectAsGuest(
           result.matchId,
           this._profile!.uid,
           result.opponentUid,
         );
+        this.log('GUEST: Connected to host!', '#2ecc71');
       }
     } catch (err) {
+      this.log(`Connection failed: ${err}`, '#e74c3c');
       this.setState('error');
       this._events.onError?.(`Connection failed: ${err}`);
     }

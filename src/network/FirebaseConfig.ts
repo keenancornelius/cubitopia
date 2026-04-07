@@ -243,9 +243,17 @@ export async function findMatchAsGuest(uid: string): Promise<MatchRecord | null>
   const snap = await get(ref(getDb(), 'matches'));
   if (!snap.exists()) return null;
   let found: MatchRecord | null = null;
+  const now = Date.now();
+  const MAX_AGE = 2 * 60 * 1000; // Ignore matches older than 2 minutes
   snap.forEach((child) => {
     const match = child.val() as MatchRecord;
-    if (match.player2 === uid && (match.status === 'signaling' || match.status === 'waiting') && !match.isGhost) {
+    const age = now - (match.createdAt as number);
+    if (
+      match.player2 === uid &&
+      (match.status === 'signaling' || match.status === 'waiting') &&
+      !match.isGhost &&
+      age < MAX_AGE // Filter stale matches from old test sessions
+    ) {
       // Pick the most recent one
       if (!found || (match.createdAt as number) > (found.createdAt as number)) {
         found = match;
