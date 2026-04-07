@@ -543,6 +543,54 @@ export class InputManager {
         this.game.togglePerfOverlay();
       }
 
+      // F9 — Material & scene diagnostic dump (press when fog appears)
+      if (e.key === 'F9') {
+        e.preventDefault();
+        const scene = this.game.renderer.scene;
+        let meshCount = 0, spriteCount = 0, pointsCount = 0, groupCount = 0, otherCount = 0;
+        const suspiciousMats: string[] = [];
+        const matSeen = new Set<number>();
+        scene.traverse((obj: any) => {
+          if (obj.isGroup) groupCount++;
+          else if (obj.isSprite) spriteCount++;
+          else if (obj.isPoints) pointsCount++;
+          else if (obj.isMesh) {
+            meshCount++;
+            const m = obj.material;
+            if (m && !matSeen.has(m.id)) {
+              matSeen.add(m.id);
+              const c = m.color;
+              const em = m.emissive;
+              const hasEmissive = em && (em.r > 0.01 || em.g > 0.01 || em.b > 0.01);
+              const lowOpacity = m.opacity !== undefined && m.opacity < 0.95 && m.transparent;
+              if (hasEmissive || lowOpacity) {
+                suspiciousMats.push(
+                  `mat#${m.id} type=${m.type} color=${c?.getHexString()} ` +
+                  `emissive=${em?.getHexString()} emInt=${m.emissiveIntensity?.toFixed(2)} ` +
+                  `opacity=${m.opacity?.toFixed(2)} transparent=${m.transparent} ` +
+                  `name="${obj.name}" parent="${obj.parent?.name || '?'}"`
+                );
+              }
+            }
+          } else otherCount++;
+        });
+        console.log(`%c[F9 SCENE DUMP]`, 'color:#ff0;font-weight:bold',
+          `\nTotal children: ${scene.children.length}`,
+          `\nMeshes: ${meshCount}, Sprites: ${spriteCount}, Points: ${pointsCount}, Groups: ${groupCount}, Other: ${otherCount}`,
+          `\nUnique materials: ${matSeen.size}`,
+          `\nSuspicious materials (emissive>0 or low opacity):`,
+          suspiciousMats.length ? '\n  ' + suspiciousMats.join('\n  ') : ' NONE'
+        );
+        // Also check VoxelBuilder terrain material
+        const vb = (this.game as any).voxelBuilder;
+        if (vb) {
+          const om = vb.opaqueMat;
+          console.log(`%c[F9 TERRAIN MAT]`, 'color:#0ff;font-weight:bold',
+            `opaqueMat: color=${om?.color?.getHexString()} emissive=${om?.emissive?.getHexString()} emInt=${om?.emissiveIntensity?.toFixed(2)} opacity=${om?.opacity?.toFixed(2)} transparent=${om?.transparent}`
+          );
+        }
+      }
+
       // Escape cancels attack-move mode
       if (e.key === 'Escape' && this.game.interaction.state.kind === 'attack_move') {
         this.game.interaction.clear();

@@ -2348,6 +2348,39 @@ class Cubitopia {
     this._mpTickAccumulator = 0;
     const isArena = this.mapType === MapType.ARENA;
 
+    // ── Defensive cleanup: remove any lingering overlay canvases ──
+    // Title scene canvas can persist if dispose() fails (e.g. WebGL context lost)
+    document.getElementById('title-scene-canvas')?.remove();
+
+    // Remove orphaned ocean plane from previous Archipelago game
+    const oldOcean = this.renderer.scene.getObjectByName('ocean-plane');
+    if (oldOcean) {
+      this.renderer.scene.remove(oldOcean);
+      if (oldOcean instanceof THREE.Mesh) {
+        oldOcean.geometry.dispose();
+        (oldOcean.material as THREE.Material).dispose();
+      }
+    }
+
+    // Sweep any orphaned sprites/VFX from previous game (opacity ~ 0 or very large)
+    const orphans: THREE.Object3D[] = [];
+    this.renderer.scene.traverse((obj) => {
+      if (obj instanceof THREE.Sprite && obj.material instanceof THREE.SpriteMaterial) {
+        // Remove sprites with near-zero opacity (stale VFX)
+        if (obj.material.opacity < 0.01 && !obj.userData._permanent) {
+          orphans.push(obj);
+        }
+      }
+    });
+    for (const orphan of orphans) {
+      this.renderer.scene.remove(orphan);
+      if ((orphan as THREE.Sprite).material) {
+        const mat = (orphan as THREE.Sprite).material as THREE.SpriteMaterial;
+        mat.map?.dispose();
+        mat.dispose();
+      }
+    }
+
     // Determine player count from game mode
     this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
 
@@ -2404,6 +2437,26 @@ class Cubitopia {
     this.currentMap = map;
     this.bases = bases;
     this._deadUnitKills = Array(this.playerCount).fill(0);
+
+    // Debug: log scene children to diagnose visual artifacts
+    {
+      const counts: Record<string, number> = {};
+      let totalChildren = 0;
+      this.renderer.scene.traverse((obj) => {
+        totalChildren++;
+        const type = obj.constructor.name;
+        counts[type] = (counts[type] || 0) + 1;
+      });
+      console.log(`[startNewGame] Scene has ${totalChildren} objects:`, counts);
+      // Log any named objects and large meshes
+      this.renderer.scene.traverse((obj) => {
+        if (obj.name) console.log(`  named: "${obj.name}" (${obj.constructor.name})`);
+        if (obj instanceof THREE.Sprite) {
+          const s = obj.scale;
+          if (s.x > 5 || s.y > 5) console.warn(`  LARGE SPRITE: scale=${s.x},${s.y} pos=${obj.position.x},${obj.position.y},${obj.position.z}`);
+        }
+      });
+    }
 
     // Reset atmosphere to defaults before applying per-map overrides
     this.renderer.scene.background = this.renderer.createSkyGradient();
@@ -4061,6 +4114,72 @@ class Cubitopia {
     animate();
     this.menuController.showMainMenu();
     console.log('CUBITOPIA v0.1 — Voxel Strategy');
+
+    // === Global debug utilities — callable from browser console ===
+    const game = this;
+    (window as any)._scene = this.renderer.scene;
+    (window as any)._renderer = this.renderer.renderer;
+    (window as any)._game = this;
+    (window as any)._cdb = {
+      /** Dump scene stats and suspicious materials */
+      dump: () => {
+        const scene = game.renderer.scene;
+        let meshes = 0, sprites = 0, additive = 0, orphanedVfx = 0;
+        const matSeen = new Set<number>();
+        const suspect: string[] = [];
+        scene.traverse((obj: any) => {
+          if (obj.isMesh) {
+            meshes++;
+            const m = obj.material;
+            if (m?.blending === 2) additive++; // THREE.AdditiveBlending = 2
+            // Check for orphaned VFX (meshes directly on scene, not in a named group)
+            if (obj.parent === scene && !obj.name?.startsWith('instanced') && !obj.name?.startsWith('voxel')) {
+              orphanedVfx++;
+            }
+            if (m && !matSeen.has(m.id)) {
+              matSeen.add(m.id);
+              const em = m.emissive;
+              if (em && (em.r > 0.3 || em.g > 0.3 || em.b > 0.3)) {
+                suspect.push(`mat#${m.id} em=${em.getHexString()} emI=${m.emissiveIntensity?.toFixed(2)} name="${obj.name}"`);
+              }
+            }
+          }
+          if (obj.isSprite) sprites++;
+        });
+        const vb = (game as any).voxelBuilder;
+        const om = vb?.opaqueMat;
+        console.log('%c[DEBUG DUMP]', 'color:#0f0;font-weight:bold',
+          `meshes=${meshes} sprites=${sprites} additive=${additive} orphanedVFX=${orphanedVfx}`,
+          `\nterrain: em=${om?.emissive?.getHexString()} emI=${om?.emissiveIntensity}`,
+          `\nhigh-emissive:`, suspect.length ? suspect : 'none',
+          `\ndrawCalls=${game.renderer.renderer.info.render.calls} tris=${game.renderer.renderer.info.render.triangles}`
+        );
+      },
+      /** Toggle shadows on/off to test if they cause the fog */
+      shadows: () => {
+        const r = game.renderer.renderer;
+        r.shadowMap.enabled = !r.shadowMap.enabled;
+        console.log('Shadows:', r.shadowMap.enabled);
+      },
+      /** Set scene background to black (test if sky gradient bleeds through) */
+      blackBg: () => {
+        game.renderer.scene.background = new THREE.Color(0x000000);
+        console.log('Background set to black');
+      },
+      /** Force remove ALL orphaned meshes directly on scene (not in groups) */
+      purgeOrphans: () => {
+        const scene = game.renderer.scene;
+        const toRemove: THREE.Object3D[] = [];
+        for (const child of scene.children) {
+          if ((child as any).isMesh && !child.name?.startsWith('instanced') && !child.name?.startsWith('voxel') && child.name !== 'main-flag') {
+            toRemove.push(child);
+          }
+        }
+        toRemove.forEach(c => { scene.remove(c); });
+        console.log(`Purged ${toRemove.length} orphaned meshes`);
+      },
+    };
+    console.log('Debug: _cdb.dump() | _cdb.shadows() | _cdb.blackBg() | _cdb.purgeOrphans()');
   }
 
   /** Delegate music update to ProceduralMusic (init + intensity + mood switching) */
@@ -4078,8 +4197,14 @@ class Cubitopia {
   /** Stop and fully remove the title scene (canvas + all resources). */
   private _stopTitleScene(): void {
     if (!this.titleScene) return;
-    this.titleScene.dispose();
+    try {
+      this.titleScene.dispose();
+    } catch (e) {
+      console.warn('[_stopTitleScene] dispose error:', e);
+    }
     this.titleScene = null;
+    // Safety: ensure no lingering title canvas
+    document.getElementById('title-scene-canvas')?.remove();
   }
 
   // Squad indicators moved to SquadIndicatorSystem; debug overlay moved to DebugOverlayRenderer

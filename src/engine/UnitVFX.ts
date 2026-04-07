@@ -16,6 +16,9 @@ export class UnitVFX {
   private deferredEffects: Array<{ executeAt: number; callback: () => void }> = [];
   private swingTrails: Array<{ mesh: THREE.Mesh; startTime: number; duration: number }> = [];
 
+  // Track active flash timers per unit so we can cancel + restore on removal
+  private activeFlashTimers = new Map<string, { timers: number[]; savedMats: Map<THREE.Mesh, THREE.Material> }>();
+
   constructor(
     private readonly scene: THREE.Scene,
     deps: { getUnitMeshes: () => Map<string, UnitMeshGroup> },
@@ -823,21 +826,28 @@ export class UnitVFX {
   /**
    * Flash a unit red briefly (damage indicator)
    */
+  // Shared flash material for hit flinch — avoids mutating cached shared materials
+  private static _hitFlashMat = new THREE.MeshLambertMaterial({ color: 0xff2222, emissive: 0xff2222, emissiveIntensity: 0.6 });
+
   flashUnit(unitId: string, duration: number = 0.15): void {
     const entry = this.unitMeshes.get(unitId);
     if (!entry) return;
 
-    const originalColors = new Map<THREE.Mesh, THREE.Color>();
+    // Cancel any in-progress flash for this unit first (restores materials immediately)
+    this._cancelFlash(unitId);
 
-    // Store original colors and apply red tint via emissive (preserves lighting response)
+    // Swap materials to shared flash material (safe — doesn't mutate cached materials)
+    const savedMats = new Map<THREE.Mesh, THREE.Material>();
     entry.group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-        originalColors.set(child, child.material.color.clone());
-        // Lerp toward red instead of fully replacing — avoids gray-out from ACES tonemapping
-        child.material.emissive.set(0xff2222);
-        child.material.emissiveIntensity = 0.6;
+        savedMats.set(child, child.material);
+        child.material = UnitVFX._hitFlashMat;
       }
     });
+
+    // Track this flash so cleanupUnit can cancel + restore if unit is removed mid-flash
+    const flashEntry = { timers: [] as number[], savedMats };
+    this.activeFlashTimers.set(unitId, flashEntry);
 
     // Body flinch: snap backward + sideways jolt, then spring back
     const origRx = entry.group.rotation.x;
@@ -859,22 +869,78 @@ export class UnitVFX {
     const restoreTime = duration * 1000;
     const springTime = restoreTime * 2.5; // body springs back slower than flash
 
-    setTimeout(() => {
+    const t1 = window.setTimeout(() => {
       entry.group.traverse((child) => {
-        if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial && originalColors.has(child)) {
-          child.material.emissive.set(0x000000);
-          child.material.emissiveIntensity = 0;
+        if (child instanceof THREE.Mesh && savedMats.has(child)) {
+          child.material = savedMats.get(child)!;
         }
       });
+      // Flash materials restored — clear tracking
+      this.activeFlashTimers.delete(unitId);
     }, restoreTime);
+    flashEntry.timers.push(t1);
 
     // Spring body back to original rotation
-    setTimeout(() => {
+    const t2 = window.setTimeout(() => {
       entry.group.rotation.x = origRx;
       entry.group.rotation.z = origRz;
       if (armLeft) armLeft.rotation.x = armLOrig;
       if (armRight) armRight.rotation.x = armROrig;
     }, springTime);
+    flashEntry.timers.push(t2);
+  }
+
+  /** Cancel an active flash for a unit — restores original materials immediately */
+  private _cancelFlash(unitId: string): void {
+    const flash = this.activeFlashTimers.get(unitId);
+    if (!flash) return;
+    // Clear pending timers
+    for (const t of flash.timers) window.clearTimeout(t);
+    // Restore saved materials immediately
+    const entry = this.unitMeshes.get(unitId);
+    if (entry) {
+      entry.group.traverse((child) => {
+        if (child instanceof THREE.Mesh && flash.savedMats.has(child)) {
+          child.material = flash.savedMats.get(child)!;
+        }
+      });
+    }
+    this.activeFlashTimers.delete(unitId);
+  }
+
+  /**
+   * Clean up all VFX state for a unit about to be removed.
+   * MUST be called before the unit entry is deleted from the mesh map.
+   * Restores any flash materials, disposes bleed-tint cloned materials, etc.
+   */
+  cleanupUnit(unitId: string): void {
+    // 1. Cancel active flash — restores shared cached materials
+    this._cancelFlash(unitId);
+
+    // 2. Restore any _origMat set by UnitAnimations hit/block flash
+    const entry = this.unitMeshes.get(unitId);
+    if (entry) {
+      entry.group.traverse((child) => {
+        if (child instanceof THREE.Mesh && (child as any)._origMat) {
+          child.material = (child as any)._origMat;
+          delete (child as any)._origMat;
+        }
+      });
+    }
+
+    // 3. Dispose bleed-tint cloned materials (these are per-unit clones, not from the cache)
+    if (this.bleedTintedUnits.has(unitId)) {
+      if (entry) {
+        entry.group.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
+            // If this unit had bleed tint, its materials were cloned — safe to dispose
+            child.material.dispose();
+          }
+        });
+      }
+      this.bleedTintedUnits.delete(unitId);
+      this.bleedOriginalColors.delete(unitId);
+    }
   }
 
   // === Persistent bleed tint tracking ===

@@ -6,6 +6,10 @@ import { easeIn, easeOut, cubicOut, smoothstep, easeInOut, cubicIn, lerp, cycleP
 type WorldPos = { x: number; y: number; z: number };
 type TrailType = 'slash' | 'stab' | 'smash';
 
+// ── Shared flash materials — avoids cloning per-mesh (preserves draw call batching) ──
+const _hitFlashMat = new THREE.MeshLambertMaterial({ color: 0xff2222 });
+const _blockFlashMat = new THREE.MeshLambertMaterial({ color: 0xffffcc });
+
 export class UnitAnimations {
   private readonly getUnitMeshesRef: () => Map<string, UnitMeshGroup>;
   private readonly spawnSwingTrailRef: (unitId: string, trailType: TrailType, time: number) => void;
@@ -2145,18 +2149,19 @@ export class UnitAnimations {
     }
 
     // --- Red damage flash on impact frame ---
-    // Tint meshes red at the impact point of the cycle, then restore
+    // Swap to shared flash material instead of mutating cached material colors.
+    // Cached materials are shared globally — mutating them leaks to all meshes.
     const shouldFlash = cycle < 0.1;
     entry.group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
         if (shouldFlash) {
-          if (!(child.material as any)._origColor) {
-            (child.material as any)._origColor = child.material.color.getHex();
+          if (!(child as any)._origMat) {
+            (child as any)._origMat = child.material;
           }
-          child.material.color.setHex(0xff2222);
-        } else if ((child.material as any)._origColor !== undefined) {
-          child.material.color.setHex((child.material as any)._origColor);
-          delete (child.material as any)._origColor;
+          child.material = _hitFlashMat;
+        } else if ((child as any)._origMat) {
+          child.material = (child as any)._origMat;
+          delete (child as any)._origMat;
         }
       }
     });
@@ -2240,25 +2245,18 @@ export class UnitAnimations {
     if (legRight) legRight.rotation.x = cycle < 0.42 ? -0.15 : -0.15 * (1 - (cycle - 0.42) / 0.58);
 
     // --- Metal flash on contact (0.12-0.22 = moment of deflect) ---
-    // IMPORTANT: Only flash if materials are already cloned (preview entry).
-    // Mutating shared cached materials would leak the flash to ALL units of this type.
+    // Swap to shared flash material instead of mutating cached material colors.
     const shouldFlash = cycle >= 0.12 && cycle < 0.22;
     entry.group.traverse((child) => {
       if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshLambertMaterial) {
-        // Safety: clone material on first flash if it hasn't been cloned yet
-        // (prevents leaking color changes to shared cached materials)
-        if (shouldFlash && !(child.material as any)._clonedForBlock) {
-          child.material = child.material.clone();
-          (child.material as any)._clonedForBlock = true;
-        }
         if (shouldFlash) {
-          if (!(child.material as any)._origColor) {
-            (child.material as any)._origColor = child.material.color.getHex();
+          if (!(child as any)._origMat) {
+            (child as any)._origMat = child.material;
           }
-          child.material.color.setHex(0xffffcc); // bright white-yellow flash
-        } else if ((child.material as any)._origColor !== undefined) {
-          child.material.color.setHex((child.material as any)._origColor);
-          delete (child.material as any)._origColor;
+          child.material = _blockFlashMat;
+        } else if ((child as any)._origMat) {
+          child.material = (child as any)._origMat;
+          delete (child as any)._origMat;
         }
       }
     });

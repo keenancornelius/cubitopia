@@ -35,6 +35,8 @@ type SoundName =
 
 export default class SoundManager {
   private ctx: AudioContext | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
+  private masterGain: GainNode | null = null;
   private config: SoundConfig = {
     masterVolume: 0.7,
     sfxVolume: 1.0,
@@ -45,14 +47,34 @@ export default class SoundManager {
   private minInterval = 0.05;
   private noiseBuffer: AudioBuffer | null = null;
   private distortionCurve: Float32Array | null = null;
+  // Global concurrent sound limit — prevents audio clipping when many units fight at once
+  private activeSounds = 0;
+  private readonly maxConcurrentSounds = 12;
+
+  /** Master output node — all sounds route through compressor → gain → destination
+   *  to prevent clipping/static when many units fight simultaneously */
+  private get out(): AudioNode {
+    return this.masterGain ?? this.ctx!.destination;
+  }
 
   constructor() {
     const initAudio = () => {
       if (!this.ctx) {
         this.ctx = new AudioContext();
+        // Master limiter chain: compressor → gain → destination
+        // Prevents clipping/static when many combat sounds fire simultaneously
+        this.compressor = this.ctx.createDynamicsCompressor();
+        this.compressor.threshold.setValueAtTime(-6, this.ctx.currentTime);   // Start compressing at -6dB
+        this.compressor.knee.setValueAtTime(6, this.ctx.currentTime);         // Soft knee
+        this.compressor.ratio.setValueAtTime(12, this.ctx.currentTime);       // Heavy limiting
+        this.compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);   // Fast attack to catch transients
+        this.compressor.release.setValueAtTime(0.1, this.ctx.currentTime);    // Quick release
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(0.85, this.ctx.currentTime);      // Slight headroom
+        this.compressor.connect(this.masterGain).connect(this.ctx.destination);
         this.noiseBuffer = this.createNoiseBuffer(2);
         this.distortionCurve = this.createDistortionCurve(400);
-        Logger.info('Sound', `AudioContext created, state: ${this.ctx.state}`);
+        Logger.info('Sound', `AudioContext created with master limiter, state: ${this.ctx.state}`);
       }
       // Browsers require explicit resume after user gesture — without this,
       // AudioContext stays "suspended" and all audio output is silenced
@@ -82,7 +104,12 @@ export default class SoundManager {
     const now = this.ctx.currentTime;
     const lastTime = this.lastPlayTime.get(name) || 0;
     if (now - lastTime < this.minInterval) return;
+    // Global concurrent sound cap — prevent audio clipping with large armies
+    if (this.activeSounds >= this.maxConcurrentSounds) return;
     this.lastPlayTime.set(name, now);
+    this.activeSounds++;
+    // Decrement after typical sound duration (sounds are short synth bursts)
+    setTimeout(() => { this.activeSounds = Math.max(0, this.activeSounds - 1); }, 300);
     const vol = (volume ?? 1) * this.config.sfxVolume * this.config.masterVolume;
     switch (name) {
       case 'hit_melee':    this.synthHitMelee(vol); break;
@@ -177,7 +204,7 @@ export default class SoundManager {
     filter.frequency.setValueAtTime(freq, ctx.currentTime);
     filter.Q.setValueAtTime(q, ctx.currentTime);
     const g = this.envGain(vol, attack, decay);
-    src.connect(filter).connect(g).connect(dest ?? ctx.destination);
+    src.connect(filter).connect(g).connect(dest ?? this.out);
     src.start();
     src.stop(ctx.currentTime + attack + decay + 0.05);
   }
@@ -205,10 +232,10 @@ export default class SoundManager {
       f.type = opts.filterType;
       f.frequency.setValueAtTime(opts.filterFreq ?? 1000, t);
       f.Q.setValueAtTime(opts.filterQ ?? 1, t);
-      g.connect(f).connect(opts?.dest ?? ctx.destination);
+      g.connect(f).connect(opts?.dest ?? this.out);
       chain = g;
     } else {
-      g.connect(opts?.dest ?? ctx.destination);
+      g.connect(opts?.dest ?? this.out);
     }
     osc.connect(chain);
     osc.start();
@@ -257,7 +284,7 @@ export default class SoundManager {
     modGain.gain.setValueAtTime(0, t);
     osc1.connect(modGain);
     osc2.connect(modGain.gain);
-    modGain.connect(g1).connect(ctx.destination);
+    modGain.connect(g1).connect(this.out);
     osc1.start(); osc2.start();
     osc1.stop(t + 0.15); osc2.stop(t + 0.15);
   }
@@ -277,7 +304,7 @@ export default class SoundManager {
     lpf.frequency.exponentialRampToValueAtTime(600, t + 0.2);
     lpf.Q.setValueAtTime(2, t);
     const whooshGain = this.envGain(vol * 0.22, 0.005, 0.2);
-    src.connect(lpf).connect(whooshGain).connect(ctx.destination);
+    src.connect(lpf).connect(whooshGain).connect(this.out);
     src.start(); src.stop(t + 0.25);
     // Impact body: low sine thud (delayed slightly)
     const impOsc = ctx.createOscillator();
@@ -288,7 +315,7 @@ export default class SoundManager {
     impG.gain.setValueAtTime(0.001, t + 0.08);
     impG.gain.linearRampToValueAtTime(vol * 0.2, t + 0.083);
     impG.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    impOsc.connect(impG).connect(ctx.destination);
+    impOsc.connect(impG).connect(this.out);
     impOsc.start(); impOsc.stop(t + 0.25);
     // Small noise impact at arrival
     this.filteredNoise('bandpass', 1200, 2, vol * 0.12, 0.001, 0.04);
@@ -310,7 +337,7 @@ export default class SoundManager {
     subG.gain.setValueAtTime(0.001, t + 0.2);
     subG.gain.linearRampToValueAtTime(vol * 0.55, t + 0.205);
     subG.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
-    subOsc.connect(subG).connect(ctx.destination);
+    subOsc.connect(subG).connect(this.out);
     subOsc.start(); subOsc.stop(t + 0.85);
     // Phase 2b: Mid punch
     const midOsc = ctx.createOscillator();
@@ -322,7 +349,7 @@ export default class SoundManager {
     midG.gain.setValueAtTime(0.001, t + 0.2);
     midG.gain.linearRampToValueAtTime(vol * 0.3, t + 0.205);
     midG.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-    midOsc.connect(midG).connect(ctx.destination);
+    midOsc.connect(midG).connect(this.out);
     midOsc.start(); midOsc.stop(t + 0.6);
     // Phase 2c: Noise crumble
     const crSrc = ctx.createBufferSource();
@@ -336,7 +363,7 @@ export default class SoundManager {
     crG.gain.setValueAtTime(0.001, t + 0.2);
     crG.gain.linearRampToValueAtTime(vol * 0.3, t + 0.22);
     crG.gain.exponentialRampToValueAtTime(0.001, t + 0.65);
-    crSrc.connect(crF).connect(crG).connect(ctx.destination);
+    crSrc.connect(crF).connect(crG).connect(this.out);
     crSrc.start(); crSrc.stop(t + 0.7);
   }
 
@@ -369,7 +396,7 @@ export default class SoundManager {
     lpf.frequency.exponentialRampToValueAtTime(500, t + 0.15);
     lpf.Q.setValueAtTime(1.5, t);
     const whooshG = this.envGain(vol * 0.3, 0.003, 0.15);
-    src.connect(lpf).connect(whooshG).connect(ctx.destination);
+    src.connect(lpf).connect(whooshG).connect(this.out);
     src.start(); src.stop(t + 0.2);
     // Heavy metallic chop (layered: low resonance + mid clang)
     this.envTone(this.vary(200), 'triangle', vol * 0.35, 0.002, 0.2, {
@@ -431,7 +458,7 @@ export default class SoundManager {
     g.gain.setValueAtTime(0.001, t + delay);
     g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.02);
     g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.5);
-    osc.connect(g).connect(ctx.destination);
+    osc.connect(g).connect(this.out);
     osc.start(t + delay);
     osc.stop(t + delay + 0.55);
   }
@@ -450,7 +477,7 @@ export default class SoundManager {
     thudG.gain.setValueAtTime(0.001, t);
     thudG.gain.linearRampToValueAtTime(vol * 0.4, t + 0.005);
     thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    thud.connect(thudG).connect(ctx.destination);
+    thud.connect(thudG).connect(this.out);
     thud.start(); thud.stop(t + 0.25);
 
     // Layer 2: Armor/bone crack — short mid-freq noise snap
@@ -470,7 +497,7 @@ export default class SoundManager {
     groanG.gain.setValueAtTime(0.001, t);
     groanG.gain.linearRampToValueAtTime(vol * 0.15, t + 0.05);
     groanG.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
-    groan.connect(groanLpf).connect(groanG).connect(ctx.destination);
+    groan.connect(groanLpf).connect(groanG).connect(this.out);
     groan.start(); groan.stop(t + 0.5);
 
     // Layer 4: Metal clatter — brief high noise (weapon/shield dropping)
@@ -485,7 +512,7 @@ export default class SoundManager {
     clatterG.gain.setValueAtTime(0.001, t + 0.06);
     clatterG.gain.linearRampToValueAtTime(vol * 0.1, t + 0.065);
     clatterG.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    clatterSrc.connect(clatterF).connect(clatterG).connect(ctx.destination);
+    clatterSrc.connect(clatterF).connect(clatterG).connect(this.out);
     clatterSrc.start(); clatterSrc.stop(t + 0.2);
 
     // Layer 5: Fading exhale — soft noise tail
@@ -520,7 +547,7 @@ export default class SoundManager {
         g.gain.setValueAtTime(vol * 0.12, t + 0.35); // sustain
         g.gain.exponentialRampToValueAtTime(0.001, t + 0.7); // gentle release
 
-        osc.connect(formant).connect(g).connect(ctx.destination);
+        osc.connect(formant).connect(g).connect(this.out);
         osc.start(); osc.stop(t + 0.75);
       });
     });
@@ -538,7 +565,7 @@ export default class SoundManager {
       g.gain.linearRampToValueAtTime(vol * 0.06, t + 0.2);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
 
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + 0.65);
     });
 
@@ -553,7 +580,7 @@ export default class SoundManager {
     breathGain.gain.setValueAtTime(0.001, t);
     breathGain.gain.linearRampToValueAtTime(vol * 0.025, t + 0.1);
     breathGain.gain.exponentialRampToValueAtTime(0.001, t + 0.55);
-    breathSrc.connect(breathFilter).connect(breathGain).connect(ctx.destination);
+    breathSrc.connect(breathFilter).connect(breathGain).connect(this.out);
     breathSrc.start(); breathSrc.stop(t + 0.6);
 
     // Layer 4: Slow vibrato on the whole choir (natural voice wobble ~5Hz)
@@ -586,7 +613,7 @@ export default class SoundManager {
     sweepGain.gain.setValueAtTime(0.001, t);
     sweepGain.gain.linearRampToValueAtTime(vol * 0.08, t + 0.05);
     sweepGain.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    sweepSrc.connect(sweepFilter).connect(sweepGain).connect(ctx.destination);
+    sweepSrc.connect(sweepFilter).connect(sweepGain).connect(this.out);
     sweepSrc.start(); sweepSrc.stop(t + 0.35);
 
     // Quick bell-like chime (two harmonics)
@@ -598,7 +625,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t);
       g.gain.linearRampToValueAtTime(vol * 0.06, t + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + 0.3);
     }
   }
@@ -619,7 +646,7 @@ export default class SoundManager {
     swF.frequency.exponentialRampToValueAtTime(400, t + 0.25);
     swF.Q.setValueAtTime(5, t);
     const swG = this.envGain(vol * 0.25, 0.005, 0.25);
-    swSrc.connect(swF).connect(swG).connect(ctx.destination);
+    swSrc.connect(swF).connect(swG).connect(this.out);
     swSrc.start(); swSrc.stop(t + 0.35);
     // Arcane crackle: secondary pops (small noise bursts scattered)
     for (let i = 0; i < 3; i++) {
@@ -635,7 +662,7 @@ export default class SoundManager {
       popG.gain.setValueAtTime(0.001, t + popDelay);
       popG.gain.linearRampToValueAtTime(vol * 0.1, t + popDelay + 0.003);
       popG.gain.exponentialRampToValueAtTime(0.001, t + popDelay + 0.04);
-      popSrc.connect(popF).connect(popG).connect(ctx.destination);
+      popSrc.connect(popF).connect(popG).connect(this.out);
       popSrc.start(); popSrc.stop(t + popDelay + 0.06);
     }
   }
@@ -654,7 +681,7 @@ export default class SoundManager {
       osc.detune.setValueAtTime(detune, t);
       const g = this.envGain(vol * 0.15, 0.01, 0.45);
       osc.connect(ws);
-      ws.connect(g).connect(ctx.destination);
+      ws.connect(g).connect(this.out);
       osc.start(); osc.stop(t + 0.5);
     });
     // Fast tremolo for aggressive jitter
@@ -685,7 +712,7 @@ export default class SoundManager {
     osc1.connect(modGain);
     osc2.connect(modGain.gain);
     const outG = this.envGain(vol * 0.2, 0.002, 0.12);
-    modGain.connect(outG).connect(ctx.destination);
+    modGain.connect(outG).connect(this.out);
     osc1.start(); osc2.start();
     osc1.stop(t + 0.15); osc2.stop(t + 0.15);
     // Body impact: low thud (dagger landing)
@@ -716,7 +743,7 @@ export default class SoundManager {
     g2.gain.setValueAtTime(0.001, t + 0.04);
     g2.gain.linearRampToValueAtTime(vol * 0.15, t + 0.042);
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-    osc2.connect(g2).connect(ctx.destination);
+    osc2.connect(g2).connect(this.out);
     osc2.start(); osc2.stop(t + 0.12);
   }
 
@@ -749,7 +776,7 @@ export default class SoundManager {
     g1.gain.setValueAtTime(0.001, t);
     g1.gain.linearRampToValueAtTime(vol * 0.18, t + 0.005);
     g1.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    o1.connect(g1).connect(ctx.destination);
+    o1.connect(g1).connect(this.out);
     o1.start(); o1.stop(t + 0.1);
     // Note 2: bright resolve (E5, slightly delayed)
     const o2 = ctx.createOscillator();
@@ -760,7 +787,7 @@ export default class SoundManager {
     g2.gain.setValueAtTime(0.001, t + 0.06);
     g2.gain.linearRampToValueAtTime(vol * 0.2, t + 0.065);
     g2.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    o2.connect(g2).connect(ctx.destination);
+    o2.connect(g2).connect(this.out);
     o2.start(); o2.stop(t + 0.18);
     // Tiny metallic click layer (triangle, high)
     const click = ctx.createOscillator();
@@ -770,7 +797,7 @@ export default class SoundManager {
     cg.gain.setValueAtTime(0.001, t);
     cg.gain.linearRampToValueAtTime(vol * 0.06, t + 0.002);
     cg.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
-    click.connect(cg).connect(ctx.destination);
+    click.connect(cg).connect(this.out);
     click.start(); click.stop(t + 0.05);
   }
 
@@ -792,7 +819,7 @@ export default class SoundManager {
     g.gain.linearRampToValueAtTime(vol * 0.15, t + 0.008);
     g.gain.setValueAtTime(vol * 0.15, t + 0.06);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-    osc.connect(lpf).connect(g).connect(ctx.destination);
+    osc.connect(lpf).connect(g).connect(this.out);
     osc.start(); osc.stop(t + 0.22);
     // Second hit (minor second dissonance — Db below)
     const o2 = ctx.createOscillator();
@@ -807,7 +834,7 @@ export default class SoundManager {
     const lpf2 = ctx.createBiquadFilter();
     lpf2.type = 'lowpass';
     lpf2.frequency.setValueAtTime(600, t);
-    o2.connect(lpf2).connect(g2).connect(ctx.destination);
+    o2.connect(lpf2).connect(g2).connect(this.out);
     o2.start(); o2.stop(t + 0.2);
   }
 
@@ -823,7 +850,7 @@ export default class SoundManager {
     sg.gain.setValueAtTime(0.001, t);
     sg.gain.linearRampToValueAtTime(vol * 0.2, t + 0.003);
     sg.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-    strike.connect(sg).connect(ctx.destination);
+    strike.connect(sg).connect(this.out);
     strike.start(); strike.stop(t + 0.15);
     // Resonant body (triangle, lower)
     const body = ctx.createOscillator();
@@ -833,7 +860,7 @@ export default class SoundManager {
     bg.gain.setValueAtTime(0.001, t);
     bg.gain.linearRampToValueAtTime(vol * 0.12, t + 0.005);
     bg.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-    body.connect(bg).connect(ctx.destination);
+    body.connect(bg).connect(this.out);
     body.start(); body.stop(t + 0.22);
     // Tiny shimmer tail (high sine pair, detuned)
     [2640, 2680].forEach(freq => {
@@ -845,7 +872,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + 0.05);
       g.gain.linearRampToValueAtTime(vol * 0.04, t + 0.06);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-      o.connect(g).connect(ctx.destination);
+      o.connect(g).connect(this.out);
       o.start(); o.stop(t + 0.25);
     });
   }
@@ -863,7 +890,7 @@ export default class SoundManager {
     popG.gain.setValueAtTime(0.001, t);
     popG.gain.linearRampToValueAtTime(vol * 0.25, t + 0.008);
     popG.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    pop.connect(popG).connect(ctx.destination);
+    pop.connect(popG).connect(this.out);
     pop.start(); pop.stop(t + 0.1);
     // Layer 2: Brief airy whoosh (filtered noise burst)
     this.filteredNoise('bandpass', this.vary(2200), 1.2, vol * 0.08, 0.005, 0.07);
@@ -876,7 +903,7 @@ export default class SoundManager {
     pingG.gain.setValueAtTime(0.001, t + 0.03);
     pingG.gain.linearRampToValueAtTime(vol * 0.14, t + 0.035);
     pingG.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    ping.connect(pingG).connect(ctx.destination);
+    ping.connect(pingG).connect(this.out);
     ping.start(); ping.stop(t + 0.18);
     // Layer 4: Sub thud — ground impact feel
     const thud = ctx.createOscillator();
@@ -888,7 +915,7 @@ export default class SoundManager {
     thudG.gain.setValueAtTime(0.001, t + 0.01);
     thudG.gain.linearRampToValueAtTime(vol * 0.18, t + 0.02);
     thudG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-    thud.connect(thudG).connect(ctx.destination);
+    thud.connect(thudG).connect(this.out);
     thud.start(); thud.stop(t + 0.12);
   }
 
@@ -904,7 +931,7 @@ export default class SoundManager {
     const pingG = ctx.createGain();
     pingG.gain.setValueAtTime(vol * 0.3, t);
     pingG.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-    ping.connect(pingG).connect(ctx.destination);
+    ping.connect(pingG).connect(this.out);
     ping.start(); ping.stop(t + 0.15);
     // Layer 2: Metallic resonance — triangle wave overtone
     const ring = ctx.createOscillator();
@@ -914,7 +941,7 @@ export default class SoundManager {
     const ringG = ctx.createGain();
     ringG.gain.setValueAtTime(vol * 0.12, t);
     ringG.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-    ring.connect(ringG).connect(ctx.destination);
+    ring.connect(ringG).connect(this.out);
     ring.start(); ring.stop(t + 0.12);
     // Layer 3: Brief clatter (filtered noise — arrow clattering away)
     this.filteredNoise('bandpass', this.vary(4000), 4, vol * 0.15, 0.01, 0.06);
@@ -942,7 +969,7 @@ export default class SoundManager {
       g.gain.linearRampToValueAtTime(vol * 0.3, t + n.start + 0.02);
       g.gain.setValueAtTime(vol * 0.3, t + n.start + n.dur * 0.7);
       g.gain.exponentialRampToValueAtTime(0.001, t + n.start + n.dur);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + n.start + n.dur + 0.05);
       // Octave harmonic (softer, adds body)
       const h = ctx.createOscillator();
@@ -953,7 +980,7 @@ export default class SoundManager {
       hg.gain.setValueAtTime(0.001, t + n.start);
       hg.gain.linearRampToValueAtTime(vol * 0.1, t + n.start + 0.02);
       hg.gain.exponentialRampToValueAtTime(0.001, t + n.start + n.dur);
-      h.connect(hg).connect(ctx.destination);
+      h.connect(hg).connect(this.out);
       h.start(); h.stop(t + n.start + n.dur + 0.05);
     });
     // Subtle noise breath texture through the horn
@@ -978,7 +1005,7 @@ export default class SoundManager {
       g.gain.linearRampToValueAtTime(vol * 0.22, t + 0.008);
       g.gain.setValueAtTime(vol * 0.22, t + 0.06);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + 0.25);
 
       // Sawtooth overtone (adds brass edge, softer)
@@ -993,7 +1020,7 @@ export default class SoundManager {
       sg.gain.setValueAtTime(0.001, t);
       sg.gain.linearRampToValueAtTime(vol * 0.08, t + 0.008);
       sg.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-      saw.connect(lpf).connect(sg).connect(ctx.destination);
+      saw.connect(lpf).connect(sg).connect(this.out);
       saw.start(); saw.stop(t + 0.2);
     });
 
@@ -1009,7 +1036,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + delay);
       g.gain.linearRampToValueAtTime(vol * (0.15 + i * 0.03), t + delay + 0.01);
       g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.2);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + delay + 0.25);
     });
 
@@ -1030,7 +1057,7 @@ export default class SoundManager {
     const lfoG = ctx.createGain();
     lfoG.gain.setValueAtTime(vol * 0.04, t);
     lfo.connect(lfoG).connect(sparkG.gain);
-    sparkOsc.connect(sparkG).connect(ctx.destination);
+    sparkOsc.connect(sparkG).connect(this.out);
     sparkOsc.start(); lfo.start();
     sparkOsc.stop(t + sparkleStart + 0.35); lfo.stop(t + sparkleStart + 0.35);
 
@@ -1060,7 +1087,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + delay);
       g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.01);
       g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.3);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + delay + 0.35);
     });
     // Phase 3: Held resolution chord (C5 major, sustained)
@@ -1073,7 +1100,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + 0.65);
       g.gain.linearRampToValueAtTime(vol * 0.18, t + 0.68);
       g.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + 1.55);
     });
     // Sparkle shimmer on top
@@ -1097,7 +1124,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + delay);
       g.gain.linearRampToValueAtTime(vol * 0.2, t + delay + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.7);
-      osc.connect(g).connect(ctx.destination);
+      osc.connect(g).connect(this.out);
       osc.start(); osc.stop(t + delay + 0.75);
     });
     // Low rumble undertone
@@ -1146,7 +1173,7 @@ export default class SoundManager {
     g.gain.setValueAtTime(0.001, t + 0.2);
     g.gain.linearRampToValueAtTime(vol * 0.08, t + 0.5);
     g.gain.exponentialRampToValueAtTime(0.001, t + 1.2);
-    src.connect(lpf).connect(g).connect(ctx.destination);
+    src.connect(lpf).connect(g).connect(this.out);
     src.start(); src.stop(t + 1.3);
   }
 
@@ -1181,7 +1208,7 @@ export default class SoundManager {
     g.gain.setValueAtTime(0.001, t + 0.05);
     g.gain.linearRampToValueAtTime(vol * 0.12, t + 0.08);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
-    src.connect(lpf).connect(g).connect(ctx.destination);
+    src.connect(lpf).connect(g).connect(this.out);
     src.start(); src.stop(t + 0.55);
   }
 
@@ -1272,7 +1299,7 @@ export default class SoundManager {
       g.gain.setValueAtTime(0.001, t + delay);
       g.gain.linearRampToValueAtTime(vol * 0.1, t + delay + 0.002);
       g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.025);
-      src.connect(hpf).connect(g).connect(ctx.destination);
+      src.connect(hpf).connect(g).connect(this.out);
       src.start(t + delay); src.stop(t + delay + 0.03);
     }
     // Electric bass undertone
@@ -1298,7 +1325,7 @@ export default class SoundManager {
     g.gain.setValueAtTime(0.001, t);
     g.gain.linearRampToValueAtTime(vol * 0.2, t + 0.1);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
-    src.connect(bpf).connect(g).connect(ctx.destination);
+    src.connect(bpf).connect(g).connect(this.out);
     src.start(); src.stop(t + 0.65);
     // Fire crackle (staccato noise bursts)
     for (let i = 0; i < 4; i++) {
@@ -1330,7 +1357,7 @@ export default class SoundManager {
     chargeG.gain.setValueAtTime(0.001, t);
     chargeG.gain.linearRampToValueAtTime(vol * 0.15, t + 0.25);
     chargeG.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
-    chargeOsc.connect(chargeLpf).connect(chargeG).connect(ctx.destination);
+    chargeOsc.connect(chargeLpf).connect(chargeG).connect(this.out);
     chargeOsc.start(); chargeOsc.stop(t + 0.35);
 
     // Phase 2: Beam fire — massive bass + mid presence (300-800ms)
@@ -1345,7 +1372,7 @@ export default class SoundManager {
     beamG.gain.linearRampToValueAtTime(vol * 0.3, t + beamStart + 0.02);
     beamG.gain.setValueAtTime(vol * 0.3, t + beamStart + 0.3);
     beamG.gain.exponentialRampToValueAtTime(0.001, t + beamStart + 0.5);
-    beamOsc.connect(beamG).connect(ctx.destination);
+    beamOsc.connect(beamG).connect(this.out);
     beamOsc.start(); beamOsc.stop(t + beamStart + 0.55);
 
     // Mid presence (purple energy hum)
@@ -1365,7 +1392,7 @@ export default class SoundManager {
     bng.gain.setValueAtTime(0.001, t + beamStart);
     bng.gain.linearRampToValueAtTime(vol * 0.12, t + beamStart + 0.03);
     bng.gain.exponentialRampToValueAtTime(0.001, t + beamStart + 0.5);
-    beamNoise.connect(bpf).connect(bng).connect(ctx.destination);
+    beamNoise.connect(bpf).connect(bng).connect(this.out);
     beamNoise.start(); beamNoise.stop(t + beamStart + 0.55);
 
     // Phase 3: Electric sizzle tail
@@ -1414,7 +1441,7 @@ export default class SoundManager {
     this.ambientWindGain.gain.setValueAtTime(0.001, t);
     this.ambientWindGain.gain.linearRampToValueAtTime(masterVol * 0.15, t + 2);
 
-    windSrc.connect(windLpf).connect(this.ambientWindGain).connect(ctx.destination);
+    windSrc.connect(windLpf).connect(this.ambientWindGain).connect(this.out);
     windSrc.start();
     this.ambientWindNode = windSrc;
 
@@ -1474,7 +1501,7 @@ export default class SoundManager {
       lpf.Q.setValueAtTime(0.5, t);
       this.ambientCombatGain = ctx.createGain();
       this.ambientCombatGain.gain.setValueAtTime(0.001, t);
-      src.connect(lpf).connect(this.ambientCombatGain).connect(ctx.destination);
+      src.connect(lpf).connect(this.ambientCombatGain).connect(this.out);
       src.start();
       this.ambientCombatNode = src;
     }

@@ -212,12 +212,17 @@ export class UnitRenderer {
   removeUnit(unitId: string): void {
     const entry = this.unitMeshes.get(unitId);
     if (entry) {
+      // Clean up VFX state FIRST (cancels flash timers, restores shared materials,
+      // disposes bleed-tint clones) — must happen while entry is still in the map
+      this.vfx.cleanupUnit(unitId);
+
       this.scene.remove(entry.group);
       entry.group.traverse((child) => {
         if (child instanceof THREE.Mesh) {
           child.geometry.dispose();
           // Don't dispose materials — they may be shared via the global material cache.
           // Cache manages material lifecycle. Only dispose non-cached materials (sprites, etc.)
+          // (Bleed-tint cloned materials are already disposed by vfx.cleanupUnit above)
         }
         if (child instanceof THREE.Sprite) {
           child.material.map?.dispose();

@@ -181,8 +181,8 @@ export class TitleScene {
     this.webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.webglRenderer.shadowMap.enabled = true;
     this.webglRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.webglRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.webglRenderer.toneMappingExposure = 1.3;
+    this.webglRenderer.toneMapping = THREE.NoToneMapping;
+    // this.webglRenderer.toneMappingExposure = 1.3;
 
     this._running = true;
     this._clock.start();
@@ -218,14 +218,22 @@ export class TitleScene {
     this._clock.stop();
     cancelAnimationFrame(this._animFrameId);
     window.removeEventListener('resize', this._onResize);
-    if (this.webglRenderer) {
-      this.webglRenderer.dispose();
+    try {
+      if (this.webglRenderer) {
+        this.webglRenderer.dispose();
+        this.webglRenderer = null;
+      }
+    } catch (e) {
+      console.warn('[TitleScene] WebGL dispose error:', e);
       this.webglRenderer = null;
     }
+    // Always remove the canvas — even if WebGL dispose failed
     if (this._canvas) {
       this._canvas.remove();
       this._canvas = null;
     }
+    // Safety: also remove by ID in case reference was lost
+    document.getElementById('title-scene-canvas')?.remove();
   }
 
   get isRunning(): boolean { return this._running; }
