@@ -198,13 +198,13 @@ export class MultiplayerController {
         await this.network.connectAsHost(
           result.matchId,
           this._profile!.uid,
-          'remote', // Will be resolved from match record
+          result.opponentUid,
         );
       } else {
         await this.network.connectAsGuest(
           result.matchId,
           this._profile!.uid,
-          'remote',
+          result.opponentUid,
         );
       }
     } catch (err) {

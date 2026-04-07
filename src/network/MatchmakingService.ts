@@ -163,6 +163,7 @@ export interface MatchFoundResult {
   mapSeed: number;
   mapType: string;
   isHost: boolean;
+  opponentUid: string;
   opponentName: string;
   opponentElo: number;
   isGhost: boolean;
@@ -319,6 +320,7 @@ export class MatchmakingService {
         mapSeed,
         mapType: 'standard',
         isHost: true,
+        opponentUid: opponent.uid,
         opponentName: opponent.displayName,
         opponentElo: opponent.elo,
         isGhost: false,
@@ -339,6 +341,7 @@ export class MatchmakingService {
             mapSeed: match.mapSeed,
             mapType: match.mapType,
             isHost: false,
+            opponentUid: match.player1,
             opponentName: opponent.displayName,
             opponentElo: opponent.elo,
             isGhost: false,
@@ -380,6 +383,7 @@ export class MatchmakingService {
       mapSeed,
       mapType: 'standard',
       isHost: true, // Player is always host in ghost matches
+      opponentUid: ghostUid,
       opponentName: ghostProfile.displayName,
       opponentElo: ghostProfile.elo,
       isGhost: true,
