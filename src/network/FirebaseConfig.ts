@@ -235,18 +235,24 @@ export function watchMatch(matchId: string, cb: (match: MatchRecord) => void): U
 }
 
 /**
- * Watch for new match records where the given uid is player2 (guest).
+ * Find a recent match where the given uid is player2 (guest).
  * Used by the guest to discover the match the host created for them.
+ * Returns null if no match found.
  */
-export function watchMatchesAsGuest(uid: string, cb: (match: MatchRecord) => void): Unsubscribe {
-  const matchesRef = ref(getDb(), 'matches');
-  return onChildAdded(matchesRef, (snap: DataSnapshot) => {
-    if (!snap.exists()) return;
-    const match = snap.val() as MatchRecord;
-    if (match.player2 === uid && match.status === 'signaling' && !match.isGhost) {
-      cb(match);
+export async function findMatchAsGuest(uid: string): Promise<MatchRecord | null> {
+  const snap = await get(ref(getDb(), 'matches'));
+  if (!snap.exists()) return null;
+  let found: MatchRecord | null = null;
+  snap.forEach((child) => {
+    const match = child.val() as MatchRecord;
+    if (match.player2 === uid && (match.status === 'signaling' || match.status === 'waiting') && !match.isGhost) {
+      // Pick the most recent one
+      if (!found || (match.createdAt as number) > (found.createdAt as number)) {
+        found = match;
+      }
     }
   });
+  return found;
 }
 
 // ============================================

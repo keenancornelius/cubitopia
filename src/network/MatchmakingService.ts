@@ -20,7 +20,7 @@ import {
   createMatch,
   updateMatch,
   getProfile,
-  watchMatchesAsGuest,
+  findMatchAsGuest,
   type QueueEntry,
   type MatchRecord,
   type PlayerProfile,
@@ -187,7 +187,7 @@ export class MatchmakingService {
   private events: MatchmakingEvents = {};
   private queueUnsubs: Unsubscribe[] = [];
   private ghostTimer: ReturnType<typeof setTimeout> | null = null;
-  private _guestWatchUnsub: Unsubscribe | null = null;
+  private _guestPollTimer: ReturnType<typeof setInterval> | null = null;
   private searchStartTime = 0;
 
   // Current player info
@@ -327,26 +327,26 @@ export class MatchmakingService {
       this.cleanupSearch();
       this.events.onMatchFound?.(this._lastMatchResult);
     } else {
-      // ── GUEST: wait for host to create the match record ──
-      // Don't fire onMatchFound yet — watch /matches for a record where we're player2
-      if (this._guestWatchUnsub) return; // already watching
-      this._guestWatchUnsub = watchMatchesAsGuest(this._uid, (match: MatchRecord) => {
+      // ── GUEST: poll for the match the host will create ──
+      if (this._guestPollTimer) return; // already polling
+      this._guestPollTimer = setInterval(async () => {
         if (this.state !== 'searching') return;
-        this.setState('found');
-
-        this._lastMatchResult = {
-          matchId: match.matchId,
-          mapSeed: match.mapSeed,
-          mapType: match.mapType,
-          isHost: false,
-          opponentName: opponent.displayName,
-          opponentElo: opponent.elo,
-          isGhost: false,
-        };
-
-        this.cleanupSearch();
-        this.events.onMatchFound?.(this._lastMatchResult);
-      });
+        const match = await findMatchAsGuest(this._uid);
+        if (match) {
+          this.setState('found');
+          this._lastMatchResult = {
+            matchId: match.matchId,
+            mapSeed: match.mapSeed,
+            mapType: match.mapType,
+            isHost: false,
+            opponentName: opponent.displayName,
+            opponentElo: opponent.elo,
+            isGhost: false,
+          };
+          this.cleanupSearch();
+          this.events.onMatchFound?.(this._lastMatchResult);
+        }
+      }, 1000); // poll every 1s
     }
   }
 
@@ -420,9 +420,9 @@ export class MatchmakingService {
       clearTimeout(this.ghostTimer);
       this.ghostTimer = null;
     }
-    if (this._guestWatchUnsub) {
-      this._guestWatchUnsub();
-      this._guestWatchUnsub = null;
+    if (this._guestPollTimer) {
+      clearInterval(this._guestPollTimer);
+      this._guestPollTimer = null;
     }
     for (const unsub of this.queueUnsubs) {
       unsub();
