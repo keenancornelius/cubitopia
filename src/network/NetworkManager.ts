@@ -66,6 +66,11 @@ export class NetworkManager {
   get connectionState() { return this.state; }
   get isConnected() { return this.state === 'connected'; }
 
+  /** Sanitize a string for use as a PeerJS ID (alphanumeric + hyphens only, no leading hyphen) */
+  private sanitizePeerId(raw: string): string {
+    return raw.replace(/[^a-zA-Z0-9-]/g, '').replace(/^-+/, '');
+  }
+
   // ── Setup ────────────────────────────────────────────────
   setEvents(events: NetworkEvents): void {
     this.events = events;
@@ -87,7 +92,9 @@ export class NetworkManager {
     this.setState('connecting');
 
     // Create PeerJS instance with a match-scoped ID
-    const peerId = `cubitopia-${matchId}-host`;
+    // Firebase push IDs start with '-' which PeerJS rejects, so sanitize
+    const safeMatchId = this.sanitizePeerId(matchId);
+    const peerId = `cubitopia-${safeMatchId}-host`;
     this.peer = new Peer(peerId, {
       debug: 0, // silent
     });
@@ -132,7 +139,8 @@ export class NetworkManager {
     this._isHost = false;
     this.setState('connecting');
 
-    const peerId = `cubitopia-${matchId}-guest`;
+    const safeMatchId = this.sanitizePeerId(matchId);
+    const peerId = `cubitopia-${safeMatchId}-guest`;
     this.peer = new Peer(peerId, { debug: 0 });
 
     return new Promise<void>((resolve, reject) => {

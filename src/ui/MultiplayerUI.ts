@@ -511,10 +511,10 @@ export class MultiplayerUI {
     loadingText.textContent = 'LOADING MATCH...';
     ov.appendChild(loadingText);
 
-    // Animate loading bar then start game
+    // Animate loading bar then start game — but wait for WebRTC to connect first
     setTimeout(() => { bar.style.width = '100%'; }, 100);
 
-    setTimeout(() => {
+    const startGame = () => {
       this.clearOverlay();
       this.callbacks.onStartMultiplayerGame(
         result.mapSeed,
@@ -523,7 +523,33 @@ export class MultiplayerUI {
         result.opponentName,
         result.ghostProfile?.difficulty,
       );
-    }, 3000);
+    };
+
+    if (result.isGhost) {
+      // Ghost matches don't need WebRTC — start after animation
+      setTimeout(startGame, 3000);
+    } else {
+      // Real match: wait for WebRTC connection (poll every 200ms, up to 15s)
+      let waited = 0;
+      const pollInterval = setInterval(() => {
+        waited += 200;
+        if (this.mp.network.isConnected) {
+          clearInterval(pollInterval);
+          loadingText.textContent = 'CONNECTED — STARTING...';
+          setTimeout(startGame, 500);
+        } else if (waited >= 15000) {
+          clearInterval(pollInterval);
+          loadingText.textContent = 'CONNECTION FAILED';
+          loadingText.style.color = '#e74c3c';
+          setTimeout(() => {
+            this.mp.returnToLobby();
+            this.showLobby();
+          }, 2000);
+        } else {
+          loadingText.textContent = `CONNECTING... ${Math.ceil((15000 - waited) / 1000)}s`;
+        }
+      }, 200);
+    }
   }
 
   private createPlayerCard(name: string, elo: number, color: string, label: string): HTMLElement {
