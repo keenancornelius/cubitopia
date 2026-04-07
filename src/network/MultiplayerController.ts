@@ -83,7 +83,9 @@ export class MultiplayerController {
   // Event registration
   // ============================================
   setEvents(events: MultiplayerEvents): void {
-    this._events = events;
+    // Merge with existing events instead of replacing — prevents
+    // showSearching() from wiping onOpponentDisconnect/onOpponentSurrender
+    this._events = { ...this._events, ...events };
   }
 
   private setState(s: MultiplayerState): void {

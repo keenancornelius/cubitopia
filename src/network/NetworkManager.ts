@@ -220,9 +220,12 @@ export class NetworkManager {
   // ============================================
   private handleMessage(msg: NetworkMessage): void {
     switch (msg.type) {
-      case MessageType.COMMAND:
-        this.events.onCommand?.(msg.payload as NetworkCommand);
+      case MessageType.COMMAND: {
+        const cmd = msg.payload as NetworkCommand;
+        console.log(`[Net] RECV COMMAND: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} hasHandler=${!!this.events.onCommand}`);
+        this.events.onCommand?.(cmd);
         break;
+      }
 
       case MessageType.STATE_HASH:
         this.events.onStateHash?.(msg.payload as GameStateHash);
@@ -273,8 +276,14 @@ export class NetworkManager {
 
   private sendRaw(msg: NetworkMessage): void {
     if (this.conn && this.conn.open) {
+      if (msg.type === MessageType.COMMAND) {
+        console.log(`[Net] SEND COMMAND via DataChannel (open=true)`);
+      }
       this.conn.send(JSON.stringify(msg));
     } else {
+      if (msg.type === MessageType.COMMAND) {
+        console.log(`[Net] BUFFERING COMMAND — conn=${!!this.conn} open=${this.conn?.open}`);
+      }
       // Buffer until connected
       this._sendBuffer.push(msg);
     }

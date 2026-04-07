@@ -120,6 +120,12 @@ export const UNIT_COLORS: Record<UnitType, number> = Object.fromEntries(
 
 let nextUnitId = 0;
 
+/** Reset the unit ID counter — MUST be called at the start of every new game
+ *  to ensure deterministic IDs across multiplayer clients. */
+export function resetUnitIdCounter(): void {
+  nextUnitId = 0;
+}
+
 export class UnitFactory {
   static create(type: UnitType, owner: number, position: HexCoord): Unit {
     const cfg = UNIT_CONFIG[type];

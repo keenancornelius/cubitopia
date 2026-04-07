@@ -13,7 +13,7 @@ import { TileHighlighter } from './engine/TileHighlighter';
 import { TerrainDecorator } from './engine/TerrainDecorator';
 import { MapGenerator } from './game/MapGenerator';
 import MapInitializer, { MapInitOps } from './game/MapInitializer';
-import { UnitFactory } from './game/entities/UnitFactory';
+import { UnitFactory, resetUnitIdCounter } from './game/entities/UnitFactory';
 import { SelectionManager } from './game/systems/SelectionManager';
 import { UnitAI } from './game/systems/UnitAI';
 import { Pathfinder, tileKey } from './game/systems/Pathfinder';
@@ -1964,11 +1964,18 @@ class Cubitopia {
   /** Spawn queue config for simple (single-resource) buildings */
 
   regenerateMap(): void {
-    // ── PvP forfeit: if leaving a live PvP match, surrender first ──
-    if (this.gameMode === 'pvp' && !this.gameOver) {
-      this.gameOver = true;
-      this.multiplayer.surrender().catch(() => {});
-      this.hud.showNotification('You left the match — defeat!', 'color:#e74c3c;font-weight:bold;');
+    // ── PvP forfeit/cleanup: if leaving a multiplayer match, clean up network ──
+    if (this.gameMode === 'pvp') {
+      if (!this.gameOver) {
+        this.gameOver = true;
+        this.multiplayer.surrender().catch(() => {});
+        this.hud.showNotification('You left the match — defeat!', 'color:#e74c3c;font-weight:bold;');
+      }
+      // Reset multiplayer state so player can re-queue
+      this.multiplayer.returnToLobby();
+      this.multiplayer.commandQueue.initSinglePlayer();
+      this._mpTickAccumulator = 0;
+      this._localPlayerIndex = 0;
     }
 
     this.voxelBuilder.clearAll();
@@ -2376,6 +2383,8 @@ class Cubitopia {
   startNewGame(): void {
     this._gameFrame = 0;
     this._mpTickAccumulator = 0;
+    // Reset unit ID counter so both multiplayer clients generate identical IDs
+    resetUnitIdCounter();
     const isArena = this.mapType === MapType.ARENA;
 
     // ── Defensive cleanup: remove any lingering overlay canvases ──

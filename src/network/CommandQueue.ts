@@ -149,10 +149,12 @@ export class CommandQueue {
 
     // Multiplayer: buffer locally and send to peer
     this.addToBuffer(cmd);
+    console.log(`[CmdQ] ENQUEUE local: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} isMP=${this._isMultiplayer} hasNet=${!!this.network} ghost=${this._isGhostMatch}`);
 
     if (this.network && !this._isGhostMatch) {
       // Send over network (strip internal index)
       const { _index, ...netCmd } = cmd;
+      console.log(`[CmdQ] SENDING to peer: type=${netCmd.type} tick=${netCmd.tick} connOpen=${this.network.isConnected}`);
       this.network.sendCommand(netCmd);
     }
   }
@@ -162,6 +164,7 @@ export class CommandQueue {
   // ============================================
 
   private receiveRemoteCommand(cmd: NetworkCommand): void {
+    console.log(`[CmdQ] RECEIVED remote: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} curTick=${this.currentTick} hasProcessor=${!!this._commandProcessor}`);
     const indexed: IndexedCommand = {
       ...cmd,
       _index: this.commandIndex++,
@@ -169,17 +172,18 @@ export class CommandQueue {
 
     // Don't process commands too far in the future
     if (cmd.tick > this.currentTick + MAX_FUTURE_TICKS) {
-      console.warn(`[CmdQ] Dropping future command: tick ${cmd.tick} (current: ${this.currentTick})`);
+      console.warn(`[CmdQ] Dropping FUTURE command: tick ${cmd.tick} (current: ${this.currentTick})`);
       return;
     }
 
     // If command is for a past tick, execute it immediately (late arrival)
     if (cmd.tick <= this.currentTick) {
-      console.warn(`[CmdQ] Late command for tick ${cmd.tick} (current: ${this.currentTick})`);
+      console.log(`[CmdQ] LATE command for tick ${cmd.tick} (current: ${this.currentTick}) — executing immediately`);
       this._commandProcessor?.(indexed);
       return;
     }
 
+    console.log(`[CmdQ] BUFFERED for tick ${cmd.tick} (current: ${this.currentTick})`);
     this.addToBuffer(indexed);
   }
 
@@ -209,6 +213,7 @@ export class CommandQueue {
 
       // Process each command
       for (const cmd of commands) {
+        console.log(`[CmdQ] PROCESS tick=${this.currentTick}: type=${cmd.type} player=${cmd.playerId?.slice(0,8)} hasProcessor=${!!this._commandProcessor}`);
         this._commandProcessor?.(cmd);
       }
 

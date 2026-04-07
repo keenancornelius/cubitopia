@@ -94,6 +94,7 @@ export interface CommandBridgeGame {
 
 export function processCommand(game: CommandBridgeGame, cmd: NetworkCommand): void {
   const owner = game.getOwnerForPlayerId(cmd.playerId);
+  console.log(`[Bridge] processCommand: type=${cmd.type} playerId=${cmd.playerId?.slice(0,8)} → owner=${owner}`);
 
   switch (cmd.type) {
     case NetCommandType.MOVE: {
