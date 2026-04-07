@@ -42,9 +42,9 @@ export class Renderer {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
 
-    // Tone mapping disabled — was causing grey fog/wash-out artifact
-    this.renderer.toneMapping = THREE.NoToneMapping;
-    // this.renderer.toneMappingExposure = 1.2;
+    // LinearToneMapping — gentler than ACES (which caused grey wash-out with stacked transparent objects)
+    this.renderer.toneMapping = THREE.LinearToneMapping;
+    this.renderer.toneMappingExposure = 1.5;
 
     // Enable clipping planes for Y-level slicer
     this.renderer.localClippingEnabled = true;
@@ -271,8 +271,8 @@ export class Renderer {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     }
-    this.renderer.toneMapping = THREE.NoToneMapping;
-    // this.renderer.toneMappingExposure = 1.2;
+    this.renderer.toneMapping = THREE.LinearToneMapping;
+    this.renderer.toneMappingExposure = 1.5;
     this.renderer.localClippingEnabled = true;
   }
 

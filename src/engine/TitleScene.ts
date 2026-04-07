@@ -181,8 +181,8 @@ export class TitleScene {
     this.webglRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.webglRenderer.shadowMap.enabled = true;
     this.webglRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.webglRenderer.toneMapping = THREE.NoToneMapping;
-    // this.webglRenderer.toneMappingExposure = 1.3;
+    this.webglRenderer.toneMapping = THREE.LinearToneMapping;
+    this.webglRenderer.toneMappingExposure = 1.5;
 
     this._running = true;
     this._clock.start();

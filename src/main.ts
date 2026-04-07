@@ -2362,22 +2362,37 @@ class Cubitopia {
       }
     }
 
-    // Sweep any orphaned sprites/VFX from previous game (opacity ~ 0 or very large)
+    // Sweep orphaned sprites/VFX AND large transparent meshes from previous game
+    // These can stack up across restarts and cause the screen to wash out
     const orphans: THREE.Object3D[] = [];
     this.renderer.scene.traverse((obj) => {
       if (obj instanceof THREE.Sprite && obj.material instanceof THREE.SpriteMaterial) {
-        // Remove sprites with near-zero opacity (stale VFX)
         if (obj.material.opacity < 0.01 && !obj.userData._permanent) {
           orphans.push(obj);
+        }
+      }
+      // Catch orphaned transparent overlay meshes (capture zone rings, columns, etc.)
+      if (obj instanceof THREE.Mesh && obj.material && !obj.userData._permanent) {
+        const mat = obj.material as THREE.MeshBasicMaterial;
+        const geoType = obj.geometry?.type || '';
+        if (mat.transparent && mat.depthWrite === false &&
+            (geoType === 'RingGeometry' || geoType === 'CylinderGeometry') &&
+            obj.geometry?.boundingSphere) {
+          if (obj.geometry.boundingSphere.radius > 3) {
+            orphans.push(obj);
+          }
         }
       }
     });
     for (const orphan of orphans) {
       this.renderer.scene.remove(orphan);
-      if ((orphan as THREE.Sprite).material) {
-        const mat = (orphan as THREE.Sprite).material as THREE.SpriteMaterial;
-        mat.map?.dispose();
+      if ((orphan as any).material) {
+        const mat = (orphan as any).material;
+        if (mat.map) mat.map.dispose();
         mat.dispose();
+      }
+      if ((orphan as any).geometry) {
+        (orphan as any).geometry.dispose();
       }
     }
 
@@ -2389,6 +2404,8 @@ class Cubitopia {
 
     // Ensure AI and capture systems are sized for the player count
     this.aiController.ensurePlayerCount(this.playerCount);
+    // Dispose old capture zone visuals before creating new system — prevents ring/column stacking
+    if (this.captureZoneSystem) this.captureZoneSystem.dispose();
     this.captureZoneSystem = new CaptureZoneSystem(this.renderer.scene, this.playerCount);
     this.captureZoneSystem.setOps({
       playSound: (name, vol) => this.sound.play(name as any, vol),
