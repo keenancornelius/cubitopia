@@ -176,7 +176,7 @@ export interface MatchmakingEvents {
 }
 
 /** How long to wait before falling back to ghost match (ms) */
-const GHOST_TIMEOUT = 15_000; // 15 seconds
+const GHOST_TIMEOUT = 30_000; // 30 seconds — give more time to find a real opponent
 
 /** Max ELO difference to consider a fair match */
 const MAX_ELO_DIFF = 300;
