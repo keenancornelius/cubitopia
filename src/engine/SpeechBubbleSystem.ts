@@ -115,6 +115,8 @@ export class SpeechBubbleSystem {
 
     for (let i = 0; i < this.activeBubbles.length; i++) {
       const bubble = this.activeBubbles[i];
+      // Lazy-init startTime on first update tick so it uses the same clock as `time`
+      if (bubble.startTime < 0) bubble.startTime = time;
       const elapsed = time - bubble.startTime;
 
       // Check if unit still exists
@@ -141,11 +143,11 @@ export class SpeechBubbleSystem {
       }
 
       // Pop-in scale animation (first 0.15s)
-      if (elapsed < 0.15) {
+      if (elapsed >= 0 && elapsed < 0.15) {
         const popScale = 0.5 + 0.5 * Math.min(elapsed / 0.15, 1);
         // Overshoot bounce
         const overshoot = elapsed < 0.1 ? 1 + 0.2 * (elapsed / 0.1) : 1.2 - 0.2 * ((elapsed - 0.1) / 0.05);
-        const s = BUBBLE_SCALE * popScale * overshoot;
+        const s = Math.min(BUBBLE_SCALE * popScale * overshoot, BUBBLE_SCALE * 1.5);  // Safety clamp
         bubble.sprite.scale.set(s, s * (BUBBLE_CANVAS_HEIGHT / BUBBLE_CANVAS_WIDTH), 1);
       }
     }
@@ -237,7 +239,7 @@ export class SpeechBubbleSystem {
       ctx,
       texture,
       unitId,
-      startTime: performance.now() / 1000,  // convert to seconds for consistency
+      startTime: -1,  // set on first update() tick to match game clock
       duration: BUBBLE_DURATION,
       baseY: yOff,
     });
