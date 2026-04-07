@@ -881,7 +881,7 @@ export class InputManager {
         if (st.kind === 'wall_build') {
           this.game.blueprintSystem.toggleWallBlueprint(hexCoord);
         } else if (st.kind === 'place_building') {
-          this.game.placeGenericBuilding(st.building, hexCoord);
+          this.game.enqueueBuildingPlacement(st.building, hexCoord);
         } else if (st.kind === 'rally_point') {
           this.game.setRallyPoint(st.buildingKey, hexCoord);
           this.hud.showNotification(

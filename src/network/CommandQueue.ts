@@ -163,8 +163,23 @@ export class CommandQueue {
   // Receive remote command
   // ============================================
 
+  /** Callback for surrender commands (bypasses tick buffering) */
+  private _onSurrender: ((cmd: NetworkCommand) => void) | null = null;
+
+  /** Set the surrender handler — called by MultiplayerController */
+  setSurrenderHandler(handler: (cmd: NetworkCommand) => void): void {
+    this._onSurrender = handler;
+  }
+
   private receiveRemoteCommand(cmd: NetworkCommand): void {
     console.log(`[CmdQ] RECEIVED remote: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} curTick=${this.currentTick} hasProcessor=${!!this._commandProcessor}`);
+
+    // Surrender is a meta-command — don't buffer, handle immediately
+    if (cmd.type === 'surrender') {
+      console.log('[CmdQ] Surrender received — routing to handler');
+      this._onSurrender?.(cmd);
+      return;
+    }
     const indexed: IndexedCommand = {
       ...cmd,
       _index: this.commandIndex++,
@@ -305,5 +320,6 @@ export class CommandQueue {
     this._commandProcessor = null;
     this._stateHashProvider = null;
     this._onDesync = null;
+    this._onSurrender = null;
   }
 }

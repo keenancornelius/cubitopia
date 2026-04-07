@@ -178,6 +178,10 @@ export class MultiplayerController {
         this.log(`WebRTC state: ${cs}`, cs === 'connected' ? '#2ecc71' : '#f39c12');
         if (cs === 'connected') {
           this.commandQueue.initMultiplayer(this.network, false);
+          // Set surrender handler so it bypasses tick buffering
+          this.commandQueue.setSurrenderHandler(() => {
+            this._events.onOpponentSurrender?.();
+          });
           this.setState('playing');
         }
       },

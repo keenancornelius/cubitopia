@@ -1294,7 +1294,9 @@ class Cubitopia {
     const tooltipOps: TooltipOps = {
       enterRallyPointMode: (key) => this.enterRallyPointModeForBuilding(key),
       demolishBuilding: (pb) => this.demolishBuilding(pb),
-      queueUnit: (unitType, buildingKind) => this.spawnQueueSystem.queueUnitFromTooltip(unitType, buildingKind),
+      queueUnit: (unitType, buildingKind) => {
+        this.enqueueCommand(NetCommandType.QUEUE_UNIT, { unitType, buildingKind });
+      },
       getBuildingQueueOptions: (kind) => this.buildingSystem.getBuildingQueueOptions(kind),
       captureZone: (position) => this.captureZoneFromTooltip(position),
       attackTarget: (position) => this.attackTargetFromTooltip(position),
@@ -1846,10 +1848,8 @@ class Cubitopia {
         UnitAI.commandStop(unit);
       },
 
-      placeBuilding: (_kind: string, _position: HexCoord, _owner: number) => {
-        // Building placement goes through BlueprintSystem → BuildingSystem.registerBuilding
-        // This is a stub — actual placement is handled by the existing building mode flow
-        console.warn('[CommandBridge] placeBuilding stub — use building mode UI');
+      placeBuilding: (kind: string, position: HexCoord, owner: number) => {
+        this.placeBuildingForOwner(kind as BuildingKind, position, owner);
       },
       cancelBuilding: (_blueprintId: string) => {
         // Building cancellation handled via tooltip controller
@@ -1868,7 +1868,7 @@ class Cubitopia {
       },
 
       queueUnit: (unitType: string, buildingKind: string, owner: number) => {
-        this.spawnQueueSystem.queueUnitFromTooltip(unitType as any, buildingKind as any);
+        this.spawnUnitForOwner(unitType as UnitType, buildingKind as BuildingKind, owner);
       },
 
       setUnitStance: (unit: Unit, stance: UnitStance) => {
@@ -3788,27 +3788,158 @@ class Cubitopia {
     market:        { woodCost: GAME_CONFIG.buildings.market.cost.player.wood, stoneCost: GAME_CONFIG.buildings.market.cost.player.stone, allowedTerrain: [TerrainType.PLAINS, TerrainType.DESERT], notification: 'Market built! Trade routes generate gold per owned base.' },
   };
 
-  /** Generic building placement — replaces 6 individual placeX methods */
-  private placeGenericBuilding(kind: BuildingKind, coord: HexCoord): void {
+  /** Generic building placement — called from CommandBridge for both local & remote players.
+   *  Owner-aware: deducts from the correct player's resources and registers to the right team. */
+  placeBuildingForOwner(kind: BuildingKind, coord: HexCoord, owner: number): void {
     if (!this.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.currentMap.tiles.get(key);
     if (!tile) return;
 
     const cfg = this.BUILDING_PLACEMENT_CONFIG[kind];
+    if (!cfg) return;
     if (!cfg.allowedTerrain.includes(tile.terrain)) return;
-    if (this.isTileOccupied(key)) {
-      this.hud.showNotification('Tile already occupied!', '#e67e22');
-      return;
-    }
+    if (this.isTileOccupied(key)) return;
 
     // Resource check (skip if debug freePlace for most buildings; silo always charges)
     const skipCost = this.hud.debugFlags.freePlace && kind !== 'silo';
     if (!skipCost) {
       const steelNeeded = cfg.steelCost ?? 0;
       const crystalNeeded = cfg.crystalCost ?? 0;
-      if (this.woodStockpile[0] < cfg.woodCost || this.stoneStockpile[0] < cfg.stoneCost
-          || this.steelStockpile[0] < steelNeeded || this.players[0].resources.crystal < crystalNeeded) {
+      if (this.woodStockpile[owner] < cfg.woodCost || this.stoneStockpile[owner] < cfg.stoneCost
+          || this.steelStockpile[owner] < steelNeeded || this.players[owner].resources.crystal < crystalNeeded) {
+        return; // Can't afford — silently skip (pre-check caught it for local player)
+      }
+      this.woodStockpile[owner] -= cfg.woodCost;
+      this.players[owner].resources.wood = Math.max(0, this.players[owner].resources.wood - cfg.woodCost);
+      if (cfg.stoneCost > 0) {
+        this.stoneStockpile[owner] -= cfg.stoneCost;
+        this.players[owner].resources.stone = Math.max(0, this.players[owner].resources.stone - cfg.stoneCost);
+      }
+      if (steelNeeded > 0) {
+        this.steelStockpile[owner] -= steelNeeded;
+        this.players[owner].resources.steel = Math.max(0, this.players[owner].resources.steel - steelNeeded);
+      }
+      if (crystalNeeded > 0) {
+        this.players[owner].resources.crystal = Math.max(0, this.players[owner].resources.crystal - crystalNeeded);
+      }
+    }
+    if (owner === this._localPlayerIndex) {
+      this.hud.updateResources(this.players[owner], this.woodStockpile[owner], this.foodStockpile[owner], this.stoneStockpile[owner]);
+    }
+
+    // Build mesh via BuildingSystem
+    const meshMethodName = kind === 'wizard_tower' ? 'buildWizardTowerMesh'
+      : `build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh`;
+    const meshBuilder = this.buildingSystem[meshMethodName as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
+    const mesh = meshBuilder.call(this.buildingSystem, coord, owner);
+    this.buildingSystem.registerBuilding(kind, owner, coord, mesh, cfg.maxHealth, true);
+
+    // UnitAI hooks — set for the correct owner
+    if (cfg.unitAIHook) {
+      // Dynamically set the UnitAI position for the right owner
+      if (kind === 'barracks') UnitAI.barracksPositions.set(owner, coord);
+      else if (kind === 'farmhouse') UnitAI.farmhousePositions.set(owner, coord);
+      else if (kind === 'silo') UnitAI.siloPositions.set(owner, coord);
+      else if (kind === 'forestry') {
+        const arr = UnitAI.forestryPositions.get(owner) ?? [];
+        arr.push(coord);
+        UnitAI.forestryPositions.set(owner, arr);
+      }
+    }
+
+    this.resourceManager.updateStockpileVisual(owner);
+    if (owner === this._localPlayerIndex) {
+      this.hud.showNotification(`${kind} blueprint placed — builder needed!`, '#3498db');
+    }
+  }
+
+  /** Spawn a unit for the given owner — called from CommandBridge for QUEUE_UNIT commands.
+   *  Handles resource deduction, unit creation, and game registration for any player. */
+  private spawnUnitForOwner(unitType: UnitType, buildingKind: BuildingKind, owner: number): void {
+    if (!this.currentMap) return;
+    const building = this.buildingSystem.getFirstBuilding(buildingKind, owner);
+    if (!building) return;
+
+    // Deduct cost based on unit type config
+    const unitCfg = GAME_CONFIG.units[unitType];
+    if (!unitCfg) return;
+    const costs = (unitCfg.costs as any)?.tooltipQueue ?? (unitCfg.costs as any)?.menu;
+    if (!costs) return;
+
+    const skipCost = this.hud.debugFlags.freeBuild;
+    if (!skipCost) {
+      if (costs.gold && this.players[owner].resources.gold < costs.gold) return;
+      if (costs.wood && this.woodStockpile[owner] < costs.wood) return;
+      if (costs.stone && this.stoneStockpile[owner] < costs.stone) return;
+      if (costs.steel && this.steelStockpile[owner] < costs.steel) return;
+      if (costs.crystal && this.players[owner].resources.crystal < costs.crystal) return;
+
+      if (costs.gold) {
+        this.players[owner].resources.gold -= costs.gold;
+        this.goldStockpile[owner] = this.players[owner].resources.gold;
+      }
+      if (costs.wood) {
+        this.woodStockpile[owner] -= costs.wood;
+        this.players[owner].resources.wood = this.woodStockpile[owner];
+      }
+      if (costs.stone) {
+        this.stoneStockpile[owner] -= costs.stone;
+        this.players[owner].resources.stone = this.stoneStockpile[owner];
+      }
+      if (costs.steel) {
+        this.steelStockpile[owner] -= costs.steel;
+        this.players[owner].resources.steel = this.steelStockpile[owner];
+      }
+      if (costs.crystal) {
+        this.players[owner].resources.crystal -= costs.crystal;
+      }
+    }
+
+    // Find spawn tile near the building
+    const spawnPos = this.findSpawnTile(this.currentMap, building.position.q, building.position.r);
+    if (!spawnPos) return;
+
+    // Create the unit for the correct owner
+    const unit = UnitFactory.create(unitType, owner, spawnPos);
+    const wp = this.hexToWorld(spawnPos);
+    unit.worldPosition = { ...wp };
+
+    // Add to game
+    this.players[owner].units.push(unit);
+    this.allUnits.push(unit);
+    this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
+    this.unitRenderer.addUnit(unit, this.getElevation(spawnPos));
+    this.sound.play('unit_spawn' as any, 0.45);
+
+    // Update HUD if it's the local player
+    if (owner === this._localPlayerIndex) {
+      this.hud.updateResources(this.players[owner], this.woodStockpile[owner], this.foodStockpile[owner], this.stoneStockpile[owner]);
+    }
+  }
+
+  /** Public entry point: validates locally then enqueues a PLACE_BUILDING command.
+   *  In single-player, executes immediately. In multiplayer, syncs to peer. */
+  enqueueBuildingPlacement(kind: BuildingKind, coord: HexCoord): void {
+    if (!this.currentMap) return;
+    const key = `${coord.q},${coord.r}`;
+    const tile = this.currentMap.tiles.get(key);
+    if (!tile) return;
+    const cfg = this.BUILDING_PLACEMENT_CONFIG[kind];
+    if (!cfg) return;
+    if (!cfg.allowedTerrain.includes(tile.terrain)) return;
+    if (this.isTileOccupied(key)) {
+      this.hud.showNotification('Tile already occupied!', '#e67e22');
+      return;
+    }
+    // Quick resource check for local player (gives instant feedback)
+    const owner = this._localPlayerIndex;
+    const skipCost = this.hud.debugFlags.freePlace && kind !== 'silo';
+    if (!skipCost) {
+      const steelNeeded = cfg.steelCost ?? 0;
+      const crystalNeeded = cfg.crystalCost ?? 0;
+      if (this.woodStockpile[owner] < cfg.woodCost || this.stoneStockpile[owner] < cfg.stoneCost
+          || this.steelStockpile[owner] < steelNeeded || this.players[owner].resources.crystal < crystalNeeded) {
         const parts = [`${cfg.woodCost} wood`];
         if (cfg.stoneCost > 0) parts.push(`${cfg.stoneCost} stone`);
         if (steelNeeded > 0) parts.push(`${steelNeeded} steel`);
@@ -3816,36 +3947,9 @@ class Cubitopia {
         this.hud.showNotification(`Need ${parts.join(' + ')} to build ${kind}!`, '#e67e22');
         return;
       }
-      this.woodStockpile[0] -= cfg.woodCost;
-      this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - cfg.woodCost);
-      if (cfg.stoneCost > 0) {
-        this.stoneStockpile[0] -= cfg.stoneCost;
-        this.players[0].resources.stone = Math.max(0, this.players[0].resources.stone - cfg.stoneCost);
-      }
-      if (steelNeeded > 0) {
-        this.steelStockpile[0] -= steelNeeded;
-        this.players[0].resources.steel = Math.max(0, this.players[0].resources.steel - steelNeeded);
-      }
-      if (crystalNeeded > 0) {
-        this.players[0].resources.crystal = Math.max(0, this.players[0].resources.crystal - crystalNeeded);
-      }
     }
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
-
-    // Build mesh via BuildingSystem
-    const meshMethodName = kind === 'wizard_tower' ? 'buildWizardTowerMesh'
-      : `build${kind.charAt(0).toUpperCase() + kind.slice(1)}Mesh`;
-    const meshBuilder = this.buildingSystem[meshMethodName as keyof BuildingSystem] as (pos: HexCoord, owner: number) => THREE.Group;
-    const mesh = meshBuilder.call(this.buildingSystem, coord, 0);
-    this.buildingSystem.registerBuilding(kind, 0, coord, mesh, cfg.maxHealth, true);
-
-    // Post-placement hooks are DEFERRED until construction completes
-    // (handled in handleConstructTick when progress reaches 1.0)
-
-    // Exit placement mode
+    this.enqueueCommand(NetCommandType.PLACE_BUILDING, { kind, position: coord });
     this.exitPlacementMode(kind);
-    this.resourceManager.updateStockpileVisual(0);
-    this.hud.showNotification(`${kind} blueprint placed — builder needed!`, '#3498db');
   }
 
   /** Exit placement mode after successful building placement */
