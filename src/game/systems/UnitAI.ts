@@ -17,6 +17,15 @@ import { Logger } from '../../engine/Logger';
 export type { MineTarget, UnitAIDebugFlags };
 
 export class UnitAI {
+  // ── Deterministic tie-breaking for multiplayer ──
+  // When two tiles score equally, Map/Set iteration order differs across
+  // browser engines (V8 vs JSC). Always prefer the lower coordinate
+  // (q first, then r) so both clients pick the same tile.
+  private static tieBreak(candidate: HexCoord, current: HexCoord | null): boolean {
+    if (!current) return true;
+    return candidate.q < current.q || (candidate.q === current.q && candidate.r < current.r);
+  }
+
   // ── SharedGameState: single injectable container for all mutable game state ──
   // All 30+ statics that were here are now in SharedGameState.
   // Forwarding getters/setters below keep `UnitAI.xxx` working everywhere.
@@ -1094,7 +1103,7 @@ export class UnitAI {
         const [q, r] = key.split(',').map(Number);
         const coord = { q, r };
         const dist = Pathfinder.heuristic(unit.position, coord);
-        if (dist < bestFarmDist) {
+        if (dist < bestFarmDist || (dist === bestFarmDist && UnitAI.tieBreak(coord, farmTile))) {
           bestFarmDist = dist;
           farmTile = coord;
         }
@@ -1113,7 +1122,7 @@ export class UnitAI {
         const [q, r] = key.split(',').map(Number);
         const coord = { q, r };
         const dist = Pathfinder.heuristic(unit.position, coord);
-        if (dist < bestGrassDist) {
+        if (dist < bestGrassDist || (dist === bestGrassDist && UnitAI.tieBreak(coord, grassTile))) {
           bestGrassDist = dist;
           grassTile = coord;
         }
@@ -2302,7 +2311,7 @@ export class UnitAI {
       }
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(coord, nearest))) {
         nearestDist = dist;
         nearest = coord;
       }
@@ -2322,7 +2331,7 @@ export class UnitAI {
       }
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(coord, nearest))) {
         nearestDist = dist;
         nearest = coord;
       }
@@ -2349,7 +2358,7 @@ export class UnitAI {
       const [q, r] = key.split(',').map(Number);
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(coord, nearest))) {
         nearestDist = dist;
         nearest = coord;
       }
@@ -2371,7 +2380,7 @@ export class UnitAI {
         const tile = map.tiles.get(key);
         if (!tile || !UnitAI.isValidWallTile(tile, key, map)) continue;
         const dist = Pathfinder.heuristic(unit.position, spot);
-        if (dist < nearestDist) {
+        if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(spot, nearest))) {
           nearestDist = dist;
           nearest = spot;
           unit._planIsGate = false;
@@ -2394,7 +2403,7 @@ export class UnitAI {
           const tile = map.tiles.get(key);
           if (!tile || !UnitAI.isValidWallTile(tile, key, map)) continue;
           const dist = Pathfinder.heuristic(unit.position, spot);
-          if (dist < nearestDist) {
+          if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(spot, nearest))) {
             nearestDist = dist;
             nearest = spot;
             unit._planIsGate = true;
@@ -2416,7 +2425,7 @@ export class UnitAI {
       const [q, r] = key.split(',').map(Number);
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(coord, nearest))) {
         nearestDist = dist;
         nearest = coord;
       }
@@ -2464,7 +2473,7 @@ export class UnitAI {
       }
       // Weight: proximity to unit first, moderate base pull, avoid crowds
       const score = baseDist * 1.0 + unitDist * 1.5 + crowdPenalty;
-      if (score < bestScore) {
+      if (score < bestScore || (score === bestScore && UnitAI.tieBreak(coord, best))) {
         bestScore = score;
         best = coord;
       }
@@ -2486,10 +2495,11 @@ export class UnitAI {
       const claimer = UnitAI.claimedTrees.get(key);
       if (claimer && claimer !== unit.id) return;
       const [q, r] = key.split(',').map(Number);
-      const dist = Pathfinder.heuristic(origin, { q, r });
-      if (dist <= radius && dist < bestDist) {
+      const coord = { q, r };
+      const dist = Pathfinder.heuristic(origin, coord);
+      if (dist <= radius && (dist < bestDist || (dist === bestDist && UnitAI.tieBreak(coord, best)))) {
         bestDist = dist;
-        best = { q, r };
+        best = coord;
       }
     });
     return best;
@@ -2515,7 +2525,7 @@ export class UnitAI {
       let nearestDist = stockPos ? Pathfinder.heuristic(unit.position, stockPos) : Infinity;
       for (const fp of forestries) {
         const d = Pathfinder.heuristic(unit.position, fp);
-        if (d < nearestDist) {
+        if (d < nearestDist || (d === nearestDist && UnitAI.tieBreak(fp, nearest))) {
           nearestDist = d;
           nearest = fp;
         }
@@ -2672,7 +2682,7 @@ export class UnitAI {
       if (returnDist < MIN_DIST_FROM_RETURN) {
         // Track as close fallback in case no distant grass exists
         const closeScore = baseDist * 2 + unitDist;
-        if (closeScore < bestCloseScore) {
+        if (closeScore < bestCloseScore || (closeScore === bestCloseScore && UnitAI.tieBreak(coord, bestClose))) {
           bestCloseScore = closeScore;
           bestClose = coord;
         }
@@ -2691,7 +2701,7 @@ export class UnitAI {
       }
       // Weight proximity to base so villagers harvest nearby grass first
       const score = baseDist * 2 + unitDist + buddyBonus;
-      if (score < bestScore) {
+      if (score < bestScore || (score === bestScore && UnitAI.tieBreak(coord, best))) {
         bestScore = score;
         best = coord;
       }
@@ -2954,7 +2964,7 @@ export class UnitAI {
       const travelPenalty = unitDist * GAME_CONFIG.combat.unitAI.miningSearch.travelPenaltyFactor;
 
       const score = distPenalty + travelPenalty + resourceBonus + clusterBonus + buddyBonus;
-      if (score < bestScore) {
+      if (score < bestScore || (score === bestScore && UnitAI.tieBreak(coord, best))) {
         bestScore = score;
         best = coord;
       }
