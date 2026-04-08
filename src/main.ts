@@ -1464,7 +1464,7 @@ class Cubitopia {
         const q = Math.round(centroid.x / 1.5);
         const zOffset = (q % 2 === 1) ? 0.75 : 0;
         const r = Math.round((centroid.z - zOffset) / 1.5);
-        this.rallyPointSystem.setRallyPoint(buildingKind, { q, r });
+        this.enqueueCommand(NetCommandType.SET_RALLY_POINT, { buildingId: buildingKind, position: { q, r } });
         const label = ['A', 'S', 'D', 'F', 'G'][squadSlot] ?? `${squadSlot}`;
         this.hud.showNotification(`Rally set to Squad ${label} position`, '#2ecc71');
       },
@@ -3487,19 +3487,20 @@ class Cubitopia {
     this.tileHighlighter.showAttackIndicator(position, elev);
   }
 
-  /** Set rally point for all combat buildings + base to a target position (from tooltip) */
+  /** Set rally point for all combat buildings + base to a target position (from tooltip).
+   *  Each rally is routed through the command queue for multiplayer sync. */
   private setRallyToPositionFromTooltip(position: HexCoord): void {
     // Set rally for all player combat buildings (barracks, armory, wizard_tower)
     const combatKinds: BuildingKind[] = ['barracks', 'armory', 'wizard_tower'];
     let count = 0;
     for (const pb of this.buildingSystem.placedBuildings) {
       if (pb.owner === this._localPlayerIndex && combatKinds.includes(pb.kind)) {
-        this.rallyPointSystem.setRallyPoint(pb.kind, position);
+        this.enqueueCommand(NetCommandType.SET_RALLY_POINT, { buildingId: pb.kind, position });
         count++;
       }
     }
     // Also set rally for the player's base (ogre spawns)
-    this.rallyPointSystem.setRallyPoint('base', position);
+    this.enqueueCommand(NetCommandType.SET_RALLY_POINT, { buildingId: 'base', position });
     count++;
     if (count > 0) {
       this.hud.showNotification(`Rally point set for ${count} buildings`, '#2980b9');
@@ -4247,9 +4248,13 @@ class Cubitopia {
     this.hud.showNotification(`Set ${buildingKey} rally point — click a tile · [ESC] cancel`, '#f0c040');
   }
 
-  /** Set rally point for a building (called from InputManager after tile click in rally mode) */
+  /** Set rally point for a building (called from InputManager after tile click in rally mode).
+   *  Routes through command queue for multiplayer determinism. */
   public setRallyPoint(buildingKey: string, target: HexCoord): void {
-    this.rallyPointSystem.setRallyPoint(buildingKey, target);
+    this.enqueueCommand(NetCommandType.SET_RALLY_POINT, {
+      buildingId: buildingKey,
+      position: target,
+    });
   }
 
   // ===================== PLANT CROPS SYSTEM =====================
