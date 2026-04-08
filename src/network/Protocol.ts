@@ -278,7 +278,13 @@ export function crc32(str: string): number {
  */
 export function computeStateHash(
   tick: number,
-  units: Array<{ id: string; position: { q: number; r: number }; currentHealth: number; state: string; type?: string; owner?: number }>,
+  units: Array<{
+    id: string; position: { q: number; r: number }; currentHealth: number; state: string;
+    type?: string; owner?: number;
+    targetPosition?: { q: number; r: number } | null;
+    carryAmount?: number;
+    gatherCooldown?: number;
+  }>,
   p1Resources: Record<string, number>,
   p2Resources: Record<string, number>,
   includeDetails = false,
@@ -286,10 +292,14 @@ export function computeStateHash(
   // Sort units by ID for deterministic ordering
   const sorted = [...units].sort((a, b) => a.id.localeCompare(b.id));
 
-  // Build hash string from critical state
+  // Build hash string from critical state (include target + carry for finer desync detection)
   let stateStr = `t${tick}|`;
   for (const u of sorted) {
-    stateStr += `${u.id}:${u.position.q},${u.position.r}:${u.currentHealth}:${u.state}|`;
+    const tgt = u.targetPosition ? `>${u.targetPosition.q},${u.targetPosition.r}` : '';
+    const carry = u.carryAmount ? `c${u.carryAmount}` : '';
+    // Quantize gatherCooldown to 2 decimal places to avoid float noise
+    const gcd = u.gatherCooldown !== undefined ? `g${Math.round(u.gatherCooldown * 20)}` : '';
+    stateStr += `${u.id}:${u.position.q},${u.position.r}:${u.currentHealth}:${u.state}${tgt}${carry}${gcd}|`;
   }
 
   const p1Sum = Object.values(p1Resources).reduce((a, b) => a + b, 0);
@@ -300,7 +310,12 @@ export function computeStateHash(
   let unitDetails: string | undefined;
   if (includeDetails) {
     unitDetails = sorted
-      .map(u => `${u.id}[${u.type ?? '?'}p${u.owner ?? '?'}]@${u.position.q},${u.position.r} hp=${u.currentHealth} st=${u.state}`)
+      .map(u => {
+        const tgt = u.targetPosition ? ` tgt=${u.targetPosition.q},${u.targetPosition.r}` : '';
+        const carry = u.carryAmount ? ` carry=${u.carryAmount}` : '';
+        const gcd = u.gatherCooldown !== undefined ? ` gcd=${u.gatherCooldown.toFixed(2)}` : '';
+        return `${u.id}[${u.type ?? '?'}p${u.owner ?? '?'}]@${u.position.q},${u.position.r} hp=${u.currentHealth} st=${u.state}${tgt}${carry}${gcd}`;
+      })
       .join('\n');
   }
 
