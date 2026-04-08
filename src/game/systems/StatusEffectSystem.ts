@@ -151,12 +151,12 @@ export class StatusEffectSystem {
           const candidates = allUnits
             .filter(u => u.owner !== attacker.owner && u.currentHealth > 0 && u.id !== target.id);
 
-          // Sort by distance from target
+          // Sort by distance from target (deterministic tie-break by q,r for lockstep)
           const withDist = candidates.map(u => ({
             unit: u,
             dist: hexDistQR(u.position.q, u.position.r, target.position.q, target.position.r),
           }));
-          withDist.sort((a, b) => a.dist - b.dist);
+          withDist.sort((a, b) => a.dist - b.dist || a.unit.position.q - b.unit.position.q || a.unit.position.r - b.unit.position.r);
 
           const chainDmg = Math.max(1, Math.round(attacker.stats.attack * ecCfg.damageMultiplier));
           for (const { unit, dist } of withDist) {
@@ -193,7 +193,7 @@ export class StatusEffectSystem {
             unit: u,
             dist: hexDistQR(u.position.q, u.position.r, target.position.q, target.position.r),
           }));
-          withDist.sort((a, b) => a.dist - b.dist);
+          withDist.sort((a, b) => a.dist - b.dist || a.unit.position.q - b.unit.position.q || a.unit.position.r - b.unit.position.r);
 
           for (const { unit, dist } of withDist) {
             if (dist > infCfg.spreadRadius) break;
