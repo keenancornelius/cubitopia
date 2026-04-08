@@ -622,6 +622,9 @@ export interface GameContext {
   findSpawnTile(map: GameMap, q: number, r: number, allowOccupied?: boolean): HexCoord;
   isWaterTerrain(terrain: TerrainType): boolean;
   hasBuilding(kind: BuildingKind, owner: number): boolean;
+
+  /** Index of the local human player (0 for host, 1 for guest in PvP) */
+  localPlayerIndex: number;
 }
 
 // Forward-declare imported types used in GameContext

@@ -149,7 +149,7 @@ class Cubitopia {
   private gameSpeed = 1;
   private gameMode: 'pvai' | 'aivai' | 'ffa' | '2v2' | 'pvp' = 'pvai';
   /** In multiplayer PvP, which player index (0 or 1) the local client controls */
-  private _localPlayerIndex: number = 0;
+  _localPlayerIndex: number = 0;
   /** Map seed override for deterministic multiplayer maps (null = random) */
   private _mapSeedOverride: number | null = null;
 
@@ -1150,6 +1150,7 @@ class Cubitopia {
         const building = self.buildingSystem.getFirstBuilding(kind, owner);
         return building !== null;
       },
+      get localPlayerIndex() { return self._localPlayerIndex; },
     };
   }
 
@@ -1349,36 +1350,32 @@ class Cubitopia {
       demolishWall: (coord) => {
         const key = `${coord.q},${coord.r}`;
         if (!this.wallSystem.wallsBuilt.has(key)) return;
-        // Eject any garrison (shouldn't have any now, but safety)
+        const lp = this._localPlayerIndex;
         this.garrisonSystem.onStructureDestroyed(key);
-        // Refund stone
         const refund = GAME_CONFIG.defenses.wall.cost.stone;
-        this.stoneStockpile[0] += refund;
-        this.players[0].resources.stone += refund;
-        // Remove the wall
+        this.stoneStockpile[lp] += refund;
+        this.players[lp].resources.stone += refund;
         this.wallSystem.damageWall(coord, 9999);
         this.garrisonSystem.markNetworkDirty();
         this.sound.play('wall_destroy', 0.4);
         this.hud.showNotification(`Wall demolished (+${refund} stone)`, '#c0392b');
-        this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]);
       },
       demolishGate: (coord) => {
         const key = `${coord.q},${coord.r}`;
         if (!this.wallSystem.gatesBuilt.has(key)) return;
-        // Eject garrisoned units first
+        const lp = this._localPlayerIndex;
         const ejected = this.garrisonSystem.onStructureDestroyed(key);
         if (ejected.length > 0) {
           this.hud.showNotification(`${ejected.length} unit(s) ejected from gate`, '#e67e22');
         }
-        // Refund stone
         const refund = GAME_CONFIG.defenses.gate.cost.stone;
-        this.stoneStockpile[0] += refund;
-        this.players[0].resources.stone += refund;
-        // Remove the gate
+        this.stoneStockpile[lp] += refund;
+        this.players[lp].resources.stone += refund;
         this.wallSystem.damageGate(coord, 9999);
         this.garrisonSystem.markNetworkDirty();
         this.hud.showNotification(`Gate demolished (+${refund} stone)`, '#c0392b');
-        this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]);
       },
       getScene: () => this.renderer.scene,
       setUnitStance: (unitId, stance) => {
@@ -1660,8 +1657,8 @@ class Cubitopia {
       addTradeGold: (owner, amount) => {
         this.goldStockpile[owner] += amount;
         this.players[owner].resources.gold += amount;
-        if (owner === 0) {
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        if (owner === this._localPlayerIndex) {
+          this.hud.updateResources(this.players[owner], this.woodStockpile[owner], this.foodStockpile[owner], this.stoneStockpile[owner]);
         }
       },
       triggerSpeechBubble: (unitId, unitType, context) => this.unitRenderer.triggerSpeechBubble(unitId, unitType, context),
@@ -3331,9 +3328,12 @@ class Cubitopia {
       market: 3,
     };
     const refund = refunds[pb.kind] ?? 3;
-    this.woodStockpile[0] += refund;
-    this.players[0].resources.wood += refund;
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+    const demolishOwner = pb.owner;
+    this.woodStockpile[demolishOwner] += refund;
+    this.players[demolishOwner].resources.wood += refund;
+    if (demolishOwner === this._localPlayerIndex) {
+      this.hud.updateResources(this.players[demolishOwner], this.woodStockpile[demolishOwner], this.foodStockpile[demolishOwner], this.stoneStockpile[demolishOwner]);
+    }
     this.buildingSystem.unregisterBuilding(pb);
     this.hud.showNotification(`${pb.kind.charAt(0).toUpperCase() + pb.kind.slice(1)} demolished. Refunded ${refund} wood.`);
   }
@@ -3342,7 +3342,7 @@ class Cubitopia {
   private captureNearestZoneWithSelected(): void {
     if (!this.currentMap) return;
     const selected = this.selectionManager.getSelectedUnits().filter(
-      u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
+      u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
     );
     if (selected.length === 0) {
       this.hud.showNotification('No combat units selected!', '#e74c3c');
@@ -3387,7 +3387,7 @@ class Cubitopia {
     const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
-      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+      : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
 
     if (units.length === 0) {
       this.hud.showNotification('No combat units available!', '#e74c3c');
@@ -3409,7 +3409,7 @@ class Cubitopia {
     const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
-      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+      : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
 
     if (units.length === 0) {
       this.hud.showNotification('No combat units available!', '#e74c3c');
@@ -3433,7 +3433,7 @@ class Cubitopia {
     const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
-      : this.allUnits.filter(u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
+      : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
 
     if (units.length === 0) {
       this.hud.showNotification('No combat units available!', '#e74c3c');
@@ -3673,14 +3673,18 @@ class Cubitopia {
       const buildingKey = parts[1];
       const unitName = parts[2];
       const unitType = (UnitType as any)[unitName] as UnitType;
-      if (unitType === undefined) return;
+      if (unitType === undefined) {
+        console.warn(`[MenuAction] Unknown unit type: ${unitName}`);
+        return;
+      }
 
+      console.log(`[MenuAction] spawn: building=${buildingKey} unit=${unitType} localPlayer=${this._localPlayerIndex} isMP=${this.multiplayer.commandQueue.isMultiplayer}`);
       // Route through command queue so both peers execute the spawn
       this.enqueueCommand(NetCommandType.QUEUE_UNIT, { unitType, buildingKind: buildingKey });
     } else if (parts[0] === 'craft') {
-      if (parts[1] === 'rope') { this.resourceManager.craftRope(); this.sound.play('craft_confirm', 0.5); }
-      else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(); this.sound.play('craft_confirm', 0.5); }
-      else if (parts[1] === 'charcoal') { this.resourceManager.craftCharcoal(); this.sound.play('craft_confirm', 0.5); }
+      if (parts[1] === 'rope') { this.resourceManager.craftRope(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
+      else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
+      else if (parts[1] === 'charcoal') { this.resourceManager.craftCharcoal(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
     } else if (parts[0] === 'action') {
       if (parts[1] === 'harvest') this.toggleHarvestMode();
       else if (parts[1] === 'mine') this.toggleMineMode();
@@ -3688,7 +3692,7 @@ class Cubitopia {
       else if (parts[1] === 'farmPatch') this.toggleFarmPatchMode();
       else if (parts[1] === 'plantTree') this.togglePlantTreeMode();
       else if (parts[1] === 'plantCrops') this.togglePlantCropsMode();
-      else if (parts[1] === 'sellWood') this.resourceManager.doSellWood();
+      else if (parts[1] === 'sellWood') this.resourceManager.doSellWood(this._localPlayerIndex);
     }
   }
 
@@ -3759,8 +3763,8 @@ class Cubitopia {
       + GameRNG.rng.nextRange(0, GAME_CONFIG.economy.harvest.grass.fiberVariance - 1); // 1-2 fiber
     this.grassFiberStockpile[unit.owner] += fiberYield;
     this.players[unit.owner].resources.grass_fiber += fiberYield;
-    if (unit.owner === 0) {
-      this.hud.showNotification(`🌿 +${fiberYield} grass fiber`, '#8bc34a');
+    if (unit.owner === this._localPlayerIndex) {
+      this.hud.showNotification(`+${fiberYield} grass fiber`, '#8bc34a');
     }
 
     // Load food (hay) onto the unit
@@ -3858,24 +3862,33 @@ class Cubitopia {
   /** Spawn a unit for the given owner — called from CommandBridge for QUEUE_UNIT commands.
    *  Handles resource deduction, unit creation, and game registration for any player. */
   private spawnUnitForOwner(unitType: UnitType, buildingKind: BuildingKind, owner: number): void {
-    if (!this.currentMap) return;
+    console.log(`[Spawn] spawnUnitForOwner: type=${unitType} building=${buildingKind} owner=${owner} hasMap=${!!this.currentMap}`);
+    if (!this.currentMap) { console.warn('[Spawn] ABORT: no map'); return; }
     const building = this.buildingSystem.getFirstBuilding(buildingKind, owner);
-    if (!building) return;
+    if (!building) {
+      console.warn(`[Spawn] ABORT: no ${buildingKind} for owner=${owner}. Buildings:`, this.buildingSystem.placedBuildings.map(b => `${b.kind}(owner=${b.owner})`).join(', '));
+      return;
+    }
 
     // Deduct cost based on unit type config
     const unitCfg = GAME_CONFIG.units[unitType];
-    if (!unitCfg) return;
+    if (!unitCfg) { console.warn(`[Spawn] ABORT: no config for unitType=${unitType}`); return; }
     const costs = (unitCfg.costs as any)?.tooltipQueue ?? (unitCfg.costs as any)?.menu ?? (unitCfg.costs as any)?.playerQueue;
-    if (!costs) return;
+    if (!costs) { console.warn(`[Spawn] ABORT: no costs for ${unitType}`); return; }
 
     const skipCost = this.hud.debugFlags.freeBuild;
+    console.log(`[Spawn] costs=`, JSON.stringify(costs), `owner=${owner} resources=`, JSON.stringify({
+      gold: this.players[owner]?.resources.gold, wood: this.woodStockpile[owner],
+      stone: this.stoneStockpile[owner], steel: this.steelStockpile[owner],
+      crystal: this.players[owner]?.resources.crystal, rope: this.ropeStockpile[owner],
+    }), `skipCost=${skipCost}`);
     if (!skipCost) {
-      if (costs.gold && this.players[owner].resources.gold < costs.gold) return;
-      if (costs.wood && this.woodStockpile[owner] < costs.wood) return;
-      if (costs.stone && this.stoneStockpile[owner] < costs.stone) return;
-      if (costs.steel && this.steelStockpile[owner] < costs.steel) return;
-      if (costs.crystal && this.players[owner].resources.crystal < costs.crystal) return;
-      if (costs.rope && this.ropeStockpile[owner] < costs.rope) return;
+      if (costs.gold && this.players[owner].resources.gold < costs.gold) { console.warn(`[Spawn] ABORT: not enough gold`); return; }
+      if (costs.wood && this.woodStockpile[owner] < costs.wood) { console.warn(`[Spawn] ABORT: not enough wood`); return; }
+      if (costs.stone && this.stoneStockpile[owner] < costs.stone) { console.warn(`[Spawn] ABORT: not enough stone`); return; }
+      if (costs.steel && this.steelStockpile[owner] < costs.steel) { console.warn(`[Spawn] ABORT: not enough steel`); return; }
+      if (costs.crystal && this.players[owner].resources.crystal < costs.crystal) { console.warn(`[Spawn] ABORT: not enough crystal`); return; }
+      if (costs.rope && this.ropeStockpile[owner] < costs.rope) { console.warn(`[Spawn] ABORT: not enough rope`); return; }
 
       if (costs.gold) {
         this.players[owner].resources.gold -= costs.gold;
@@ -3996,10 +4009,11 @@ class Cubitopia {
     if (this.natureSystem.treeAge.has(key)) return; // Already has a tree/sapling
 
     // Cost 1 wood
-    if (this.woodStockpile[0] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
-    this.woodStockpile[0] -= GAME_CONFIG.economy.harvest.tree.plantCost.wood;
-    this.players[0].resources.wood = Math.max(0, this.players[0].resources.wood - GAME_CONFIG.economy.harvest.tree.plantCost.wood);
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+    const lp = this._localPlayerIndex;
+    if (this.woodStockpile[lp] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
+    this.woodStockpile[lp] -= GAME_CONFIG.economy.harvest.tree.plantCost.wood;
+    this.players[lp].resources.wood = Math.max(0, this.players[lp].resources.wood - GAME_CONFIG.economy.harvest.tree.plantCost.wood);
+    this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]);
 
     // Sprout a sapling
     tile.terrain = TerrainType.FOREST;
@@ -4138,7 +4152,7 @@ class Cubitopia {
 
   private setSelectedSquadObjective(objective: 'CAPTURE' | 'ASSAULT' | null): void {
     const selected = this.selectionManager.getSelectedUnits().filter(
-      u => u.owner === 0 && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
+      u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u)
     );
     if (selected.length === 0) {
       this.hud.showNotification('No combat units selected!', '#e74c3c');

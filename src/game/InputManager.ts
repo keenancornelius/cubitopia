@@ -57,7 +57,7 @@ export class InputManager {
     this.hud.onBuildWalls(() => this.game.toggleBuildMode());
     this.hud.onHarvest(() => this.game.toggleHarvestMode());
     this.hud.onMine(() => this.game.toggleMineMode());
-    this.hud.onSellWood(() => this.game.resourceManager.doSellWood());
+    this.hud.onSellWood(() => this.game.resourceManager.doSellWood(this.game._localPlayerIndex));
     this.hud.onFarmPatch(() => this.game.toggleFarmPatchMode());
     this.hud.onHelp(() =>
       this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp()
@@ -523,7 +523,7 @@ export class InputManager {
       if (e.key === 'j' || e.key === 'J')
         globalAction(() => this.game.toggleFarmPatchMode());
       if (e.key === 'g' || e.key === 'G')
-        globalAction(() => this.game.resourceManager.doSellWood());
+        globalAction(() => this.game.resourceManager.doSellWood(this.game._localPlayerIndex));
 
       if (e.key === '`') {
         this.debugPanel.setUnits(this.game.allUnits);

@@ -47,7 +47,7 @@ class ResourceManager {
     (this.ctx.players[unit.owner].resources as unknown as Record<string, number>)[resource] += amount;
 
     this.updateStockpileVisual(unit.owner);
-    if (unit.owner === 0) {
+    if (unit.owner === this.ctx.localPlayerIndex) {
       this.updateHUD();
       const display = RESOURCE_DISPLAY[resource];
       this.ctx.hud.showNotification(`${display.emoji} +${amount} ${display.label}`, display.color);
@@ -75,90 +75,90 @@ class ResourceManager {
     unit.carryType = ResourceType.FOOD;
   }
 
-  craftRope(): void {
+  craftRope(owner = 0): void {
     const fiberNeeded = GAME_CONFIG.economy.recipes.rope.input.grass_fiber;
     const clayNeeded = GAME_CONFIG.economy.recipes.rope.input.clay;
-    if (this.ctx.grassFiberStockpile[0] < fiberNeeded || this.ctx.clayStockpile[0] < clayNeeded) {
+    if (this.ctx.grassFiberStockpile[owner] < fiberNeeded || this.ctx.clayStockpile[owner] < clayNeeded) {
       this.ctx.hud.showNotification(
-        `⚠️ Need ${fiberNeeded} grass fiber + ${clayNeeded} clay to craft rope! (have ${this.ctx.grassFiberStockpile[0]} fiber, ${this.ctx.clayStockpile[0]} clay)`,
+        `Need ${fiberNeeded} grass fiber + ${clayNeeded} clay to craft rope! (have ${this.ctx.grassFiberStockpile[owner]} fiber, ${this.ctx.clayStockpile[owner]} clay)`,
         '#e67e22'
       );
       return;
     }
-    this.ctx.grassFiberStockpile[0] -= fiberNeeded;
-    this.ctx.players[0].resources.grass_fiber -= fiberNeeded;
-    this.ctx.clayStockpile[0] -= clayNeeded;
-    this.ctx.players[0].resources.clay -= clayNeeded;
-    this.ctx.ropeStockpile[0] += GAME_CONFIG.economy.recipes.rope.output.rope;
-    this.ctx.players[0].resources.rope += GAME_CONFIG.economy.recipes.rope.output.rope;
+    this.ctx.grassFiberStockpile[owner] -= fiberNeeded;
+    this.ctx.players[owner].resources.grass_fiber -= fiberNeeded;
+    this.ctx.clayStockpile[owner] -= clayNeeded;
+    this.ctx.players[owner].resources.clay -= clayNeeded;
+    this.ctx.ropeStockpile[owner] += GAME_CONFIG.economy.recipes.rope.output.rope;
+    this.ctx.players[owner].resources.rope += GAME_CONFIG.economy.recipes.rope.output.rope;
     this.updateHUD();
-    this.ctx.hud.showNotification(`🪢 Crafted ${GAME_CONFIG.economy.recipes.rope.output.rope} rope (${this.ctx.ropeStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`Crafted ${GAME_CONFIG.economy.recipes.rope.output.rope} rope (${this.ctx.ropeStockpile[owner]} total)`, '#2ecc71');
   }
 
-  craftCharcoal(): void {
+  craftCharcoal(owner = 0): void {
     const woodNeeded = GAME_CONFIG.economy.recipes.charcoal.input.wood;
     const clayNeeded = GAME_CONFIG.economy.recipes.charcoal.input.clay;
-    if (this.ctx.woodStockpile[0] < woodNeeded || this.ctx.clayStockpile[0] < clayNeeded) {
+    if (this.ctx.woodStockpile[owner] < woodNeeded || this.ctx.clayStockpile[owner] < clayNeeded) {
       this.ctx.hud.showNotification(
-        `⚠️ Need ${woodNeeded} wood + ${clayNeeded} clay to craft charcoal! (have ${this.ctx.woodStockpile[0]} wood, ${this.ctx.clayStockpile[0]} clay)`,
+        `Need ${woodNeeded} wood + ${clayNeeded} clay to craft charcoal! (have ${this.ctx.woodStockpile[owner]} wood, ${this.ctx.clayStockpile[owner]} clay)`,
         '#e67e22'
       );
       return;
     }
-    this.ctx.woodStockpile[0] -= woodNeeded;
-    this.ctx.players[0].resources.wood -= woodNeeded;
-    this.ctx.clayStockpile[0] -= clayNeeded;
-    this.ctx.players[0].resources.clay -= clayNeeded;
-    this.ctx.charcoalStockpile[0] += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
-    this.ctx.players[0].resources.charcoal += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
+    this.ctx.woodStockpile[owner] -= woodNeeded;
+    this.ctx.players[owner].resources.wood -= woodNeeded;
+    this.ctx.clayStockpile[owner] -= clayNeeded;
+    this.ctx.players[owner].resources.clay -= clayNeeded;
+    this.ctx.charcoalStockpile[owner] += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
+    this.ctx.players[owner].resources.charcoal += GAME_CONFIG.economy.recipes.charcoal.output.charcoal;
     this.updateHUD();
-    this.ctx.hud.showNotification(`⚫ Crafted ${GAME_CONFIG.economy.recipes.charcoal.output.charcoal} charcoal (${this.ctx.charcoalStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`Crafted ${GAME_CONFIG.economy.recipes.charcoal.output.charcoal} charcoal (${this.ctx.charcoalStockpile[owner]} total)`, '#2ecc71');
   }
 
-  smeltSteel(): void {
+  smeltSteel(owner = 0): void {
     const ironNeeded = GAME_CONFIG.economy.recipes.steel.input.iron;
     const charcoalNeeded = GAME_CONFIG.economy.recipes.steel.input.charcoal;
 
     // Check if smelter building exists
-    const hasSmelter = this.ctx.hasBuilding('smelter', 0);
+    const hasSmelter = this.ctx.hasBuilding('smelter', owner);
     if (!hasSmelter) {
       this.ctx.hud.showNotification(
-        `⚠️ You need a smelter building to smelt steel!`,
+        `You need a smelter building to smelt steel!`,
         '#e67e22'
       );
       return;
     }
 
-    if (this.ctx.ironStockpile[0] < ironNeeded || this.ctx.charcoalStockpile[0] < charcoalNeeded) {
+    if (this.ctx.ironStockpile[owner] < ironNeeded || this.ctx.charcoalStockpile[owner] < charcoalNeeded) {
       this.ctx.hud.showNotification(
-        `⚠️ Need ${ironNeeded} iron + ${charcoalNeeded} charcoal to smelt steel! (have ${this.ctx.ironStockpile[0]} iron, ${this.ctx.charcoalStockpile[0]} charcoal)`,
+        `Need ${ironNeeded} iron + ${charcoalNeeded} charcoal to smelt steel! (have ${this.ctx.ironStockpile[owner]} iron, ${this.ctx.charcoalStockpile[owner]} charcoal)`,
         '#e67e22'
       );
       return;
     }
-    this.ctx.ironStockpile[0] -= ironNeeded;
-    this.ctx.players[0].resources.iron -= ironNeeded;
-    this.ctx.charcoalStockpile[0] -= charcoalNeeded;
-    this.ctx.players[0].resources.charcoal -= charcoalNeeded;
-    this.ctx.steelStockpile[0] += GAME_CONFIG.economy.recipes.steel.output.steel;
-    this.ctx.players[0].resources.steel += GAME_CONFIG.economy.recipes.steel.output.steel;
+    this.ctx.ironStockpile[owner] -= ironNeeded;
+    this.ctx.players[owner].resources.iron -= ironNeeded;
+    this.ctx.charcoalStockpile[owner] -= charcoalNeeded;
+    this.ctx.players[owner].resources.charcoal -= charcoalNeeded;
+    this.ctx.steelStockpile[owner] += GAME_CONFIG.economy.recipes.steel.output.steel;
+    this.ctx.players[owner].resources.steel += GAME_CONFIG.economy.recipes.steel.output.steel;
     this.updateHUD();
-    this.ctx.hud.showNotification(`🔨 Smelted ${GAME_CONFIG.economy.recipes.steel.output.steel} steel (${this.ctx.steelStockpile[0]} total)`, '#2ecc71');
+    this.ctx.hud.showNotification(`Smelted ${GAME_CONFIG.economy.recipes.steel.output.steel} steel (${this.ctx.steelStockpile[owner]} total)`, '#2ecc71');
   }
 
-  doSellWood(): void {
+  doSellWood(owner = 0): void {
     const woodCost = GAME_CONFIG.economy.trade.sellWood.input.wood;
     const goldGain = GAME_CONFIG.economy.trade.sellWood.output.gold;
-    if (this.ctx.woodStockpile[0] >= woodCost) {
-      this.ctx.woodStockpile[0] -= woodCost;
-      this.ctx.players[0].resources.wood -= woodCost;
-      this.ctx.goldStockpile[0] += goldGain;
-      this.ctx.players[0].resources.gold += goldGain;
+    if (this.ctx.woodStockpile[owner] >= woodCost) {
+      this.ctx.woodStockpile[owner] -= woodCost;
+      this.ctx.players[owner].resources.wood -= woodCost;
+      this.ctx.goldStockpile[owner] += goldGain;
+      this.ctx.players[owner].resources.gold += goldGain;
       this.updateHUD();
-      this.updateStockpileVisual(0);
-      this.ctx.hud.showNotification(`💰 Sold ${woodCost} wood → ${goldGain} gold`, '#2ecc71');
+      this.updateStockpileVisual(owner);
+      this.ctx.hud.showNotification(`Sold ${woodCost} wood -> ${goldGain} gold`, '#2ecc71');
     } else {
-      this.ctx.hud.showNotification(`⚠️ Need ${woodCost} wood to sell! (have ${this.ctx.woodStockpile[0]})`, '#e67e22');
+      this.ctx.hud.showNotification(`Need ${woodCost} wood to sell! (have ${this.ctx.woodStockpile[owner]})`, '#e67e22');
     }
   }
 
@@ -268,11 +268,12 @@ class ResourceManager {
   }
 
   updateHUD(): void {
+    const lp = this.ctx.localPlayerIndex;
     this.ctx.hud.updateResources(
-      this.ctx.players[0],
-      this.ctx.woodStockpile[0],
-      this.ctx.foodStockpile[0],
-      this.ctx.stoneStockpile[0]
+      this.ctx.players[lp],
+      this.ctx.woodStockpile[lp],
+      this.ctx.foodStockpile[lp],
+      this.ctx.stoneStockpile[lp]
     );
   }
 
