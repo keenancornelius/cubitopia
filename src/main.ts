@@ -2935,7 +2935,7 @@ class Cubitopia {
     // Both clients accumulate real time, then step simulation in identical
     // fixed-size increments so frame-rate differences don't cause desync.
     if (this.multiplayer.commandQueue.isMultiplayer) {
-      const TICK_RATE = 1 / 10; // 10 ticks per second (100ms per tick)
+      const TICK_RATE = 1 / 20; // 20 ticks per second (50ms per tick)
       this._mpTickAccumulator += delta;
       while (this._mpTickAccumulator >= TICK_RATE) {
         this._mpTickAccumulator -= TICK_RATE;
