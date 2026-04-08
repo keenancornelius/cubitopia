@@ -1850,7 +1850,7 @@ class Cubitopia {
       return {
         units: this.allUnits
           .filter(u => u.currentHealth > 0)
-          .map(u => ({ id: u.id, position: u.position, currentHealth: u.currentHealth, state: u.state })),
+          .map(u => ({ id: u.id, position: u.position, currentHealth: u.currentHealth, state: u.state, type: u.type, owner: u.owner })),
         p1Resources: p0 ? p0.resources : {},
         p2Resources: p1 ? p1.resources : {},
       };

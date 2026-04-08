@@ -246,6 +246,8 @@ export interface GameStateHash {
   unitCount: number;   // Quick sanity check
   p1Resources: number; // Sum of player 1 resources
   p2Resources: number; // Sum of player 2 resources
+  /** Per-unit state snapshot (only sent on first desync for debugging) */
+  unitDetails?: string;
 }
 
 // ============================================
@@ -276,9 +278,10 @@ export function crc32(str: string): number {
  */
 export function computeStateHash(
   tick: number,
-  units: Array<{ id: string; position: { q: number; r: number }; currentHealth: number; state: string }>,
+  units: Array<{ id: string; position: { q: number; r: number }; currentHealth: number; state: string; type?: string; owner?: number }>,
   p1Resources: Record<string, number>,
   p2Resources: Record<string, number>,
+  includeDetails = false,
 ): GameStateHash {
   // Sort units by ID for deterministic ordering
   const sorted = [...units].sort((a, b) => a.id.localeCompare(b.id));
@@ -293,11 +296,20 @@ export function computeStateHash(
   const p2Sum = Object.values(p2Resources).reduce((a, b) => a + b, 0);
   stateStr += `r1:${p1Sum}|r2:${p2Sum}`;
 
+  // Build per-unit detail string for desync debugging
+  let unitDetails: string | undefined;
+  if (includeDetails) {
+    unitDetails = sorted
+      .map(u => `${u.id}[${u.type ?? '?'}p${u.owner ?? '?'}]@${u.position.q},${u.position.r} hp=${u.currentHealth} st=${u.state}`)
+      .join('\n');
+  }
+
   return {
     tick,
     hash: crc32(stateStr),
     unitCount: sorted.length,
     p1Resources: p1Sum,
     p2Resources: p2Sum,
+    unitDetails,
   };
 }
