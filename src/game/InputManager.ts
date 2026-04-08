@@ -752,7 +752,7 @@ export class InputManager {
           if (foundPB) {
             // Enemy building with units selected = crosshair, otherwise pointer for info
             this.container.style.cursor =
-              selected.length > 0 && foundPB.owner !== 0
+              selected.length > 0 && foundPB.owner !== this.game._localPlayerIndex
                 ? 'crosshair'
                 : 'pointer';
             if (hoveredEnemyId) {
@@ -787,7 +787,7 @@ export class InputManager {
           }
           if (foundBase && !foundBase.destroyed) {
             this.container.style.cursor =
-              selected.length > 0 && foundBase.owner !== 0
+              selected.length > 0 && foundBase.owner !== this.game._localPlayerIndex
                 ? 'crosshair'
                 : 'pointer';
             if (hoveredEnemyId) {
@@ -1009,7 +1009,7 @@ export class InputManager {
             obj = obj.parent;
           }
           if (clickedPB) {
-            if (clickedPB.owner === 0) {
+            if (clickedPB.owner === this.game._localPlayerIndex) {
               // Friendly building — show full tooltip with queue/demolish
               this.game.tooltipController.showTooltip(
                 clickedPB,
@@ -1049,7 +1049,7 @@ export class InputManager {
             hitObj = hitObj.parent;
           }
           if (clickedBase && !clickedBase.destroyed) {
-            const isOwn = clickedBase.owner === 0;
+            const isOwn = clickedBase.owner === this.game._localPlayerIndex;
             this.game.tooltipController.showBaseTooltip(
               clickedBase,
               isOwn,
@@ -1112,7 +1112,7 @@ export class InputManager {
                 ? WallSystem.WALL_MAX_HP
                 : WallSystem.GATE_MAX_HP;
 
-            if (owner === 0) {
+            if (owner === this.game._localPlayerIndex) {
               this.game.tooltipController.showWallGateTooltip(
                 foundKey,
                 foundType,
@@ -1133,7 +1133,7 @@ export class InputManager {
       if (clickedUnit) {
         this.game.tooltipController.showUnitTooltip(clickedUnit, e.clientX, e.clientY);
         // Hide the simpler HUD selection panel for single-unit clicks — the PIP tooltip is richer
-        if (clickedUnit.owner === 0) {
+        if (clickedUnit.owner === this.game._localPlayerIndex) {
           this.hud.hideSelectionInfo();
         }
         return;

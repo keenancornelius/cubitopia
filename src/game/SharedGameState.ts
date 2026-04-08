@@ -106,6 +106,8 @@ export class SharedGameState {
   moraleModifiers: number[] = [1.0, 1.0];
   /** Arena mode: all units seek and destroy */
   arenaMode: boolean = false;
+  /** Index of the local (human) player — 0 for host, 1 for guest */
+  localPlayerIndex: number = 0;
 
   // ── System references ────────────────────────────────────────
   /** Squad coordination manager */

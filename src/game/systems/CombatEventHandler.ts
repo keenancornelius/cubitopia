@@ -19,6 +19,7 @@ export interface CombatEventOps {
   getPlayers(): Player[];
   getAllUnits(): Unit[];
   getDebugFlags(): { godMode: boolean; disableCombat: boolean; disableBuild: boolean; disableChop: boolean; disableDeposit: boolean; disableMine: boolean; disableHarvest: boolean };
+  getLocalPlayerIndex(): number;
 
   // Stockpiles (for HUD resource update)
   getWoodStockpile(): number[];
@@ -177,7 +178,8 @@ export default class CombatEventHandler {
       if (dist <= cfg.proximityRadius) {
         // Award trade gold!
         this.ops.addTradeGold(unit.owner, cfg.goldPerDelivery);
-        if (unit.owner === 0) {
+        // Show notification only for the local player
+        if (unit.owner === this.ops.getLocalPlayerIndex()) {
           this.ops.showNotification(`🔄 +${cfg.goldPerDelivery} trade gold`, '#ffd700');
         }
         return; // only one bonus per delivery
@@ -190,17 +192,18 @@ export default class CombatEventHandler {
     const ops = this.ops;
     const debugFlags = ops.getDebugFlags();
 
+    const localPlayerIndex = ops.getLocalPlayerIndex();
     for (const event of events) {
-      // ─── God mode: prevent player units (owner 0) from dying/taking damage ───
+      // ─── God mode: prevent local player units from dying/taking damage ───
       if (debugFlags.godMode) {
-        if (event.type === 'unit:killed' && event.unit && event.unit.owner === 0) {
+        if (event.type === 'unit:killed' && event.unit && event.unit.owner === localPlayerIndex) {
           event.unit.currentHealth = event.unit.stats.maxHealth;
           continue;
         }
-        if (event.type === 'combat' && event.defender && event.defender.owner === 0) {
+        if (event.type === 'combat' && event.defender && event.defender.owner === localPlayerIndex) {
           event.defender.currentHealth = event.defender.stats.maxHealth;
         }
-        if (event.type === 'combat' && event.attacker && event.attacker.owner === 0) {
+        if (event.type === 'combat' && event.attacker && event.attacker.owner === localPlayerIndex) {
           event.attacker.currentHealth = event.attacker.stats.maxHealth;
         }
       }
@@ -214,9 +217,9 @@ export default class CombatEventHandler {
             : GAME_CONFIG.economy.trade.combatRewards.unitKillGold;
           ops.getGoldStockpile()[killerOwner] += goldReward;
           ops.getPlayers()[killerOwner].resources.gold += goldReward;
-          if (killerOwner === 0) {
+          if (killerOwner === localPlayerIndex) {
             ops.showNotification(`💰 +${goldReward} gold`, '#FFD700');
-            ops.updateResources(ops.getPlayers()[0], ops.getWoodStockpile()[0], ops.getFoodStockpile()[0], ops.getStoneStockpile()[0]);
+            ops.updateResources(ops.getPlayers()[localPlayerIndex], ops.getWoodStockpile()[localPlayerIndex], ops.getFoodStockpile()[localPlayerIndex], ops.getStoneStockpile()[localPlayerIndex]);
           }
         }
 

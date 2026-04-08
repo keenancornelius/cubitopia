@@ -312,7 +312,7 @@ export default class BuildingTooltipController {
     `;
 
     const kindLabel = pb.kind.charAt(0).toUpperCase() + pb.kind.slice(1);
-    const ownerLabel = pb.owner === 0 ? 'Player' : `AI ${pb.owner}`;
+    const ownerLabel = pb.owner === this.ctx.localPlayerIndex ? 'Player' : (this.ctx.players[pb.owner]?.isAI ? `AI ${pb.owner}` : 'Enemy');
     const hpPct = Math.round((pb.health / pb.maxHealth) * 100);
     const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
 
@@ -324,7 +324,7 @@ export default class BuildingTooltipController {
 
     // ── Unit queue section (QWERTY keys) ──
     const queueBtns = this.ops.getBuildingQueueOptions(pb.kind);
-    if (queueBtns.length > 0 && pb.owner === 0) {
+    if (queueBtns.length > 0 && pb.owner === this.ctx.localPlayerIndex) {
       html += DIV();
       html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family};letter-spacing:0.5px;text-transform:uppercase">Queue Units</div>`;
       const qwertyKeys = ['Q', 'W', 'E', 'R', 'T', 'Y'];
@@ -339,7 +339,7 @@ export default class BuildingTooltipController {
     }
 
     // ── Actions section (F = Rally, X = Demolish) ──
-    if (pb.owner === 0) {
+    if (pb.owner === this.ctx.localPlayerIndex) {
       html += DIV();
       html += `<div style="font-size:${FONT.xs};color:${COLORS.textMuted};margin-bottom:4px;font-family:${FONT.family};letter-spacing:0.5px;text-transform:uppercase">Actions</div>`;
       html += `<div style="display:flex;gap:4px;flex-wrap:wrap">`;
@@ -356,7 +356,7 @@ export default class BuildingTooltipController {
     // Only show for combat-producing buildings (not farmhouse/forestry/masonry)
     const COMBAT_BUILDINGS: Set<string> = new Set(['barracks', 'armory', 'wizard_tower', 'workshop']);
     const buildingHexKey = `${pb.position.q},${pb.position.r}`;
-    if (pb.owner === 0 && COMBAT_BUILDINGS.has(pb.kind)) {
+    if (pb.owner === this.ctx.localPlayerIndex && COMBAT_BUILDINGS.has(pb.kind)) {
       const SQ_LABELS = ['A', 'S', 'D', 'F', 'G'];
       const squads = this.ops.getSquadSlots();
       const curSquad = this.ops.getBuildingSquadAssignment(buildingHexKey);
@@ -413,7 +413,7 @@ export default class BuildingTooltipController {
     // ── Garrison section (G = Garrison, U = Ungarrison) ──
     const structKey = buildingHexKey;
     const garrisonInfo = this.ops.getGarrisonInfo(structKey);
-    if (pb.owner === 0) {
+    if (pb.owner === this.ctx.localPlayerIndex) {
       html += DIV();
       const gCount = garrisonInfo?.current ?? 0;
       const gMax = garrisonInfo?.max ?? 10;
@@ -523,7 +523,7 @@ export default class BuildingTooltipController {
 
       // QWERTY → queue unit
       const qIdx = qwertyKeys.indexOf(key);
-      if (qIdx >= 0 && qIdx < queueBtns.length && pb.owner === 0) {
+      if (qIdx >= 0 && qIdx < queueBtns.length && pb.owner === this.ctx.localPlayerIndex) {
         e.preventDefault();
         e.stopPropagation();
         this.ops.queueUnit(queueBtns[qIdx].type, pb.kind);
@@ -540,7 +540,7 @@ export default class BuildingTooltipController {
       }
 
       // X → Demolish (player only)
-      if (key === 'X' && pb.owner === 0) {
+      if (key === 'X' && pb.owner === this.ctx.localPlayerIndex) {
         e.preventDefault();
         e.stopPropagation();
         this.ops.demolishBuilding(pb);
@@ -549,7 +549,7 @@ export default class BuildingTooltipController {
       }
 
       // G → Garrison selected (player only)
-      if (key === 'G' && pb.owner === 0) {
+      if (key === 'G' && pb.owner === this.ctx.localPlayerIndex) {
         e.preventDefault();
         e.stopPropagation();
         this.ops.garrisonSelected(structKey);
@@ -558,7 +558,7 @@ export default class BuildingTooltipController {
       }
 
       // U → Ungarrison (player only, if units inside)
-      if (key === 'U' && pb.owner === 0 && garrisonInfo && garrisonInfo.current > 0) {
+      if (key === 'U' && pb.owner === this.ctx.localPlayerIndex && garrisonInfo && garrisonInfo.current > 0) {
         e.preventDefault();
         e.stopPropagation();
         this.ops.ungarrisonStructure(structKey);
@@ -681,7 +681,7 @@ export default class BuildingTooltipController {
     this.hideTooltip();
 
     const isNeutralBase = base.owner >= this.ctx.players.length;
-    const borderColor = isOwn ? getPlayerCSS(0) : (isNeutralBase ? '#d4af37' : getPlayerCSS(base.owner));
+    const borderColor = isOwn ? getPlayerCSS(this.ctx.localPlayerIndex) : (isNeutralBase ? '#d4af37' : getPlayerCSS(base.owner));
     const bgColor = isOwn ? 'rgba(15,20,30,0.95)' : (isNeutralBase ? 'rgba(30,25,10,0.95)' : 'rgba(30,15,15,0.95)');
 
     const el = document.createElement('div');
@@ -698,10 +698,12 @@ export default class BuildingTooltipController {
       ownerLabel = '<span style="color:#d4af37">Neutral (Capturable)</span>';
     } else if (isOwn) {
       nameLabel = '🏰 Your Base';
-      ownerLabel = `<span style="color:${getPlayerCSS(0)}">Player</span>`;
+      ownerLabel = `<span style="color:${getPlayerCSS(this.ctx.localPlayerIndex)}">Player</span>`;
     } else {
-      nameLabel = '🏰 Enemy Base';
-      ownerLabel = `<span style="color:${getPlayerCSS(base.owner)}">Enemy (AI ${base.owner})</span>`;
+      const isEnemyAI = this.ctx.players[base.owner]?.isAI;
+      const enemyLabel = isEnemyAI ? `AI ${base.owner}` : 'Enemy';
+      nameLabel = `🏰 ${enemyLabel} Base`;
+      ownerLabel = `<span style="color:${getPlayerCSS(base.owner)}">${enemyLabel}</span>`;
     }
 
     const K = BuildingTooltipController.keyBadge;
@@ -720,7 +722,7 @@ export default class BuildingTooltipController {
     } else if (!isOwn) {
       html += `<div style="color:${getPlayerCSS(base.owner)};font-size:11px;margin-top:4px">Capture to defeat this enemy</div>`;
     } else {
-      html += `<div style="color:${getPlayerCSS(0)};font-size:11px;margin-top:4px">Defend — losing this base means defeat</div>`;
+      html += `<div style="color:${getPlayerCSS(this.ctx.localPlayerIndex)};font-size:11px;margin-top:4px">Defend — losing this base means defeat</div>`;
     }
 
     html += DIV();
@@ -796,7 +798,7 @@ export default class BuildingTooltipController {
   ): void {
     this.hideTooltip();
 
-    const isOwn = owner === 0;
+    const isOwn = owner === this.ctx.localPlayerIndex;
     const borderColor = isOwn ? '#e67e22' : '#e74c3c';
     const bgColor = isOwn ? 'rgba(20,20,30,0.95)' : 'rgba(30,15,15,0.95)';
     const typeLabel = structureType === 'gate' ? 'Gate' : 'Wall';
@@ -813,7 +815,7 @@ export default class BuildingTooltipController {
     const B = BuildingTooltipController.btnStyle;
     const DIV = BuildingTooltipController.divider;
 
-    const ownerLabel = owner === 0 ? 'Player' : `AI ${owner}`;
+    const ownerLabel = owner === this.ctx.localPlayerIndex ? 'Player' : (this.ctx.players[owner]?.isAI ? `AI ${owner}` : 'Enemy');
     const hpPct = Math.round((health / maxHealth) * 100);
     const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
 
@@ -1045,9 +1047,9 @@ export default class BuildingTooltipController {
     const B = BuildingTooltipController.btnStyle;
     const DIV = BuildingTooltipController.divider;
 
-    const isOwn = unit.owner === 0;
+    const isOwn = unit.owner === this.ctx.localPlayerIndex;
     const isEnemy = !isOwn;
-    const borderColor = isOwn ? getPlayerCSS(0) : getPlayerCSS(unit.owner);
+    const borderColor = isOwn ? getPlayerCSS(this.ctx.localPlayerIndex) : getPlayerCSS(unit.owner);
     const bgColor = isOwn ? 'rgba(15,20,30,0.95)' : 'rgba(30,15,15,0.95)';
 
     // Position: bottom-left, snapped to the right edge of the building menu panel
@@ -1066,7 +1068,7 @@ export default class BuildingTooltipController {
     const pipContentW = 310 - 24; // 12px padding each side
 
     const typeLabel = unit.type.charAt(0).toUpperCase() + unit.type.slice(1);
-    const ownerLabel = isOwn ? 'Player' : `AI ${unit.owner}`;
+    const ownerLabel = isOwn ? 'Player' : (this.ctx.players[unit.owner]?.isAI ? `AI ${unit.owner}` : 'Enemy');
     const hpPct = Math.round((unit.currentHealth / unit.stats.maxHealth) * 100);
     const hpColor = hpPct > 60 ? '#2ecc71' : hpPct > 30 ? '#f39c12' : '#e74c3c';
 

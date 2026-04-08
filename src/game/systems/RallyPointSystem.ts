@@ -36,6 +36,9 @@ export interface RallyPointOps {
   getElevation(pos: HexCoord): number;
   getCurrentMap(): GameMap | null;
 
+  // Local player
+  getLocalPlayerIndex(): number;
+
   // Unit queries
   getPlayerUnits(owner: number): Unit[];
 }
@@ -87,11 +90,12 @@ export default class RallyPointSystem {
     this.rallyPoints.set(buildingKey, target);
 
     // Get building position for the line
+    const PLAYER_ID = this.ops.getLocalPlayerIndex();
     let buildingPos: HexCoord | null = null;
     if (buildingKey === 'base') {
-      buildingPos = this.ops.getBasePosition(0);
+      buildingPos = this.ops.getBasePosition(PLAYER_ID);
     } else {
-      const bld = this.ops.getFirstBuilding(buildingKey as BuildingKind, 0);
+      const bld = this.ops.getFirstBuilding(buildingKey as BuildingKind, PLAYER_ID);
       if (bld) buildingPos = bld.position;
     }
     if (!buildingPos) return;
@@ -161,8 +165,9 @@ export default class RallyPointSystem {
     const rally = this.getRallyPoint(buildingKey);
     if (!rally) return null;
 
-    // Gather all player 0 units within hex distance 5 of the rally point
-    const playerUnits = this.ops.getPlayerUnits(0);
+    // Gather all units of the same owner within hex distance 5 of the rally point
+    // TODO: Replace hardcoded owner with actual player context
+    const playerUnits = this.ops.getPlayerUnits(newUnit.owner);
     const nearbyUnits: Unit[] = [];
     for (const unit of playerUnits) {
       if (unit.state === UnitState.DEAD) continue;

@@ -24,6 +24,9 @@ export interface LifecycleOps {
   showNotification(msg: string, color: string): void;
   getRallyFormationSlot(buildingKey: string, unit: Unit): HexCoord | null;
 
+  // Local player
+  getLocalPlayerIndex(): number;
+
   // Population disband
   findExcessUnits(pid: number): string[];
   getUnitById(id: string): Unit | undefined;
@@ -69,7 +72,7 @@ export default class LifecycleUpdater {
         const tierNames = ['Camp', 'Fort', 'Castle', 'Citadel'];
         const tierEmojis = ['🏕️', '🏰', '👑', '🔮'];
         const msg = `${tierEmojis[evt.newTier] ?? '🏰'} Base upgraded to ${tierNames[evt.newTier]}!`;
-        if (pid === 0) {
+        if (pid === this.ops.getLocalPlayerIndex()) {
           this.ops.showNotification(msg, evt.newTier === BaseTier.CITADEL ? '#9b59b6' : '#f1c40f');
           this.ops.playSound('tier_upgrade', 0.9);
         }
@@ -89,13 +92,13 @@ export default class LifecycleUpdater {
           const elev = this.ops.getElevation(spawnCoord);
           this.ops.addUnitToWorld(reward, elev);
           base.ogresSpawned = rewardsForTier;
-          if (pid === 0) {
+          if (pid === this.ops.getLocalPlayerIndex()) {
             const notifMsg = isCitadel
               ? '⚔️ A Champion has joined your army!'
               : '👹 An Ogre has joined your army!';
             const notifColor = isCitadel ? '#f5f5f5' : '#4e342e';
             this.ops.showNotification(notifMsg, notifColor);
-            this.ops.setPlayerUnits(allUnits, 0);
+            this.ops.setPlayerUnits(allUnits, pid);
           }
           // Send reward unit to base rally point if one is set
           const rallySlot = this.ops.getRallyFormationSlot('base', reward);
@@ -119,7 +122,7 @@ export default class LifecycleUpdater {
           unit.currentHealth = 0;
           unit.state = UnitState.DEAD;
           this.ops.removeUnitFromGame(unit);
-          if (pid === 0) {
+          if (pid === this.ops.getLocalPlayerIndex()) {
             this.ops.showNotification(`⚠️ ${unit.type} disbanded — not enough food!`, '#e74c3c');
           }
           Logger.info('PopDisband', `Player ${pid} ${unit.type}(${uid}) disbanded (over food cap)`);

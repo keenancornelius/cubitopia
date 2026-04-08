@@ -581,16 +581,22 @@ export class UnitAI {
 
   /**
    * Called every tick from the main game loop. Handles autonomous behavior for
-   * player units with _playerObjective set. Groups units by squad, finds targets,
+   * local player units with _playerObjective set. Groups units by squad, finds targets,
    * dispatches idle/stuck members.
+   *
+   * @param allUnits All units in the game
+   * @param bases All bases in the game
+   * @param map Current game map
+   * @param delta Time delta in seconds
+   * @param localPlayerIndex Index of the local player (whose objectives to update)
    */
-  static updatePlayerObjectives(allUnits: Unit[], bases: Base[], map: GameMap, delta: number): void {
+  static updatePlayerObjectives(allUnits: Unit[], bases: Base[], map: GameMap, delta: number, localPlayerIndex: number = 0): void {
     UnitAI._playerObjTimer += delta;
     if (UnitAI._playerObjTimer < UnitAI.PLAYER_OBJ_INTERVAL) return;
     UnitAI._playerObjTimer = 0;
 
-    // Collect player units with objectives, grouped by squad
-    const objUnits = allUnits.filter(u => u.owner === 0 && u._playerObjective && !UnitAI.isDead(u));
+    // Collect local player units with objectives, grouped by squad
+    const objUnits = allUnits.filter(u => u.owner === localPlayerIndex && u._playerObjective && !UnitAI.isDead(u));
     if (objUnits.length === 0) return;
 
     // Group by squad ID (null squad = individual objective units grouped together)
@@ -611,7 +617,7 @@ export class UnitAI {
       const centroid: HexCoord = { q: avgQ, r: avgR };
 
       // Find the best target for this objective
-      const target = UnitAI.findPlayerObjectiveTarget(objective, centroid, bases, allUnits);
+      const target = UnitAI.findPlayerObjectiveTarget(objective, centroid, bases, allUnits, localPlayerIndex);
       if (!target) {
         // No valid target — clear objective
         for (const u of members) {
@@ -630,9 +636,9 @@ export class UnitAI {
       let currentValid = false;
       if (currentTarget) {
         if (objective === 'CAPTURE') {
-          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== 0 && !b.destroyed);
+          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== localPlayerIndex && !b.destroyed);
         } else if (objective === 'ASSAULT') {
-          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== 0 && !b.destroyed);
+          currentValid = bases.some(b => b.position.q === currentTarget.q && b.position.r === currentTarget.r && b.owner !== localPlayerIndex && !b.destroyed);
         }
       }
 
@@ -670,17 +676,19 @@ export class UnitAI {
 
   /**
    * Find the best target for a player objective, mirroring AI commander logic.
+   * @param localPlayerIndex Index of the player whose objectives we're evaluating
    */
   private static findPlayerObjectiveTarget(
     objective: 'CAPTURE' | 'ASSAULT',
     from: HexCoord,
     bases: Base[],
-    allUnits: Unit[]
+    allUnits: Unit[],
+    localPlayerIndex: number = 0
   ): Base | null {
     if (objective === 'CAPTURE') {
-      // Prioritize: nearest neutral base, then nearest enemy outpost
+      // Prioritize: nearest neutral base, then nearest enemy or owned base (not local player's owned base)
       const captureTargets = bases
-        .filter(b => b.owner !== 0 && !b.destroyed)
+        .filter(b => b.owner !== localPlayerIndex && !b.destroyed)
         .sort((a, b) => {
           // Neutral first (owner >= playerCount), then by distance
           const aN = a.owner >= UnitAI.playerCount ? 0 : 1;
@@ -690,9 +698,9 @@ export class UnitAI {
         });
       return captureTargets[0] ?? null;
     } else {
-      // ASSAULT: target the enemy capital, or nearest enemy base
+      // ASSAULT: target the enemy capital, or nearest enemy base (not owned by local player)
       const enemyBases = bases
-        .filter(b => b.owner !== 0 && b.owner < UnitAI.playerCount && !b.destroyed)
+        .filter(b => b.owner !== localPlayerIndex && b.owner < UnitAI.playerCount && !b.destroyed)
         .sort((a, b) => {
           // Capitals first (tier matters), then by distance
           const aTier = a.tier ?? 0;
@@ -983,7 +991,9 @@ export class UnitAI {
       // This keeps builders productive without requiring constant micromanagement.
       if (!UnitAI.debugFlags.disableMine) {
         // Throttled debug log — only every 5 seconds per builder
-        if (unit.owner === 0) {
+        // Only log for locally-controlled builders to reduce console spam
+        // TODO: Add localPlayerIndex parameter to static update method
+        if (unit.owner === UnitAI.state.localPlayerIndex) {
           const gf = UnitAI.gameFrame;
           if (!(unit as any)._lastAutoMineLog || gf - (unit as any)._lastAutoMineLog > 300) {
             (unit as any)._lastAutoMineLog = gf;
@@ -2479,8 +2489,9 @@ export class UnitAI {
    */
   private static findNearestDropOff(unit: Unit): HexCoord | null {
     const basePos = UnitAI.basePositions.get(unit.owner);
+    // Offset stockpile drop-off location: player 0 → -2q, player 1 → +2q, others → based on modulo
     const stockPos = basePos ? {
-      q: basePos.q + (unit.owner === 0 ? -2 : 2),
+      q: basePos.q + (unit.owner % 2 === 0 ? -2 : 2),
       r: basePos.r,
     } : null;
 
@@ -2559,8 +2570,9 @@ export class UnitAI {
    */
   private static findNearestFoodDropOff(unit: Unit): HexCoord | null {
     const basePos = UnitAI.basePositions.get(unit.owner);
+    // Offset stockpile drop-off location: player 0 → -2q, player 1 → +2q, others → based on modulo
     const stockPos = basePos ? {
-      q: basePos.q + (unit.owner === 0 ? -2 : 2),
+      q: basePos.q + (unit.owner % 2 === 0 ? -2 : 2),
       r: basePos.r,
     } : null;
 

@@ -302,6 +302,7 @@ class Cubitopia {
       removeUnitFromGame: (unit) => this.removeUnitFromGame(unit),
       getAllUnits: () => this.allUnits,
       getGameFrame: () => this._gameFrame,
+      getLocalPlayerIndex: () => this._localPlayerIndex,
     });
 
     // Interaction state machine — replaces 26+ boolean mode flags
@@ -349,29 +350,29 @@ class Cubitopia {
       hexToWorld: (pos) => this.hexToWorld(pos),
       getElevation: (pos) => this.getElevation(pos),
       getSelectedUnits: () => this.selectionManager.getSelectedUnits(),
-      getWoodStockpile: () => this.woodStockpile[0],
-      setWoodStockpile: (v) => { this.woodStockpile[0] = v; },
-      getStoneStockpile: () => this.stoneStockpile[0],
-      setStoneStockpile: (v) => { this.stoneStockpile[0] = v; },
-      getFoodStockpile: () => this.foodStockpile[0],
-      setFoodStockpile: (v) => { this.foodStockpile[0] = v; },
-      getGrassFiberStockpile: () => this.grassFiberStockpile[0],
-      setGrassFiberStockpile: (v) => { this.grassFiberStockpile[0] = v; },
-      getClayStockpile: () => this.clayStockpile[0],
-      setClayStockpile: (v) => { this.clayStockpile[0] = v; },
-      getRopeStockpile: () => this.ropeStockpile[0],
-      setRopeStockpile: (v) => { this.ropeStockpile[0] = v; },
-      getIronStockpile: () => this.ironStockpile[0],
-      setIronStockpile: (v) => { this.ironStockpile[0] = v; },
-      getCharcoalStockpile: () => this.charcoalStockpile[0],
-      setCharcoalStockpile: (v) => { this.charcoalStockpile[0] = v; },
-      getGoldStockpile: () => this.goldStockpile[0],
-      setGoldStockpile: (v) => { this.goldStockpile[0] = v; },
-      getSteelStockpile: () => this.steelStockpile[0],
-      setSteelStockpile: (v) => { this.steelStockpile[0] = v; },
-      getCrystalStockpile: () => this.crystalStockpile[0],
-      setCrystalStockpile: (v) => { this.crystalStockpile[0] = v; },
-      updateResourceDisplay: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
+      getWoodStockpile: () => this.woodStockpile[this._localPlayerIndex],
+      setWoodStockpile: (v) => { this.woodStockpile[this._localPlayerIndex] = v; },
+      getStoneStockpile: () => this.stoneStockpile[this._localPlayerIndex],
+      setStoneStockpile: (v) => { this.stoneStockpile[this._localPlayerIndex] = v; },
+      getFoodStockpile: () => this.foodStockpile[this._localPlayerIndex],
+      setFoodStockpile: (v) => { this.foodStockpile[this._localPlayerIndex] = v; },
+      getGrassFiberStockpile: () => this.grassFiberStockpile[this._localPlayerIndex],
+      setGrassFiberStockpile: (v) => { this.grassFiberStockpile[this._localPlayerIndex] = v; },
+      getClayStockpile: () => this.clayStockpile[this._localPlayerIndex],
+      setClayStockpile: (v) => { this.clayStockpile[this._localPlayerIndex] = v; },
+      getRopeStockpile: () => this.ropeStockpile[this._localPlayerIndex],
+      setRopeStockpile: (v) => { this.ropeStockpile[this._localPlayerIndex] = v; },
+      getIronStockpile: () => this.ironStockpile[this._localPlayerIndex],
+      setIronStockpile: (v) => { this.ironStockpile[this._localPlayerIndex] = v; },
+      getCharcoalStockpile: () => this.charcoalStockpile[this._localPlayerIndex],
+      setCharcoalStockpile: (v) => { this.charcoalStockpile[this._localPlayerIndex] = v; },
+      getGoldStockpile: () => this.goldStockpile[this._localPlayerIndex],
+      setGoldStockpile: (v) => { this.goldStockpile[this._localPlayerIndex] = v; },
+      getSteelStockpile: () => this.steelStockpile[this._localPlayerIndex],
+      setSteelStockpile: (v) => { this.steelStockpile[this._localPlayerIndex] = v; },
+      getCrystalStockpile: () => this.crystalStockpile[this._localPlayerIndex],
+      setCrystalStockpile: (v) => { this.crystalStockpile[this._localPlayerIndex] = v; },
+      updateResourceDisplay: () => { const lp = this._localPlayerIndex; this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]); },
       updateStockpileVisual: (owner) => this.resourceManager.updateStockpileVisual(owner),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
       getCurrentMapTiles: () => this.currentMap?.tiles ?? null,
@@ -1178,10 +1179,12 @@ class Cubitopia {
           // Ghost matches: local player vs AI impersonation
           this.gameMode = 'pvai';
           this._localPlayerIndex = 0;
+          UnitAI.state.localPlayerIndex = 0;
         } else {
           // Real PvP: each player controls their own team
           this.gameMode = 'pvp';
           this._localPlayerIndex = this.multiplayer.network.isHost ? 0 : 1;
+          UnitAI.state.localPlayerIndex = this._localPlayerIndex;
         }
         this._multiplayerOpponentName = opponentName;
         this.startNewGame();
@@ -1195,6 +1198,7 @@ class Cubitopia {
         this._mpTickAccumulator = 0;
         this._multiplayerOpponentName = '';
         this._localPlayerIndex = 0;
+        UnitAI.state.localPlayerIndex = 0;
         this.multiplayerUI!.showLobby();
       },
     });
@@ -1246,7 +1250,7 @@ class Cubitopia {
         for (const [sKey] of this.resourceManager.stockpileMeshes) {
           const base = this.bases.find(b => b.owner === (sKey.includes('0') ? 0 : 1));
           if (base) {
-            const stockQ = base.position.q + (base.owner === 0 ? -2 : 2);
+            const stockQ = base.position.q + (base.owner % 2 === 0 ? -2 : 2);
             const stockR = base.position.r;
             if (pos.q === stockQ && Math.abs(pos.r - stockR) <= 1) return true;
           }
@@ -1404,7 +1408,7 @@ class Cubitopia {
           if (this.selectionManager.hasControlGroup(slot)) {
             // Count living units in this squad
             const units = this.allUnits.filter(u =>
-              u.owner === 0 && u._squadId === slot && u.currentHealth > 0
+              u.owner === this._localPlayerIndex && u._squadId === slot && u.currentHealth > 0
             );
             result.set(slot, {
               label: SQUAD_LABELS[slot],
@@ -1444,7 +1448,7 @@ class Cubitopia {
       },
       getSquadCentroid: (squadSlot: number) => {
         // Find all player-0 units in this squad and compute centroid
-        const units = this.allUnits.filter((u: Unit) => u.owner === 0 && u._squadId === squadSlot && (u.state as string) !== 'dead');
+        const units = this.allUnits.filter((u: Unit) => u.owner === this._localPlayerIndex && u._squadId === squadSlot && (u.state as string) !== 'dead');
         if (units.length === 0) return null;
         let cx = 0, cy = 0, cz = 0;
         for (const u of units) { cx += u.worldPosition.x; cy += u.worldPosition.y; cz += u.worldPosition.z; }
@@ -1498,8 +1502,8 @@ class Cubitopia {
           this.players[owner].resources.wood += amount;
         }
         this.resourceManager.updateStockpileVisual(owner);
-        if (owner === 0) {
-          this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+        if (owner === this._localPlayerIndex) {
+          this.hud.updateResources(this.players[this._localPlayerIndex], this.woodStockpile[this._localPlayerIndex], this.foodStockpile[this._localPlayerIndex], this.stoneStockpile[this._localPlayerIndex]);
         }
       },
     };
@@ -1549,6 +1553,7 @@ class Cubitopia {
       getElevation: (pos) => this.getElevation(pos),
       getCurrentMap: () => this.currentMap,
       getPlayerUnits: (owner) => this.players[owner].units,
+      getLocalPlayerIndex: () => this._localPlayerIndex,
     };
     this.rallyPointSystem = new RallyPointSystem(rallyPointOps);
 
@@ -1571,6 +1576,7 @@ class Cubitopia {
     this.combatEventHandler = new CombatEventHandler({
       getPlayers: () => this.players,
       getAllUnits: () => this.allUnits,
+      getLocalPlayerIndex: () => this._localPlayerIndex,
       getDebugFlags: () => this.hud.debugFlags,
       getWoodStockpile: () => this.woodStockpile,
       getFoodStockpile: () => this.foodStockpile,
@@ -1635,8 +1641,8 @@ class Cubitopia {
       },
       isGateAt: (key) => this.wallSystem.gatesBuilt.has(key),
       onStructureDestroyed: (key) => this.garrisonSystem.onStructureDestroyed(key),
-      handleBuildWall: (unit, pos) => { this.wallSystem.handleBuildWall(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === 0) this.sound.play('wall_build', 0.4); },
-      handleBuildGate: (unit, pos) => { this.wallSystem.handleBuildGate(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === 0) this.sound.play('wall_build', 0.3); },
+      handleBuildWall: (unit, pos) => { this.wallSystem.handleBuildWall(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === this._localPlayerIndex) this.sound.play('wall_build', 0.4); },
+      handleBuildGate: (unit, pos) => { this.wallSystem.handleBuildGate(unit, pos); this.garrisonSystem.markNetworkDirty(); if (unit.owner === this._localPlayerIndex) this.sound.play('wall_build', 0.3); },
       handleChopWood: (unit, pos) => this.handleChopWood(unit, pos),
       handleWoodDeposit: (unit) => this.resourceManager.handleWoodDeposit(unit),
       handleMineTerrain: (unit, pos) => this.handleMineTerrain(unit, pos),
@@ -1669,18 +1675,21 @@ class Cubitopia {
       getPlayers: () => this.players,
       getAllUnits: () => this.allUnits,
       getCurrentMap: () => this.currentMap,
-      getGold: () => this.players[0].resources.gold,
-      setGold: (v) => { this.goldStockpile[0] = v; this.players[0].resources.gold = v; },
-      getWood: () => this.woodStockpile[0],
-      setWood: (v) => { this.woodStockpile[0] = v; this.players[0].resources.wood = v; },
-      getStone: () => this.stoneStockpile[0],
-      setStone: (v) => { this.stoneStockpile[0] = v; this.players[0].resources.stone = v; },
-      getRope: () => this.ropeStockpile[0],
-      setRope: (v) => { this.ropeStockpile[0] = v; this.players[0].resources.rope = v; },
-      getSteel: () => this.steelStockpile[0],
-      setSteel: (v) => { this.steelStockpile[0] = v; this.players[0].resources.steel = v; },
-      getCrystal: () => this.players[0].resources.crystal,
-      setCrystal: (v) => { this.players[0].resources.crystal = v; },
+      // NOTE: SpawnQueueSystem resource ops use localPlayerIndex. In multiplayer lockstep,
+      // unit spawning goes through spawnUnitForOwner() which is fully owner-aware.
+      // SpawnQueueSystem queue processing only runs for local player's buildings.
+      getGold: () => this.players[this._localPlayerIndex]?.resources.gold ?? 0,
+      setGold: (v) => { const lp = this._localPlayerIndex; this.goldStockpile[lp] = v; if (this.players[lp]) this.players[lp].resources.gold = v; },
+      getWood: () => this.woodStockpile[this._localPlayerIndex] ?? 0,
+      setWood: (v) => { const lp = this._localPlayerIndex; this.woodStockpile[lp] = v; if (this.players[lp]) this.players[lp].resources.wood = v; },
+      getStone: () => this.stoneStockpile[this._localPlayerIndex] ?? 0,
+      setStone: (v) => { const lp = this._localPlayerIndex; this.stoneStockpile[lp] = v; if (this.players[lp]) this.players[lp].resources.stone = v; },
+      getRope: () => this.ropeStockpile[this._localPlayerIndex] ?? 0,
+      setRope: (v) => { const lp = this._localPlayerIndex; this.ropeStockpile[lp] = v; if (this.players[lp]) this.players[lp].resources.rope = v; },
+      getSteel: () => this.steelStockpile[this._localPlayerIndex] ?? 0,
+      setSteel: (v) => { const lp = this._localPlayerIndex; this.steelStockpile[lp] = v; if (this.players[lp]) this.players[lp].resources.steel = v; },
+      getCrystal: () => this.players[this._localPlayerIndex]?.resources.crystal ?? 0,
+      setCrystal: (v) => { if (this.players[this._localPlayerIndex]) this.players[this._localPlayerIndex].resources.crystal = v; },
       getNextSpawnBuilding: (kind, owner) => this.buildingSystem.getNextSpawnBuilding(kind, owner),
       advanceSpawnIndex: (kind) => this.buildingSystem.advanceSpawnIndex(kind),
       getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
@@ -1689,13 +1698,13 @@ class Cubitopia {
       getElevation: (pos) => this.getElevation(pos),
       addUnitToRenderer: (unit, elev) => this.unitRenderer.addUnit(unit, elev),
       addUnitToGame: (unit) => {
-        this.players[0].units.push(unit);
+        this.players[unit.owner].units.push(unit);
         this.allUnits.push(unit);
         this.selectionManager.setPlayerUnits(this.allUnits, this._localPlayerIndex);
       },
       getRallyFormationSlot: (kind, unit) => this.rallyPointSystem.getRallyFormationSlot(kind, unit),
       showNotification: (msg, color) => this.hud.showNotification(msg, color),
-      updateResources: () => this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]),
+      updateResources: () => { const lp = this._localPlayerIndex; this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]); },
       playSound: (name, vol) => this.sound.play(name as any, vol),
       getDebugFlags: () => this.hud.debugFlags,
       toggleBuildingPlaceMode: (kind) => this.toggleBuildingPlaceMode(kind),
@@ -1973,6 +1982,7 @@ class Cubitopia {
       this.multiplayer.commandQueue.initSinglePlayer();
       this._mpTickAccumulator = 0;
       this._localPlayerIndex = 0;
+      UnitAI.state.localPlayerIndex = 0;
     }
 
     this.voxelBuilder.clearAll();
@@ -2435,7 +2445,7 @@ class Cubitopia {
     // Determine player count from game mode
     this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
     // Reset local player index for non-PvP modes
-    if (this.gameMode !== 'pvp') this._localPlayerIndex = 0;
+    if (this.gameMode !== 'pvp') { this._localPlayerIndex = 0; UnitAI.state.localPlayerIndex = 0; }
 
     // Reset FFA enemy bar state so it rebuilds for new player count
     this.hud.resetFfaEnemyBar();
@@ -2702,7 +2712,7 @@ class Cubitopia {
       this.steelStockpile[pid] = r.steel ?? 0;
     }
 
-    this.hud.updateResources(this.players[0], this.woodStockpile[0], this.foodStockpile[0], this.stoneStockpile[0]);
+    { const lp = this._localPlayerIndex; this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]); }
 
     // Base setup already done by mapInitializer.setupMap()
     // Here we just finalize the remaining game state
@@ -2792,28 +2802,29 @@ class Cubitopia {
 
     // Debug: infinite resources — top up all resources to 999 each tick
     if (this.hud.debugFlags.infiniteResources) {
-      this.woodStockpile[0] = 999;
-      this.stoneStockpile[0] = 999;
-      this.foodStockpile[0] = 999;
-      this.grassFiberStockpile[0] = 999;
-      this.clayStockpile[0] = 999;
-      this.ropeStockpile[0] = 999;
-      this.players[0].resources.wood = 999;
-      this.players[0].resources.stone = 999;
-      this.players[0].resources.food = 999;
-      this.players[0].resources.gold = 999;
-      this.players[0].resources.grass_fiber = 999;
-      this.players[0].resources.clay = 999;
-      this.players[0].resources.rope = 999;
-      this.ironStockpile[0] = 999;
-      this.charcoalStockpile[0] = 999;
-      this.steelStockpile[0] = 999;
-      this.crystalStockpile[0] = 999;
-      this.goldStockpile[0] = 999;
-      this.players[0].resources.iron = 999;
-      this.players[0].resources.charcoal = 999;
-      this.players[0].resources.steel = 999;
-      this.players[0].resources.crystal = 999;
+      const lp = this._localPlayerIndex;
+      this.woodStockpile[lp] = 999;
+      this.stoneStockpile[lp] = 999;
+      this.foodStockpile[lp] = 999;
+      this.grassFiberStockpile[lp] = 999;
+      this.clayStockpile[lp] = 999;
+      this.ropeStockpile[lp] = 999;
+      this.players[lp].resources.wood = 999;
+      this.players[lp].resources.stone = 999;
+      this.players[lp].resources.food = 999;
+      this.players[lp].resources.gold = 999;
+      this.players[lp].resources.grass_fiber = 999;
+      this.players[lp].resources.clay = 999;
+      this.players[lp].resources.rope = 999;
+      this.ironStockpile[lp] = 999;
+      this.charcoalStockpile[lp] = 999;
+      this.steelStockpile[lp] = 999;
+      this.crystalStockpile[lp] = 999;
+      this.goldStockpile[lp] = 999;
+      this.players[lp].resources.iron = 999;
+      this.players[lp].resources.charcoal = 999;
+      this.players[lp].resources.steel = 999;
+      this.players[lp].resources.crystal = 999;
     }
 
     // --- Spawn queue processing (delegated to SpawnQueueSystem) ---
@@ -2893,8 +2904,8 @@ class Cubitopia {
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
 
-    // Player squad objectives — autonomous CAPTURE/ASSAULT behavior
-    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta);
+    // Player squad objectives — autonomous CAPTURE/ASSAULT behavior (for local player only)
+    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta, this._localPlayerIndex);
 
     // Process combat events (delegated to CombatEventHandler)
     this.combatEventHandler.processEvents(events);
@@ -3087,7 +3098,7 @@ class Cubitopia {
     // Update wall build mode cost preview when in wall mode
     if (this.interaction.state.kind === 'wall_build') {
       const bpInfo = this.blueprintSystem.getBlueprintCounts();
-      this.hud.updateBuildModeInfo(bpInfo, this.stoneStockpile[0]);
+      this.hud.updateBuildModeInfo(bpInfo, this.stoneStockpile[this._localPlayerIndex]);
     }
 
     // Base upgrades, population disband, and dead cleanup — delegated to LifecycleUpdater
@@ -3254,8 +3265,8 @@ class Cubitopia {
     // Compute game stats for the battle report
     let stats: GameOverStats | undefined;
     try {
-      const player = this.players[0];
-      const enemy = this.players[1];
+      const player = this.players[this._localPlayerIndex];
+      const enemy = this.players[this._localPlayerIndex === 0 ? 1 : 0];
       if (player && enemy) {
         // Count alive and dead units per player
         const playerAlive = player.units.filter(u => u.state !== UnitState.DEAD);
@@ -3267,14 +3278,14 @@ class Cubitopia {
         const enemyKills = enemy.units.reduce((sum, u) => sum + (u.kills ?? 0), 0);
 
         // Zones held by player
-        const playerBases = this.bases.filter(b => b.owner === 0 && !b.destroyed).length;
+        const playerBases = this.bases.filter(b => b.owner === this._localPlayerIndex && !b.destroyed).length;
         const totalBases = this.bases.filter(b => !b.id.includes('neutral') || b.owner >= 0).length;
 
         // Player main base tier — use capture zone system for isMainBase info,
         // fall back to first player-owned base
         const czZones = this.captureZoneSystem?.getZones() ?? [];
-        const playerMainZone = czZones.find(z => z.isMainBase && z.base.owner === 0);
-        const playerMainBase = playerMainZone?.base ?? this.bases.find(b => b.owner === 0);
+        const playerMainZone = czZones.find(z => z.isMainBase && z.base.owner === this._localPlayerIndex);
+        const playerMainBase = playerMainZone?.base ?? this.bases.find(b => b.owner === this._localPlayerIndex);
         const playerBaseTier = playerMainBase?.tier ?? 0;
 
         stats = {
@@ -3312,7 +3323,7 @@ class Cubitopia {
   /** Queue a unit from the building tooltip */
   /** Demolish a player building, removing it from the world and refunding some resources */
   private demolishBuilding(pb: PlacedBuilding): void {
-    if (pb.owner !== 0) return; // Only player can demolish their own
+    if (pb.owner !== this._localPlayerIndex) return; // Only local player can demolish their own
     // Refund half the build cost in wood
     const refunds: Record<BuildingKind, number> = {
       barracks: GAME_CONFIG.buildings.barracks.refund.wood,
@@ -3355,7 +3366,7 @@ class Cubitopia {
     const from: HexCoord = { q: avgQ, r: avgR };
 
     const targets = this.bases
-      .filter(b => b.owner !== 0 && !b.destroyed)
+      .filter(b => b.owner !== this._localPlayerIndex && !b.destroyed)
       .sort((a, b) => {
         // Neutral first, then by distance
         const aN = a.owner >= this.playerCount ? 0 : 1;
@@ -3384,7 +3395,7 @@ class Cubitopia {
 
   /** Order selected/all combat units to attack-move to a structure (from tooltip) */
   private attackTargetFromTooltip(position: HexCoord): void {
-    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
       : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
@@ -3406,7 +3417,7 @@ class Cubitopia {
 
   /** Order selected units to focus-attack a specific enemy unit (chase & kill — from tooltip) */
   private focusAttackUnitFromTooltip(unitId: string, position: HexCoord): void {
-    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
       : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
@@ -3430,7 +3441,7 @@ class Cubitopia {
 
   /** Order selected/all combat units to capture a zone (move + defensive stance) */
   private captureZoneFromTooltip(position: HexCoord): void {
-    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === 0 && u.state !== UnitState.DEAD);
+    const selected = this.selectionManager.getSelectedUnits().filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD);
     const units = selected.length > 0
       ? selected
       : this.allUnits.filter(u => u.owner === this._localPlayerIndex && u.state !== UnitState.DEAD && UnitAI.isCombatUnit(u));
@@ -3458,7 +3469,7 @@ class Cubitopia {
     const combatKinds: BuildingKind[] = ['barracks', 'armory', 'wizard_tower'];
     let count = 0;
     for (const pb of this.buildingSystem.placedBuildings) {
-      if (pb.owner === 0 && combatKinds.includes(pb.kind)) {
+      if (pb.owner === this._localPlayerIndex && combatKinds.includes(pb.kind)) {
         this.rallyPointSystem.setRallyPoint(pb.kind, position);
         count++;
       }
@@ -4165,7 +4176,7 @@ class Cubitopia {
     if (objective !== null) {
       squadId = selected.find(u => u._squadId != null)?._squadId ?? null;
       if (squadId == null) {
-        const usedIds = new Set(this.allUnits.filter((u: Unit) => u.owner === 0 && u._squadId != null).map((u: Unit) => u._squadId!));
+        const usedIds = new Set(this.allUnits.filter((u: Unit) => u.owner === this._localPlayerIndex && u._squadId != null).map((u: Unit) => u._squadId!));
         for (let id = 100; id < 110; id++) {
           if (!usedIds.has(id)) { squadId = id; break; }
         }
