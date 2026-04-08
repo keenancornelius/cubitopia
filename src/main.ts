@@ -3675,7 +3675,8 @@ class Cubitopia {
       const unitType = (UnitType as any)[unitName] as UnitType;
       if (unitType === undefined) return;
 
-      this.spawnQueueSystem.doSpawnQueue(buildingKey, unitType, unitName, parts.slice(3));
+      // Route through command queue so both peers execute the spawn
+      this.enqueueCommand(NetCommandType.QUEUE_UNIT, { unitType, buildingKind: buildingKey });
     } else if (parts[0] === 'craft') {
       if (parts[1] === 'rope') { this.resourceManager.craftRope(); this.sound.play('craft_confirm', 0.5); }
       else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(); this.sound.play('craft_confirm', 0.5); }
@@ -3864,7 +3865,7 @@ class Cubitopia {
     // Deduct cost based on unit type config
     const unitCfg = GAME_CONFIG.units[unitType];
     if (!unitCfg) return;
-    const costs = (unitCfg.costs as any)?.tooltipQueue ?? (unitCfg.costs as any)?.menu;
+    const costs = (unitCfg.costs as any)?.tooltipQueue ?? (unitCfg.costs as any)?.menu ?? (unitCfg.costs as any)?.playerQueue;
     if (!costs) return;
 
     const skipCost = this.hud.debugFlags.freeBuild;
@@ -3874,6 +3875,7 @@ class Cubitopia {
       if (costs.stone && this.stoneStockpile[owner] < costs.stone) return;
       if (costs.steel && this.steelStockpile[owner] < costs.steel) return;
       if (costs.crystal && this.players[owner].resources.crystal < costs.crystal) return;
+      if (costs.rope && this.ropeStockpile[owner] < costs.rope) return;
 
       if (costs.gold) {
         this.players[owner].resources.gold -= costs.gold;
@@ -3893,6 +3895,10 @@ class Cubitopia {
       }
       if (costs.crystal) {
         this.players[owner].resources.crystal -= costs.crystal;
+      }
+      if (costs.rope) {
+        this.ropeStockpile[owner] -= costs.rope;
+        this.players[owner].resources.rope = this.ropeStockpile[owner];
       }
     }
 
