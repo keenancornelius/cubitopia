@@ -1175,6 +1175,9 @@ class Cubitopia {
         this.hud.setVisible(true);
         this.mapType = mapType;
         this._mapSeedOverride = mapSeed; // Wire seed for deterministic maps
+        // CRITICAL: Seed the global game RNG so both clients have identical PRNG state.
+        // Without this, GameRNG uses Date.now() from module init — different on each client!
+        GameRNG.initSeed(mapSeed);
         if (isGhost) {
           // Ghost matches: local player vs AI impersonation
           this.gameMode = 'pvai';
