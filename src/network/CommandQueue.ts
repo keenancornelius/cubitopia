@@ -285,11 +285,13 @@ export class CommandQueue {
     if (!this._stateHashProvider || !this.network) return;
 
     const state = this._stateHashProvider();
+    // Include unit details until first desync is logged (for debugging)
     const hash = computeStateHash(
       this.currentTick,
       state.units,
       state.p1Resources,
       state.p2Resources,
+      !this._desyncDetailLogged, // include details until first desync is diagnosed
     );
 
     // Store local hash so we can compare against stale remote hashes
@@ -306,56 +308,39 @@ export class CommandQueue {
   }
 
   private receiveStateHash(remoteHash: GameStateHash): void {
-    if (!this._stateHashProvider) return;
-
-    if (remoteHash.tick === this.currentTick) {
-      // Same tick — compare immediately
-      this._compareHash(remoteHash);
-    } else if (remoteHash.tick > this.currentTick) {
+    if (remoteHash.tick > this.currentTick) {
       // Remote is ahead — store and compare when we reach that tick
       this._pendingRemoteHashes.set(remoteHash.tick, remoteHash);
     } else {
-      // We're ahead — check local hash history for that tick
-      const localHash = this._localHashHistory.get(remoteHash.tick);
-      if (localHash) {
-        if (localHash.hash !== remoteHash.hash) {
-          console.error(`[CmdQ] DESYNC at tick ${remoteHash.tick} (stale compare)! Local: ${localHash.hash}, Remote: ${remoteHash.hash} | Units: ${localHash.unitCount} vs ${remoteHash.unitCount} | P1res: ${localHash.p1Resources} vs ${remoteHash.p1Resources} | P2res: ${localHash.p2Resources} vs ${remoteHash.p2Resources}`);
-          if (!this._desynced) {
-            this._desynced = true;
-            this._desyncTick = remoteHash.tick;
-            this._onDesync?.(localHash.hash, remoteHash.hash, remoteHash.tick);
-          }
-        } else {
-          console.log(`[CmdQ] Hash OK at tick ${remoteHash.tick} (stale compare, current: ${this.currentTick})`);
-        }
-      } else {
-        console.warn(`[CmdQ] Received stale hash for tick ${remoteHash.tick} (current: ${this.currentTick}) — no local hash saved`);
-      }
+      // Same tick or we're ahead — compare using stored local hash
+      // (_compareHash always uses _localHashHistory, never recomputes from live state)
+      this._compareHash(remoteHash);
     }
   }
 
-  /** Compare local state against a remote hash at the current tick */
+  /** Compare local state against a remote hash.
+   *  IMPORTANT: Always use the STORED local hash from _localHashHistory, never
+   *  recompute from current state.  The remote hash may arrive asynchronously
+   *  (via WebRTC callback between frames) after _simulationStep has already
+   *  advanced the game state past the tick the hash is for.  Recomputing would
+   *  compare post-simulation state against pre-simulation state → false desync. */
   private _compareHash(remoteHash: GameStateHash): void {
-    if (!this._stateHashProvider) return;
-    const state = this._stateHashProvider();
-
-    // On first desync, include detailed unit info for debugging
-    const wantDetails = !this._desyncDetailLogged;
-    const localHash = computeStateHash(
-      remoteHash.tick,
-      state.units,
-      state.p1Resources,
-      state.p2Resources,
-      wantDetails,
-    );
+    // Look up the local hash we stored when we originally processed this tick
+    const localHash = this._localHashHistory.get(remoteHash.tick);
+    if (!localHash) {
+      console.warn(`[CmdQ] Cannot compare hash for tick ${remoteHash.tick} — no stored local hash (current tick: ${this.currentTick})`);
+      return;
+    }
 
     if (localHash.hash !== remoteHash.hash) {
       console.error(`[CmdQ] DESYNC at tick ${remoteHash.tick}! Local: ${localHash.hash}, Remote: ${remoteHash.hash} | Units: ${localHash.unitCount} vs ${remoteHash.unitCount} | P1res: ${localHash.p1Resources} vs ${remoteHash.p1Resources} | P2res: ${localHash.p2Resources} vs ${remoteHash.p2Resources}`);
 
       // Log detailed unit state on first desync
-      if (!this._desyncDetailLogged && localHash.unitDetails) {
+      if (!this._desyncDetailLogged) {
         this._desyncDetailLogged = true;
-        console.error(`[CmdQ] LOCAL unit state at desync tick ${remoteHash.tick}:\n${localHash.unitDetails}`);
+        if (localHash.unitDetails) {
+          console.error(`[CmdQ] LOCAL unit state at desync tick ${remoteHash.tick}:\n${localHash.unitDetails}`);
+        }
         if (remoteHash.unitDetails) {
           console.error(`[CmdQ] REMOTE unit state at desync tick ${remoteHash.tick}:\n${remoteHash.unitDetails}`);
         }
