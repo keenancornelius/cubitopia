@@ -2859,7 +2859,7 @@ class Cubitopia {
     this._spawnQueueHudTimer += delta;
     if (this._spawnQueueHudTimer >= 0.25) {
       this._spawnQueueHudTimer = 0;
-      const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags);
+      const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags, this._localPlayerIndex);
       // Add AI queues for all players
       for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
         const st = this.aiController.aiState[pid];

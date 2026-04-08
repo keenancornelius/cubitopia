@@ -96,33 +96,29 @@ export default class SpawnQueueSystem {
 
   // ── Queue state ──
   spawnQueue: SimpleQueueItem[] = [];
-  spawnTimer = 0;
   forestrySpawnQueue: SimpleQueueItem[] = [];
-  forestrySpawnTimer = 0;
   masonrySpawnQueue: SimpleQueueItem[] = [];
-  masonrySpawnTimer = 0;
   farmhouseSpawnQueue: SimpleQueueItem[] = [];
-  farmhouseSpawnTimer = 0;
   workshopSpawnQueue: WorkshopQueueItem[] = [];
-  workshopSpawnTimer = 0;
   armorySpawnQueue: ArmoryQueueItem[] = [];
-  armorySpawnTimer = 0;
   wizardTowerSpawnQueue: WizardTowerQueueItem[] = [];
-  wizardTowerSpawnTimer = 0;
 
-  /** Cached per-frame spawn configs — built once, avoids 7+ closure allocations per frame */
-  private _cachedSpawnConfigs: {
-    kind: string; color: string; spawnTime: number;
-    queue: { type: UnitType }[];
-    getTimer: () => number; setTimer: (v: number) => void;
-    canAfford: (item: any) => boolean; deductCost: (item: any) => void;
-  }[] | null = null;
+  /** Per-owner timers: ownerTimers[buildingKind][ownerIndex] */
+  private ownerTimers: Record<string, number[]> = {};
+  private getOwnerTimer(kind: string, owner: number): number {
+    if (!this.ownerTimers[kind]) this.ownerTimers[kind] = [0, 0];
+    return this.ownerTimers[kind][owner] ?? 0;
+  }
+  private setOwnerTimer(kind: string, owner: number, v: number): void {
+    if (!this.ownerTimers[kind]) this.ownerTimers[kind] = [0, 0];
+    this.ownerTimers[kind][owner] = v;
+  }
 
   constructor(ops: SpawnQueueOps) {
     this.ops = ops;
   }
 
-  // ── Config for simple (single-resource) buildings ──
+  // ── Config for simple (single-resource) buildings (used by doSpawnQueueGeneric) ──
   private readonly SPAWN_QUEUE_CONFIG: Record<string, {
     buildingKind: BuildingKind;
     resourceType: 'gold' | 'wood';
@@ -135,79 +131,17 @@ export default class SpawnQueueSystem {
     farmhouse: { buildingKind: 'farmhouse', resourceType: 'wood', getResource: () => this.ops.getWood(),  getQueue: () => this.farmhouseSpawnQueue },
   };
 
-  /** Build spawn configs once, reuse every frame */
-  private getSpawnConfigs() {
-    if (this._cachedSpawnConfigs) return this._cachedSpawnConfigs;
-    const ops = this.ops;
-    this._cachedSpawnConfigs = [
-      {
-        kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime,
-        queue: this.spawnQueue,
-        getTimer: () => this.spawnTimer, setTimer: (v) => { this.spawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getGold() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setGold(ops.getGold() - item.cost); },
-      },
-      {
-        kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime,
-        queue: this.forestrySpawnQueue,
-        getTimer: () => this.forestrySpawnTimer, setTimer: (v) => { this.forestrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime,
-        queue: this.masonrySpawnQueue,
-        getTimer: () => this.masonrySpawnTimer, setTimer: (v) => { this.masonrySpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime,
-        queue: this.farmhouseSpawnQueue,
-        getTimer: () => this.farmhouseSpawnTimer, setTimer: (v) => { this.farmhouseSpawnTimer = v; },
-        canAfford: (item: SimpleQueueItem) => ops.getWood() >= item.cost,
-        deductCost: (item: SimpleQueueItem) => { ops.setWood(ops.getWood() - item.cost); },
-      },
-      {
-        kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime,
-        queue: this.workshopSpawnQueue,
-        getTimer: () => this.workshopSpawnTimer, setTimer: (v) => { this.workshopSpawnTimer = v; },
-        canAfford: (item: WorkshopQueueItem) =>
-          ops.getRope() >= item.cost.rope &&
-          ops.getStone() >= item.cost.stone &&
-          ops.getWood() >= item.cost.wood,
-        deductCost: (item: WorkshopQueueItem) => {
-          ops.setRope(ops.getRope() - item.cost.rope);
-          ops.setStone(ops.getStone() - item.cost.stone);
-          ops.setWood(ops.getWood() - item.cost.wood);
-        },
-      },
-      {
-        kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime,
-        queue: this.armorySpawnQueue,
-        getTimer: () => this.armorySpawnTimer, setTimer: (v) => { this.armorySpawnTimer = v; },
-        canAfford: (item: ArmoryQueueItem) =>
-          ops.getGold() >= item.cost.gold &&
-          ops.getSteel() >= item.cost.steel,
-        deductCost: (item: ArmoryQueueItem) => {
-          ops.setGold(ops.getGold() - item.cost.gold);
-          ops.setSteel(ops.getSteel() - item.cost.steel);
-        },
-      },
-      {
-        kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime,
-        queue: this.wizardTowerSpawnQueue,
-        getTimer: () => this.wizardTowerSpawnTimer, setTimer: (v) => { this.wizardTowerSpawnTimer = v; },
-        canAfford: (item: WizardTowerQueueItem) =>
-          ops.getGold() >= item.cost.gold &&
-          ops.getCrystal() >= item.cost.crystal,
-        deductCost: (item: WizardTowerQueueItem) => {
-          ops.setGold(ops.getGold() - item.cost.gold);
-          ops.setCrystal(ops.getCrystal() - item.cost.crystal);
-        },
-      },
+  /** Queue configs for update() — maps building kind to its queue + spawn time */
+  private getQueueConfigs() {
+    return [
+      { kind: 'barracks', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime, queue: this.spawnQueue },
+      { kind: 'forestry', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime, queue: this.forestrySpawnQueue },
+      { kind: 'masonry', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime, queue: this.masonrySpawnQueue },
+      { kind: 'farmhouse', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime, queue: this.farmhouseSpawnQueue },
+      { kind: 'workshop', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime, queue: this.workshopSpawnQueue as any[] },
+      { kind: 'armory', spawnTime: GAME_CONFIG.buildings.armory.spawnTime, queue: this.armorySpawnQueue as any[] },
+      { kind: 'wizard_tower', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime, queue: this.wizardTowerSpawnQueue as any[] },
     ];
-    return this._cachedSpawnConfigs;
   }
 
   /** Queue a unit for a simple (single-resource) building */
@@ -354,99 +288,97 @@ export default class SpawnQueueSystem {
     ops.showNotification(`✅ ${name} queued (${debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + crystalCost + ' crystal'})`, '#7c3aed');
   }
 
-  /** Process all spawn queues — called each frame from updateRTS */
+  /** Process all spawn queues — called each frame from updateRTS.
+   *  Each owner gets independent timers so both players spawn in parallel. */
   update(delta: number): void {
     const ops = this.ops;
     const map = ops.getCurrentMap();
     if (!map) return;
 
     const debugFlags = ops.getDebugFlags();
+    const queueConfigs = this.getQueueConfigs();
 
-    const spawnConfigs = this.getSpawnConfigs();
-
-    // ─── Process spawn timers ───
-    for (const cfg of spawnConfigs) {
+    // ─── Process spawn timers per-owner ───
+    for (const cfg of queueConfigs) {
       if (cfg.queue.length === 0) continue;
-      const next = cfg.queue[0] as any; // May have .owner from enqueueForOwner
-      const itemOwner: number = next.owner ?? 0;
-      const building = ops.getNextSpawnBuilding(cfg.kind as any, itemOwner);
-      if (!building) continue;
-
-      const timer = cfg.getTimer() + delta;
       const spawnTime = debugFlags.instantSpawn ? 0 : cfg.spawnTime;
 
-      if (timer >= spawnTime) {
-        cfg.setTimer(0);
-        // Owner-aware affordability check
-        const canAfford = this._canAffordItem(cfg.kind, next, itemOwner);
-        if (canAfford) {
-          this._deductItemCost(cfg.kind, next, itemOwner);
-          cfg.queue.shift();
-          // Use the already-peeked building (no double-advance)
-          const pos = ops.findSpawnTile(map, building.position.q, building.position.r, true);
-          ops.advanceSpawnIndex(cfg.kind as any);
-          // Mark tile occupied immediately to prevent same-frame stacking
-          Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
-          const unit = UnitFactory.create(next.type, itemOwner, pos);
-          const wp = ops.hexToWorld(pos);
-          unit.worldPosition = { ...wp };
-          ops.addUnitToGame(unit);
-          ops.addUnitToRenderer(unit, ops.getElevation(pos));
-          ops.playSound('unit_spawn', 0.45);
-          // Deduct food for combat units (3 food per combat unit)
-          if (isCombatType(unit.type)) {
-            const currentFood = ops.getFoodStockpile(itemOwner);
-            ops.setFoodStockpile(itemOwner, Math.max(0, currentFood - FOOD_PER_COMBAT_UNIT));
-          }
-          ops.updateResources();
-          // Rally point
-          const rallySlot = ops.getRallyFormationSlot(cfg.kind as any, unit);
-          if (rallySlot) UnitAI.commandMove(unit, rallySlot, map);
-          if (isCombatType(unit.type)) unit.stance = UnitStance.AGGRESSIVE;
-          // Auto-join squad if this building has a squad assignment (combat units only)
-          if (isCombatType(unit.type)) {
-            const bKey = `${building.position.q},${building.position.r}`;
-            const squadSlot = ops.getBuildingSquadAssignment?.(bKey);
-            if (squadSlot != null) {
-              ops.assignUnitToSquad?.(unit, squadSlot);
+      // Process each owner independently — both can spawn in parallel
+      for (const owner of [0, 1]) {
+        const idx = cfg.queue.findIndex((item: any) => (item.owner ?? 0) === owner);
+        if (idx === -1) continue;
+        const next = cfg.queue[idx] as any;
+
+        const building = ops.getNextSpawnBuilding(cfg.kind as any, owner);
+        if (!building) continue;
+
+        const timer = this.getOwnerTimer(cfg.kind, owner) + delta;
+        if (timer >= spawnTime) {
+          this.setOwnerTimer(cfg.kind, owner, 0);
+          // Owner-aware affordability check
+          const canAfford = this._canAffordItem(cfg.kind, next, owner);
+          if (canAfford) {
+            this._deductItemCost(cfg.kind, next, owner);
+            cfg.queue.splice(idx, 1);
+            const pos = ops.findSpawnTile(map, building.position.q, building.position.r, true);
+            ops.advanceSpawnIndex(cfg.kind as any);
+            Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
+            const unit = UnitFactory.create(next.type, owner, pos);
+            const wp = ops.hexToWorld(pos);
+            unit.worldPosition = { ...wp };
+            ops.addUnitToGame(unit);
+            ops.addUnitToRenderer(unit, ops.getElevation(pos));
+            ops.playSound('unit_spawn', 0.45);
+            if (isCombatType(unit.type)) {
+              const currentFood = ops.getFoodStockpile(owner);
+              ops.setFoodStockpile(owner, Math.max(0, currentFood - FOOD_PER_COMBAT_UNIT));
+            }
+            ops.updateResources();
+            const rallySlot = ops.getRallyFormationSlot(cfg.kind as any, unit);
+            if (rallySlot) UnitAI.commandMove(unit, rallySlot, map);
+            if (isCombatType(unit.type)) unit.stance = UnitStance.AGGRESSIVE;
+            if (isCombatType(unit.type)) {
+              const bKey = `${building.position.q},${building.position.r}`;
+              const squadSlot = ops.getBuildingSquadAssignment?.(bKey);
+              if (squadSlot != null) {
+                ops.assignUnitToSquad?.(unit, squadSlot);
+              }
             }
           }
+        } else {
+          this.setOwnerTimer(cfg.kind, owner, timer);
         }
-      } else {
-        cfg.setTimer(timer);
       }
     }
-
-    // ─── Build HUD entries for all queues (player + AI) ───
-    return this.buildQueueHUDEntries(spawnConfigs, debugFlags);
   }
 
-  /** Build and return HUD queue entries for display */
-  private buildQueueHUDEntries(spawnConfigs: any[], debugFlags: { instantSpawn: boolean }): void {
-    // This is separated so it can be extended with AI queues in main.ts
-    // The actual HUD update call will be handled by main.ts which has access to aiController
-  }
-
-  /** Get current queue entries for HUD (called by main.ts to combine with AI queues) */
-  getQueueHUDEntries(debugFlags: { instantSpawn: boolean }): { kind: string; color: string; items: { type: UnitType }[]; timerProgress: number }[] {
+  /** Get current queue entries for HUD (called by main.ts to combine with AI queues).
+   *  Filters by owner so each player only sees their own queue. */
+  getQueueHUDEntries(debugFlags: { instantSpawn: boolean }, owner?: number): { kind: string; color: string; items: { type: UnitType }[]; timerProgress: number }[] {
     const configs = [
-      { kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime, queue: this.spawnQueue, timer: this.spawnTimer },
-      { kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime, queue: this.forestrySpawnQueue, timer: this.forestrySpawnTimer },
-      { kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime, queue: this.masonrySpawnQueue, timer: this.masonrySpawnTimer },
-      { kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime, queue: this.farmhouseSpawnQueue, timer: this.farmhouseSpawnTimer },
-      { kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime, queue: this.workshopSpawnQueue, timer: this.workshopSpawnTimer },
-      { kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime, queue: this.armorySpawnQueue, timer: this.armorySpawnTimer },
-      { kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime, queue: this.wizardTowerSpawnQueue, timer: this.wizardTowerSpawnTimer },
+      { kind: 'barracks', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.barracks.spawnTime, queue: this.spawnQueue },
+      { kind: 'forestry', color: '#6b8e23', spawnTime: GAME_CONFIG.buildings.forestry.spawnTime, queue: this.forestrySpawnQueue },
+      { kind: 'masonry', color: '#808080', spawnTime: GAME_CONFIG.buildings.masonry.spawnTime, queue: this.masonrySpawnQueue },
+      { kind: 'farmhouse', color: '#d4a030', spawnTime: GAME_CONFIG.buildings.farmhouse.spawnTime, queue: this.farmhouseSpawnQueue },
+      { kind: 'workshop', color: '#c9a96e', spawnTime: GAME_CONFIG.buildings.workshop.spawnTime, queue: this.workshopSpawnQueue as any[] },
+      { kind: 'armory', color: '#e67e22', spawnTime: GAME_CONFIG.buildings.armory.spawnTime, queue: this.armorySpawnQueue as any[] },
+      { kind: 'wizard_tower', color: '#7c3aed', spawnTime: GAME_CONFIG.buildings.wizard_tower.spawnTime, queue: this.wizardTowerSpawnQueue as any[] },
     ];
 
-    return configs.map(cfg => ({
-      kind: cfg.kind,
-      color: cfg.color,
-      items: cfg.queue.map(q => ({ type: q.type })),
-      timerProgress: cfg.queue.length > 0
-        ? cfg.timer / (debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
-        : 0,
-    }));
+    return configs.map(cfg => {
+      const filtered = owner != null
+        ? cfg.queue.filter((q: any) => (q.owner ?? 0) === owner)
+        : cfg.queue;
+      const timerOwner = owner ?? 0;
+      return {
+        kind: cfg.kind,
+        color: cfg.color,
+        items: filtered.map((q: any) => ({ type: q.type })),
+        timerProgress: filtered.length > 0
+          ? this.getOwnerTimer(cfg.kind, timerOwner) / (debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
+          : 0,
+      };
+    });
   }
 
   /** Owner-aware affordability check for a queue item */
@@ -602,20 +534,12 @@ export default class SpawnQueueSystem {
   /** Reset all queues — called on map regeneration */
   cleanup(): void {
     this.spawnQueue = [];
-    this.spawnTimer = 0;
     this.forestrySpawnQueue = [];
-    this.forestrySpawnTimer = 0;
     this.masonrySpawnQueue = [];
-    this.masonrySpawnTimer = 0;
     this.farmhouseSpawnQueue = [];
-    this.farmhouseSpawnTimer = 0;
     this.workshopSpawnQueue = [];
-    this.workshopSpawnTimer = 0;
     this.armorySpawnQueue = [];
-    this.armorySpawnTimer = 0;
     this.wizardTowerSpawnQueue = [];
-    this.wizardTowerSpawnTimer = 0;
-    // Invalidate cached configs so they pick up fresh queue refs
-    this._cachedSpawnConfigs = null;
+    this.ownerTimers = {};
   }
 }
