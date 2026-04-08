@@ -2802,29 +2802,16 @@ class Cubitopia {
     this.sound.startAmbient();
   }
 
-  // --- RTS Game Loop ---
+  // --- Simulation Step (deterministic — called at fixed rate in MP, variable in SP) ---
 
-  private updateRTS(delta: number): void {
-    if (!this.currentMap || this.players.length === 0 || this.gameOver) return;
+  private _simulationStep(delta: number): void {
+    if (!this.currentMap) return;
 
-    // Advance deterministic game frame counter (used by all systems instead of Date.now)
+    // Advance deterministic game frame counter
     this._gameFrame++;
     UnitAI.gameFrame = this._gameFrame;
 
-    // ── Multiplayer tick advancement ──
-    // In multiplayer mode, advance the command queue at a fixed tick rate
-    // so both clients process buffered commands in lockstep.
-    // Ghost matches also use tick advancement to process AI commands.
-    if (this.multiplayer.commandQueue.isMultiplayer) {
-      const TICK_RATE = 1 / 10; // 10 ticks per second (100ms per tick)
-      this._mpTickAccumulator += delta;
-      while (this._mpTickAccumulator >= TICK_RATE) {
-        this._mpTickAccumulator -= TICK_RATE;
-        this.multiplayer.commandQueue.processTick();
-      }
-    }
-
-    // Debug: infinite resources — top up all resources to 999 each tick
+    // Debug: infinite resources
     if (this.hud.debugFlags.infiniteResources) {
       const lp = this._localPlayerIndex;
       this.woodStockpile[lp] = 999;
@@ -2851,8 +2838,118 @@ class Cubitopia {
       this.players[lp].resources.crystal = 999;
     }
 
-    // --- Spawn queue processing (delegated to SpawnQueueSystem) ---
+    // Spawn queue processing
     this.spawnQueueSystem.update(delta);
+
+    // Build unit-ID lookup map
+    if (!this._unitById) this._unitById = new Map<string, Unit>();
+    const unitById = this._unitById;
+    unitById.clear();
+
+    // Update occupied tiles for pathfinder
+    Pathfinder.occupiedTiles.clear();
+    for (let i = 0, len = this.allUnits.length; i < len; i++) {
+      const unit = this.allUnits[i];
+      if (unit.state !== UnitState.DEAD) {
+        unitById.set(unit.id, unit);
+        Pathfinder.occupiedTiles.add(tileKey(unit.position.q, unit.position.r));
+      }
+    }
+
+    // Sync debug flags to UnitAI
+    const df = UnitAI.debugFlags;
+    df.disableChop = this.hud.debugFlags.disableChop;
+    df.disableMine = this.hud.debugFlags.disableMine;
+    df.disableHarvest = this.hud.debugFlags.disableHarvest;
+    df.disableBuild = this.hud.debugFlags.disableBuild;
+    df.disableDeposit = this.hud.debugFlags.disableDeposit;
+    df.disableAutoReturn = this.hud.debugFlags.disableAutoReturn;
+    df.disableCombat = this.hud.debugFlags.disableCombat;
+
+    // Sync stockpiles to UnitAI
+    UnitAI.stoneStockpile = this.stoneStockpile;
+    UnitAI.ironStockpile = this.ironStockpile;
+    UnitAI.clayStockpile = this.clayStockpile;
+    UnitAI.crystalStockpile = this.crystalStockpile;
+    UnitAI.goldStockpile = this.goldStockpile;
+    UnitAI.charcoalStockpile = this.charcoalStockpile;
+    UnitAI.steelStockpile = this.steelStockpile;
+    UnitAI.placedBuildings = this.buildingSystem.placedBuildings;
+    UnitAI.tacticalGroupManager = this.tacticalGroupManager;
+
+    // Tactical groups
+    this.tacticalGroupManager.update(delta, this.allUnits);
+
+    // Run unit AI (movement, combat, auto-attack)
+    const events = UnitAI.update(this.players, this.currentMap, delta);
+
+    // Player squad objectives
+    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta, this._localPlayerIndex);
+
+    // Process combat events
+    this.combatEventHandler.processEvents(events);
+
+    // Garrison system
+    this.garrisonSystem.update(delta);
+
+    // Morale & starvation
+    for (let pi = 0; pi < this.players.length; pi++) {
+      this.populationSystem.applyStarvationDrain(pi, delta);
+      UnitAI.moraleModifiers[pi] = this.populationSystem.getMoraleModifier(pi);
+    }
+
+    // Zone control capture system
+    const captureEvents = this.captureZoneSystem.update(this.allUnits, delta);
+    for (const evt of captureEvents) {
+      this.handleCaptureEvent(evt);
+    }
+
+    // AI commander (for AI players)
+    if (!this.hud.debugFlags.disableAI) {
+      for (let pid = 0; pid < this.playerCount; pid++) {
+        if (!this.players[pid]?.isAI) continue;
+        if (this.players[pid].defeated) continue;
+        this.aiController.updateSmartAICommander(pid, delta);
+        this.aiController.updateSmartAIEconomy(pid, delta);
+        this.aiController.updateSmartAISpawnQueue(pid, delta);
+        this.aiController.updateSmartAITactics(pid, delta);
+        this.aiController.updateSmartAIStrategy(pid, delta);
+      }
+    }
+
+    // Nature simulation (tree regrowth, grass growth/spread)
+    if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
+      this.natureSystem.update(delta);
+    }
+
+    // Base upgrades, population disband, and dead cleanup
+    this.lifecycleUpdater.update(delta);
+  }
+
+  // --- RTS Game Loop ---
+
+  private updateRTS(delta: number): void {
+    if (!this.currentMap || this.players.length === 0 || this.gameOver) return;
+
+    // ── Multiplayer: run ALL simulation at fixed tick rate for determinism ──
+    // Both clients accumulate real time, then step simulation in identical
+    // fixed-size increments so frame-rate differences don't cause desync.
+    if (this.multiplayer.commandQueue.isMultiplayer) {
+      const TICK_RATE = 1 / 10; // 10 ticks per second (100ms per tick)
+      this._mpTickAccumulator += delta;
+      while (this._mpTickAccumulator >= TICK_RATE) {
+        this._mpTickAccumulator -= TICK_RATE;
+        this.multiplayer.commandQueue.processTick();
+        this._simulationStep(TICK_RATE);
+      }
+    } else {
+      // Single-player: run simulation at variable frame rate (smooth feel)
+      this._simulationStep(delta);
+    }
+
+    // --- Visual-only updates below (HUD, rendering, camera) — NOT simulation ---
+
+    // --- Spawn queue HUD (visual only) ---
 
     // Update unified spawn queue HUD with progress bars — throttled to every 0.25s
     if (!this._spawnQueueHudTimer) this._spawnQueueHudTimer = 0;
@@ -2884,68 +2981,10 @@ class Cubitopia {
       this.hud.updateAllSpawnQueues(allQueueEntries);
     }
 
-    // ── Build unit-ID lookup map (avoids O(n) .find() in combat loop) ──
-    // Reuse the same map object to avoid GC pressure
+    // ── VISUAL LOOP: Y-fix + position + animate + strafe + aggro (runs every frame) ──
     if (!this._unitById) this._unitById = new Map<string, Unit>();
     const unitById = this._unitById;
-    unitById.clear();
-
-    // Update occupied tiles for pathfinder (units prefer unoccupied paths)
-    Pathfinder.occupiedTiles.clear();
-    for (let i = 0, len = this.allUnits.length; i < len; i++) {
-      const unit = this.allUnits[i];
-      if (unit.state !== UnitState.DEAD) {
-        unitById.set(unit.id, unit);
-        Pathfinder.occupiedTiles.add(tileKey(unit.position.q, unit.position.r));
-      }
-    }
-
-    // Pass debug flags to UnitAI before running update
-    // Sync debug flags without allocating a new object each frame
-    const df = UnitAI.debugFlags;
-    df.disableChop = this.hud.debugFlags.disableChop;
-    df.disableMine = this.hud.debugFlags.disableMine;
-    df.disableHarvest = this.hud.debugFlags.disableHarvest;
-    df.disableBuild = this.hud.debugFlags.disableBuild;
-    df.disableDeposit = this.hud.debugFlags.disableDeposit;
-    df.disableAutoReturn = this.hud.debugFlags.disableAutoReturn;
-    df.disableCombat = this.hud.debugFlags.disableCombat;
-
-    // Sync stockpiles to UnitAI so builders know what resources are available
-    UnitAI.stoneStockpile = this.stoneStockpile;
-    UnitAI.ironStockpile = this.ironStockpile;
-    UnitAI.clayStockpile = this.clayStockpile;
-    UnitAI.crystalStockpile = this.crystalStockpile;
-    UnitAI.goldStockpile = this.goldStockpile;
-    UnitAI.charcoalStockpile = this.charcoalStockpile;
-    UnitAI.steelStockpile = this.steelStockpile;
-    UnitAI.placedBuildings = this.buildingSystem.placedBuildings;
-    UnitAI.tacticalGroupManager = this.tacticalGroupManager;
-
-    // Update tactical groups (phase transitions, blackboard, centroids)
-    this.tacticalGroupManager.update(delta, this.allUnits);
-
-    // Run unit AI (movement, combat, auto-attack)
-    const events = UnitAI.update(this.players, this.currentMap, delta);
-
-    // Player squad objectives — autonomous CAPTURE/ASSAULT behavior (for local player only)
-    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta, this._localPlayerIndex);
-
-    // Process combat events (delegated to CombatEventHandler)
-    this.combatEventHandler.processEvents(events);
-
-    // Update garrison system (ranged fire from garrisoned units)
-    this.garrisonSystem.update(delta);
-
-    // ── MORALE & STARVATION ──
-    // Apply starvation health drain and cache morale modifier per player
-    for (let pi = 0; pi < this.players.length; pi++) {
-      this.populationSystem.applyStarvationDrain(pi, delta);
-      // Cache morale modifier on UnitAI for combat speed calculations
-      UnitAI.moraleModifiers[pi] = this.populationSystem.getMoraleModifier(pi);
-    }
-
-    // ── SINGLE CONSOLIDATED LOOP: Y-fix + position + animate + strafe + aggro ──
+    // Note: unitById is populated inside _simulationStep; just reference it here
     const gameTime = this.clock.elapsedTime;
     const hasMap = !!this.currentMap;
     // Reuse aggro array — clear instead of reallocating
@@ -3024,26 +3063,9 @@ class Cubitopia {
     this.unitRenderer.updateDeferredEffects();
     this.unitRenderer.updateTrailParticles();
 
-    // --- Zone control capture system ---
-    const captureEvents = this.captureZoneSystem.update(this.allUnits, delta);
-    for (const evt of captureEvents) {
-      this.handleCaptureEvent(evt);
-    }
+    // Capture zone billboards (visual only — simulation done in _simulationStep)
     this.captureZoneSystem.updateBillboards(this.camera.camera);
     this.hud.updateCaptureZones(this.captureZoneSystem.getZones());
-
-    // AI commander: periodically issue orders (skip if disableAI)
-    if (!this.hud.debugFlags.disableAI) {
-      for (let pid = 0; pid < this.playerCount; pid++) {
-        if (!this.players[pid]?.isAI) continue;
-        if (this.players[pid].defeated) continue;
-        this.aiController.updateSmartAICommander(pid, delta);
-        this.aiController.updateSmartAIEconomy(pid, delta);
-        this.aiController.updateSmartAISpawnQueue(pid, delta);
-        this.aiController.updateSmartAITactics(pid, delta);
-        this.aiController.updateSmartAIStrategy(pid, delta);
-      }
-    }
 
     // Update enemy resource bar (reuse cached object to avoid per-frame allocation)
     // In PvP, the "enemy" is whichever player is NOT the local player
@@ -3079,11 +3101,6 @@ class Cubitopia {
       erc.clay = this.clayStockpile[enemyIdx]; erc.charcoal = this.charcoalStockpile[enemyIdx]; erc.rope = this.ropeStockpile[enemyIdx];
       erc.steel = this.steelStockpile[enemyIdx]; erc.gold = this.goldStockpile[enemyIdx];
       this.hud.updateEnemyResources(this.players[enemyIdx], erc);
-    }
-
-    // Nature simulation (tree regrowth, grass growth/spread)
-    if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
-      this.natureSystem.update(delta);
     }
 
     // Update base health bar billboards
@@ -3124,9 +3141,6 @@ class Cubitopia {
       const bpInfo = this.blueprintSystem.getBlueprintCounts();
       this.hud.updateBuildModeInfo(bpInfo, this.stoneStockpile[this._localPlayerIndex]);
     }
-
-    // Base upgrades, population disband, and dead cleanup — delegated to LifecycleUpdater
-    this.lifecycleUpdater.update(delta);
 
     // Update unit stats panel (if visible — throttled to every 0.5s)
     if (!this._unitStatsPanelTimer) this._unitStatsPanelTimer = 0;
