@@ -2883,8 +2883,18 @@ class Cubitopia {
     // Run unit AI (movement, combat, auto-attack)
     const events = UnitAI.update(this.players, this.currentMap, delta);
 
-    // Player squad objectives
-    UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta, this._localPlayerIndex);
+    // Player squad objectives — run for ALL human players for multiplayer determinism.
+    // Advance timer once, then run for each player skipping the internal timer check.
+    {
+      UnitAI._playerObjTimer += delta;
+      if (UnitAI._playerObjTimer >= UnitAI.PLAYER_OBJ_INTERVAL) {
+        UnitAI._playerObjTimer = 0;
+        for (let pid = 0; pid < this.playerCount; pid++) {
+          if (this.players[pid]?.isAI) continue;
+          UnitAI.updatePlayerObjectives(this.allUnits, this.bases, this.currentMap, delta, pid, true);
+        }
+      }
+    }
 
     // Process combat events
     this.combatEventHandler.processEvents(events);

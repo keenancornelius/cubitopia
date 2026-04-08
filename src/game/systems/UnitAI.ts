@@ -576,8 +576,8 @@ export class UnitAI {
   // act autonomously — find targets, march, re-evaluate on completion.
 
   /** Timer throttle — only re-evaluate player objectives every 2 seconds */
-  private static _playerObjTimer = 0;
-  private static readonly PLAYER_OBJ_INTERVAL = 2.0; // seconds
+  static _playerObjTimer = 0;
+  static readonly PLAYER_OBJ_INTERVAL = 2.0; // seconds
 
   /**
    * Called every tick from the main game loop. Handles autonomous behavior for
@@ -590,10 +590,12 @@ export class UnitAI {
    * @param delta Time delta in seconds
    * @param localPlayerIndex Index of the local player (whose objectives to update)
    */
-  static updatePlayerObjectives(allUnits: Unit[], bases: Base[], map: GameMap, delta: number, localPlayerIndex: number = 0): void {
-    UnitAI._playerObjTimer += delta;
-    if (UnitAI._playerObjTimer < UnitAI.PLAYER_OBJ_INTERVAL) return;
-    UnitAI._playerObjTimer = 0;
+  static updatePlayerObjectives(allUnits: Unit[], bases: Base[], map: GameMap, delta: number, localPlayerIndex: number = 0, skipTimerCheck = false): void {
+    if (!skipTimerCheck) {
+      UnitAI._playerObjTimer += delta;
+      if (UnitAI._playerObjTimer < UnitAI.PLAYER_OBJ_INTERVAL) return;
+      UnitAI._playerObjTimer = 0;
+    }
 
     // Collect local player units with objectives, grouped by squad
     const objUnits = allUnits.filter(u => u.owner === localPlayerIndex && u._playerObjective && !UnitAI.isDead(u));

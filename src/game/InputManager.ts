@@ -338,11 +338,11 @@ export class InputManager {
         const keyLower = e.key.toLowerCase();
         const squadSlot = SQUAD_KEYS[keyLower];
         const isModifier = e.ctrlKey || e.metaKey; // Support both Ctrl (Win/Linux) and Cmd (Mac)
+        // Always block browser defaults for Cmd/Ctrl+squad keys (Save, SelectAll, etc.)
+        if (squadSlot !== undefined && isModifier && !e.altKey) {
+          e.preventDefault();
+        }
         if (squadSlot !== undefined && this.game.menuCategory === 0 && !e.altKey) {
-          // Always prevent browser defaults for modifier+squad keys (Cmd+A=SelectAll, Cmd+S=Save, etc.)
-          if (isModifier) {
-            e.preventDefault();
-          }
 
           const sm = this.game.selectionManager;
           const selected = sm.getSelectedUnits();
