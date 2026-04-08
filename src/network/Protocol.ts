@@ -89,6 +89,16 @@ export enum NetCommandType {
   TRADE_RESOURCE = 'trade_resource',
   CRAFT_ITEM = 'craft_item',
 
+  // Crafting / economy actions
+  CRAFT_ROPE = 'craft_rope',
+  CRAFT_STEEL = 'craft_steel',
+  CRAFT_CHARCOAL = 'craft_charcoal',
+  SELL_WOOD = 'sell_wood',
+
+  // Terrain modification (player-initiated)
+  PLANT_TREE = 'plant_tree',
+  PLANT_CROP = 'plant_crop',
+
   // Game flow
   SURRENDER = 'surrender',
 
@@ -131,6 +141,9 @@ export type CommandPayload =
   | GarrisonPayload
   | TradePayload
   | CraftPayload
+  | PlantTreePayload
+  | PlantCropPayload
+  | SimpleCraftPayload
   | SurrenderPayload
   | NopPayload
   | Record<string, unknown>;
@@ -231,6 +244,17 @@ export interface CraftPayload {
   recipe: string;
   amount: number;
 }
+
+export interface PlantTreePayload {
+  position: HexCoord;
+}
+
+export interface PlantCropPayload {
+  position: HexCoord;
+}
+
+/** Simple crafting/economy commands — no payload, owner inferred from playerId */
+export interface SimpleCraftPayload {}
 
 export interface SurrenderPayload {}
 

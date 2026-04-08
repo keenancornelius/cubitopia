@@ -32,6 +32,8 @@ import {
   SetRallyPointPayload,
   GarrisonPayload,
   SquadPayload,
+  PlantTreePayload,
+  PlantCropPayload,
 } from './Protocol';
 import type { Unit, HexCoord } from '../types';
 import { UnitState, UnitStance, UnitType, ElementType } from '../types';
@@ -85,6 +87,16 @@ export interface CommandBridgeGame {
 
   // Squad
   setSquadObjective(squadId: number, objective: string, target?: HexCoord): void;
+
+  // Crafting / economy
+  doCraftRope(owner: number): void;
+  doCraftSteel(owner: number): void;
+  doCraftCharcoal(owner: number): void;
+  doSellWood(owner: number): void;
+
+  // Terrain modification (player-initiated)
+  doPlantTree(position: HexCoord, owner: number): void;
+  doPlantCrop(position: HexCoord, owner: number): void;
 
   // Player ID mapping
   getOwnerForPlayerId(playerId: string): number;
@@ -301,6 +313,34 @@ export function processCommand(game: CommandBridgeGame, cmd: NetworkCommand): vo
         // Legacy path: apply to control group by squad ID
         game.setSquadObjective(p.squadId, p.objective, p.target);
       }
+      break;
+    }
+
+    case NetCommandType.CRAFT_ROPE:
+      game.doCraftRope(owner);
+      break;
+
+    case NetCommandType.CRAFT_STEEL:
+      game.doCraftSteel(owner);
+      break;
+
+    case NetCommandType.CRAFT_CHARCOAL:
+      game.doCraftCharcoal(owner);
+      break;
+
+    case NetCommandType.SELL_WOOD:
+      game.doSellWood(owner);
+      break;
+
+    case NetCommandType.PLANT_TREE: {
+      const p = cmd.payload as PlantTreePayload;
+      game.doPlantTree(p.position, owner);
+      break;
+    }
+
+    case NetCommandType.PLANT_CROP: {
+      const p = cmd.payload as PlantCropPayload;
+      game.doPlantCrop(p.position, owner);
       break;
     }
 

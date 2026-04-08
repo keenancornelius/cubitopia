@@ -1969,6 +1969,77 @@ class Cubitopia {
         }
       },
 
+      // ── Crafting / economy (routed through command queue for MP sync) ──
+      doCraftRope: (owner: number) => {
+        this.resourceManager.craftRope(owner);
+        if (owner === this._localPlayerIndex) this.sound.play('craft_confirm', 0.5);
+      },
+      doCraftSteel: (owner: number) => {
+        this.resourceManager.smeltSteel(owner);
+        if (owner === this._localPlayerIndex) this.sound.play('craft_confirm', 0.5);
+      },
+      doCraftCharcoal: (owner: number) => {
+        this.resourceManager.craftCharcoal(owner);
+        if (owner === this._localPlayerIndex) this.sound.play('craft_confirm', 0.5);
+      },
+      doSellWood: (owner: number) => {
+        this.resourceManager.doSellWood(owner);
+      },
+
+      // ── Terrain modification (routed through command queue for MP sync) ──
+      doPlantTree: (position: HexCoord, owner: number) => {
+        if (!this.currentMap) return;
+        const key = `${position.q},${position.r}`;
+        const tile = this.currentMap.tiles.get(key);
+        if (!tile) return;
+
+        // Validation (same checks as paintPlantTree, minus UI-only concerns)
+        if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.MOUNTAIN) return;
+        if (Pathfinder.blockedTiles.has(key)) return;
+        if (UnitAI.farmPatches.has(key)) return;
+        if (this.natureSystem.treeAge.has(key)) return;
+
+        // Cost 1 wood
+        if (this.woodStockpile[owner] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
+        this.woodStockpile[owner] -= GAME_CONFIG.economy.harvest.tree.plantCost.wood;
+        this.players[owner].resources.wood = Math.max(0, this.players[owner].resources.wood - GAME_CONFIG.economy.harvest.tree.plantCost.wood);
+        if (owner === this._localPlayerIndex) {
+          this.hud.updateResources(this.players[owner], this.woodStockpile[owner], this.foodStockpile[owner], this.stoneStockpile[owner]);
+        }
+
+        // Sprout a sapling
+        tile.terrain = TerrainType.FOREST;
+        this.terrainDecorator.addTreeAtStage(position, tile.elevation * 0.5, 0);
+        this.natureSystem.treeAge.set(key, 0);
+        this.natureSystem.treeGrowthTimers.set(key, this.natureSystem.TREE_GROWTH_TIME);
+      },
+
+      doPlantCrop: (position: HexCoord, owner: number) => {
+        if (!this.currentMap) return;
+        const key = `${position.q},${position.r}`;
+        const tile = this.currentMap.tiles.get(key);
+        if (!tile) return;
+
+        if (tile.terrain !== TerrainType.PLAINS) return;
+        const grassStage = this.natureSystem.getGrassAge(key);
+        if (grassStage !== undefined && grassStage >= 1) return;
+        if (UnitAI.farmPatches.has(key)) return;
+        if (Pathfinder.blockedTiles.has(key)) return;
+
+        // Place farm patch
+        UnitAI.farmPatches.add(key);
+        UnitAI.cropStages.set(key, 0);
+        UnitAI.cropTimers.set(key, GAME_CONFIG.economy.harvest.crops.growTime ?? 8);
+        this.natureSystem.clearedPlains.add(key);
+
+        // Visuals
+        this.blueprintSystem.addFarmPatchMarker(position);
+        this.terrainDecorator.updateCropVisual(key, 0);
+        if (owner === this._localPlayerIndex) {
+          this.hud.showNotification('🌱 Crops planted! They will grow over time.', '#4a7023');
+        }
+      },
+
       getOwnerForPlayerId: (playerId: string) => {
         // In single-player, always player 0
         // In multiplayer, host = 0, guest = 1
@@ -3757,9 +3828,9 @@ class Cubitopia {
       // Route through command queue so both peers execute the spawn
       this.enqueueCommand(NetCommandType.QUEUE_UNIT, { unitType, buildingKind: buildingKey });
     } else if (parts[0] === 'craft') {
-      if (parts[1] === 'rope') { this.resourceManager.craftRope(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
-      else if (parts[1] === 'steel') { this.resourceManager.smeltSteel(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
-      else if (parts[1] === 'charcoal') { this.resourceManager.craftCharcoal(this._localPlayerIndex); this.sound.play('craft_confirm', 0.5); }
+      if (parts[1] === 'rope') { this.enqueueCommand(NetCommandType.CRAFT_ROPE, {}); }
+      else if (parts[1] === 'steel') { this.enqueueCommand(NetCommandType.CRAFT_STEEL, {}); }
+      else if (parts[1] === 'charcoal') { this.enqueueCommand(NetCommandType.CRAFT_CHARCOAL, {}); }
     } else if (parts[0] === 'action') {
       if (parts[1] === 'harvest') this.toggleHarvestMode();
       else if (parts[1] === 'mine') this.toggleMineMode();
@@ -3767,7 +3838,7 @@ class Cubitopia {
       else if (parts[1] === 'farmPatch') this.toggleFarmPatchMode();
       else if (parts[1] === 'plantTree') this.togglePlantTreeMode();
       else if (parts[1] === 'plantCrops') this.togglePlantCropsMode();
-      else if (parts[1] === 'sellWood') this.resourceManager.doSellWood(this._localPlayerIndex);
+      else if (parts[1] === 'sellWood') this.enqueueCommand(NetCommandType.SELL_WOOD, {});
     }
   }
 
@@ -4070,31 +4141,22 @@ class Cubitopia {
     this.interaction.toggle({ kind: 'plant_tree' });
   }
 
-  /** Plant a tree sapling on a plains tile (costs 1 wood) */
+  /** Plant a tree sapling on a plains tile (costs 1 wood) — routed through command queue */
   private paintPlantTree(coord: HexCoord): void {
     if (!this.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.currentMap.tiles.get(key);
     if (!tile) return;
 
-    // Can plant on plains or mountain tiles (not water, snow, desert, swamp)
+    // Quick local validation (prevents queueing obviously invalid commands)
     if (tile.terrain !== TerrainType.PLAINS && tile.terrain !== TerrainType.MOUNTAIN) return;
     if (Pathfinder.blockedTiles.has(key)) return;
     if (UnitAI.farmPatches.has(key)) return;
-    if (this.natureSystem.treeAge.has(key)) return; // Already has a tree/sapling
+    if (this.natureSystem.treeAge.has(key)) return;
+    if (this.woodStockpile[this._localPlayerIndex] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
 
-    // Cost 1 wood
-    const lp = this._localPlayerIndex;
-    if (this.woodStockpile[lp] < GAME_CONFIG.economy.harvest.tree.plantCost.wood) return;
-    this.woodStockpile[lp] -= GAME_CONFIG.economy.harvest.tree.plantCost.wood;
-    this.players[lp].resources.wood = Math.max(0, this.players[lp].resources.wood - GAME_CONFIG.economy.harvest.tree.plantCost.wood);
-    this.hud.updateResources(this.players[lp], this.woodStockpile[lp], this.foodStockpile[lp], this.stoneStockpile[lp]);
-
-    // Sprout a sapling
-    tile.terrain = TerrainType.FOREST;
-    this.terrainDecorator.addTreeAtStage(coord, tile.elevation * 0.5, 0);
-    this.natureSystem.treeAge.set(key, 0);
-    this.natureSystem.treeGrowthTimers.set(key, this.natureSystem.TREE_GROWTH_TIME);
+    // Route through command queue so both clients execute it
+    this.enqueueCommand(NetCommandType.PLANT_TREE, { position: coord });
   }
 
   /** Clear all build/placement modes */
@@ -4302,40 +4364,28 @@ class Cubitopia {
     this.interaction.toggle({ kind: 'plant_crops' });
   }
 
-  /** Plant a crop on a cleared plains tile */
+  /** Plant a crop on a cleared plains tile — routed through command queue */
   private paintPlantCrop(coord: HexCoord): void {
     if (!this.currentMap) return;
     const key = `${coord.q},${coord.r}`;
     const tile = this.currentMap.tiles.get(key);
     if (!tile) return;
 
-    // Must be plains
+    // Quick local validation (prevents queueing obviously invalid commands)
     if (tile.terrain !== TerrainType.PLAINS) {
       this.hud.showNotification('⚠️ Crops can only be planted on plains!', '#e67e22');
       return;
     }
-
-    // Must be cleared of grass (grass stage 0 or in clearedPlains set)
     const grassStage = this.natureSystem.getGrassAge(key);
     if (grassStage !== undefined && grassStage >= 1) {
       this.hud.showNotification('⚠️ Harvest the grass first before planting crops!', '#e67e22');
       return;
     }
-
-    // Can't already be a farm
     if (UnitAI.farmPatches.has(key)) return;
     if (Pathfinder.blockedTiles.has(key)) return;
 
-    // Place farm patch — start at stage 0 (seedling), grows to stage 3 (harvestable)
-    UnitAI.farmPatches.add(key);
-    UnitAI.cropStages.set(key, 0);
-    UnitAI.cropTimers.set(key, GAME_CONFIG.economy.harvest.crops.growTime ?? 8);
-    this.natureSystem.clearedPlains.add(key);
-
-    // Add soil marker + initial crop seedling visual
-    this.blueprintSystem.addFarmPatchMarker(coord);
-    this.terrainDecorator.updateCropVisual(key, 0);
-    this.hud.showNotification('🌱 Crops planted! They will grow over time.', '#4a7023');
+    // Route through command queue so both clients execute it
+    this.enqueueCommand(NetCommandType.PLANT_CROP, { position: coord });
   }
 
   /** Check if terrain is any water type (ocean, river, lake, or waterfall) */
