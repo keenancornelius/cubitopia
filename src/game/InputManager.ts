@@ -401,6 +401,7 @@ export class InputManager {
         const selected = this.game.selectionManager.getSelectedUnits();
         if (selected.length > 0) {
           this.game.interaction.enter({ kind: 'attack_move' });
+          (document.getElementById(this.engineConfig.canvasId) as HTMLCanvasElement).style.cursor = 'crosshair';
           this.hud.showNotification(
             'ATTACK MOVE — Left-click target',
             '#ff9800'

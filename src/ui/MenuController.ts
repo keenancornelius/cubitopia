@@ -461,7 +461,7 @@ export default class MenuController {
     // Version
     const ver = document.createElement('div');
     ver.style.cssText = 'position:absolute; bottom:20px; color:#444; font-size:10px; letter-spacing:2px;';
-    ver.textContent = 'v0.12 — PLAYTEST BUILD';
+    ver.textContent = 'v0.13 — PLAYTEST BUILD';
     overlay.appendChild(ver);
 
     document.body.appendChild(overlay);

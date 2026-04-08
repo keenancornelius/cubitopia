@@ -1675,6 +1675,7 @@ class Cubitopia {
       getPlayers: () => this.players,
       getAllUnits: () => this.allUnits,
       getCurrentMap: () => this.currentMap,
+      getLocalPlayerIndex: () => this._localPlayerIndex,
       // NOTE: SpawnQueueSystem resource ops use localPlayerIndex. In multiplayer lockstep,
       // unit spawning goes through spawnUnitForOwner() which is fully owner-aware.
       // SpawnQueueSystem queue processing only runs for local player's buildings.
@@ -1739,6 +1740,27 @@ class Cubitopia {
         unit._squadJoining = true;
         // Append to the control group without disrupting current selection
         this.selectionManager.appendToControlGroup(squadSlot, unit);
+      },
+      getResourceForOwner: (resource, owner) => {
+        switch (resource) {
+          case 'gold': return this.players[owner]?.resources.gold ?? 0;
+          case 'wood': return this.woodStockpile[owner] ?? 0;
+          case 'stone': return this.stoneStockpile[owner] ?? 0;
+          case 'rope': return this.ropeStockpile[owner] ?? 0;
+          case 'steel': return this.steelStockpile[owner] ?? 0;
+          case 'crystal': return this.players[owner]?.resources.crystal ?? 0;
+          default: return 0;
+        }
+      },
+      setResourceForOwner: (resource, owner, value) => {
+        switch (resource) {
+          case 'gold': this.goldStockpile[owner] = value; if (this.players[owner]) this.players[owner].resources.gold = value; break;
+          case 'wood': this.woodStockpile[owner] = value; if (this.players[owner]) this.players[owner].resources.wood = value; break;
+          case 'stone': this.stoneStockpile[owner] = value; if (this.players[owner]) this.players[owner].resources.stone = value; break;
+          case 'rope': this.ropeStockpile[owner] = value; if (this.players[owner]) this.players[owner].resources.rope = value; break;
+          case 'steel': this.steelStockpile[owner] = value; if (this.players[owner]) this.players[owner].resources.steel = value; break;
+          case 'crystal': if (this.players[owner]) this.players[owner].resources.crystal = value; break;
+        }
       },
     });
 
@@ -1874,7 +1896,8 @@ class Cubitopia {
       },
 
       queueUnit: (unitType: string, buildingKind: string, owner: number) => {
-        this.spawnUnitForOwner(unitType as UnitType, buildingKind as BuildingKind, owner);
+        // Route through SpawnQueueSystem timer instead of instant spawn
+        this.spawnQueueSystem.enqueueForOwner(buildingKind, unitType as UnitType, owner);
       },
 
       setUnitStance: (unit: Unit, stance: UnitStance) => {
@@ -2582,8 +2605,9 @@ class Cubitopia {
     // Register tribe assignments with the renderer so unit models use tribe palette colors
     this.unitRenderer.setPlayerTribes(this.players);
 
-    if (isArena) {
+    if (isArena && !isPvP) {
       // Arena mode: large combat armies on opposite sides, aggressive stance
+      // Disabled in PvP multiplayer — non-deterministic unit spawning causes desync
       const arenaCenter = Math.floor(MAP_SIZE / 2);
       // Army compositions from debug panel (Army tab), defaults to 1 of each
       const armyComp = this.debugPanel.getArmyComposition();

@@ -14,10 +14,10 @@ import { GAME_CONFIG } from '../GameConfig';
 
 // ── Queue item types ──
 
-export type SimpleQueueItem = { type: UnitType; cost: number };
-export type WorkshopQueueItem = { type: UnitType; cost: { wood: number; stone: number; rope: number } };
-export type ArmoryQueueItem = { type: UnitType; cost: { gold: number; steel: number } };
-export type WizardTowerQueueItem = { type: UnitType; cost: { gold: number; crystal: number } };
+export type SimpleQueueItem = { type: UnitType; cost: number; owner: number };
+export type WorkshopQueueItem = { type: UnitType; cost: { wood: number; stone: number; rope: number }; owner: number };
+export type ArmoryQueueItem = { type: UnitType; cost: { gold: number; steel: number }; owner: number };
+export type WizardTowerQueueItem = { type: UnitType; cost: { gold: number; crystal: number }; owner: number };
 
 /** Slim interface — only what SpawnQueueSystem needs from the outside */
 export interface SpawnQueueOps {
@@ -26,7 +26,10 @@ export interface SpawnQueueOps {
   getAllUnits(): Unit[];
   getCurrentMap(): any;
 
-  // Resource access (player 0)
+  // Local player index (for UI validation in doSpawnQueue* methods)
+  getLocalPlayerIndex(): number;
+
+  // Resource access (local player — used by doSpawnQueue* for UI validation)
   getGold(): number;
   setGold(v: number): void;
   getWood(): number;
@@ -39,6 +42,10 @@ export interface SpawnQueueOps {
   setSteel(v: number): void;
   getCrystal(): number;
   setCrystal(v: number): void;
+
+  // Owner-parameterized resource access (for multiplayer queue processing)
+  getResourceForOwner(resource: 'gold' | 'wood' | 'stone' | 'rope' | 'steel' | 'crystal', owner: number): number;
+  setResourceForOwner(resource: 'gold' | 'wood' | 'stone' | 'rope' | 'steel' | 'crystal', owner: number, value: number): void;
 
   // Building queries
   getNextSpawnBuilding(kind: BuildingKind, owner: number): PlacedBuilding | null;
@@ -208,17 +215,18 @@ export default class SpawnQueueSystem {
     const cfg = this.SPAWN_QUEUE_CONFIG[buildingKey];
     if (!cfg) return;
     const ops = this.ops;
-    if (!ops.getFirstBuilding(cfg.buildingKind, 0)) {
+    const lp = ops.getLocalPlayerIndex();
+    if (!ops.getFirstBuilding(cfg.buildingKind, lp)) {
       ops.showNotification(`Place a ${cfg.buildingKind.charAt(0).toUpperCase() + cfg.buildingKind.slice(1)} first, then press ${name} again`, '#e67e22');
       ops.toggleBuildingPlaceMode(cfg.buildingKind);
       return;
     }
     const debugFlags = ops.getDebugFlags();
     // Pop cap check for combat units
-    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
-      const info = ops.getCombatPopInfo(0);
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(lp)) {
+      const info = ops.getCombatPopInfo(lp);
       ops.playSound('queue_error', 0.4);
-      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(lp)} more food` : '';
       ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
@@ -227,7 +235,7 @@ export default class SpawnQueueSystem {
       ops.showNotification(`Need ${cost} ${cfg.resourceType} for ${name}! (have ${cfg.getResource()})`, '#e67e22');
       return;
     }
-    cfg.getQueue().push({ type, cost: debugFlags.freeBuild ? 0 : cost });
+    cfg.getQueue().push({ type, cost: debugFlags.freeBuild ? 0 : cost, owner: lp });
     ops.playSound('queue_confirm', 0.5);
     ops.showNotification(`${name} queued (${debugFlags.freeBuild ? 'FREE' : cost + ' ' + cfg.resourceType})`, '#2ecc71');
   }
@@ -235,7 +243,8 @@ export default class SpawnQueueSystem {
   /** Queue a unit for Workshop (multi-resource: rope + stone + wood) */
   doSpawnQueueWorkshop(type: UnitType, name: string): void {
     const ops = this.ops;
-    if (!ops.getFirstBuilding('workshop', 0)) {
+    const lp = ops.getLocalPlayerIndex();
+    if (!ops.getFirstBuilding('workshop', lp)) {
       ops.showNotification(`📍 Place a Workshop first [W], then press 7 again`, '#e67e22');
       ops.toggleBuildingPlaceMode('workshop');
       return;
@@ -243,10 +252,10 @@ export default class SpawnQueueSystem {
     const cost = { ...GAME_CONFIG.units[UnitType.TREBUCHET].costs.playerQueue };
     const debugFlags = ops.getDebugFlags();
     // Pop cap check for combat units
-    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
-      const info = ops.getCombatPopInfo(0);
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(lp)) {
+      const info = ops.getCombatPopInfo(lp);
       ops.playSound('queue_error', 0.4);
-      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(lp)} more food` : '';
       ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
@@ -268,7 +277,7 @@ export default class SpawnQueueSystem {
       }
     }
     const actualCost = debugFlags.freeBuild ? { wood: 0, stone: 0, rope: 0 } : cost;
-    this.workshopSpawnQueue.push({ type, cost: actualCost });
+    this.workshopSpawnQueue.push({ type, cost: actualCost, owner: lp });
     ops.playSound('queue_confirm', 0.5);
     ops.showNotification(`✅ ${name} queued (${debugFlags.freeBuild ? 'FREE' : cost.rope + ' rope + ' + cost.stone + ' stone + ' + cost.wood + ' wood'})`, '#2ecc71');
   }
@@ -276,17 +285,18 @@ export default class SpawnQueueSystem {
   /** Queue a unit for Armory (gold + steel) */
   doSpawnQueueArmory(type: UnitType, name: string, goldCost: number, steelCost: number): void {
     const ops = this.ops;
-    if (!ops.getFirstBuilding('armory', 0)) {
+    const lp = ops.getLocalPlayerIndex();
+    if (!ops.getFirstBuilding('armory', lp)) {
       ops.showNotification(`📍 Place an Armory first [A], then queue ${name} again`, '#e67e22');
       ops.toggleBuildingPlaceMode('armory');
       return;
     }
     const debugFlags = ops.getDebugFlags();
     // Pop cap check for combat units
-    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
-      const info = ops.getCombatPopInfo(0);
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(lp)) {
+      const info = ops.getCombatPopInfo(lp);
       ops.playSound('queue_error', 0.4);
-      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(lp)} more food` : '';
       ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
@@ -303,7 +313,7 @@ export default class SpawnQueueSystem {
       }
     }
     const cost = debugFlags.freeBuild ? { gold: 0, steel: 0 } : { gold: goldCost, steel: steelCost };
-    this.armorySpawnQueue.push({ type, cost });
+    this.armorySpawnQueue.push({ type, cost, owner: lp });
     ops.playSound('queue_confirm', 0.5);
     ops.showNotification(`✅ ${name} queued (${debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + steelCost + ' steel'})`, '#2ecc71');
   }
@@ -311,17 +321,18 @@ export default class SpawnQueueSystem {
   /** Queue a unit for Wizard Tower (gold + crystal) */
   doSpawnQueueWizardTower(type: UnitType, name: string, goldCost: number, crystalCost: number): void {
     const ops = this.ops;
-    if (!ops.getFirstBuilding('wizard_tower', 0)) {
+    const lp = ops.getLocalPlayerIndex();
+    if (!ops.getFirstBuilding('wizard_tower', lp)) {
       ops.showNotification(`📍 Place a Wizard Tower first [Y], then queue ${name} again`, '#e67e22');
       ops.toggleBuildingPlaceMode('wizard_tower');
       return;
     }
     const debugFlags = ops.getDebugFlags();
     // Pop cap check for combat units
-    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(0)) {
-      const info = ops.getCombatPopInfo(0);
+    if (isCombatType(type) && !debugFlags.freeBuild && !ops.canSpawnCombatUnit(lp)) {
+      const info = ops.getCombatPopInfo(lp);
       ops.playSound('queue_error', 0.4);
-      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(0)} more food` : '';
+      const foodHint = ops.getFoodNeededForNext ? ` Need ${ops.getFoodNeededForNext(lp)} more food` : '';
       ops.showNotification(`Pop cap reached! (${info.current}/${info.cap}) — build farms for more food.${foodHint}`, '#e67e22');
       return;
     }
@@ -338,7 +349,7 @@ export default class SpawnQueueSystem {
       }
     }
     const cost = debugFlags.freeBuild ? { gold: 0, crystal: 0 } : { gold: goldCost, crystal: crystalCost };
-    this.wizardTowerSpawnQueue.push({ type, cost });
+    this.wizardTowerSpawnQueue.push({ type, cost, owner: lp });
     ops.playSound('queue_confirm', 0.5);
     ops.showNotification(`✅ ${name} queued (${debugFlags.freeBuild ? 'FREE' : goldCost + 'g + ' + crystalCost + ' crystal'})`, '#7c3aed');
   }
@@ -355,24 +366,28 @@ export default class SpawnQueueSystem {
 
     // ─── Process spawn timers ───
     for (const cfg of spawnConfigs) {
-      const building = ops.getNextSpawnBuilding(cfg.kind as any, 0);
-      if (!building || cfg.queue.length === 0) continue;
+      if (cfg.queue.length === 0) continue;
+      const next = cfg.queue[0] as any; // May have .owner from enqueueForOwner
+      const itemOwner: number = next.owner ?? 0;
+      const building = ops.getNextSpawnBuilding(cfg.kind as any, itemOwner);
+      if (!building) continue;
 
       const timer = cfg.getTimer() + delta;
       const spawnTime = debugFlags.instantSpawn ? 0 : cfg.spawnTime;
 
       if (timer >= spawnTime) {
         cfg.setTimer(0);
-        const next = cfg.queue[0];
-        if (cfg.canAfford(next)) {
-          cfg.deductCost(next);
+        // Owner-aware affordability check
+        const canAfford = this._canAffordItem(cfg.kind, next, itemOwner);
+        if (canAfford) {
+          this._deductItemCost(cfg.kind, next, itemOwner);
           cfg.queue.shift();
           // Use the already-peeked building (no double-advance)
           const pos = ops.findSpawnTile(map, building.position.q, building.position.r, true);
           ops.advanceSpawnIndex(cfg.kind as any);
           // Mark tile occupied immediately to prevent same-frame stacking
           Pathfinder.occupiedTiles.add(`${pos.q},${pos.r}`);
-          const unit = UnitFactory.create(next.type, 0, pos);
+          const unit = UnitFactory.create(next.type, itemOwner, pos);
           const wp = ops.hexToWorld(pos);
           unit.worldPosition = { ...wp };
           ops.addUnitToGame(unit);
@@ -380,8 +395,8 @@ export default class SpawnQueueSystem {
           ops.playSound('unit_spawn', 0.45);
           // Deduct food for combat units (3 food per combat unit)
           if (isCombatType(unit.type)) {
-            const currentFood = ops.getFoodStockpile(0);
-            ops.setFoodStockpile(0, Math.max(0, currentFood - FOOD_PER_COMBAT_UNIT));
+            const currentFood = ops.getFoodStockpile(itemOwner);
+            ops.setFoodStockpile(itemOwner, Math.max(0, currentFood - FOOD_PER_COMBAT_UNIT));
           }
           ops.updateResources();
           // Rally point
@@ -432,6 +447,47 @@ export default class SpawnQueueSystem {
         ? cfg.timer / (debugFlags.instantSpawn ? 0.001 : cfg.spawnTime)
         : 0,
     }));
+  }
+
+  /** Owner-aware affordability check for a queue item */
+  private _canAffordItem(buildingKind: string, item: any, owner: number): boolean {
+    const ops = this.ops;
+    const debugFlags = ops.getDebugFlags();
+    if (debugFlags.freeBuild) return true;
+    if (buildingKind === 'workshop') {
+      return ops.getResourceForOwner('rope', owner) >= item.cost.rope &&
+             ops.getResourceForOwner('stone', owner) >= item.cost.stone &&
+             ops.getResourceForOwner('wood', owner) >= item.cost.wood;
+    } else if (buildingKind === 'armory') {
+      return ops.getResourceForOwner('gold', owner) >= item.cost.gold &&
+             ops.getResourceForOwner('steel', owner) >= item.cost.steel;
+    } else if (buildingKind === 'wizard_tower') {
+      return ops.getResourceForOwner('gold', owner) >= item.cost.gold &&
+             ops.getResourceForOwner('crystal', owner) >= item.cost.crystal;
+    } else {
+      // Simple buildings: barracks (gold), forestry/masonry/farmhouse (wood)
+      const resource = buildingKind === 'barracks' ? 'gold' : 'wood';
+      return ops.getResourceForOwner(resource as any, owner) >= item.cost;
+    }
+  }
+
+  /** Owner-aware cost deduction for a queue item */
+  private _deductItemCost(buildingKind: string, item: any, owner: number): void {
+    const ops = this.ops;
+    if (buildingKind === 'workshop') {
+      ops.setResourceForOwner('rope', owner, ops.getResourceForOwner('rope', owner) - item.cost.rope);
+      ops.setResourceForOwner('stone', owner, ops.getResourceForOwner('stone', owner) - item.cost.stone);
+      ops.setResourceForOwner('wood', owner, ops.getResourceForOwner('wood', owner) - item.cost.wood);
+    } else if (buildingKind === 'armory') {
+      ops.setResourceForOwner('gold', owner, ops.getResourceForOwner('gold', owner) - item.cost.gold);
+      ops.setResourceForOwner('steel', owner, ops.getResourceForOwner('steel', owner) - item.cost.steel);
+    } else if (buildingKind === 'wizard_tower') {
+      ops.setResourceForOwner('gold', owner, ops.getResourceForOwner('gold', owner) - item.cost.gold);
+      ops.setResourceForOwner('crystal', owner, ops.getResourceForOwner('crystal', owner) - item.cost.crystal);
+    } else {
+      const resource = buildingKind === 'barracks' ? 'gold' : 'wood';
+      ops.setResourceForOwner(resource as any, owner, ops.getResourceForOwner(resource as any, owner) - item.cost);
+    }
   }
 
   /** Route spawn queue command based on building type and unit */
@@ -504,6 +560,43 @@ export default class SpawnQueueSystem {
         break;
       }
     }
+  }
+
+  /** Enqueue a unit for a specific owner — called from CommandBridge for QUEUE_UNIT commands.
+   *  Bypasses UI cost validation (cost is checked at spawn time by update()).
+   *  Both clients in lockstep call this with identical params for determinism. */
+  enqueueForOwner(buildingKind: string, unitType: UnitType, owner: number): void {
+    const unitCfg = GAME_CONFIG.units[unitType];
+    if (!unitCfg) return;
+    const costs = (unitCfg.costs as any)?.tooltipQueue ?? (unitCfg.costs as any)?.menu ?? (unitCfg.costs as any)?.playerQueue;
+    if (!costs) return;
+    const debugFlags = this.ops.getDebugFlags();
+    const free = debugFlags.freeBuild;
+
+    switch (buildingKind) {
+      case 'barracks':
+        this.spawnQueue.push({ type: unitType, cost: free ? 0 : (costs.gold ?? 0), owner });
+        break;
+      case 'forestry':
+        this.forestrySpawnQueue.push({ type: unitType, cost: free ? 0 : (costs.wood ?? 0), owner });
+        break;
+      case 'masonry':
+        this.masonrySpawnQueue.push({ type: unitType, cost: free ? 0 : (costs.wood ?? 0), owner });
+        break;
+      case 'farmhouse':
+        this.farmhouseSpawnQueue.push({ type: unitType, cost: free ? 0 : (costs.wood ?? 0), owner });
+        break;
+      case 'workshop':
+        this.workshopSpawnQueue.push({ type: unitType, cost: free ? 0 : { wood: costs.wood ?? 0, stone: costs.stone ?? 0, rope: costs.rope ?? 0 }, owner } as any);
+        break;
+      case 'armory':
+        this.armorySpawnQueue.push({ type: unitType, cost: free ? 0 : { gold: costs.gold ?? 0, steel: costs.steel ?? 0 }, owner } as any);
+        break;
+      case 'wizard_tower':
+        this.wizardTowerSpawnQueue.push({ type: unitType, cost: free ? 0 : { gold: costs.gold ?? 0, crystal: costs.crystal ?? 0 }, owner } as any);
+        break;
+    }
+    this.ops.playSound('queue_confirm', 0.5);
   }
 
   /** Reset all queues — called on map regeneration */
