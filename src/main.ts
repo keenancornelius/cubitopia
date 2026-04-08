@@ -3165,15 +3165,15 @@ class Cubitopia {
     }
 
     // AI outpost building — if an AI captures an outpost, build forward-operating buildings
-    const isAI = evt.newOwner > 0 || this.gameMode === 'aivai';
-    if (isAI && !evt.isMainBase) {
+    const capturerIsAI = this.players[evt.newOwner]?.isAI ?? false;
+    if (capturerIsAI && !evt.isMainBase) {
       this.aiController.onBaseCapture(evt.newOwner, base.position);
     }
 
     // Notification — N-player aware
     const colorName = PLAYER_COLORS[evt.newOwner]?.name ?? `Player ${evt.newOwner}`;
-    const isHumanCapture = evt.newOwner === 0 && this.gameMode !== 'aivai';
-    const capturerName = isHumanCapture ? 'You' : colorName;
+    const isHumanCapture = !capturerIsAI;
+    const capturerName = (evt.newOwner === this._localPlayerIndex) ? 'You' : colorName;
     const capturerCSS = getPlayerCSS(evt.newOwner);
     const baseLabel = evt.isMainBase ? 'main base' : 'outpost';
 
