@@ -288,6 +288,8 @@ export function computeStateHash(
   p1Resources: Record<string, number>,
   p2Resources: Record<string, number>,
   includeDetails = false,
+  rngState?: number,
+  terrainFingerprint?: string,
 ): GameStateHash {
   // Sort units by ID for deterministic ordering
   const sorted = [...units].sort((a, b) => a.id.localeCompare(b.id));
@@ -305,10 +307,16 @@ export function computeStateHash(
   const p1Sum = Object.values(p1Resources).reduce((a, b) => a + b, 0);
   const p2Sum = Object.values(p2Resources).reduce((a, b) => a + b, 0);
   stateStr += `r1:${p1Sum}|r2:${p2Sum}`;
+  // Include RNG state — if this diverges, a non-deterministic RNG call happened
+  if (rngState !== undefined) stateStr += `|rng:${rngState}`;
+  // Include terrain fingerprint — if this diverges, map state differs (different mining/chopping)
+  if (terrainFingerprint) stateStr += `|tf:${terrainFingerprint}`;
 
   // Build per-unit detail string for desync debugging
   let unitDetails: string | undefined;
   if (includeDetails) {
+    const rngInfo = rngState !== undefined ? `\nRNG state: ${rngState}` : '';
+    const tfInfo = terrainFingerprint ? `\nTerrain: ${terrainFingerprint}` : '';
     unitDetails = sorted
       .map(u => {
         const tgt = u.targetPosition ? ` tgt=${u.targetPosition.q},${u.targetPosition.r}` : '';
@@ -316,7 +324,7 @@ export function computeStateHash(
         const gcd = u.gatherCooldown !== undefined ? ` gcd=${u.gatherCooldown.toFixed(2)}` : '';
         return `${u.id}[${u.type ?? '?'}p${u.owner ?? '?'}]@${u.position.q},${u.position.r} hp=${u.currentHealth} st=${u.state}${tgt}${carry}${gcd}`;
       })
-      .join('\n');
+      .join('\n') + rngInfo + tfInfo;
   }
 
   return {

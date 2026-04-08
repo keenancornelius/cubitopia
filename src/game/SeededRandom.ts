@@ -40,6 +40,11 @@ export class SeededRandom {
     return this.next() < probability;
   }
 
+  /** Expose internal state for determinism verification (desync detection) */
+  getState(): number {
+    return this.seed;
+  }
+
   /** Pick a random element from an array */
   pick<T>(arr: T[]): T {
     return arr[Math.floor(this.next() * arr.length)];
@@ -86,6 +91,11 @@ class GameRNGManager {
   /** The shared RNG instance — use this in all game logic */
   get rng(): SeededRandom {
     return this._rng;
+  }
+
+  /** Expose RNG internal state for desync detection */
+  getState(): number {
+    return this._rng.getState();
   }
 }
 

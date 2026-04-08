@@ -20,7 +20,7 @@ import { NetworkCommand, NetCommandType, GameStateHash, computeStateHash } from 
 import { NetworkManager } from './NetworkManager';
 
 /** How many ticks between state hash checks */
-const HASH_CHECK_INTERVAL = 20; // 1 second at 20 ticks/s (was 60 — tighter for debugging)
+const HASH_CHECK_INTERVAL = 5; // 250ms at 20 ticks/s — very tight for desync bisection
 
 /** How many ticks ahead we allow commands to be buffered */
 const MAX_FUTURE_TICKS = 20;
@@ -60,7 +60,7 @@ export class CommandQueue {
   private _commandProcessor: ((cmd: NetworkCommand) => void) | null = null;
 
   /** Callback for computing current state hash */
-  private _stateHashProvider: (() => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number> }) | null = null;
+  private _stateHashProvider: (() => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string }) | null = null;
 
   /** Desync callback */
   private _onDesync: ((localHash: number, remoteHash: number, tick: number) => void) | null = null;
@@ -131,7 +131,7 @@ export class CommandQueue {
   }
 
   /** Set the function that provides current game state for hashing */
-  setStateHashProvider(provider: () => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number> }): void {
+  setStateHashProvider(provider: () => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string }): void {
     this._stateHashProvider = provider;
   }
 
@@ -292,12 +292,14 @@ export class CommandQueue {
       state.p1Resources,
       state.p2Resources,
       !this._desyncDetailLogged, // include details until first desync is diagnosed
+      state.rngState,
+      state.terrainFingerprint,
     );
 
     // Store local hash so we can compare against stale remote hashes
     this._localHashHistory.set(this.currentTick, hash);
     // Keep only recent hashes (avoid memory leak)
-    if (this._localHashHistory.size > 20) {
+    if (this._localHashHistory.size > 80) {
       const oldest = this.currentTick - HASH_CHECK_INTERVAL * 20;
       for (const [tick] of this._localHashHistory) {
         if (tick < oldest) this._localHashHistory.delete(tick);

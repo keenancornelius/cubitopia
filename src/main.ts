@@ -1847,12 +1847,24 @@ class Cubitopia {
     this.multiplayer.commandQueue.setStateHashProvider(() => {
       const p0 = this.players[0];
       const p1 = this.players[1];
+      // Build terrain fingerprint: count FOREST tiles + hash a few key tile elevations
+      let forestCount = 0;
+      let terrainSum = 0;
+      if (this.currentMap) {
+        for (const [key, tile] of this.currentMap.tiles) {
+          if (tile.terrain === TerrainType.FOREST) forestCount++;
+          terrainSum += tile.elevation;
+        }
+      }
+      const terrainFingerprint = `f${forestCount}e${terrainSum}`;
       return {
         units: this.allUnits
           .filter(u => u.currentHealth > 0)
           .map(u => ({ id: u.id, position: u.position, currentHealth: u.currentHealth, state: u.state, type: u.type, owner: u.owner, targetPosition: u.targetPosition ?? null, carryAmount: u.carryAmount ?? 0, gatherCooldown: u.gatherCooldown })),
         p1Resources: p0 ? p0.resources : {},
         p2Resources: p1 ? p1.resources : {},
+        rngState: GameRNG.getState(),
+        terrainFingerprint,
       };
     });
   }
