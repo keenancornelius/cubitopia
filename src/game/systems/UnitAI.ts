@@ -233,11 +233,19 @@ export class UnitAI {
 
         // Healer caster: pick most-injured ally in range, fire heal projectile
         if (unit.type === UnitType.HEALER) {
+          // Deterministic cast-animation timer (replaces setTimeout for multiplayer sync)
+          if ((unit as any)._healCastTimer > 0) {
+            (unit as any)._healCastTimer -= delta;
+            if ((unit as any)._healCastTimer <= 0) {
+              (unit as any)._healCastTimer = 0;
+              if (unit.state === UnitState.ATTACKING) unit.state = UnitState.IDLE;
+            }
+          }
           const healed = CombatSystem.processHealerTick(unit, allUnits, delta);
           if (healed.length > 0) {
             unit.state = UnitState.ATTACKING; // triggers cast animation
-            // Auto-return to idle after cast animation finishes
-            setTimeout(() => { if (unit.state === UnitState.ATTACKING) unit.state = UnitState.IDLE; }, GAME_CONFIG.gather.healerCastDelay);
+            // Deterministic timer: healerCastDelay is in ms, convert to seconds
+            (unit as any)._healCastTimer = GAME_CONFIG.gather.healerCastDelay / 1000;
           }
           for (const hid of healed) events.push({ type: 'heal', healerId: unit.id, targetId: hid } as any);
 
@@ -2120,7 +2128,7 @@ export class UnitAI {
       const [q, r] = key.split(',').map(Number);
       const coord = { q, r };
       const dist = Pathfinder.heuristic(unit.position, coord);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && UnitAI.tieBreak(coord, nearest))) {
         nearestDist = dist;
         nearest = coord;
       }
@@ -2549,10 +2557,11 @@ export class UnitAI {
       const claimer = UnitAI.claimedFarms.get(key);
       if (claimer && claimer !== unit.id) continue;
       const [q, r] = key.split(',').map(Number);
-      const dist = Pathfinder.heuristic(origin, { q, r });
-      if (dist <= radius && dist < bestDist) {
+      const coord = { q, r };
+      const dist = Pathfinder.heuristic(origin, coord);
+      if (dist <= radius && (dist < bestDist || (dist === bestDist && UnitAI.tieBreak(coord, best)))) {
         bestDist = dist;
-        best = { q, r };
+        best = coord;
       }
     }
 
@@ -2563,10 +2572,11 @@ export class UnitAI {
       const tile = map.tiles.get(key);
       if (!tile || tile.terrain !== TerrainType.PLAINS) continue;
       const [q, r] = key.split(',').map(Number);
-      const dist = Pathfinder.heuristic(origin, { q, r });
-      if (dist <= radius && dist < bestDist) {
+      const coord = { q, r };
+      const dist = Pathfinder.heuristic(origin, coord);
+      if (dist <= radius && (dist < bestDist || (dist === bestDist && UnitAI.tieBreak(coord, best)))) {
         bestDist = dist;
-        best = { q, r };
+        best = coord;
       }
     }
 
@@ -2577,8 +2587,9 @@ export class UnitAI {
       const tile = map.tiles.get(key);
       if (!tile || tile.terrain !== TerrainType.PLAINS) continue;
       const [q, r] = key.split(',').map(Number);
-      const dist = Pathfinder.heuristic(origin, { q, r });
-      if (dist <= radius && dist < bestDist) {
+      const coord = { q, r };
+      const dist = Pathfinder.heuristic(origin, coord);
+      if (dist <= radius && (dist < bestDist || (dist === bestDist && UnitAI.tieBreak(coord, best)))) {
         bestDist = dist;
         best = { q, r };
       }
