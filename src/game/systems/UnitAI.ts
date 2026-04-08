@@ -26,6 +26,22 @@ export class UnitAI {
     return candidate.q < current.q || (candidate.q === current.q && candidate.r < current.r);
   }
 
+  // ── Float quantization for multiplayer determinism ──
+  // Math.sqrt and float accumulation can produce subtly different results
+  // across browser engines (V8 vs JSC). Quantizing worldPosition to a
+  // fine grid (1/512 ≈ 0.002) each tick prevents drift from accumulating.
+  // 512 is a power of 2, so 1/512 is exactly representable in IEEE 754.
+  private static readonly QUANT = 512;
+  private static quantize(v: number): number {
+    return Math.round(v * UnitAI.QUANT) / UnitAI.QUANT;
+  }
+  /** Snap a unit's worldPosition to the quantization grid after movement */
+  private static quantizePosition(unit: Unit): void {
+    unit.worldPosition.x = UnitAI.quantize(unit.worldPosition.x);
+    unit.worldPosition.y = UnitAI.quantize(unit.worldPosition.y);
+    unit.worldPosition.z = UnitAI.quantize(unit.worldPosition.z);
+  }
+
   // ── SharedGameState: single injectable container for all mutable game state ──
   // All 30+ statics that were here are now in SharedGameState.
   // Forwarding getters/setters below keep `UnitAI.xxx` working everywhere.
@@ -1881,6 +1897,7 @@ export class UnitAI {
       unit.worldPosition.x = targetWorld.x;
       unit.worldPosition.z = targetWorld.z;
       unit.worldPosition.y = targetWorld.y;
+      UnitAI.quantizePosition(unit);
 
       const path = unit._path as HexCoord[] | null;
       const pathIndex = (unit._pathIndex ?? 0) || 0;
@@ -1991,6 +2008,8 @@ export class UnitAI {
           unit._elevProgress = blendT;
         }
       }
+      // Quantize worldPosition to prevent cross-browser float drift
+      UnitAI.quantizePosition(unit);
     }
   }
 
@@ -3138,6 +3157,7 @@ export class UnitAI {
       unit.worldPosition.x = targetWorld.x;
       unit.worldPosition.z = targetWorld.z;
       unit.worldPosition.y = targetWorld.y;
+      UnitAI.quantizePosition(unit);
 
       // Dynamic underground state: transition at tunnel entrances
       // Only units with an underground command auto-transition when entering tunnel tiles.
@@ -3357,6 +3377,8 @@ export class UnitAI {
         }
 
       }
+      // Quantize worldPosition to prevent cross-browser float drift
+      UnitAI.quantizePosition(unit);
     }
   }
 
