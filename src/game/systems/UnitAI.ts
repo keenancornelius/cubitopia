@@ -1178,9 +1178,10 @@ export class UnitAI {
           return;
         }
 
-        // Zone control: if player-commanded and inside an enemy/neutral base capture zone,
-        // hold position to maintain zone control presence
-        if (unit._playerCommanded) {
+        // Zone control: if player-commanded (via MOVE, not ATTACK) and inside an
+        // enemy/neutral base capture zone, hold position to maintain zone control.
+        // Skip if unit has an ATTACK command — let building attack logic run.
+        if (unit._playerCommanded && unit.command?.type !== CommandType.ATTACK) {
           for (const base of UnitAI.bases) {
             if (base.destroyed || base.owner === unit.owner) continue;
             const distToBase = Pathfinder.heuristic(unit.position, base.position);
@@ -1264,11 +1265,16 @@ export class UnitAI {
             unit._postPosition = null;
           }
 
-          // Siege: attack walls/buildings; non-siege: attack buildings while holding position
+          // Siege: attack walls first, then buildings; non-siege: attack buildings while holding position
           if (unit.isSiege) {
             const adjacentWall = UnitAI.findAdjacentEnemyWall(unit, player.id);
             if (adjacentWall) {
               events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentWall } });
+              return;
+            }
+            const adjacentBuildingSiege = UnitAI.findAdjacentEnemyBuilding(unit, player.id);
+            if (adjacentBuildingSiege) {
+              events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentBuildingSiege } });
               return;
             }
           } else {
@@ -1330,11 +1336,16 @@ export class UnitAI {
               return;
             }
           }
-          // Siege: attack adjacent enemy walls/buildings; non-siege: attack adjacent enemy buildings only
+          // Siege: attack adjacent enemy walls first, then buildings; non-siege: attack buildings only
           if (unit.isSiege) {
             const adjacentWall = UnitAI.findAdjacentEnemyWall(unit, player.id);
             if (adjacentWall) {
               events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentWall } });
+              return;
+            }
+            const adjacentBuildingSiege = UnitAI.findAdjacentEnemyBuilding(unit, player.id);
+            if (adjacentBuildingSiege) {
+              events.push({ type: 'unit:attack_wall', unit, result: { position: adjacentBuildingSiege } });
               return;
             }
           } else {
