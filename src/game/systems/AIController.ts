@@ -694,7 +694,7 @@ export default class AIController {
 
     // All capture targets sorted by distance from own base
     const captureTargets = [...neutralBases, ...enemyOutposts].sort((a, b) =>
-      Pathfinder.heuristic(ownBase.position, a.position) - Pathfinder.heuristic(ownBase.position, b.position)
+      Pathfinder.heuristic(ownBase.position, a.position) - Pathfinder.heuristic(ownBase.position, b.position) || a.id.localeCompare(b.id)
     );
     const allNonOwnBases = [...captureTargets, ...(enemyCapital ? [enemyCapital] : [])];
     const hasUnclaimedTerritory = captureTargets.length > 0;
@@ -779,7 +779,7 @@ export default class AIController {
       });
     }
 
-    objectives.sort((a, b) => b.priority - a.priority);
+    objectives.sort((a, b) => b.priority - a.priority || a.pos.q - b.pos.q || a.pos.r - b.pos.r);
 
     // 2. Collect all units currently in each squad
     const squadMembers = new Map<number, Unit[]>(); // squadDisplayId -> units
@@ -939,7 +939,7 @@ export default class AIController {
         }
         if (!largest || lSize < 4) break;
         const members = squadMembers.get(largest.id) ?? [];
-        members.sort((a, b) => Pathfinder.heuristic(a.position, obj.pos) - Pathfinder.heuristic(b.position, obj.pos));
+        members.sort((a, b) => Pathfinder.heuristic(a.position, obj.pos) - Pathfinder.heuristic(b.position, obj.pos) || a.id.localeCompare(b.id));
         const splitOff = members.splice(0, Math.floor(members.length / 2));
         const usedIds = new Set(st.squads.map(s => s.id));
         let newId = 1;
@@ -1069,7 +1069,7 @@ export default class AIController {
     else formation = FormationType.BOX;
 
     const sorted = [...units].sort((a, b) =>
-      Pathfinder.heuristic(a.position, sq.target!) - Pathfinder.heuristic(b.position, sq.target!)
+      Pathfinder.heuristic(a.position, sq.target!) - Pathfinder.heuristic(b.position, sq.target!) || a.id.localeCompare(b.id)
     );
 
     const slots = this.generateFormationTyped(sq.target, sorted.length, formation);
@@ -1119,7 +1119,7 @@ export default class AIController {
       const aNeutral = a.owner >= this.ctx.players.length ? 0 : 1;
       const bNeutral = b.owner >= this.ctx.players.length ? 0 : 1;
       if (aNeutral !== bNeutral) return aNeutral - bNeutral;
-      return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+      return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position) || a.id.localeCompare(b.id);
     });
     return targets[0];
   }

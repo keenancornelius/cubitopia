@@ -20,7 +20,7 @@ import { NetworkCommand, NetCommandType, GameStateHash, computeStateHash } from 
 import { NetworkManager } from './NetworkManager';
 
 /** How many ticks between state hash checks */
-const HASH_CHECK_INTERVAL = 60; // 3 seconds at 20 ticks/s
+const HASH_CHECK_INTERVAL = 20; // 1 second at 20 ticks/s (was 60 — tighter for debugging)
 
 /** How many ticks ahead we allow commands to be buffered */
 const MAX_FUTURE_TICKS = 20;

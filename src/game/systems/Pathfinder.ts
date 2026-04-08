@@ -74,7 +74,7 @@ export class Pathfinder {
         if (nTile && nTile.terrain !== TerrainType.WATER
             && nTile.terrain !== TerrainType.FOREST && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
-          if (dist < bestDist) {
+          if (dist < bestDist || (dist === bestDist && (effectiveGoal === goal || n.q < effectiveGoal.q || (n.q === effectiveGoal.q && n.r < effectiveGoal.r)))) {
             bestDist = dist;
             effectiveGoal = n;
             effectiveGoalKey = nKey;
@@ -108,7 +108,7 @@ export class Pathfinder {
             && (canTraverseForest || nTile.terrain !== TerrainType.FOREST)
             && !Pathfinder.blockedTiles.has(nKey)) {
           const dist = Pathfinder.heuristic(start, n);
-          if (dist < bestDist) {
+          if (dist < bestDist || (dist === bestDist && bestNeighbor && (n.q < bestNeighbor.q || (n.q === bestNeighbor.q && n.r < bestNeighbor.r)))) {
             bestDist = dist;
             bestNeighbor = n;
           }
@@ -147,10 +147,16 @@ export class Pathfinder {
     open.push(startNode);
 
     while (open.length > 0) {
-      // Find node with lowest f
+      // Find node with lowest f (tie-break by lowest q, then lowest r for determinism)
       let bestIdx = 0;
       for (let i = 1; i < open.length; i++) {
-        if (open[i].f < open[bestIdx].f) bestIdx = i;
+        const fi = open[i].f;
+        const fb = open[bestIdx].f;
+        if (fi < fb
+          || (fi === fb && (open[i].coord.q < open[bestIdx].coord.q
+            || (open[i].coord.q === open[bestIdx].coord.q && open[i].coord.r < open[bestIdx].coord.r)))) {
+          bestIdx = i;
+        }
       }
       const current = open.splice(bestIdx, 1)[0];
       const currentKey = `${current.coord.q},${current.coord.r}`;

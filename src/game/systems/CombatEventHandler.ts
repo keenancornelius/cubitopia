@@ -807,7 +807,7 @@ export default class CombatEventHandler {
       .filter(u => u.id !== source.id && u.id !== defender.id && u.owner !== attacker.owner && u.currentHealth > 0 && u.state !== 'dead')
       .map(u => ({ unit: u, dist: hexDistQR(u.position.q, u.position.r, source.position.q, source.position.r) }))
       .filter(e => e.dist <= hvCfg.cascadeChainRadius)
-      .sort((a, b) => a.dist - b.dist)
+      .sort((a, b) => a.dist - b.dist || a.unit.id.localeCompare(b.unit.id))
       .slice(0, hvCfg.cascadeChainCount);
 
     for (const ct of cascadeTargets) {
@@ -869,9 +869,9 @@ export default class CombatEventHandler {
       // Normal chain lightning (no Wet status) — reduced chain
       const chainTargets = allUnits
         .filter(u => u.id !== defenderRef.id && u.owner !== attackerRef.owner && u.state !== 'dead')
-        .map(u => ({ unit: u, dist: Math.hypot(u.worldPosition.x - defenderRef.worldPosition.x, u.worldPosition.z - defenderRef.worldPosition.z) }))
-        .filter(e => e.dist < 3.0)
-        .sort((a, b) => a.dist - b.dist)
+        .map(u => ({ unit: u, dist: hexDistQR(u.position.q, u.position.r, defenderRef.position.q, defenderRef.position.r) }))
+        .filter(e => e.dist <= 3)
+        .sort((a, b) => a.dist - b.dist || a.unit.id.localeCompare(b.unit.id))
         .slice(0, 2);
       for (const ct of chainTargets) {
         const chainDmg = Math.max(1, Math.floor(attackerRef.stats.attack * 0.5));

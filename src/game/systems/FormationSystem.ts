@@ -57,7 +57,7 @@ export function generateBoxFormation(center: HexCoord, count: number, tiles: Til
       const da = Math.max(Math.abs(ax1 - cx1), Math.abs(ay1 - cy1), Math.abs(az1 - cz1));
       const bx1 = b.q, bz1 = b.r - (b.q - (b.q & 1)) / 2, by1 = -bx1 - bz1;
       const db = Math.max(Math.abs(bx1 - cx1), Math.abs(by1 - cy1), Math.abs(bz1 - cz1));
-      return da - db;
+      return da - db || a.q - b.q || a.r - b.r;
     });
     for (const hex of ring) {
       if (slots.length >= count) break;

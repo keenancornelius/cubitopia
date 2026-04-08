@@ -363,7 +363,7 @@ export default class NatureSystem {
         // Prefer planting on original forest tiles first, then any plains
         const isOriginal = this.originalForestTiles.has(key);
         const score = d + (isOriginal ? 0 : 5);
-        if (score < bestDist) {
+        if (score < bestDist || (score === bestDist && bestKey && key < bestKey)) {
           bestDist = score;
           bestKey = key;
         }
@@ -455,6 +455,8 @@ export default class NatureSystem {
     for (const [key, stage] of this.grassAge) {
       if (stage >= 1) spreadCandidates.push(key);
     }
+    // Sort deterministically so grass spread order is consistent across clients
+    spreadCandidates.sort();
 
     let spreadCount = 0;
     for (const key of spreadCandidates) {

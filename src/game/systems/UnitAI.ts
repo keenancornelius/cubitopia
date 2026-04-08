@@ -729,7 +729,7 @@ export class UnitAI {
           const aN = a.owner >= UnitAI.playerCount ? 0 : 1;
           const bN = b.owner >= UnitAI.playerCount ? 0 : 1;
           if (aN !== bN) return aN - bN;
-          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position) || a.position.q - b.position.q || a.position.r - b.position.r;
         });
       return captureTargets[0] ?? null;
     } else {
@@ -741,7 +741,7 @@ export class UnitAI {
           const aTier = a.tier ?? 0;
           const bTier = b.tier ?? 0;
           if (aTier !== bTier) return bTier - aTier; // Higher tier = capital
-          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position);
+          return Pathfinder.heuristic(from, a.position) - Pathfinder.heuristic(from, b.position) || a.position.q - b.position.q || a.position.r - b.position.r;
         });
       return enemyBases[0] ?? null;
     }
@@ -796,7 +796,7 @@ export class UnitAI {
         const dist = Pathfinder.heuristic(unit.position, ally.position);
         const hpRatio = ally.currentHealth / ally.stats.maxHealth;
         const score = dist + hpRatio * 5; // Prioritize low HP + close
-        if (score < bestScore) { bestScore = score; bestAlly = ally; }
+        if (score < bestScore || (score === bestScore && bestAlly && UnitAI.tieBreak(ally.position, bestAlly.position))) { bestScore = score; bestAlly = ally; }
       }
       if (bestAlly) {
         const dist = Pathfinder.heuristic(unit.position, bestAlly.position);
@@ -812,7 +812,7 @@ export class UnitAI {
           if (ally.type === UnitType.HEALER || ally.type === UnitType.BUILDER ||
               ally.type === UnitType.LUMBERJACK || ally.type === UnitType.VILLAGER) continue;
           const d = Pathfinder.heuristic(unit.position, ally.position);
-          if (d < nearestDist) { nearestDist = d; nearestCombat = ally; }
+          if (d < nearestDist || (d === nearestDist && nearestCombat && UnitAI.tieBreak(ally.position, nearestCombat.position))) { nearestDist = d; nearestCombat = ally; }
         }
         if (nearestCombat && nearestDist > 3) {
           UnitAI.commandMove(unit, nearestCombat.position, map);
@@ -1615,7 +1615,7 @@ export class UnitAI {
       if (pb.assignedBuilderId && pb.assignedBuilderId !== unit.id) { skippedAssigned++; continue; }
       if (failed && failed.has(pb.id)) { skippedFailed++; continue; }
       const d = Math.abs(pb.position.q - unit.position.q) + Math.abs(pb.position.r - unit.position.r);
-      if (d < bestDist) {
+      if (d < bestDist || (d === bestDist && best && (pb.position.q < best.position.q || (pb.position.q === best.position.q && pb.position.r < best.position.r)))) {
         bestDist = d;
         best = pb;
       }
@@ -2290,7 +2290,7 @@ export class UnitAI {
     const centerR = bestGapTiles.length > 0
       ? bestGapTiles[Math.floor(bestGapTiles.length / 2)].r
       : basePos.r;
-    plan.sort((a, b) => Math.abs(a.r - centerR) - Math.abs(b.r - centerR));
+    plan.sort((a, b) => Math.abs(a.r - centerR) - Math.abs(b.r - centerR) || a.q - b.q || a.r - b.r);
 
     UnitAI.keepWallPlans.set(owner, plan);
     UnitAI.keepGatePlans.set(owner, gatePlan);
@@ -2867,7 +2867,7 @@ export class UnitAI {
     }
 
     // Sort by urgency descending
-    priorities.sort((a, b) => b.urgency - a.urgency);
+    priorities.sort((a, b) => b.urgency - a.urgency || a.resource.localeCompare(b.resource));
     return priorities;
   }
 
@@ -3680,7 +3680,7 @@ export class UnitAI {
       // Underground units only see underground enemies, surface only sees surface
       if (!!other._underground !== isUnderground) continue;
       const dist = Pathfinder.heuristic(unit.position, other.position);
-      if (dist < nearestDist) {
+      if (dist < nearestDist || (dist === nearestDist && nearest && UnitAI.tieBreak(other.position, nearest.position))) {
         nearestDist = dist;
         nearest = other;
       }
@@ -3853,7 +3853,7 @@ export class UnitAI {
 
       const score = dist + focusPenalty - hpBonus - peelBonus - kiterBonus - clickPointBonus;
 
-      if (score < bestScore) {
+      if (score < bestScore || (score === bestScore && bestEnemy && UnitAI.tieBreak(other.position, bestEnemy.position))) {
         bestScore = score;
         bestEnemy = other;
       }
