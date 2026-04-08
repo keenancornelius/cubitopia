@@ -20,10 +20,15 @@ import { NetworkCommand, NetCommandType, GameStateHash, computeStateHash } from 
 import { NetworkManager } from './NetworkManager';
 
 /** How many ticks between state hash checks */
-const HASH_CHECK_INTERVAL = 60; // ~1 second at 60 ticks/s
+const HASH_CHECK_INTERVAL = 60; // 3 seconds at 20 ticks/s
 
 /** How many ticks ahead we allow commands to be buffered */
-const MAX_FUTURE_TICKS = 10;
+const MAX_FUTURE_TICKS = 20;
+
+/** Input delay: commands execute N ticks in the future to give the network
+ *  time to deliver them before both clients reach that tick. At 20hz,
+ *  3 ticks = 150ms which covers most LAN/broadband latency. */
+const INPUT_DELAY = 3;
 
 /** Command with ordering index for deterministic sort */
 interface IndexedCommand extends NetworkCommand {
@@ -60,6 +65,9 @@ export class CommandQueue {
   /** Desync callback */
   private _onDesync: ((localHash: number, remoteHash: number, tick: number) => void) | null = null;
 
+  /** Pending remote hashes waiting for us to reach their tick */
+  private _pendingRemoteHashes: Map<number, GameStateHash> = new Map();
+
   // ── Getters ──────────────────────────────────────────────
   get tick() { return this.currentTick; }
   get isMultiplayer() { return this._isMultiplayer; }
@@ -85,6 +93,7 @@ export class CommandQueue {
     this.localBuffer = [];
     this._desynced = false;
     this._desyncTick = -1;
+    this._pendingRemoteHashes.clear();
 
     // Listen for remote commands
     if (network) {
@@ -133,8 +142,9 @@ export class CommandQueue {
    * it executes immediately.
    */
   enqueue(type: NetCommandType | string, payload: Record<string, unknown>): void {
+    const delay = this._isMultiplayer ? INPUT_DELAY : 1;
     const cmd: IndexedCommand = {
-      tick: this.currentTick + 1, // Execute on next tick
+      tick: this.currentTick + delay, // Execute after input delay (MP) or next tick (SP)
       playerId: this.network?.localUid ?? 'local',
       type,
       payload,
@@ -191,11 +201,12 @@ export class CommandQueue {
       return;
     }
 
-    // If command is for a past tick, execute it immediately (late arrival)
+    // If command is for a past tick, reschedule to the next tick so both
+    // clients process it at the same simulation state (executing immediately
+    // would desync because the other client processed it at the correct tick).
     if (cmd.tick <= this.currentTick) {
-      console.log(`[CmdQ] LATE command for tick ${cmd.tick} (current: ${this.currentTick}) — executing immediately`);
-      this._commandProcessor?.(indexed);
-      return;
+      console.warn(`[CmdQ] LATE command for tick ${cmd.tick} (current: ${this.currentTick}) — rescheduling to tick ${this.currentTick + 1}`);
+      indexed.tick = this.currentTick + 1;
     }
 
     console.log(`[CmdQ] BUFFERED for tick ${cmd.tick} (current: ${this.currentTick})`);
@@ -240,6 +251,22 @@ export class CommandQueue {
     if (this._isMultiplayer && !this._isGhostMatch && this.currentTick % HASH_CHECK_INTERVAL === 0) {
       this.sendStateHash();
     }
+
+    // Check if we have a pending remote hash for this tick
+    const pendingHash = this._pendingRemoteHashes.get(this.currentTick);
+    if (pendingHash) {
+      this._pendingRemoteHashes.delete(this.currentTick);
+      this._compareHash(pendingHash);
+    }
+
+    // Clean up very old pending hashes (shouldn't happen, but prevent memory leak)
+    if (this._pendingRemoteHashes.size > 10) {
+      for (const [tick] of this._pendingRemoteHashes) {
+        if (tick < this.currentTick - HASH_CHECK_INTERVAL * 2) {
+          this._pendingRemoteHashes.delete(tick);
+        }
+      }
+    }
   }
 
   // ============================================
@@ -263,22 +290,37 @@ export class CommandQueue {
   private receiveStateHash(remoteHash: GameStateHash): void {
     if (!this._stateHashProvider) return;
 
-    // Only compare if we're on the same tick
-    if (remoteHash.tick !== this.currentTick) return;
+    if (remoteHash.tick === this.currentTick) {
+      // Same tick — compare immediately
+      this._compareHash(remoteHash);
+    } else if (remoteHash.tick > this.currentTick) {
+      // Remote is ahead — store and compare when we reach that tick
+      this._pendingRemoteHashes.set(remoteHash.tick, remoteHash);
+    } else {
+      // We're ahead — compute hash for their tick? Can't rewind.
+      // Log but don't compare (we've already advanced past that state).
+      console.warn(`[CmdQ] Received stale hash for tick ${remoteHash.tick} (current: ${this.currentTick}) — skipping`);
+    }
+  }
 
+  /** Compare local state against a remote hash at the current tick */
+  private _compareHash(remoteHash: GameStateHash): void {
+    if (!this._stateHashProvider) return;
     const state = this._stateHashProvider();
     const localHash = computeStateHash(
-      this.currentTick,
+      remoteHash.tick,
       state.units,
       state.p1Resources,
       state.p2Resources,
     );
 
     if (localHash.hash !== remoteHash.hash) {
-      console.error(`[CmdQ] DESYNC at tick ${this.currentTick}! Local: ${localHash.hash}, Remote: ${remoteHash.hash}`);
+      console.error(`[CmdQ] DESYNC at tick ${remoteHash.tick}! Local: ${localHash.hash}, Remote: ${remoteHash.hash}`);
       this._desynced = true;
-      this._desyncTick = this.currentTick;
-      this._onDesync?.(localHash.hash, remoteHash.hash, this.currentTick);
+      this._desyncTick = remoteHash.tick;
+      this._onDesync?.(localHash.hash, remoteHash.hash, remoteHash.tick);
+    } else {
+      console.log(`[CmdQ] Hash OK at tick ${remoteHash.tick}`);
     }
   }
 
