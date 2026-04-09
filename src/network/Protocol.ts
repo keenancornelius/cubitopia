@@ -314,6 +314,7 @@ export function computeStateHash(
   includeDetails = false,
   rngState?: number,
   terrainFingerprint?: string,
+  stockpileFingerprint?: string,
 ): GameStateHash {
   // Sort units by ID for deterministic ordering
   const sorted = [...units].sort((a, b) => a.id.localeCompare(b.id));
@@ -335,12 +336,15 @@ export function computeStateHash(
   if (rngState !== undefined) stateStr += `|rng:${rngState}`;
   // Include terrain fingerprint — if this diverges, map state differs (different mining/chopping)
   if (terrainFingerprint) stateStr += `|tf:${terrainFingerprint}`;
+  // Include per-resource stockpile fingerprint — catches crafting/trade desync that resource sums miss
+  if (stockpileFingerprint) stateStr += `|sp:${stockpileFingerprint}`;
 
   // Build per-unit detail string for desync debugging
   let unitDetails: string | undefined;
   if (includeDetails) {
     const rngInfo = rngState !== undefined ? `\nRNG state: ${rngState}` : '';
     const tfInfo = terrainFingerprint ? `\nTerrain: ${terrainFingerprint}` : '';
+    const spInfo = stockpileFingerprint ? `\nStockpiles: ${stockpileFingerprint}` : '';
     unitDetails = sorted
       .map(u => {
         const tgt = u.targetPosition ? ` tgt=${u.targetPosition.q},${u.targetPosition.r}` : '';
@@ -348,7 +352,7 @@ export function computeStateHash(
         const gcd = u.gatherCooldown !== undefined ? ` gcd=${u.gatherCooldown.toFixed(2)}` : '';
         return `${u.id}[${u.type ?? '?'}p${u.owner ?? '?'}]@${u.position.q},${u.position.r} hp=${u.currentHealth} st=${u.state}${tgt}${carry}${gcd}`;
       })
-      .join('\n') + rngInfo + tfInfo;
+      .join('\n') + rngInfo + tfInfo + spInfo;
   }
 
   return {

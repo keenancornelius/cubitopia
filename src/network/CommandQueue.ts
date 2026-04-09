@@ -60,7 +60,7 @@ export class CommandQueue {
   private _commandProcessor: ((cmd: NetworkCommand) => void) | null = null;
 
   /** Callback for computing current state hash */
-  private _stateHashProvider: (() => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string }) | null = null;
+  private _stateHashProvider: (() => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string; stockpileFingerprint?: string }) | null = null;
 
   /** Desync callback */
   private _onDesync: ((localHash: number, remoteHash: number, tick: number) => void) | null = null;
@@ -131,7 +131,7 @@ export class CommandQueue {
   }
 
   /** Set the function that provides current game state for hashing */
-  setStateHashProvider(provider: () => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string }): void {
+  setStateHashProvider(provider: () => { units: any[]; p1Resources: Record<string, number>; p2Resources: Record<string, number>; rngState?: number; terrainFingerprint?: string; stockpileFingerprint?: string }): void {
     this._stateHashProvider = provider;
   }
 
@@ -294,6 +294,7 @@ export class CommandQueue {
       !this._desyncDetailLogged, // include details until first desync is diagnosed
       state.rngState,
       state.terrainFingerprint,
+      state.stockpileFingerprint,
     );
 
     // Store local hash so we can compare against stale remote hashes

@@ -1860,6 +1860,9 @@ class Cubitopia {
         }
       }
       const terrainFingerprint = `f${forestCount}e${terrainSum}`;
+      // Build detailed stockpile fingerprint for each player (catches crafting/trade desync)
+      const stockFp = (idx: number) => `w${this.woodStockpile[idx]??0}s${this.stoneStockpile[idx]??0}i${this.ironStockpile[idx]??0}c${this.clayStockpile[idx]??0}g${this.goldStockpile[idx]??0}ch${this.charcoalStockpile[idx]??0}st${this.steelStockpile[idx]??0}`;
+      const stockpileFingerprint = `p0[${stockFp(0)}]p1[${stockFp(1)}]`;
       return {
         units: this.allUnits
           .filter(u => u.currentHealth > 0)
@@ -1868,6 +1871,7 @@ class Cubitopia {
         p2Resources: p1 ? p1.resources : {},
         rngState: GameRNG.getState(),
         terrainFingerprint,
+        stockpileFingerprint,
       };
     });
   }

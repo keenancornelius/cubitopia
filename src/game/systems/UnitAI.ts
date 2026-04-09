@@ -2889,6 +2889,8 @@ export class UnitAI {
     let best: HexCoord | null = null;
     let bestScore = Infinity;
 
+    // Track top candidates for desync diagnostics
+    const _mineDiag: Array<{key: string; score: number; res: string}> = [];
     map.tiles.forEach((tile, key) => {
       // Skip water, forest, and bedrock
       if (tile.terrain === TerrainType.WATER || tile.terrain === TerrainType.RIVER
@@ -2994,12 +2996,28 @@ export class UnitAI {
       const travelPenalty = unitDist * GAME_CONFIG.combat.unitAI.miningSearch.travelPenaltyFactor;
 
       const score = distPenalty + travelPenalty + resourceBonus + clusterBonus + buddyBonus;
+      // Track top 3 candidates for desync diagnostics
+      if (_mineDiag.length < 3 || score < _mineDiag[_mineDiag.length - 1].score) {
+        _mineDiag.push({key, score, res: tileResource});
+        _mineDiag.sort((a, b) => a.score - b.score);
+        if (_mineDiag.length > 3) _mineDiag.length = 3;
+      }
       if (score < bestScore || (score === bestScore && UnitAI.tieBreak(coord, best))) {
         bestScore = score;
         best = coord;
       }
     });
 
+    // Log mine selection for desync diagnostics (builders only, throttled)
+    const chosen = best as HexCoord | null;
+    if (chosen && unit.type === UnitType.BUILDER) {
+      const gf = UnitAI.gameFrame;
+      if (!(unit as any)._lastMineSelLog || gf - (unit as any)._lastMineSelLog > 100) {
+        (unit as any)._lastMineSelLog = gf;
+        const top = _mineDiag.map(d => `${d.key}(${d.res}:${d.score.toFixed(2)})`).join(', ');
+        console.log(`[MineSel] ${unit.id} @${unit.position.q},${unit.position.r} → ${chosen.q},${chosen.r} score=${bestScore.toFixed(2)} top=[${top}]`);
+      }
+    }
     return best;
   }
 
