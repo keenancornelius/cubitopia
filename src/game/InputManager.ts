@@ -90,6 +90,13 @@ export class InputManager {
     this.hud.onRespawnUnits(() => this.game.debugController.killSelected());
     this.hud.onCaptureNearestZone(() => this.game.captureNearestZoneWithSelected());
     this.hud.onSetSquadObjective((objective) => this.game.setSelectedSquadObjective(objective));
+    this.hud.onLockElement((unitIds: string[], element: ElementType | null) => {
+      if (element === null) {
+        this.game.enqueueCommand('unlock_element', { unitIds, element: null });
+      } else {
+        this.game.enqueueCommand('lock_element', { unitIds, element });
+      }
+    });
 
     // Squad type toggle: when user clicks a unit type badge in the tooltip, filter the selection
     this.hud.onSelectionFiltered((filtered) => {
@@ -238,6 +245,7 @@ export class InputManager {
     this.container.addEventListener(
       'click',
       (e: MouseEvent) => {
+        console.log(`[AttackMove] click handler: state=${this.game.interaction.state.kind} button=${e.button}`);
         if (this.game.interaction.state.kind !== 'attack_move') return;
         this.game.interaction.clear();
         (document.getElementById(
@@ -406,6 +414,7 @@ export class InputManager {
             'ATTACK MOVE — Left-click target',
             '#ff9800'
           );
+          console.log(`[AttackMove] A-key entered attack_move mode, ${selected.length} units selected`);
           return;
         }
       }

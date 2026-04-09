@@ -2098,11 +2098,17 @@ export class UnitAI {
     UnitAI.playerMineBlueprint = new Map();
     UnitAI.claimedMines.clear();
     UnitAI.grassTiles.clear();
+    UnitAI.mineOwners.clear();
+    UnitAI.wallBlueprintOwners.clear();
+    UnitAI.harvestOwners.clear();
   }
 
   static get playerMineBlueprint() { return UnitAI.state.playerMineBlueprint; }
   static set playerMineBlueprint(v) { UnitAI.state.playerMineBlueprint = v; }
   static get claimedMines() { return UnitAI.state.claimedMines; }
+  static get mineOwners() { return UnitAI.state.mineOwners; }
+  static get wallBlueprintOwners() { return UnitAI.state.wallBlueprintOwners; }
+  static get harvestOwners() { return UnitAI.state.harvestOwners; }
 
   /** Check if a mine blueprint is fully excavated (no blocks remain in the Y range) */
   static isMineComplete(key: string, tile: { voxelData: { blocks: { localPosition: { y: number } }[] } }): boolean {
@@ -2126,9 +2132,14 @@ export class UnitAI {
     let nearestDist = Infinity;
 
     for (const [key, target] of UnitAI.playerMineBlueprint) {
+      // Skip blueprints owned by a different player
+      const bpOwner = UnitAI.mineOwners.get(key);
+      if (bpOwner !== undefined && bpOwner !== unit.owner) continue;
+
       const tile = map.tiles.get(key);
       if (!tile || tile.terrain === TerrainType.WATER || tile.elevation <= -39) {
         UnitAI.playerMineBlueprint.delete(key);
+        UnitAI.mineOwners.delete(key);
         continue;
       }
       // Skip if no blocks remain in the mine's Y range
@@ -2138,6 +2149,7 @@ export class UnitAI {
       );
       if (!hasBlocks) {
         UnitAI.playerMineBlueprint.delete(key);
+        UnitAI.mineOwners.delete(key);
         continue;
       }
       // Skip tiles claimed by other workers
@@ -2325,15 +2337,21 @@ export class UnitAI {
 
     // Check both wall and gate blueprints
     for (const key of UnitAI.playerWallBlueprint) {
+      // Skip blueprints owned by a different player
+      const bpOwner = UnitAI.wallBlueprintOwners.get(key);
+      if (bpOwner !== undefined && bpOwner !== unit.owner) continue;
+
       // Skip if already built
       if (Pathfinder.blockedTiles.has(key)) {
-        UnitAI.playerWallBlueprint.delete(key); // Clean up built spots
+        UnitAI.playerWallBlueprint.delete(key);
+        UnitAI.wallBlueprintOwners.delete(key);
         continue;
       }
       const [q, r] = key.split(',').map(Number);
       const tile = map.tiles.get(key);
       if (!tile || !UnitAI.isValidWallTile(tile, key, map)) {
         UnitAI.playerWallBlueprint.delete(key);
+        UnitAI.wallBlueprintOwners.delete(key);
         continue;
       }
       const coord = { q, r };
@@ -2345,15 +2363,21 @@ export class UnitAI {
     }
 
     for (const key of UnitAI.playerGateBlueprint) {
+      // Skip blueprints owned by a different player
+      const bpOwner = UnitAI.wallBlueprintOwners.get(key);
+      if (bpOwner !== undefined && bpOwner !== unit.owner) continue;
+
       // Skip if already built
       if (Pathfinder.blockedTiles.has(key)) {
-        UnitAI.playerGateBlueprint.delete(key); // Clean up built spots
+        UnitAI.playerGateBlueprint.delete(key);
+        UnitAI.wallBlueprintOwners.delete(key);
         continue;
       }
       const [q, r] = key.split(',').map(Number);
       const tile = map.tiles.get(key);
       if (!tile || !UnitAI.isValidWallTile(tile, key, map)) {
         UnitAI.playerGateBlueprint.delete(key);
+        UnitAI.wallBlueprintOwners.delete(key);
         continue;
       }
       const coord = { q, r };
@@ -2373,9 +2397,14 @@ export class UnitAI {
     let nearestDist = Infinity;
 
     for (const key of UnitAI.playerHarvestBlueprint) {
+      // Skip blueprints owned by a different player
+      const bpOwner = UnitAI.harvestOwners.get(key);
+      if (bpOwner !== undefined && bpOwner !== unit.owner) continue;
+
       const tile = map.tiles.get(key);
       if (!tile || (tile.terrain !== TerrainType.FOREST && tile.terrain !== TerrainType.JUNGLE)) {
         UnitAI.playerHarvestBlueprint.delete(key);
+        UnitAI.harvestOwners.delete(key);
         continue;
       }
       // Skip trees claimed by other lumberjacks

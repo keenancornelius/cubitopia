@@ -37,6 +37,7 @@ export class HUD {
   private _onSetStance: ((stance: UnitStance) => void) | null = null;
   private _onSetFormation: ((formation: FormationType) => void) | null = null;
   private _onRespawnUnits: (() => void) | null = null;
+  private _onLockElement: ((unitIds: string[], element: ElementType | null) => void) | null = null;
   private selectionCommandPanel: HTMLElement | null = null;
 
   // Squad type toggle state — tracks the full box-selected group and which types are active
@@ -169,6 +170,7 @@ export class HUD {
   onSetStance(cb: (stance: UnitStance) => void) { this._onSetStance = cb; }
   onSetFormation(cb: (formation: FormationType) => void) { this._onSetFormation = cb; }
   onRespawnUnits(cb: () => void) { this._onRespawnUnits = cb; }
+  onLockElement(cb: (unitIds: string[], element: ElementType | null) => void) { this._onLockElement = cb; }
 
   private _onCaptureNearestZone: (() => void) | null = null;
   onCaptureNearestZone(cb: () => void) { this._onCaptureNearestZone = cb; }
@@ -2391,16 +2393,16 @@ export class HUD {
           });
           btn.addEventListener('click', (ev) => {
             ev.stopPropagation();
+            const mageIds = magesInSelection.map(m => m.id);
             if (isActive) {
-              // Unlock
-              for (const m of magesInSelection) { m._lockedElement = undefined; }
+              // Unlock — route through command queue for multiplayer determinism
+              if (this._onLockElement) {
+                this._onLockElement(mageIds, null);
+              }
             } else {
-              // Lock
-              const EC = [ElementType.FIRE, ElementType.WATER, ElementType.LIGHTNING, ElementType.WIND, ElementType.EARTH];
-              for (const m of magesInSelection) {
-                m._lockedElement = sq.element;
-                m.element = sq.element;
-                m._elementCycleIndex = EC.indexOf(sq.element);
+              // Lock — route through command queue for multiplayer determinism
+              if (this._onLockElement) {
+                this._onLockElement(mageIds, sq.element);
               }
             }
             this.updateSelectionInfo(units);

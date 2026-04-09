@@ -88,6 +88,14 @@ export class SharedGameState {
   /** Mine tile → miner unit ID (prevents stacking) */
   claimedMines: Map<string, string> = new Map();
 
+  // ── Blueprint ownership (tile key → player ID) ──────────────
+  /** Which player owns each mine blueprint */
+  mineOwners: Map<string, number> = new Map();
+  /** Which player owns each wall/gate blueprint */
+  wallBlueprintOwners: Map<string, number> = new Map();
+  /** Which player owns each harvest blueprint */
+  harvestOwners: Map<string, number> = new Map();
+
   // ── Player & map state ───────────────────────────────────────
   /** All bases — set by main.ts at game init */
   bases: Base[] = [];

@@ -2051,6 +2051,7 @@ class Cubitopia {
         const key = `${position.q},${position.r}`;
         if (UnitAI.playerMineBlueprint.has(key)) return;
         UnitAI.playerMineBlueprint.set(key, { startY, depth });
+        UnitAI.mineOwners.set(key, _owner);
         // Visual marker only for the local player
         if (_owner === this._localPlayerIndex) {
           this.blueprintSystem.addMineMarker(position, startY, depth);
@@ -2061,6 +2062,7 @@ class Cubitopia {
         if (!UnitAI.playerMineBlueprint.has(key)) return;
         UnitAI.playerMineBlueprint.delete(key);
         UnitAI.claimedMines.delete(key);
+        UnitAI.mineOwners.delete(key);
         if (_owner === this._localPlayerIndex) {
           this.blueprintSystem.removeMineMarker(position);
         }
@@ -2069,6 +2071,7 @@ class Cubitopia {
         const key = `${position.q},${position.r}`;
         if (UnitAI.playerHarvestBlueprint.has(key)) return;
         UnitAI.playerHarvestBlueprint.add(key);
+        UnitAI.harvestOwners.set(key, _owner);
         if (_owner === this._localPlayerIndex) {
           this.blueprintSystem.addHarvestMarker(position);
         }
@@ -2079,6 +2082,7 @@ class Cubitopia {
           if (UnitAI.playerWallBlueprint.has(key)) continue;
           if (UnitAI.playerGateBlueprint.has(key)) continue;
           UnitAI.addBlueprint(pos);
+          UnitAI.wallBlueprintOwners.set(key, _owner);
           if (_owner === this._localPlayerIndex) {
             this.blueprintSystem.addBlueprintGhost(pos);
           }
@@ -2088,12 +2092,14 @@ class Cubitopia {
         const key = `${position.q},${position.r}`;
         if (UnitAI.playerWallBlueprint.has(key)) {
           UnitAI.playerWallBlueprint.delete(key);
+          UnitAI.wallBlueprintOwners.delete(key);
           if (_owner === this._localPlayerIndex) {
             this.blueprintSystem.removeBlueprintGhost(position);
           }
         }
         if (UnitAI.playerGateBlueprint.has(key)) {
           UnitAI.playerGateBlueprint.delete(key);
+          UnitAI.wallBlueprintOwners.delete(key);
           if (_owner === this._localPlayerIndex) {
             this.blueprintSystem.removeBlueprintGhost(position);
           }
