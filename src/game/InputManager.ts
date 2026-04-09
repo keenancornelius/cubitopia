@@ -1201,7 +1201,7 @@ export class InputManager {
         : this.mouseToHex(e);
       if (hex) {
         if (mode === 'harvest')
-          this.game.blueprintSystem.paintHarvestTile(hex);
+          this.game.enqueueCommand('paint_harvest', { position: hex });
         else if (mode === 'farm_patch')
           this.game.blueprintSystem.paintFarmPatch(hex);
         else if (mode === 'plant_tree') this.game.paintPlantTree(hex);
@@ -1211,32 +1211,20 @@ export class InputManager {
           mineEraseMode =
             UnitAI.playerWallBlueprint.has(key) ||
             this.game.wallSystem.wallsBuilt.has(key);
-          if (e.shiftKey) {
-            // Shift+click: place gate instead
-            if (mineEraseMode) {
-              this.game.blueprintSystem.removeWallBlueprint(hex);
-            } else {
-              this.game.blueprintSystem.paintGateBlueprint(hex);
-              lastDragHex = hex;
-            }
+          if (mineEraseMode) {
+            this.game.enqueueCommand('remove_wall_blueprint', { position: hex });
           } else {
-            // Normal click: place wall
-            if (mineEraseMode) {
-              this.game.blueprintSystem.removeWallBlueprint(hex);
-            } else {
-              this.game.blueprintSystem.paintWallBlueprint(hex);
-              lastDragHex = hex;
-            }
+            this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex] });
+            lastDragHex = hex;
           }
         } else if (mode === 'mine') {
           const key = `${hex.q},${hex.r}`;
           mineEraseMode = UnitAI.playerMineBlueprint.has(key);
           if (mineEraseMode) {
-            this.game.blueprintSystem.unpaintMine(hex);
+            this.game.enqueueCommand('unpaint_mine', { position: hex });
           } else {
-            // startY = sliceY if slicer active, null = surface
-            const sliceY = this.game.voxelBuilder.getSliceY();
-            this.game.blueprintSystem.paintMine(hex, sliceY);
+            // Validate and compute mine params locally, then enqueue
+            this.game.enqueuePaintMine(hex);
           }
         }
       }
@@ -1250,44 +1238,31 @@ export class InputManager {
         : this.mouseToHex(e);
       if (hex) {
         if (mode === 'harvest')
-          this.game.blueprintSystem.paintHarvestTile(hex);
+          this.game.enqueueCommand('paint_harvest', { position: hex });
         else if (mode === 'farm_patch')
           this.game.blueprintSystem.paintFarmPatch(hex);
         else if (mode === 'plant_tree') this.game.paintPlantTree(hex);
         else if (mode === 'wall_build') {
           if (mineEraseMode) {
-            this.game.blueprintSystem.removeWallBlueprint(hex);
-          } else if (e.shiftKey) {
-            // Gate drag: trace hex-neighbor path from last gate to target
-            if (lastDragHex) {
-              const path = traceHexPath(lastDragHex, hex);
-              for (const step of path) {
-                this.game.blueprintSystem.paintGateBlueprint(step);
-              }
-              if (path.length > 0) lastDragHex = path[path.length - 1];
-            } else {
-              this.game.blueprintSystem.paintGateBlueprint(hex);
-              lastDragHex = hex;
-            }
+            this.game.enqueueCommand('remove_wall_blueprint', { position: hex });
           } else {
-            // Wall drag: trace hex-neighbor path from last wall to target
+            // Wall/gate drag: trace hex-neighbor path from last position to target
             if (lastDragHex) {
               const path = traceHexPath(lastDragHex, hex);
-              for (const step of path) {
-                this.game.blueprintSystem.paintWallBlueprint(step);
+              if (path.length > 0) {
+                this.game.enqueueCommand('paint_wall_blueprint', { positions: path });
+                lastDragHex = path[path.length - 1];
               }
-              if (path.length > 0) lastDragHex = path[path.length - 1];
             } else {
-              this.game.blueprintSystem.paintWallBlueprint(hex);
+              this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex] });
               lastDragHex = hex;
             }
           }
         } else if (mode === 'mine') {
           if (mineEraseMode) {
-            this.game.blueprintSystem.unpaintMine(hex);
+            this.game.enqueueCommand('unpaint_mine', { position: hex });
           } else {
-            const sliceY = this.game.voxelBuilder.getSliceY();
-            this.game.blueprintSystem.paintMine(hex, sliceY);
+            this.game.enqueuePaintMine(hex);
           }
         }
       }

@@ -2046,6 +2046,60 @@ class Cubitopia {
         }
       },
 
+      // ── Blueprint sync (deterministic across clients) ──────
+      doPaintMine: (position: HexCoord, startY: number, depth: number, _owner: number) => {
+        const key = `${position.q},${position.r}`;
+        if (UnitAI.playerMineBlueprint.has(key)) return;
+        UnitAI.playerMineBlueprint.set(key, { startY, depth });
+        // Visual marker only for the local player
+        if (_owner === this._localPlayerIndex) {
+          this.blueprintSystem.addMineMarker(position, startY, depth);
+        }
+      },
+      doUnpaintMine: (position: HexCoord, _owner: number) => {
+        const key = `${position.q},${position.r}`;
+        if (!UnitAI.playerMineBlueprint.has(key)) return;
+        UnitAI.playerMineBlueprint.delete(key);
+        UnitAI.claimedMines.delete(key);
+        if (_owner === this._localPlayerIndex) {
+          this.blueprintSystem.removeMineMarker(position);
+        }
+      },
+      doPaintHarvest: (position: HexCoord, _owner: number) => {
+        const key = `${position.q},${position.r}`;
+        if (UnitAI.playerHarvestBlueprint.has(key)) return;
+        UnitAI.playerHarvestBlueprint.add(key);
+        if (_owner === this._localPlayerIndex) {
+          this.blueprintSystem.addHarvestMarker(position);
+        }
+      },
+      doPaintWallBlueprint: (positions: HexCoord[], _owner: number) => {
+        for (const pos of positions) {
+          const key = `${pos.q},${pos.r}`;
+          if (UnitAI.playerWallBlueprint.has(key)) continue;
+          if (UnitAI.playerGateBlueprint.has(key)) continue;
+          UnitAI.addBlueprint(pos);
+          if (_owner === this._localPlayerIndex) {
+            this.blueprintSystem.addBlueprintGhost(pos);
+          }
+        }
+      },
+      doRemoveWallBlueprint: (position: HexCoord, _owner: number) => {
+        const key = `${position.q},${position.r}`;
+        if (UnitAI.playerWallBlueprint.has(key)) {
+          UnitAI.playerWallBlueprint.delete(key);
+          if (_owner === this._localPlayerIndex) {
+            this.blueprintSystem.removeBlueprintGhost(position);
+          }
+        }
+        if (UnitAI.playerGateBlueprint.has(key)) {
+          UnitAI.playerGateBlueprint.delete(key);
+          if (_owner === this._localPlayerIndex) {
+            this.blueprintSystem.removeBlueprintGhost(position);
+          }
+        }
+      },
+
       getOwnerForPlayerId: (playerId: string) => {
         // In single-player, always player 0
         // In multiplayer, host = 0, guest = 1
@@ -4145,6 +4199,32 @@ class Cubitopia {
 
   private togglePlantTreeMode(): void {
     this.interaction.toggle({ kind: 'plant_tree' });
+  }
+
+  /** Validate mine blueprint and enqueue through command queue for multiplayer sync */
+  enqueuePaintMine(coord: HexCoord): void {
+    if (!this.currentMap) return;
+    const key = `${coord.q},${coord.r}`;
+    const tile = this.currentMap.tiles.get(key);
+    if (!tile) return;
+    if (this.isWaterTerrain(tile.terrain as TerrainType)) return;
+
+    const depth = this.blueprintSystem.mineDepthLayers;
+    const sliceY = this.voxelBuilder.getSliceY();
+    const topY = sliceY ?? (tile.elevation - 1);
+    const bottomY = topY - depth + 1;
+
+    const hasBlocks = tile.voxelData.blocks.some(
+      (b: any) => b.localPosition.y >= bottomY && b.localPosition.y <= topY
+    );
+    if (!hasBlocks) return;
+    if (UnitAI.playerMineBlueprint.has(key)) return;
+
+    this.enqueueCommand(NetCommandType.PAINT_MINE, {
+      position: coord,
+      startY: topY,
+      depth,
+    });
   }
 
   /** Plant a tree sapling on a plains tile (costs 1 wood) — routed through command queue */

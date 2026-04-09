@@ -99,6 +99,13 @@ export enum NetCommandType {
   PLANT_TREE = 'plant_tree',
   PLANT_CROP = 'plant_crop',
 
+  // Blueprint placement (must sync so builder AI is deterministic)
+  PAINT_MINE = 'paint_mine',
+  UNPAINT_MINE = 'unpaint_mine',
+  PAINT_HARVEST = 'paint_harvest',
+  PAINT_WALL_BLUEPRINT = 'paint_wall_blueprint',
+  REMOVE_WALL_BLUEPRINT = 'remove_wall_blueprint',
+
   // Game flow
   SURRENDER = 'surrender',
 
@@ -144,6 +151,9 @@ export type CommandPayload =
   | PlantTreePayload
   | PlantCropPayload
   | SimpleCraftPayload
+  | PaintMinePayload
+  | BlueprintPositionPayload
+  | PaintWallBlueprintPayload
   | SurrenderPayload
   | NopPayload
   | Record<string, unknown>;
@@ -255,6 +265,23 @@ export interface PlantCropPayload {
 
 /** Simple crafting/economy commands — no payload, owner inferred from playerId */
 export interface SimpleCraftPayload {}
+
+/** Mine blueprint: position + Y range to excavate */
+export interface PaintMinePayload {
+  position: HexCoord;
+  startY: number;
+  depth: number;
+}
+
+/** Simple position-based blueprint commands */
+export interface BlueprintPositionPayload {
+  position: HexCoord;
+}
+
+/** Wall blueprint can include multiple positions (drag-painted path) */
+export interface PaintWallBlueprintPayload {
+  positions: HexCoord[];
+}
 
 export interface SurrenderPayload {}
 

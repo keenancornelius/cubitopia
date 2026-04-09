@@ -34,6 +34,9 @@ import {
   SquadPayload,
   PlantTreePayload,
   PlantCropPayload,
+  PaintMinePayload,
+  BlueprintPositionPayload,
+  PaintWallBlueprintPayload,
 } from './Protocol';
 import type { Unit, HexCoord } from '../types';
 import { UnitState, UnitStance, UnitType, ElementType } from '../types';
@@ -97,6 +100,13 @@ export interface CommandBridgeGame {
   // Terrain modification (player-initiated)
   doPlantTree(position: HexCoord, owner: number): void;
   doPlantCrop(position: HexCoord, owner: number): void;
+
+  // Blueprint sync (must be deterministic across clients)
+  doPaintMine(position: HexCoord, startY: number, depth: number, owner: number): void;
+  doUnpaintMine(position: HexCoord, owner: number): void;
+  doPaintHarvest(position: HexCoord, owner: number): void;
+  doPaintWallBlueprint(positions: HexCoord[], owner: number): void;
+  doRemoveWallBlueprint(position: HexCoord, owner: number): void;
 
   // Player ID mapping
   getOwnerForPlayerId(playerId: string): number;
@@ -341,6 +351,33 @@ export function processCommand(game: CommandBridgeGame, cmd: NetworkCommand): vo
     case NetCommandType.PLANT_CROP: {
       const p = cmd.payload as PlantCropPayload;
       game.doPlantCrop(p.position, owner);
+      break;
+    }
+
+    // ── Blueprint sync ───────────────────────────────────────
+    case NetCommandType.PAINT_MINE: {
+      const p = cmd.payload as PaintMinePayload;
+      game.doPaintMine(p.position, p.startY, p.depth, owner);
+      break;
+    }
+    case NetCommandType.UNPAINT_MINE: {
+      const p = cmd.payload as BlueprintPositionPayload;
+      game.doUnpaintMine(p.position, owner);
+      break;
+    }
+    case NetCommandType.PAINT_HARVEST: {
+      const p = cmd.payload as BlueprintPositionPayload;
+      game.doPaintHarvest(p.position, owner);
+      break;
+    }
+    case NetCommandType.PAINT_WALL_BLUEPRINT: {
+      const p = cmd.payload as PaintWallBlueprintPayload;
+      game.doPaintWallBlueprint(p.positions, owner);
+      break;
+    }
+    case NetCommandType.REMOVE_WALL_BLUEPRINT: {
+      const p = cmd.payload as BlueprintPositionPayload;
+      game.doRemoveWallBlueprint(p.position, owner);
       break;
     }
 
