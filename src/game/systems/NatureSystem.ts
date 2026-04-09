@@ -7,7 +7,7 @@ import { HexCoord, TerrainType, GameMap } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import { GAME_CONFIG } from '../GameConfig';
-import { GameRNG } from '../SeededRandom';
+import { GameRNG, SeededRandom } from '../SeededRandom';
 import { hexDistQR } from '../HexMath';
 
 /** Position of a completed forestry building */
@@ -170,18 +170,26 @@ export default class NatureSystem {
   }
 
   // ── Initialization (after map creation) ─────────────────────
-  initializeGrassTracking(): void {
+  initializeGrassTracking(mapSeed?: number): void {
     const map = this.ops.getMap();
     if (!map) return;
+    // Use a LOCAL RNG seeded from the map seed — NOT the global GameRNG.
+    // This is critical for multiplayer: if any client has even one different
+    // grass tile (stale decorator state, etc.), using GameRNG would permanently
+    // diverge the global PRNG for the rest of the match.
+    const localRng = new SeededRandom((mapSeed ?? 0) + 0xB10550A5);
+    let grassCount = 0;
     for (const [key, tile] of map.tiles) {
       if (tile.terrain === TerrainType.PLAINS && this.ops.hasGrass(key)) {
-        const stage = GameRNG.rng.next() > GAME_CONFIG.timers.nature.initialGrassMatureChance ? 2 : 1;
+        const stage = localRng.next() > GAME_CONFIG.timers.nature.initialGrassMatureChance ? 2 : 1;
         this.grassAge.set(key, stage);
         if (stage < 2) {
           this.grassGrowthTimers.set(key, this.GRASS_GROWTH_TIME);
         }
+        grassCount++;
       }
     }
+    console.log(`[NatureSystem] initializeGrassTracking: ${grassCount} grass tiles processed (mapSeed=${mapSeed})`);
     this.syncGrassTiles();
   }
 

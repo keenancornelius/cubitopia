@@ -22,8 +22,12 @@ export class SeededRandom {
 
   /** Returns a float in [0, 1) — deterministic replacement for Math.random() */
   next(): number {
-    // Mulberry32: full-period 32-bit PRNG with excellent avalanche
-    let t = (this.seed += 0x6D2B79F5) | 0;
+    // Mulberry32: full-period 32-bit PRNG with excellent avalanche.
+    // CRITICAL: constrain this.seed to 32-bit int BEFORE further use.
+    // Without this, seed grows as a float64 and eventually loses integer
+    // precision (past 2^53), silently breaking determinism between clients.
+    this.seed = (this.seed + 0x6D2B79F5) | 0;
+    let t = this.seed;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     t = ((t ^ (t >>> 14)) >>> 0);

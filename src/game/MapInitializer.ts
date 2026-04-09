@@ -80,7 +80,7 @@ export interface MapInitOps {
   isWaterTerrain(terrain: string): boolean;
 
   // NatureSystem access
-  initializeGrassTracking(): void;
+  initializeGrassTracking(mapSeed?: number): void;
   initializeForestTracking(): void;
 
   // Camera setup
@@ -254,7 +254,7 @@ export default class MapInitializer {
     this.addOceanPlane(MAP_SIZE);
 
     // Step 6: Initialize nature tracking
-    this.ops.initializeGrassTracking();
+    this.ops.initializeGrassTracking(seed);
     this.ops.initializeForestTracking();
 
     // Step 7: Create bases for ALL players

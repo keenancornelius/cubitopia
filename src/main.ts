@@ -1178,6 +1178,7 @@ class Cubitopia {
         // CRITICAL: Seed the global game RNG so both clients have identical PRNG state.
         // Without this, GameRNG uses Date.now() from module init — different on each client!
         GameRNG.initSeed(mapSeed);
+        console.log(`[MP-INIT] GameRNG seeded with ${mapSeed}, RNG state after init: ${GameRNG.getState()}`);
         if (isGhost) {
           // Ghost matches: local player vs AI impersonation
           this.gameMode = 'pvai';
@@ -1191,6 +1192,7 @@ class Cubitopia {
         }
         this._multiplayerOpponentName = opponentName;
         this.startNewGame();
+        console.log(`[MP-INIT] After startNewGame: GameRNG state=${GameRNG.getState()}, isHost=${!isGhost && this.multiplayer.network.isHost}`);
       },
       onReturnToLobby: () => {
         // Reset command queue back to single-player mode for lobby state
@@ -1829,7 +1831,7 @@ class Cubitopia {
       getElevation: (pos) => this.getElevation(pos),
       rebuildTileShell: (pos) => this.rebuildTileShell(pos),
       isWaterTerrain: (terrain) => this.isWaterTerrain(terrain as TerrainType),
-      initializeGrassTracking: () => this.natureSystem.initializeGrassTracking(),
+      initializeGrassTracking: (mapSeed?: number) => this.natureSystem.initializeGrassTracking(mapSeed),
       initializeForestTracking: () => this.natureSystem.initializeForestTracking(),
       setMapBounds: (x0, y0, x1, y1) => this.camera.setMapBounds(x0, y0, x1, y1),
       focusCameraOnCenter: (cq, cz) => this.camera.focusOn(new THREE.Vector3(cq, 2, cz)),
