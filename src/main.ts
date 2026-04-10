@@ -3086,6 +3086,34 @@ class Cubitopia {
 
     // Base upgrades, population disband, and dead cleanup
     this.lifecycleUpdater.update(delta);
+
+    // ── Canonical resource sync: normalize player.resources with stockpile arrays ──
+    // Prevents drift between the two parallel resource stores from causing false
+    // desyncs in the state hash. p1Resources/p2Resources in the hash reads
+    // player.resources while gameplay mostly writes stockpile arrays; any
+    // asymmetric clamp (Math.max(0,...)) or missed update can leak a 1-unit
+    // drift that surfaces as a desync. Forcing stockpile→player.resources every
+    // tick normalizes both stores at tick boundaries so drift can't accumulate.
+    // Stockpile arrays are canonical for everything with a stockpile writer;
+    // player.resources.crystal is canonical because no code path writes to
+    // crystalStockpile independently (we mirror it back here for consistency).
+    for (let pid = 0; pid < this.players.length; pid++) {
+      const p = this.players[pid];
+      if (!p) continue;
+      const r = p.resources;
+      r.wood = this.woodStockpile[pid] ?? 0;
+      r.stone = this.stoneStockpile[pid] ?? 0;
+      r.food = this.foodStockpile[pid] ?? 0;
+      r.iron = this.ironStockpile[pid] ?? 0;
+      r.clay = this.clayStockpile[pid] ?? 0;
+      r.gold = this.goldStockpile[pid] ?? 0;
+      r.rope = this.ropeStockpile[pid] ?? 0;
+      r.charcoal = this.charcoalStockpile[pid] ?? 0;
+      r.steel = this.steelStockpile[pid] ?? 0;
+      r.grass_fiber = this.grassFiberStockpile[pid] ?? 0;
+      // crystal: player.resources is canonical — mirror into crystalStockpile
+      this.crystalStockpile[pid] = r.crystal ?? 0;
+    }
   }
 
   // --- RTS Game Loop ---
@@ -4120,6 +4148,7 @@ class Cubitopia {
       }
       if (costs.crystal) {
         this.players[owner].resources.crystal -= costs.crystal;
+        this.crystalStockpile[owner] = this.players[owner].resources.crystal;
       }
       if (costs.rope) {
         this.ropeStockpile[owner] -= costs.rope;
