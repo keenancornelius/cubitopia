@@ -1862,8 +1862,15 @@ class Cubitopia {
         }
       }
       const terrainFingerprint = `f${forestCount}e${terrainSum}`;
-      // Build detailed stockpile fingerprint for each player (catches crafting/trade desync)
-      const stockFp = (idx: number) => `w${this.woodStockpile[idx]??0}s${this.stoneStockpile[idx]??0}i${this.ironStockpile[idx]??0}c${this.clayStockpile[idx]??0}g${this.goldStockpile[idx]??0}ch${this.charcoalStockpile[idx]??0}st${this.steelStockpile[idx]??0}`;
+      // Build detailed stockpile fingerprint for each player (catches crafting/trade desync).
+      // IMPORTANT: include ALL 10 stockpiles + crystal from player.resources so every
+      // possible source of resource drift is visible in the desync log. Previous format
+      // only covered w/s/i/c/g/ch/st, which hid food/grass_fiber/rope/crystal drift inside
+      // the aggregate p1Res/p2Res sum and made diagnosis guesswork.
+      const stockFp = (idx: number) => {
+        const pr = this.players[idx]?.resources;
+        return `w${this.woodStockpile[idx]??0}s${this.stoneStockpile[idx]??0}i${this.ironStockpile[idx]??0}c${this.clayStockpile[idx]??0}g${this.goldStockpile[idx]??0}ch${this.charcoalStockpile[idx]??0}st${this.steelStockpile[idx]??0}f${this.foodStockpile[idx]??0}gf${this.grassFiberStockpile[idx]??0}rp${this.ropeStockpile[idx]??0}xt${pr?.crystal??0}`;
+      };
       const stockpileFingerprint = `p0[${stockFp(0)}]p1[${stockFp(1)}]`;
       return {
         units: this.allUnits
