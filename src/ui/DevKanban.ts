@@ -66,13 +66,17 @@ function loadMyVotes(): void {
   try {
     const stored = localStorage.getItem('cubitopia_feature_votes');
     if (stored) _myVotes = new Set(JSON.parse(stored));
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('[DevKanban] Failed to load votes from localStorage:', err);
+  }
 }
 
 function saveMyVotes(): void {
   try {
     localStorage.setItem('cubitopia_feature_votes', JSON.stringify([..._myVotes]));
-  } catch { /* ignore */ }
+  } catch (err) {
+    console.debug('[DevKanban] Failed to save votes to localStorage:', err);
+  }
 }
 
 async function ensureFirebase(): Promise<boolean> {
@@ -84,7 +88,8 @@ async function ensureFirebase(): Promise<boolean> {
     _dbRef = { getDb, ref };
     _firebaseReady = true;
     return true;
-  } catch {
+  } catch (err) {
+    console.debug('[DevKanban] Firebase unavailable (offline or uninitialized):', err);
     return false;
   }
 }
@@ -97,7 +102,9 @@ async function loadVotes(): Promise<Record<string, number>> {
     if (snap.exists()) {
       _votesCache = snap.val() as Record<string, number>;
     }
-  } catch { /* offline — use cache */ }
+  } catch (err) {
+    console.debug('[DevKanban] Failed to load votes (offline):', err);
+  }
   return _votesCache;
 }
 
@@ -114,7 +121,9 @@ async function castVote(hash: string): Promise<number> {
     try {
       const { ref, set } = await import('firebase/database');
       await set(ref(_dbRef.getDb(), `feature-votes/${hash}`), newCount);
-    } catch { /* offline — local only */ }
+    } catch (err) {
+      console.debug('[DevKanban] Failed to persist vote (offline):', err);
+    }
   }
   return newCount;
 }
@@ -126,7 +135,8 @@ async function submitSuggestion(text: string): Promise<boolean> {
     const sugRef = push(ref(_dbRef.getDb(), 'feature-suggestions'));
     await set(sugRef, { text, timestamp: serverTimestamp() });
     return true;
-  } catch {
+  } catch (err) {
+    console.debug('[DevKanban] Failed to submit suggestion:', err);
     return false;
   }
 }

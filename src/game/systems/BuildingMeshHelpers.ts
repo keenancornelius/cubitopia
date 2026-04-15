@@ -12,14 +12,26 @@
  */
 
 import * as THREE from 'three';
+import { getCachedLambert } from '../../engine/MeshMergeUtils';
+import {
+  FoundationOpts,
+  PitchedRoofOpts,
+  ConicalRoofOpts,
+  StoneCourseOpts,
+  CylinderBandOpts,
+  MerlonOpts,
+  CornerTowerOpts,
+  PlankCourseOpts,
+  DoorOpts,
+  CornerTrimOpts,
+  BannerOpts,
+} from '../../types/geometry';
 
 // ── Shared material factories ─────────────────────────────────
-const _matCache: Map<number, THREE.MeshLambertMaterial> = new Map();
 
+/** Material factory — uses centralized cache from MeshMergeUtils for consistency. */
 export function mat(color: number): THREE.MeshLambertMaterial {
-  let m = _matCache.get(color);
-  if (!m) { m = new THREE.MeshLambertMaterial({ color }); _matCache.set(color, m); }
-  return m;
+  return getCachedLambert(color);
 }
 
 export function glow(color: number, intensity = 0.6): THREE.MeshLambertMaterial {
@@ -44,19 +56,6 @@ export function bmr(geo: THREE.BufferGeometry, material: THREE.Material, x: numb
 }
 
 // ── Foundation ────────────────────────────────────────────────
-export interface FoundationOpts {
-  /** Width/depth of bottom tier (default 1.75) */
-  width?: number;
-  depth?: number;
-  /** Color of bottom tier */
-  color1?: number;
-  /** Color of top tier */
-  color2?: number;
-  /** Width/depth shrink for top tier (default 0.1) */
-  shrink?: number;
-  /** Optional 3rd tier */
-  tier3?: { width: number; depth: number; height: number; color: number };
-}
 
 /** Add a 2-3 tier foundation platform at Y≈0.03/0.11 */
 export function addFoundation(g: THREE.Group, opts: FoundationOpts = {}): void {
@@ -74,24 +73,6 @@ export function addFoundation(g: THREE.Group, opts: FoundationOpts = {}): void {
 }
 
 // ── Pitched (A-frame) Roof ────────────────────────────────────
-export interface PitchedRoofOpts {
-  /** Slab width along the slope */
-  width: number;
-  /** Slab depth (along ridge) */
-  depth: number;
-  /** Y position of the ridge */
-  y: number;
-  /** Tilt angle in radians (0.52 = steep, 0.22 = gentle) */
-  angle: number;
-  /** X offset of each slab from center (default width*0.26) */
-  offsetX?: number;
-  /** Main roof color */
-  color: number;
-  /** Optional under-layer color + thickness */
-  underColor?: number;
-  /** Slab thickness (default 0.1) */
-  thickness?: number;
-}
 
 /** Add a symmetric pitched roof (two tilted slabs, optional under-layer) */
 export function addPitchedRoof(g: THREE.Group, opts: PitchedRoofOpts): void {
@@ -112,17 +93,6 @@ export function addPitchedRoof(g: THREE.Group, opts: PitchedRoofOpts): void {
 }
 
 // ── Conical Roof / Spire ──────────────────────────────────────
-export interface ConicalRoofOpts {
-  /** Array of [radius, height, y] cone layers from bottom to top */
-  layers: [number, number, number][];
-  /** Cone color */
-  color: number;
-  /** Number of sides (6 for hex, 8 for round) */
-  segments?: number;
-  /** X/Z offset */
-  x?: number;
-  z?: number;
-}
 
 /** Add stacked cone layers (spire/turret cap) */
 export function addConicalRoof(g: THREE.Group, opts: ConicalRoofOpts): void {
@@ -135,22 +105,6 @@ export function addConicalRoof(g: THREE.Group, opts: ConicalRoofOpts): void {
 }
 
 // ── Stone Courses / Horizontal Bands ──────────────────────────
-export interface StoneCourseOpts {
-  /** Y positions for each band */
-  ys: number[];
-  /** Band width */
-  width: number;
-  /** Band depth */
-  depth: number;
-  /** Band color */
-  color: number;
-  /** Band height (default 0.04) */
-  height?: number;
-  /** X offset (default 0) */
-  x?: number;
-  /** Z offset (default 0) */
-  z?: number;
-}
 
 /** Add horizontal stone course lines (box bands at specified Y positions) */
 export function addStoneCourses(g: THREE.Group, opts: StoneCourseOpts): void {
@@ -163,21 +117,6 @@ export function addStoneCourses(g: THREE.Group, opts: StoneCourseOpts): void {
 }
 
 // ── Cylindrical Bands (for round buildings) ───────────────────
-export interface CylinderBandOpts {
-  /** Y positions for each band */
-  ys: number[];
-  /** Band radius (or function: (y) => radius) */
-  radius: number | ((y: number) => number);
-  /** Band color */
-  color: number;
-  /** Band height (default 0.04) */
-  height?: number;
-  /** Number of sides (default 8) */
-  segments?: number;
-  /** X/Z offset */
-  x?: number;
-  z?: number;
-}
 
 /** Add horizontal ring bands around cylindrical structures */
 export function addCylinderBands(g: THREE.Group, opts: CylinderBandOpts): void {
@@ -192,22 +131,6 @@ export function addCylinderBands(g: THREE.Group, opts: CylinderBandOpts): void {
 }
 
 // ── Merlons / Crenellations ───────────────────────────────────
-export interface MerlonOpts {
-  /** Number of merlons */
-  count: number;
-  /** Starting X position */
-  startX: number;
-  /** Spacing between merlons */
-  spacing: number;
-  /** Y position */
-  y: number;
-  /** Z position */
-  z: number;
-  /** Merlon size [w, h, d] (default [0.1, 0.16, 0.1]) */
-  size?: [number, number, number];
-  /** Color */
-  color: number;
-}
 
 /** Add a row of crenellation merlons along an edge */
 export function addMerlons(g: THREE.Group, opts: MerlonOpts): void {
@@ -220,22 +143,6 @@ export function addMerlons(g: THREE.Group, opts: MerlonOpts): void {
 }
 
 // ── Corner Towers / Pillars ───────────────────────────────────
-export interface CornerTowerOpts {
-  /** [x, z] positions for each tower */
-  positions: [number, number][];
-  /** Top radius */
-  radiusTop: number;
-  /** Bottom radius */
-  radiusBottom: number;
-  /** Height */
-  height: number;
-  /** Y position (center) */
-  y: number;
-  /** Color */
-  color: number;
-  /** Segments (default 8) */
-  segments?: number;
-}
 
 /** Add cylindrical corner towers at specified positions */
 export function addCornerTowers(g: THREE.Group, opts: CornerTowerOpts): void {
@@ -248,20 +155,6 @@ export function addCornerTowers(g: THREE.Group, opts: CornerTowerOpts): void {
 }
 
 // ── Plank Courses (horizontal trim lines) ─────────────────────
-export interface PlankCourseOpts {
-  /** Y positions for each plank line */
-  ys: number[];
-  /** Plank width */
-  width: number;
-  /** Z positions (both sides of wall) — each Z gets a plank line */
-  zPositions: number[];
-  /** Plank color */
-  color: number;
-  /** Plank height (default 0.025) */
-  height?: number;
-  /** Plank depth (default 0.03) */
-  depth?: number;
-}
 
 /** Add horizontal plank trim lines on walls */
 export function addPlankCourses(g: THREE.Group, opts: PlankCourseOpts): void {
@@ -276,22 +169,6 @@ export function addPlankCourses(g: THREE.Group, opts: PlankCourseOpts): void {
 }
 
 // ── Door / Archway Opening ────────────────────────────────────
-export interface DoorOpts {
-  /** Door width */
-  width: number;
-  /** Door height */
-  height: number;
-  /** X, Y, Z position */
-  x: number;
-  y: number;
-  z: number;
-  /** Dark opening color (default 0x1a1408) */
-  openingColor?: number;
-  /** Arch stone color (optional — omit for no arch) */
-  archColor?: number;
-  /** Keystone color (optional — omit for no keystone) */
-  keystoneColor?: number;
-}
 
 /** Add a door opening with optional arch and keystone */
 export function addDoor(g: THREE.Group, opts: DoorOpts): void {
@@ -308,22 +185,6 @@ export function addDoor(g: THREE.Group, opts: DoorOpts): void {
 }
 
 // ── Vertical Corner Trim ──────────────────────────────────────
-export interface CornerTrimOpts {
-  /** X positions of trim boards */
-  xs: number[];
-  /** Z positions (front/back walls) */
-  zs: number[];
-  /** Trim height */
-  height: number;
-  /** Y center */
-  y: number;
-  /** Trim color */
-  color: number;
-  /** Trim thickness (default 0.04) */
-  size?: number;
-  /** Skip back-wall for center X (e.g., for doors). Pass the X values to skip on back Z. */
-  skipBackAt?: number[];
-}
 
 /** Add vertical corner trim boards on building walls */
 export function addCornerTrim(g: THREE.Group, opts: CornerTrimOpts): void {
@@ -339,21 +200,6 @@ export function addCornerTrim(g: THREE.Group, opts: CornerTrimOpts): void {
 }
 
 // ── Team Banner ───────────────────────────────────────────────
-export interface BannerOpts {
-  x: number;
-  y: number;
-  z: number;
-  /** Banner height (default 0.35) */
-  height?: number;
-  /** Banner width (default 0.2) */
-  width?: number;
-  /** Pole height (default 0.6) */
-  poleHeight?: number;
-  /** Pole color (default 0x5a5550 iron) */
-  poleColor?: number;
-  /** Team color hex number */
-  teamColor: number;
-}
 
 /** Add a team banner on a pole */
 export function addBanner(g: THREE.Group, opts: BannerOpts): void {

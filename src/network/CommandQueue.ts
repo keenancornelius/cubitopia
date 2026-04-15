@@ -338,6 +338,23 @@ export class CommandQueue {
     if (localHash.hash !== remoteHash.hash) {
       console.error(`[CmdQ] DESYNC at tick ${remoteHash.tick}! Local: ${localHash.hash}, Remote: ${remoteHash.hash} | Units: ${localHash.unitCount} vs ${remoteHash.unitCount} | P1res: ${localHash.p1Resources} vs ${remoteHash.p1Resources} | P2res: ${localHash.p2Resources} vs ${remoteHash.p2Resources}`);
 
+      // Side-by-side fingerprint comparison — makes it trivial to see which
+      // field drifted without hunting through unit-detail dumps.
+      if (localHash.rngState !== undefined || remoteHash.rngState !== undefined) {
+        const rngMatch = localHash.rngState === remoteHash.rngState ? 'match' : 'DIFF';
+        console.error(`[CmdQ]   RNG [${rngMatch}] local=${localHash.rngState} remote=${remoteHash.rngState}`);
+      }
+      if (localHash.terrainFingerprint || remoteHash.terrainFingerprint) {
+        const tfMatch = localHash.terrainFingerprint === remoteHash.terrainFingerprint ? 'match' : 'DIFF';
+        console.error(`[CmdQ]   Terrain [${tfMatch}] local=${localHash.terrainFingerprint} remote=${remoteHash.terrainFingerprint}`);
+      }
+      if (localHash.stockpileFingerprint || remoteHash.stockpileFingerprint) {
+        const spMatch = localHash.stockpileFingerprint === remoteHash.stockpileFingerprint ? 'match' : 'DIFF';
+        console.error(`[CmdQ]   Stockpiles [${spMatch}]`);
+        console.error(`[CmdQ]     local:  ${localHash.stockpileFingerprint}`);
+        console.error(`[CmdQ]     remote: ${remoteHash.stockpileFingerprint}`);
+      }
+
       // Log detailed unit state on first desync
       if (!this._desyncDetailLogged) {
         this._desyncDetailLogged = true;

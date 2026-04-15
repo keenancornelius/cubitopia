@@ -334,8 +334,12 @@ export class MatchmakingService {
       this.log(`HOST: Match created: ${matchId.slice(0,8)}`, '#2ecc71');
 
       // Remove ourselves from queue (opponent removes themselves when they find the match)
-      await leaveQueue(this._uid).catch(() => {});
-      this.log('HOST: Removed self from queue');
+      try {
+        await leaveQueue(this._uid);
+        this.log('HOST: Removed self from queue');
+      } catch (err) {
+        this.log(`HOST: Warning — failed to leave queue: ${err}`, '#f39c12');
+      }
 
       this._lastMatchResult = {
         matchId,

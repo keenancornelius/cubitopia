@@ -12,13 +12,19 @@
 
 import type { TribeId } from '../game/TribeConfig';
 
-declare global {
-  interface Window {
-    Stripe?: any;
-  }
+interface StripeRedirectResult {
+  error?: { message: string };
 }
 
-export type StripePublishableKey = string;
+interface StripeInstance {
+  redirectToCheckout(options: { sessionId: string }): Promise<StripeRedirectResult>;
+}
+
+declare global {
+  interface Window {
+    Stripe?: (publishableKey: string) => StripeInstance;
+  }
+}
 
 /**
  * Map of tribe ID to Stripe Price ID.
@@ -53,7 +59,7 @@ const STORAGE_KEY = 'cubitopia_unlocked_tribes';
  */
 class StripeService {
   private static instance: StripeService | null = null;
-  private stripeInstance: any = null;
+  private stripeInstance: StripeInstance | null = null;
   private publishableKey: string;
   private initialized: boolean = false;
 

@@ -3,6 +3,7 @@
 // ============================================
 
 import * as THREE from 'three';
+import type { HUD, UnitRenderer, SelectionManager, TerrainDecorator, VoxelBuilder } from './GameSystemTypes';
 
 // --- Feature Flags ---
 /** Set to true to re-enable underground tunnels, lava tubes, and the Desert Tunnels map. */
@@ -20,6 +21,12 @@ export interface HexCoord {
   q: number;  // column
   r: number;  // row
 }
+
+/** 3D world position vector */
+export type Vec3 = { x: number; y: number; z: number };
+
+/** A structure placed on the map with both hex and world coordinates */
+export type PlacedStructure = { position: HexCoord; worldPosition: Vec3 };
 
 export interface Tile {
   position: HexCoord;
@@ -203,7 +210,7 @@ export interface Unit {
   type: UnitType;
   owner: number;
   position: HexCoord;
-  worldPosition: { x: number; y: number; z: number };
+  worldPosition: Vec3;
   targetPosition: HexCoord | null;
   command: UnitCommand | null;
   state: UnitState;
@@ -356,7 +363,7 @@ export interface Base {
   id: string;
   owner: number;
   position: HexCoord;
-  worldPosition: { x: number; y: number; z: number };
+  worldPosition: Vec3;
   health: number;
   maxHealth: number;
   destroyed: boolean;
@@ -535,15 +542,15 @@ export interface PlacedBuilding {
 // --- AI State Types ---
 
 export interface AIBuildState {
-  barracks: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  forestry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  masonry: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  farmhouse: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  workshop: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  silo: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  smelter: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  armory: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
-  wizard_tower: { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null;
+  barracks: PlacedStructure | null;
+  forestry: PlacedStructure | null;
+  masonry: PlacedStructure | null;
+  farmhouse: PlacedStructure | null;
+  workshop: PlacedStructure | null;
+  silo: PlacedStructure | null;
+  smelter: PlacedStructure | null;
+  armory: PlacedStructure | null;
+  wizard_tower: PlacedStructure | null;
   meshes: THREE.Group[];
   spawnQueue: { type: UnitType; cost: number }[];
   workerSpawnQueue: { type: UnitType; building: string }[];
@@ -620,16 +627,9 @@ export interface GameContext {
   getElevation(pos: HexCoord): number;
   isTileOccupied(key: string): boolean;
   findSpawnTile(map: GameMap, q: number, r: number, allowOccupied?: boolean): HexCoord;
-  isWaterTerrain(terrain: TerrainType): boolean;
   hasBuilding(kind: BuildingKind, owner: number): boolean;
 
   /** Index of the local human player (0 for host, 1 for guest in PvP) */
   localPlayerIndex: number;
 }
 
-// Forward-declare imported types used in GameContext
-import type { HUD } from '../ui/HUD';
-import type { UnitRenderer } from '../engine/UnitRenderer';
-import type { SelectionManager } from '../game/systems/SelectionManager';
-import type { TerrainDecorator } from '../engine/TerrainDecorator';
-import type { VoxelBuilder } from '../engine/VoxelBuilder';

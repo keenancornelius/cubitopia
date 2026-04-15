@@ -14,7 +14,7 @@ export interface SoundConfig {
   muted: boolean;
 }
 
-type SoundName =
+export type SoundName =
   | 'hit_melee' | 'hit_ranged' | 'hit_siege'
   | 'hit_pierce' | 'hit_cleave' | 'hit_blunt'
   | 'death' | 'heal' | 'splash_aoe'

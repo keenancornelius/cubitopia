@@ -13,7 +13,7 @@
  */
 
 // ── Color Palette ──────────────────────────────────────────────
-export const COLORS = {
+export const COLORS: Record<string, string> = {
   // Backgrounds
   panelBg:      'rgba(20, 20, 30, 0.95)',
   panelBgLight: 'rgba(20, 20, 30, 0.88)',
@@ -52,10 +52,10 @@ export const COLORS = {
   danger:   '#e74c3c',
   warning:  '#f39c12',
   info:     '#3498db',
-} as const;
+};
 
 // ── Typography ─────────────────────────────────────────────────
-export const FONT = {
+export const FONT: Record<string, string> = {
   /** Primary UI font — clean, readable at small sizes */
   family:   "'Segoe UI', system-ui, -apple-system, sans-serif",
   /** Monospace font for hotkey badges, code-style text */
@@ -73,7 +73,7 @@ export const FONT = {
   '4xl': '36px',
   '5xl': '48px',
   title: '64px',
-} as const;
+};
 
 // ── Spacing ────────────────────────────────────────────────────
 export const SPACE = {
@@ -88,7 +88,7 @@ export const SPACE = {
 } as const;
 
 // ── Borders & Radius ───────────────────────────────────────────
-export const BORDER = {
+export const BORDER: Record<string, any> = {
   width:  '2px',
   thin:   '1px',
   radius: {
@@ -98,15 +98,15 @@ export const BORDER = {
     xl: '10px',
     pill: '20px',
   },
-} as const;
+};
 
 // ── Shadows ────────────────────────────────────────────────────
-export const SHADOW = {
+export const SHADOW: Record<string, string | ((color: string, spread?: number) => string)> = {
   panel:    '0 4px 16px rgba(0, 0, 0, 0.5)',
   dropdown: '0 8px 28px rgba(0, 0, 0, 0.6)',
   glow: (color: string, spread = 8) => `0 0 ${spread}px ${color}`,
   inset:    'inset 0 1px 0 rgba(255,255,255,0.06)',
-} as const;
+};
 
 // ── Transitions ────────────────────────────────────────────────
 export const TRANSITION = {
@@ -477,24 +477,24 @@ export function setSkin(skin: ThemeSkin): void {
   root.style.setProperty('--ui-radius', s.radiusLg);
 
   // Override the mutable JS constants so UI.panel() etc. produce the right styles
-  (COLORS as any).panelBg      = s.panelBg;
-  (COLORS as any).panelBgLight = s.panelBgLight;
-  (COLORS as any).panelBgEnemy = s.panelBgEnemy;
-  (COLORS as any).overlayBg    = s.overlayBg;
-  (COLORS as any).dropdownBg   = s.dropdownBg;
-  (COLORS as any).borderDefault= s.borderDefault;
-  (COLORS as any).borderHover  = s.borderHover;
-  (COLORS as any).borderActive = s.borderActive;
-  (COLORS as any).divider      = s.divider;
-  (COLORS as any).textPrimary  = s.textPrimary;
-  (COLORS as any).textSecondary= s.textSecondary;
-  (COLORS as any).textMuted    = s.textMuted;
-  (COLORS as any).textDim      = s.textDim;
-  (FONT as any).family         = s.font;
-  (SHADOW as any).panel        = s.shadow;
-  (BORDER.radius as any).lg    = s.radiusLg;
-  (BORDER.radius as any).md    = s.radiusMd;
-  (BORDER.radius as any).sm    = s.radiusSm;
+  COLORS.panelBg      = s.panelBg;
+  COLORS.panelBgLight = s.panelBgLight;
+  COLORS.panelBgEnemy = s.panelBgEnemy;
+  COLORS.overlayBg    = s.overlayBg;
+  COLORS.dropdownBg   = s.dropdownBg;
+  COLORS.borderDefault= s.borderDefault;
+  COLORS.borderHover  = s.borderHover;
+  COLORS.borderActive = s.borderActive;
+  COLORS.divider      = s.divider;
+  COLORS.textPrimary  = s.textPrimary;
+  COLORS.textSecondary= s.textSecondary;
+  COLORS.textMuted    = s.textMuted;
+  COLORS.textDim      = s.textDim;
+  FONT.family         = s.font;
+  SHADOW.panel        = s.shadow;
+  BORDER.radius.lg    = s.radiusLg;
+  BORDER.radius.md    = s.radiusMd;
+  BORDER.radius.sm    = s.radiusSm;
 
   // Inject/update scanline overlay for classic skin
   let scanline = document.getElementById('cubitopia-scanline');

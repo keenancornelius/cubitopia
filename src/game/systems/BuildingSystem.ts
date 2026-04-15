@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType, UnitType } from '../../types';
+import { HexCoord, PlacedBuilding, BuildingKind, GameContext, TerrainType, UnitType, PlacedStructure } from '../../types';
 import { Pathfinder } from './Pathfinder';
 import { UnitAI } from './UnitAI';
 import {
@@ -52,7 +52,7 @@ class BuildingSystem {
 
   // --- Query Methods ---
 
-  getFirstBuilding(kind: BuildingKind, owner = 0): { position: HexCoord; worldPosition: { x: number; y: number; z: number } } | null {
+  getFirstBuilding(kind: BuildingKind, owner = 0): PlacedStructure | null {
     const b = this.placedBuildings.find(pb => pb.kind === kind && pb.owner === owner);
     return b ? { position: b.position, worldPosition: b.worldPosition } : null;
   }

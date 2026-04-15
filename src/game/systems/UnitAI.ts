@@ -896,10 +896,9 @@ export class UnitAI {
             UnitAI.commandMove(unit, assigned.position, map);
             if (unit.state !== UnitState.MOVING) {
               // Pathfinding failed — blacklist this blueprint and clear assignment
-              if (!(unit as any)._failedBlueprintIds?.has(assigned.id))
+              if (!UnitAI.ensureFailedBlueprintSet(unit).has(assigned.id))
                 Logger.debug('Builder', `${unit.id} path to blueprint ${assigned.id} failed, blacklisting`);
-              if (!(unit as any)._failedBlueprintIds) (unit as any)._failedBlueprintIds = new Set<string>();
-              (unit as any)._failedBlueprintIds.add(assigned.id);
+              UnitAI.ensureFailedBlueprintSet(unit).add(assigned.id);
               unit._assignedBlueprintId = undefined;
               if (assigned.assignedBuilderId === unit.id) assigned.assignedBuilderId = undefined;
               // Fall through to try other tasks
@@ -955,8 +954,7 @@ export class UnitAI {
             if (unit.state !== UnitState.MOVING) {
               // Pathfinding failed — blacklist and release assignment
               Logger.debug('Builder', `${unit.id} auto-assign path to ${blueprint.id} (${blueprint.kind}) failed, blacklisting`);
-              if (!(unit as any)._failedBlueprintIds) (unit as any)._failedBlueprintIds = new Set<string>();
-              (unit as any)._failedBlueprintIds.add(blueprint.id);
+              UnitAI.ensureFailedBlueprintSet(unit).add(blueprint.id);
               unit._assignedBlueprintId = undefined;
               if (blueprint.assignedBuilderId === unit.id) blueprint.assignedBuilderId = undefined;
               // Fall through to try mining/walls
@@ -1025,9 +1023,7 @@ export class UnitAI {
       // Priority order: building blueprints → mine blueprints → wall building → auto-mine.
       // This keeps builders productive without requiring constant micromanagement.
       if (!UnitAI.debugFlags.disableMine) {
-        // Throttled debug log — only every 5 seconds per builder
         // Only log for locally-controlled builders to reduce console spam
-        // TODO: Add localPlayerIndex parameter to static update method
         if (unit.owner === UnitAI.state.localPlayerIndex) {
           const gf = UnitAI.gameFrame;
           if (!(unit as any)._lastAutoMineLog || gf - (unit as any)._lastAutoMineLog > 300) {
@@ -3777,22 +3773,15 @@ export class UnitAI {
     return unit.stats.range + GAME_CONFIG.combat.unitAI.kiteTriggerBonus;
   }
 
+  /** Ensure unit has a _failedBlueprintIds Set initialized (for builder blacklisting). */
+  private static ensureFailedBlueprintSet(unit: Unit): Set<string> {
+    if (!(unit as any)._failedBlueprintIds) (unit as any)._failedBlueprintIds = new Set<string>();
+    return (unit as any)._failedBlueprintIds;
+  }
+
   /** Get detection range for a unit type — how far it can "see" threats */
   private static getDetectionRange(unit: Unit): number {
-    switch (unit.type) {
-      case UnitType.ARCHER:       return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.ARCHER];
-      case UnitType.PALADIN:      return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.PALADIN];
-      case UnitType.SCOUT:        return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.SCOUT];
-      case UnitType.RIDER:        return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.RIDER];
-      case UnitType.TREBUCHET:    return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.TREBUCHET];
-      case UnitType.HEALER:       return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.HEALER];
-      case UnitType.ASSASSIN:     return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.ASSASSIN];
-      case UnitType.SHIELDBEARER: return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.SHIELDBEARER];
-      case UnitType.BERSERKER:    return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.BERSERKER];
-      case UnitType.BATTLEMAGE:   return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.BATTLEMAGE];
-      case UnitType.GREATSWORD:   return GAME_CONFIG.combat.unitAI.detectionRanges[UnitType.GREATSWORD];
-      default:                    return GAME_CONFIG.combat.unitAI.detectionRanges.default;
-    }
+    return (GAME_CONFIG.combat.unitAI.detectionRanges as any)[unit.type] ?? GAME_CONFIG.combat.unitAI.detectionRanges.default;
   }
 
   /**

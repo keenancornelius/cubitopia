@@ -44,24 +44,6 @@ export const RESOURCE_DISPLAY: Record<StockpileResource, { emoji: string; label:
   gold:       { emoji: '💰', label: 'gold',         color: '#ffd700' },
 };
 
-/**
- * Maps legacy stockpile array property names (e.g. "woodStockpile")
- * to their StockpileResource key.
- */
-export const LEGACY_STOCKPILE_MAP: Record<string, StockpileResource> = {
-  woodStockpile: 'wood',
-  stoneStockpile: 'stone',
-  foodStockpile: 'food',
-  grassFiberStockpile: 'grass_fiber',
-  clayStockpile: 'clay',
-  ropeStockpile: 'rope',
-  ironStockpile: 'iron',
-  charcoalStockpile: 'charcoal',
-  steelStockpile: 'steel',
-  crystalStockpile: 'crystal',
-  goldStockpile: 'gold',
-};
-
 export class ResourcePool {
   /** Internal storage: resource → per-player amounts */
   private data: Map<StockpileResource, number[]> = new Map();

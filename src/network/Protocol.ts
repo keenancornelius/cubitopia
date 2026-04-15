@@ -299,6 +299,12 @@ export interface GameStateHash {
   p2Resources: number; // Sum of player 2 resources
   /** Per-unit state snapshot (only sent on first desync for debugging) */
   unitDetails?: string;
+  /** Per-resource stockpile fingerprint — sent every tick for fast desync triage */
+  stockpileFingerprint?: string;
+  /** RNG state — sent every tick for fast desync triage */
+  rngState?: number;
+  /** Terrain fingerprint — sent every tick for fast desync triage */
+  terrainFingerprint?: string;
 }
 
 // ============================================
@@ -389,5 +395,8 @@ export function computeStateHash(
     p1Resources: p1Sum,
     p2Resources: p2Sum,
     unitDetails,
+    stockpileFingerprint,
+    rngState,
+    terrainFingerprint,
   };
 }

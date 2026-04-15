@@ -698,7 +698,7 @@ export class DebugPanel {
     };
 
     // Helper: slider row that reads/writes a config value
-    const mkSlider = (label: string, obj: any, key: string, min: number, max: number, step: number, color: string, suffix: string = '') => {
+    const mkSlider = (label: string, obj: Record<string, any>, key: string, min: number, max: number, step: number, color: string, suffix: string = '') => {
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:3px;';
 
@@ -782,7 +782,7 @@ export class DebugPanel {
 
     // ---------- BM WET SPLASH ----------
     mkSection('BM Water AoE Damage', '#4488ff');
-    mkSlider('Wet Splash DMG %', cfg.statusEffects as any, 'battlemageWetSplashDamageMultiplier', 0, 0.5, 0.05, '#4488ff');
+    mkSlider('Wet Splash DMG %', cfg.statusEffects as Record<string, any>, 'battlemageWetSplashDamageMultiplier', 0, 0.5, 0.05, '#4488ff');
 
     // ---------- UNIT STATS (live edit) ----------
     mkSection('Unit Stats Override', '#76ff03');
@@ -821,16 +821,16 @@ export class DebugPanel {
         slider.min = String(min);
         slider.max = String(max);
         slider.step = String(step);
-        slider.value = String((s as any)[key]);
+        slider.value = String((s as Record<string, any>)[key]);
         slider.style.cssText = `flex:1;height:4px;accent-color:${color};cursor:pointer;`;
 
         const val = document.createElement('span');
         val.style.cssText = `color:${color};font-size:11px;font-weight:bold;min-width:30px;text-align:right;font-family:monospace;`;
-        val.textContent = String((s as any)[key]);
+        val.textContent = String((s as Record<string, any>)[key]);
 
         slider.addEventListener('input', () => {
           const v = Number(slider.value);
-          (s as any)[key] = v;
+          (s as Record<string, any>)[key] = v;
           val.textContent = step < 1 ? v.toFixed(1) : String(v);
         });
 
@@ -860,16 +860,16 @@ export class DebugPanel {
         slider.min = String(min);
         slider.max = String(max);
         slider.step = String(step);
-        slider.value = String((uc as any)[key]);
+        slider.value = String((uc as Record<string, any>)[key]);
         slider.style.cssText = `flex:1;height:4px;accent-color:${color};cursor:pointer;`;
 
         const val = document.createElement('span');
         val.style.cssText = `color:${color};font-size:11px;font-weight:bold;min-width:30px;text-align:right;font-family:monospace;`;
-        val.textContent = Number((uc as any)[key]).toFixed(1);
+        val.textContent = Number((uc as Record<string, any>)[key]).toFixed(1);
 
         slider.addEventListener('input', () => {
           const v = Number(slider.value);
-          (uc as any)[key] = v;
+          (uc as Record<string, any>)[key] = v;
           val.textContent = v.toFixed(1);
         });
 
@@ -1687,9 +1687,9 @@ export class DebugPanel {
 
       // Update UNIT_CONFIG directly
       if (isStat) {
-        (UNIT_CONFIG[this.selectedUnitType].stats as any)[field] = newVal;
+        (UNIT_CONFIG[this.selectedUnitType].stats as Record<string, any>)[field] = newVal;
       } else {
-        (UNIT_CONFIG[this.selectedUnitType] as any)[field] = newVal;
+        (UNIT_CONFIG[this.selectedUnitType] as Record<string, any>)[field] = newVal;
       }
 
       // Apply to all live units of this type via callback

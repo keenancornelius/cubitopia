@@ -271,9 +271,3 @@ export function getDialogueLine(unitType: UnitType, context: DialogueContext): s
   return lines[Math.floor(Math.random() * lines.length)];
 }
 
-/**
- * Get all unit types that have custom dialogue (for testing/debug).
- */
-export function getCustomDialogueTypes(): UnitType[] {
-  return Object.keys(UNIT_LINES) as UnitType[];
-}

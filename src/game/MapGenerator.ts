@@ -1529,7 +1529,6 @@ export class MapGenerator {
     const FORT_ELEVATION = 8; // High but walkable (below ridge threshold of 10)
     const PATH_WIDTH = 1; // Center tile + some neighbors
 
-    // Step 1: Flatten the fort area — set center + neighbors to exactly FORT_ELEVATION
     const fortTile = map.tiles.get(`${fortCenter.q},${fortCenter.r}`);
     if (fortTile) {
       fortTile.elevation = FORT_ELEVATION;
@@ -1545,8 +1544,6 @@ export class MapGenerator {
         nt.walkableFloor = FORT_ELEVATION;
       }
     }
-
-    // Step 2: Find nearest low-terrain tile (elevation < 7) to build a path toward
     let bestTarget: { q: number; r: number } | null = null;
     let bestDist = Infinity;
     const searchRadius = 12;
@@ -1572,8 +1569,8 @@ export class MapGenerator {
       return;
     }
 
-    // Step 3: Trace a path from fort to low terrain, lowering any ridge tiles along the way
-    // Use greedy stepping: each step moves toward target, picking the neighbor closest to goal
+    // Trace a path from fort to low terrain, lowering ridge tiles along the way
+    // Greedy stepping: move toward target, picking the neighbor closest to goal
     let cq = fortCenter.q;
     let cr = fortCenter.r;
     const visited = new Set<string>();

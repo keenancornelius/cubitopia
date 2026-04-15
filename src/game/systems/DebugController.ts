@@ -23,8 +23,6 @@ export interface DebugOps {
   updateHealthBar(unit: Unit): void;
   setUnitWorldPosition(id: string, x: number, y: number, z: number): void;
   showBaseDestruction(base: any): void;
-  /** @deprecated No-op — zone capture replaced base health bars */
-  updateBaseHealthBars(): void;
 
   // World helpers
   hexToWorld(pos: HexCoord): { x: number; y: number; z: number };
@@ -168,7 +166,6 @@ export default class DebugController {
     const base = this.ops.getBases().find(b => b.owner === owner);
     if (!base) return;
     base.health = Math.max(0, base.health - amount);
-    this.ops.updateBaseHealthBars();
     this.ops.showNotification(`🐛 Base ${owner} -${amount} hp (${base.health}/${base.maxHealth})`, '#ff5722');
   }
 
@@ -255,7 +252,6 @@ export default class DebugController {
     base.health = 0;
     base.destroyed = true;
     this.ops.showBaseDestruction(base);
-    this.ops.updateBaseHealthBars();
     this.ops.checkWinCondition();
   }
 
@@ -265,7 +261,6 @@ export default class DebugController {
     base.health = 0;
     base.destroyed = true;
     this.ops.showBaseDestruction(base);
-    this.ops.updateBaseHealthBars();
     this.ops.checkWinCondition();
   }
 

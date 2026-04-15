@@ -86,27 +86,6 @@ function renderPortrait(unitType: UnitType): string {
   return dataUrl;
 }
 
-/**
- * Get all unit portrait data URLs. Renders lazily on first call.
- * Returns a Map<UnitType, string> of data URL images.
- */
-export function getUnitPortraits(): Map<string, string> {
-  const allTypes: UnitType[] = [
-    UnitType.WARRIOR, UnitType.ARCHER, UnitType.RIDER, UnitType.SCOUT,
-    UnitType.LUMBERJACK, UnitType.BUILDER, UnitType.VILLAGER,
-    UnitType.TREBUCHET, UnitType.PALADIN, UnitType.MAGE, UnitType.HEALER,
-    UnitType.ASSASSIN, UnitType.SHIELDBEARER, UnitType.BERSERKER,
-    UnitType.BATTLEMAGE, UnitType.GREATSWORD, UnitType.OGRE,
-  ];
-
-  for (const t of allTypes) {
-    if (!portraitCache.has(t)) {
-      renderPortrait(t);
-    }
-  }
-
-  return portraitCache;
-}
 
 /**
  * Get a single unit portrait data URL.

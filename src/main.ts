@@ -346,7 +346,6 @@ class Cubitopia {
       updateHealthBar: (unit) => this.unitRenderer.updateHealthBar(unit),
       setUnitWorldPosition: (id, x, y, z) => this.unitRenderer.setWorldPosition(id, x, y, z),
       showBaseDestruction: (base) => this.baseRenderer.showDestruction(base),
-      updateBaseHealthBars: () => { /* removed — zone capture replaced health bars */ },
       hexToWorld: (pos) => this.hexToWorld(pos),
       getElevation: (pos) => this.getElevation(pos),
       getSelectedUnits: () => this.selectionManager.getSelectedUnits(),
@@ -2672,8 +2671,6 @@ class Cubitopia {
     const MAP_SIZE = mapSetupResult.mapSize;
     const bases = mapSetupResult.bases;
     const baseCoords = mapSetupResult.baseCoords;
-    const p1BaseCoord = mapSetupResult.p1BaseCoord;
-    const p2BaseCoord = mapSetupResult.p2BaseCoord;
     const midR = Math.floor(MAP_SIZE / 2);
     const BASE_INSET = mapSetupResult.baseInset;
     const P1_Q = BASE_INSET;
@@ -4577,8 +4574,8 @@ class Cubitopia {
         let meshes = 0, sprites = 0, additive = 0, orphanedVfx = 0;
         const matSeen = new Set<number>();
         const suspect: string[] = [];
-        scene.traverse((obj: any) => {
-          if (obj.isMesh) {
+        scene.traverse((obj: THREE.Object3D) => {
+          if (obj instanceof THREE.Mesh) {
             meshes++;
             const m = obj.material;
             if (m?.blending === 2) additive++; // THREE.AdditiveBlending = 2
@@ -4594,7 +4591,7 @@ class Cubitopia {
               }
             }
           }
-          if (obj.isSprite) sprites++;
+          if ((obj as any).isSprite) sprites++;
         });
         const vb = (game as any).voxelBuilder;
         const om = vb?.opaqueMat;

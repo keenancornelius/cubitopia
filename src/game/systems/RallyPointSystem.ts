@@ -166,7 +166,6 @@ export default class RallyPointSystem {
     if (!rally) return null;
 
     // Gather all units of the same owner within hex distance 5 of the rally point
-    // TODO: Replace hardcoded owner with actual player context
     const playerUnits = this.ops.getPlayerUnits(newUnit.owner);
     const nearbyUnits: Unit[] = [];
     for (const unit of playerUnits) {

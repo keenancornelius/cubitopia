@@ -171,20 +171,13 @@ export default class MapInitializer {
     bases: Base[];
     /** Base coordinates for each player (index = player ID) */
     baseCoords: HexCoord[];
-    /** @deprecated Use baseCoords[0] */
-    p1BaseCoord: HexCoord;
-    /** @deprecated Use baseCoords[1] */
-    p2BaseCoord: HexCoord;
     baseInset: number;
     mapSize: number;
   } {
-    // Step 1: Generate map
     const map = this.generateMap(mapType, playerCount, seed);
     const preset = getPreset(mapType);
     const MAP_SIZE = preset.size;
     const BASE_INSET = mapType === MapType.ARENA ? 3 : 5;
-
-    // Step 2: Calculate base positions for N players
     const arenaCenter = Math.floor(MAP_SIZE / 2);
     const basePositions: { q: number; r: number }[] = [];
 
@@ -215,7 +208,6 @@ export default class MapInitializer {
       }
     }
 
-    // Step 3: Smooth terrain around ALL player bases (skip for arena)
     if (mapType !== MapType.ARENA && mapType !== MapType.SKYLAND && mapType !== MapType.ARCHIPELAGO) {
       for (const bp of basePositions) {
         this.smoothBaseArea(map, bp.q, bp.r, 3, 4, 3, TerrainType.PLAINS);
@@ -238,7 +230,7 @@ export default class MapInitializer {
       }
     }
 
-    // Step 4a: Map-specific re-skin — swap standard blocks to variant materials BEFORE building meshes
+    // Map-specific re-skin — swap standard blocks to variant materials BEFORE building meshes
     if (mapType === MapType.TUNDRA) {
       this.reskinTundra(map);
     } else if (mapType === MapType.SUNKEN_RUINS) {
@@ -247,17 +239,10 @@ export default class MapInitializer {
       this.reskinBadlands(map);
     }
 
-    // Step 4: Build terrain voxels and decorate tiles
     this.buildTerrainAndDecorate(map);
-
-    // Step 5: Add water decorations
     this.addOceanPlane(MAP_SIZE);
-
-    // Step 6: Initialize nature tracking
     this.ops.initializeGrassTracking(seed);
     this.ops.initializeForestTracking();
-
-    // Step 7: Create bases for ALL players
     const BASE_MAX_HEALTH = 500;
     const bases: Base[] = [];
     const baseCoords: HexCoord[] = [];
@@ -281,18 +266,14 @@ export default class MapInitializer {
       baseCoords.push(coord);
     }
 
-    // Step 8: Add ALL bases to renderer
     for (const base of bases) {
       const tile = map.tiles.get(`${base.position.q},${base.position.r}`);
       const elev = tile ? tile.elevation * 0.5 : 1;
       this.ops.addBase(base, elev);
     }
 
-    // Step 9: Add underground/neutral bases
     this.addUndergroundBases(map, bases);
     this.addSurfaceBases(map, bases, baseCoords);
-
-    // Step 10: Setup capture zones
     this.ops.disposeCaptureSystems();
     const playerBaseIds = new Set(bases.filter(b => b.owner < playerCount).map(b => b.id));
     for (const b of bases) {
@@ -305,7 +286,6 @@ export default class MapInitializer {
       }
     }
 
-    // Step 11: Update pathfinder and walls
     Pathfinder.blockedTiles = this.ops.getBaseTiles();
     Pathfinder.gateTiles.clear();
 
@@ -323,13 +303,10 @@ export default class MapInitializer {
       this.ops.rebuildAllConnections();
     }
 
-    // Step 12: Camera and HUD setup
     this.ops.setMapBounds(-3, -3, MAP_SIZE * 1.5 + 3, MAP_SIZE * 1.5 + 3);
     const centerQ = Math.floor(MAP_SIZE / 2);
     const midR = Math.floor(MAP_SIZE / 2);
     this.ops.focusCameraOnCenter(centerQ * 1.5, midR * 1.5);
-
-    // Step 13: Update stockpile visuals for all players
     for (let i = 0; i < playerCount; i++) {
       this.ops.updateStockpileVisual(i);
     }
@@ -338,8 +315,6 @@ export default class MapInitializer {
       map,
       bases,
       baseCoords,
-      p1BaseCoord: baseCoords[0],
-      p2BaseCoord: baseCoords[1] ?? baseCoords[0],
       baseInset: BASE_INSET,
       mapSize: MAP_SIZE,
     };

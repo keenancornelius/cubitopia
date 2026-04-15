@@ -222,4 +222,4 @@ export class CombatLog {
 }
 
 // Expose CombatLog globally for debugging
-(window as any).__CombatLog = CombatLog;
+(window as unknown as Record<string, any>).__CombatLog = CombatLog;

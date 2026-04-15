@@ -1736,9 +1736,6 @@ export class HUD {
     if (active) this.hideAllModeIndicators('wizard_tower');
   }
 
-  /** @deprecated Use updateAllSpawnQueues instead */
-  updateWorkshopSpawnQueue(_queue: { type: string; cost: { wood: number; stone: number; rope: number } }[]): void {}
-
   // ---- Unified stacking queue display ----
 
   /** Queue entry for unified display — supports player-categorized grouping */
@@ -1895,15 +1892,6 @@ export class HUD {
     if (except !== 'armory' && this.armoryModeIndicator) this.armoryModeIndicator.style.display = 'none';
     if (except !== 'wizard_tower' && this.wizardTowerModeIndicator) this.wizardTowerModeIndicator.style.display = 'none';
   }
-
-  /** @deprecated Use updateAllSpawnQueues instead */
-  updateSpawnQueue(_queue: { type: string; cost: number }[]): void {}
-
-  /** @deprecated Use updateAllSpawnQueues instead */
-  updateForestrySpawnQueue(_queue: { type: string; cost: number }[]): void {}
-
-  /** @deprecated Use updateAllSpawnQueues instead */
-  updateMasonrySpawnQueue(_queue: { type: string; cost: number }[]): void {}
 
   // === Capture Zone HUD ===
   private captureZoneContainer: HTMLElement | null = null;
