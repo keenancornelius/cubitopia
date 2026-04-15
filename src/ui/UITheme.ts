@@ -101,7 +101,12 @@ export const BORDER: Record<string, any> = {
 };
 
 // ── Shadows ────────────────────────────────────────────────────
-export const SHADOW: Record<string, string | ((color: string, spread?: number) => string)> = {
+export const SHADOW: {
+  panel: string;
+  dropdown: string;
+  glow: (color: string, spread?: number) => string;
+  inset: string;
+} = {
   panel:    '0 4px 16px rgba(0, 0, 0, 0.5)',
   dropdown: '0 8px 28px rgba(0, 0, 0, 0.6)',
   glow: (color: string, spread = 8) => `0 0 ${spread}px ${color}`,

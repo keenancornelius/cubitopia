@@ -628,6 +628,7 @@ export interface GameContext {
   isTileOccupied(key: string): boolean;
   findSpawnTile(map: GameMap, q: number, r: number, allowOccupied?: boolean): HexCoord;
   hasBuilding(kind: BuildingKind, owner: number): boolean;
+  isWaterTerrain(terrain: TerrainType): boolean;
 
   /** Index of the local human player (0 for host, 1 for guest in PvP) */
   localPlayerIndex: number;
