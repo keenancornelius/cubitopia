@@ -627,6 +627,10 @@ export default class AIController {
           player.units.push(unit);
           this.ctx.allUnits.push(unit);
           this.ctx.unitRenderer.addUnit(unit, this.ctx.getElevation(pos));
+          // Same food rule as human spawns (SpawnQueueSystem): a combat unit costs FOOD_PER_COMBAT_UNIT.
+          // The AI previously spawned for free — its food sat at 50 all game while humans starved at the cap.
+          this.ctx.foodStockpile[ownerId] = Math.max(0, (this.ctx.foodStockpile[ownerId] ?? 0) - FOOD_PER_COMBAT_UNIT);
+          player.resources.food = this.ctx.foodStockpile[ownerId];
           if (ownerId === 0) this.ctx.selectionManager.setPlayerUnits(this.ctx.allUnits, 0);
         }
       }

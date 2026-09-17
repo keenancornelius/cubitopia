@@ -754,7 +754,11 @@ export class MultiplayerUI {
     // Opponent info
     const oppInfo = document.createElement('div');
     oppInfo.style.cssText = `font-size:16px; color:#bbb; font-family:${FONT}; margin:12px 0 32px; letter-spacing:2px;`;
-    oppInfo.textContent = won ? `You defeated ${opponentName}!` : `${opponentName} has won the battle`;
+    if (this.mp.currentMatchMode === 'coop') {
+      oppInfo.textContent = won ? `You and ${opponentName} beat both AIs!` : `The AIs beat you and ${opponentName} this time`;
+    } else {
+      oppInfo.textContent = won ? `You defeated ${opponentName}!` : `${opponentName} has won the battle`;
+    }
     ov.appendChild(oppInfo);
 
     // ELO change card

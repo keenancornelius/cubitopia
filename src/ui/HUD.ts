@@ -214,6 +214,7 @@ export class HUD {
   /** Show/hide the chat panel (only in real multiplayer matches) */
   setChatEnabled(on: boolean): void {
     this.chatEnabled = on;
+    if (!on) this.clearPersistentBanner();
     if (this.chatPanel) this.chatPanel.style.display = on ? 'flex' : 'none';
     if (!on) { this.clearChat(); this.blurChat(); }
   }
@@ -318,6 +319,21 @@ export class HUD {
     this.chatInput = input;
     this.chatHint = hint;
   }
+
+  private persistentBanner: HTMLElement | null = null;
+  /** Sticky top-center banner (e.g. eliminated-but-spectating in co-op). Cleared by clearPersistentBanner(). */
+  showPersistentBanner(text: string, color: string): void {
+    if (!this.persistentBanner) {
+      this.persistentBanner = document.createElement('div');
+      this.persistentBanner.style.cssText = `position:absolute; top:64px; left:50%; transform:translateX(-50%); padding:8px 18px; ${UI.panel(color)}; font-family:${FONT.family}; font-size:${FONT.md}; font-weight:bold; letter-spacing:1px; z-index:10001; pointer-events:none;`;
+      this.container.appendChild(this.persistentBanner);
+    }
+    this.persistentBanner.style.border = `${BORDER.width} solid ${color}`;
+    this.persistentBanner.style.color = color;
+    this.persistentBanner.textContent = text;
+    this.persistentBanner.style.display = 'block';
+  }
+  clearPersistentBanner(): void { if (this.persistentBanner) this.persistentBanner.style.display = 'none'; }
 
   /** First-visit tutorial: open the help overlay once, at the start of the first
    *  single-player game (called from startNewGame, never for ranked matches). */

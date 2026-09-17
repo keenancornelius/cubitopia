@@ -482,7 +482,7 @@ export default class MenuController {
   }
 
   // ── Game Over Screen ──────────────────────────────────────
-  showGameOverScreen(winner: string, isVictory: boolean, gameMode: string, stats?: GameOverStats, mpContinue?: () => void): void {
+  showGameOverScreen(winner: string, isVictory: boolean, gameMode: string, stats?: GameOverStats, mpContinue?: () => void, coop = false): void {
     if (this.gameOverOverlay) return;
 
     const overlay = document.createElement('div');
@@ -500,6 +500,9 @@ export default class MenuController {
     if (gameMode === 'aivai') {
       titleText = winner + ' WINS!';
       subtitleText = winner + ' captured the opposing base!';
+    } else if (coop) {
+      titleText = isVictory ? 'VICTORY!' : 'DEFEAT!';
+      subtitleText = isVictory ? 'Your team eliminated both AIs!' : 'Both of your bases have fallen to the AI.';
     } else {
       titleText = isVictory ? 'VICTORY!' : 'DEFEAT!';
       subtitleText = isVictory ? 'You captured the enemy base!' : 'Your base has been captured!';
@@ -566,7 +569,7 @@ export default class MenuController {
       <button id="play-again-btn" style="
         ${UI.ctaButton(`linear-gradient(135deg, ${color}, ${isVictory ? '#27ae60' : '#c0392b'})`)};
       ">${mpContinue ? 'CONTINUE' : 'NEW BATTLE'}</button>
-      ${mpContinue ? `<div style="font-size:11px; color:#777; letter-spacing:2px; margin-top:12px; font-family:${FONT.family};">RANKED MATCH — ELO RESULT ON NEXT SCREEN</div>` : ''}
+      ${mpContinue ? `<div style="font-size:11px; color:#777; letter-spacing:2px; margin-top:12px; font-family:${FONT.family};">${coop ? 'CO-OP MATCH — UNRANKED' : 'RANKED MATCH — ELO RESULT ON NEXT SCREEN'}</div>` : ''}
     `;
 
     document.body.appendChild(overlay);

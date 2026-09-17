@@ -23,6 +23,8 @@ export type WizardTowerQueueItem = { type: UnitType; cost: { gold: number; cryst
 export interface SpawnQueueOps {
   // Player/game state
   getPlayers(): Player[];
+  /** Simulation frame counter (for deterministic spawn logging) */
+  getGameFrame?(): number;
   getAllUnits(): Unit[];
   getCurrentMap(): any;
 
@@ -328,6 +330,7 @@ export default class SpawnQueueSystem {
             unit.worldPosition = { ...wp };
             ops.addUnitToGame(unit);
             ops.addUnitToRenderer(unit, ops.getElevation(pos));
+            console.log(`[Spawn] frame=${ops.getGameFrame?.() ?? '?'} ${unit.id} ${unit.type} owner=${owner} from ${cfg.kind}@${building.position.q},${building.position.r} at ${pos.q},${pos.r}`);
             ops.playSound('unit_spawn', 0.45);
             if (isCombatType(unit.type)) {
               const currentFood = ops.getFoodStockpile(owner);
@@ -529,6 +532,19 @@ export default class SpawnQueueSystem {
         break;
     }
     this.ops.playSound('queue_confirm', 0.5);
+  }
+
+  /** Compact deterministic fingerprint of all queues + per-owner timers (for the multiplayer state hash).
+   *  If this diverges first, the spawn pipeline is the desync source. */
+  fingerprint(): string {
+    const parts: string[] = [];
+    for (const cfg of this.getQueueConfigs()) {
+      const q = cfg.queue as any[];
+      if (q.length === 0 && !this.ownerTimers[cfg.kind]) continue;
+      const t = (this.ownerTimers[cfg.kind] ?? []).map(v => Math.round((v ?? 0) * 20)).join('/');
+      parts.push(`${cfg.kind}:${q.map(i => `${i.type[0]}${i.owner ?? 0}`).join('')}:t${t}`);
+    }
+    return parts.join('|');
   }
 
   /** Reset all queues — called on map regeneration */

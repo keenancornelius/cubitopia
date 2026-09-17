@@ -1818,6 +1818,7 @@ class Cubitopia {
       getCrystal: () => this.players[this._localPlayerIndex]?.resources.crystal ?? 0,
       setCrystal: (v) => { if (this.players[this._localPlayerIndex]) this.players[this._localPlayerIndex].resources.crystal = v; },
       getNextSpawnBuilding: (kind, owner) => this.buildingSystem.getNextSpawnBuilding(kind, owner),
+      getGameFrame: () => this._gameFrame,
       advanceSpawnIndex: (kind) => this.buildingSystem.advanceSpawnIndex(kind),
       getFirstBuilding: (kind, owner) => this.buildingSystem.getFirstBuilding(kind, owner),
       findSpawnTile: (map, q, r, allow) => this.findSpawnTile(map, q, r, allow),
@@ -1994,6 +1995,8 @@ class Cubitopia {
       };
       let stockpileFingerprint = '';
       for (let i = 0; i < this.playerCount; i++) stockpileFingerprint += `p${i}[${stockFp(i)}]`;
+      // Spawn pipeline state (queues + timers) — first thing to diverge if unit spawn timing drifts
+      stockpileFingerprint += `|sq:${this.spawnQueueSystem.fingerprint()}`;
       return {
         units: this.allUnits
           .filter(u => u.currentHealth > 0)
@@ -3642,6 +3645,7 @@ class Cubitopia {
           this.showGameOverScreen(won ? 'YOUR TEAM' : 'THE AI', won);
         } else if (evt.previousOwner === this._localPlayerIndex) {
           this.hud.showNotification('Your base fell — your partner fights on. Chat to help them!', 'color:#e67e22;font-weight:bold;');
+          this.hud.showPersistentBanner('ELIMINATED — spectating your partner. Use the chat (ENTER) to coach them.', '#e67e22');
         } else if (this.players[evt.previousOwner] && !this.players[evt.previousOwner].isAI) {
           this.hud.showNotification(`${this._multiplayerOpponentName || 'Your partner'} lost their base — it's on you now!`, 'color:#e67e22;font-weight:bold;');
         } else {
@@ -3768,7 +3772,7 @@ class Cubitopia {
         resultPromise.then((elo) => this.multiplayerUI!.showMatchResult(isVictory, elo, opponent));
       };
     }
-    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats, mpContinue);
+    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats, mpContinue, this._isCoop);
   }
 
   // --- Centralized resource pool (backing store for all stockpiles) ---
