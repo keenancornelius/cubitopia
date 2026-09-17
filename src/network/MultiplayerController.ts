@@ -148,6 +148,13 @@ export class MultiplayerController {
 
   async findMatch(): Promise<void> {
     if (!this._profile) throw new Error('Not initialized — call initialize() first');
+    if (this._state === 'error') {
+      // A failed pairing/connection must not brick the lobby: clean up and retry
+      this.network.cleanup();
+      this.matchmaking.cleanup();
+      this._currentMatch = null;
+      this.setState('ready');
+    }
     if (this._state !== 'ready') return;
 
     this.setState('searching');

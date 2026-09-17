@@ -2286,10 +2286,22 @@ class Cubitopia {
 
   /** Spawn queue config for simple (single-resource) buildings */
 
+  /** Timestamp of the first MENU click in a live multiplayer match (two-click forfeit confirm) */
+  private _forfeitArmedAt = 0;
+
   regenerateMap(): void {
     // ── PvP forfeit/cleanup: if leaving a multiplayer match, clean up network ──
     if (this.gameMode === 'pvp') {
       if (!this.gameOver) {
+        // Leaving a live match is a forfeit — require a second click within 5s.
+        // (No native confirm(): it would freeze the page for scripted/automated players.)
+        const now = Date.now();
+        if (now - this._forfeitArmedAt > 5000) {
+          this._forfeitArmedAt = now;
+          this.hud.showNotification('Leave the match? That is a FORFEIT. Click MENU again within 5s to confirm.', 'color:#e74c3c;font-weight:bold;');
+          return;
+        }
+        this._forfeitArmedAt = 0;
         this.gameOver = true;
         this.multiplayer.surrender().catch(() => {});
         this.hud.showNotification('You left the match — defeat!', 'color:#e74c3c;font-weight:bold;');

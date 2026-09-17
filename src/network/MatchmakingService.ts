@@ -247,6 +247,12 @@ export class MatchmakingService {
     await joinQueue(entry);
     this.log('Queue entry written to Firebase');
 
+    // Always poll for a match record addressed to us. The host creates the match the
+    // moment it sees our queue entry and then leaves the queue — if that happens between
+    // our initial queue read and our watcher attaching, we would never see the host and
+    // never start polling (playtest: host waited 30s for a guest that wasn't looking).
+    this.startGuestPoll(null);
+
     // Check for existing players in the queue
     this.checkForOpponent();
 
@@ -375,43 +381,62 @@ export class MatchmakingService {
       this.events.onMatchFound?.(this._lastMatchResult);
     } else {
       // ── GUEST: poll for the match the host will create ──
-      if (this._guestPollTimer) {
-        this.log('GUEST: Already polling, skip');
-        return;
-      }
-      this.log('GUEST: Starting poll for host-created match...');
-      let pollCount = 0;
-      this._guestPollTimer = setInterval(async () => {
-        if (this.state !== 'searching') return;
-        pollCount++;
-        const match = await findMatchAsGuest(this._uid);
-        if (match) {
-          this.log(`GUEST: Found match! id=${match.matchId.slice(0,8)} host=${match.player1.slice(0,8)}`, '#2ecc71');
-          // Remove ourselves from queue
-          await leaveQueue(this._uid).catch(() => {});
-          this.setState('found');
-          this._lastMatchResult = {
-            matchId: match.matchId,
-            mapSeed: match.mapSeed,
-            mapType: match.mapType,
-            isHost: false,
-            opponentUid: match.player1,
-            opponentName: opponent.displayName,
-            opponentElo: opponent.elo,
-            isGhost: false,
-            mode: this._mode, // pairing only happens between equal modes (see tryPairWith)
-          };
-          this.cleanupSearch();
-          this.events.onMatchFound?.(this._lastMatchResult);
-        } else {
-          if (pollCount % 5 === 0) this.log(`GUEST: Poll #${pollCount} — no match yet`);
-        }
-      }, 1000); // poll every 1s
+      this.startGuestPoll(opponent);
     }
     } catch (err) {
       this.log(`ERROR in tryPairWith: ${err}`, '#e74c3c');
       this.events.onError?.(`Pairing failed: ${err}`);
     }
+  }
+
+  /** Poll Firebase for a match record where we are player2. `known` is the host's queue
+   *  entry when we saw it (name/elo for the result); otherwise the profile is fetched. */
+  private startGuestPoll(known: QueueEntry | null): void {
+    if (this._guestPollTimer) {
+      if (known) this.log('GUEST: Already polling, skip');
+      return;
+    }
+    this.log(known ? 'GUEST: Starting poll for host-created match...' : 'Polling for a host-created match (background)');
+    let pollCount = 0;
+    let busy = false;
+    this._guestPollTimer = setInterval(async () => {
+      if (this.state !== 'searching' || busy) return;
+      busy = true;
+      try {
+        pollCount++;
+        const match = await findMatchAsGuest(this._uid);
+        if (!match) {
+          if (known && pollCount % 5 === 0) this.log(`GUEST: Poll #${pollCount} — no match yet`);
+          return;
+        }
+        this.log(`GUEST: Found match! id=${match.matchId.slice(0,8)} host=${match.player1.slice(0,8)}`, '#2ecc71');
+        let hostName = known?.uid === match.player1 ? known.displayName : '';
+        let hostElo = known?.uid === match.player1 ? known.elo : 0;
+        if (!hostName) {
+          const prof = await getProfile(match.player1).catch(() => null);
+          hostName = prof?.displayName ?? 'Opponent';
+          hostElo = prof?.elo ?? 1000;
+        }
+        // Remove ourselves from queue
+        await leaveQueue(this._uid).catch(() => {});
+        this.setState('found');
+        this._lastMatchResult = {
+          matchId: match.matchId,
+          mapSeed: match.mapSeed,
+          mapType: match.mapType,
+          isHost: false,
+          opponentUid: match.player1,
+          opponentName: hostName,
+          opponentElo: hostElo,
+          isGhost: false,
+          mode: this._mode, // pairing only happens between equal modes (see tryPairWith)
+        };
+        this.cleanupSearch();
+        this.events.onMatchFound?.(this._lastMatchResult);
+      } finally {
+        busy = false;
+      }
+    }, 1000); // poll every 1s
   }
 
   // ============================================
