@@ -3789,11 +3789,12 @@ class Cubitopia {
     }
 
     const target = targets[0];
-    for (const unit of selected) {
-      unit._playerCommanded = true;
-      unit.stance = UnitStance.DEFENSIVE;
-      UnitAI.commandMove(unit, target.position, this.currentMap!);
-    }
+    // Route through the command queue (same as a right-click on a base) so both
+    // multiplayer clients apply the move + defensive stance in lockstep.
+    // A direct UnitAI.commandMove here only ran on this client → desync.
+    const unitIds = selected.map(u => u.id);
+    this.enqueueCommand(NetCommandType.MOVE, { unitIds, target: target.position });
+    this.enqueueCommand(NetCommandType.SET_STANCE, { unitIds, stance: UnitStance.DEFENSIVE });
 
     const label = target.owner >= this.playerCount ? 'neutral outpost' : 'enemy zone';
     this.hud.showNotification(`${selected.length} units capturing ${label}!`, '#27ae60');

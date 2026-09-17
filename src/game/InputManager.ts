@@ -14,6 +14,7 @@ import { Pathfinder } from './systems/Pathfinder';
 import { StrategyCamera } from '../engine/Camera';
 import { EngineConfig, HexCoord, TerrainType, UnitStance, FormationType, MapType, PlacedBuilding, Base, ElementType, UnitType, Unit } from '../types';
 import WallSystem from './systems/WallSystem';
+import { NetCommandType } from '../network/Protocol';
 
 // The Cubitopia main game class — tightly coupled by design (80+ property accesses).
 // Using `any` because InputManager needs access to private members and extracting an
@@ -57,7 +58,9 @@ export class InputManager {
     this.hud.onBuildWalls(() => this.game.toggleBuildMode());
     this.hud.onHarvest(() => this.game.toggleHarvestMode());
     this.hud.onMine(() => this.game.toggleMineMode());
-    this.hud.onSellWood(() => this.game.resourceManager.doSellWood(this.game._localPlayerIndex));
+    // Route through the command queue — a direct doSellWood() only ran on this client and desynced
+    // the stockpiles in multiplayer (found in playtest: host w126/g30 vs guest view w130/g25).
+    this.hud.onSellWood(() => this.game.enqueueCommand(NetCommandType.SELL_WOOD, {}));
     this.hud.onFarmPatch(() => this.game.toggleFarmPatchMode());
     this.hud.onHelp(() =>
       this.hud.isHelpVisible() ? this.hud.hideHelp() : this.hud.showHelp()
@@ -87,7 +90,14 @@ export class InputManager {
     this.hud.onSetFormation((formation: FormationType) =>
       this.game.setSelectedUnitsFormation(formation)
     );
-    this.hud.onRespawnUnits(() => this.game.debugController.killSelected());
+    this.hud.onRespawnUnits(() => {
+      // Kill/dismiss removes units locally without a network command → would desync a ranked match
+      if (this.game.multiplayer.commandQueue.isMultiplayer && !this.game.multiplayer.isGhostMatch) {
+        this.hud.showNotification('Dismissing units is disabled in ranked matches', '#e67e22');
+        return;
+      }
+      this.game.debugController.killSelected();
+    });
     this.hud.onCaptureNearestZone(() => this.game.captureNearestZoneWithSelected());
     this.hud.onSetSquadObjective((objective) => this.game.setSelectedSquadObjective(objective));
     this.hud.onLockElement((unitIds: string[], element: ElementType | null) => {
@@ -533,7 +543,7 @@ export class InputManager {
       if (e.key === 'j' || e.key === 'J')
         globalAction(() => this.game.toggleFarmPatchMode());
       if (e.key === 'g' || e.key === 'G')
-        globalAction(() => this.game.resourceManager.doSellWood(this.game._localPlayerIndex));
+        globalAction(() => this.game.enqueueCommand(NetCommandType.SELL_WOOD, {}));
 
       if (e.key === '`') {
         this.debugPanel.setUnits(this.game.allUnits);

@@ -156,8 +156,9 @@ class ResourceManager {
       this.ctx.players[owner].resources.gold += goldGain;
       this.updateHUD();
       this.updateStockpileVisual(owner);
-      this.ctx.hud.showNotification(`Sold ${woodCost} wood -> ${goldGain} gold`, '#2ecc71');
-    } else {
+      // Runs on BOTH clients in multiplayer (command queue) — only toast for the local player
+      if (owner === this.ctx.localPlayerIndex) this.ctx.hud.showNotification(`Sold ${woodCost} wood -> ${goldGain} gold`, '#2ecc71');
+    } else if (owner === this.ctx.localPlayerIndex) {
       this.ctx.hud.showNotification(`Need ${woodCost} wood to sell! (have ${this.ctx.woodStockpile[owner]})`, '#e67e22');
     }
   }
