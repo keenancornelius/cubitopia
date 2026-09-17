@@ -466,7 +466,7 @@ export class CommandQueue {
         this._onDesync?.(localHash.hash, remoteHash.hash, remoteHash.tick);
       }
     } else {
-      console.log(`[CmdQ] Hash OK at tick ${remoteHash.tick}`);
+      if (remoteHash.tick % 200 === 0) console.log(`[CmdQ] Hash OK at tick ${remoteHash.tick} (checked every ${HASH_CHECK_INTERVAL} ticks, logged every 200)`);
     }
   }
 

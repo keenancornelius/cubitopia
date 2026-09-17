@@ -6,3 +6,4 @@
 // Only exported MultiplayerController is actually imported in main.ts
 // Others are removed as unused barrel exports (dead code cleanup)
 export { MultiplayerController } from './MultiplayerController';
+export type { EloUpdateResult } from './MultiplayerController';

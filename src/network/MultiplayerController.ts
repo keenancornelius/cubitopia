@@ -127,6 +127,7 @@ export class MultiplayerController {
       },
       onMatchFound: async (result: MatchFoundResult) => {
         this._currentMatch = result;
+        this._resultReport = null; // fresh match → fresh (single) result report
         this._events.onMatchFound?.(result);
 
         if (result.isGhost) {
@@ -238,7 +239,17 @@ export class MultiplayerController {
   // ============================================
   // Report match result (called when game ends)
   // ============================================
+  /** In-flight / completed result report for the current match — guards against double reporting
+   *  (e.g. two main-base capture events, or capture + disconnect firing together). */
+  private _resultReport: Promise<EloUpdateResult> | null = null;
+
   async reportMatchResult(won: boolean): Promise<EloUpdateResult> {
+    if (this._resultReport) return this._resultReport;
+    this._resultReport = this._reportMatchResultOnce(won);
+    return this._resultReport;
+  }
+
+  private async _reportMatchResultOnce(won: boolean): Promise<EloUpdateResult> {
     if (!this._profile || !this._currentMatch) {
       return { newElo: this._profile?.elo ?? 1000, change: 0 };
     }
@@ -299,6 +310,7 @@ export class MultiplayerController {
     this.matchmaking.cleanup();
     this.commandQueue.cleanup();
     this._currentMatch = null;
+    this._resultReport = null;
     this.setState('ready');
   }
 
@@ -312,6 +324,7 @@ export class MultiplayerController {
     this._state = 'offline';
     this._profile = null;
     this._currentMatch = null;
+    this._resultReport = null;
   }
 }
 

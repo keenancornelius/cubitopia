@@ -482,7 +482,7 @@ export default class MenuController {
   }
 
   // ── Game Over Screen ──────────────────────────────────────
-  showGameOverScreen(winner: string, isVictory: boolean, gameMode: string, stats?: GameOverStats): void {
+  showGameOverScreen(winner: string, isVictory: boolean, gameMode: string, stats?: GameOverStats, mpContinue?: () => void): void {
     if (this.gameOverOverlay) return;
 
     const overlay = document.createElement('div');
@@ -565,7 +565,8 @@ export default class MenuController {
       ${statsHTML}
       <button id="play-again-btn" style="
         ${UI.ctaButton(`linear-gradient(135deg, ${color}, ${isVictory ? '#27ae60' : '#c0392b'})`)};
-      ">NEW BATTLE</button>
+      ">${mpContinue ? 'CONTINUE' : 'NEW BATTLE'}</button>
+      ${mpContinue ? `<div style="font-size:11px; color:#777; letter-spacing:2px; margin-top:12px; font-family:${FONT.family};">RANKED MATCH — ELO RESULT ON NEXT SCREEN</div>` : ''}
     `;
 
     document.body.appendChild(overlay);
@@ -573,7 +574,7 @@ export default class MenuController {
 
     const btn = document.getElementById('play-again-btn');
     if (btn) {
-      btn.addEventListener('click', () => this.callbacks.onPlayAgain());
+      btn.addEventListener('click', () => mpContinue ? mpContinue() : this.callbacks.onPlayAgain());
     }
   }
 

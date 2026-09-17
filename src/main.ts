@@ -60,7 +60,7 @@ import { hexDist } from './game/HexMath';
 import { GameRNG } from './game/SeededRandom';
 import { getPlayerColor, getPlayerHex, getPlayerCSS, PLAYER_COLORS, NEUTRAL_OWNER } from './game/PlayerConfig';
 import { type TribeId, getTribe } from './game/TribeConfig';
-import { MultiplayerController } from './network';
+import { MultiplayerController, type EloUpdateResult } from './network';
 import { MultiplayerUI } from './ui/MultiplayerUI';
 import { processCommand, type CommandBridgeGame } from './network/CommandBridge';
 import { ClaudeControl } from './game/ClaudeControl';
@@ -1312,7 +1312,8 @@ class Cubitopia {
         if (!this.gameOver) {
           this.hud.showNotification('Opponent disconnected — you win!', 'color:#2ecc71;font-weight:bold;');
           this.gameOver = true;
-          this.multiplayer.reportMatchResult(true).catch(() => {});
+          this._mpResultPromise = this.multiplayer.reportMatchResult(true)
+            .catch(() => ({ newElo: this.multiplayer.profile?.elo ?? 1000, change: 0 }));
           this.showGameOverScreen('PLAYER', true);
         }
       },
@@ -1320,7 +1321,8 @@ class Cubitopia {
         if (!this.gameOver) {
           this.hud.showNotification('Opponent surrendered — you win!', 'color:#2ecc71;font-weight:bold;');
           this.gameOver = true;
-          this.multiplayer.reportMatchResult(true).catch(() => {});
+          this._mpResultPromise = this.multiplayer.reportMatchResult(true)
+            .catch(() => ({ newElo: this.multiplayer.profile?.elo ?? 1000, change: 0 }));
           this.showGameOverScreen('PLAYER', true);
         }
       },
@@ -2682,9 +2684,17 @@ class Cubitopia {
     return { q: preferQ, r: preferR };
   }
 
+  /** Wall-clock time (clock.elapsedTime) when the current match started — for battle report duration */
+  private _matchStartTime = 0;
+
   startNewGame(): void {
     this._gameFrame = 0;
     this._mpTickAccumulator = 0;
+    this._matchStartTime = this.clock.elapsedTime;
+    // First-visit tutorial: show the help overlay at the start of the first
+    // single-player game only. Never in a ranked match (the lockstep sim keeps
+    // running under the overlay, so a tutorial there is a free head start for the opponent).
+    if (this.gameMode !== 'pvp') this.hud.maybeAutoShowHelp();
     // Reset unit ID counter so both multiplayer clients generate identical IDs
     resetUnitIdCounter();
     const isArena = this.mapType === MapType.ARENA;
@@ -3471,9 +3481,12 @@ class Cubitopia {
         units: p.units,
         color: getPlayerCSS(i),
       }));
+      // "You" is always the LEFT side of the bar — in multiplayer the local player may be owner 1 (guest)
+      const lpIdx = this._localPlayerIndex;
+      const enemyIdx = lpIdx === 0 ? 1 : 0;
       this.hud.updateArmyStrength(
-        this.players[0].units,
-        this.players[1].units,
+        this.players[lpIdx].units,
+        this.players[enemyIdx].units,
         this.players.length > 2 ? allPlayersForBar : undefined,
       );
     }
@@ -3580,6 +3593,8 @@ class Cubitopia {
       // Check: how many players remain un-defeated?
       const alive = this.players.filter(p => !p.defeated);
       if (alive.length <= 1) {
+        // Guard: a second main-base capture event after game over must not re-report the result
+        if (this.gameOver) return;
         // Game over — last player standing wins
         this.gameOver = true;
         const winnerId = alive.length === 1 ? alive[0].id : evt.newOwner;
@@ -3601,13 +3616,12 @@ class Cubitopia {
         }
         // Report match result to multiplayer controller (ELO update + Firebase)
         if (this.multiplayer.commandQueue.isMultiplayer && this.multiplayer.isInMatch) {
-          this.multiplayer.reportMatchResult(isVictory).then((eloResult) => {
-            if (eloResult && this.multiplayerUI) {
-              // Show ELO change on the result screen
-              console.log(`[MP] Match result reported: ${isVictory ? 'WIN' : 'LOSS'}, ELO: ${eloResult.newElo} (${eloResult.change >= 0 ? '+' : ''}${eloResult.change})`);
-            }
+          this._mpResultPromise = this.multiplayer.reportMatchResult(isVictory).then((eloResult) => {
+            console.log(`[MP] Match result reported: ${isVictory ? 'WIN' : 'LOSS'}, ELO: ${eloResult.newElo} (${eloResult.change >= 0 ? '+' : ''}${eloResult.change})`);
+            return eloResult;
           }).catch((err) => {
             console.warn('[MP] Failed to report match result:', err);
+            return { newElo: this.multiplayer.profile?.elo ?? 1000, change: 0 };
           });
         }
 
@@ -3641,6 +3655,9 @@ class Cubitopia {
     }
   }
 
+  /** Pending ELO result for the current ranked match (resolves after Firebase write) */
+  private _mpResultPromise: Promise<EloUpdateResult> | null = null;
+
   private showGameOverScreen(winner: string, isVictory: boolean): void {
     // Compute game stats for the battle report
     let stats: GameOverStats | undefined;
@@ -3669,7 +3686,7 @@ class Cubitopia {
         const playerBaseTier = playerMainBase?.tier ?? 0;
 
         stats = {
-          gameDuration: this.clock.elapsedTime,
+          gameDuration: Math.max(0, this.clock.elapsedTime - this._matchStartTime),
           playerUnitsKilled: playerKills,
           playerUnitsLost: playerDead.length,
           enemyUnitsKilled: enemyKills,
@@ -3682,7 +3699,18 @@ class Cubitopia {
     } catch {
       // If stats computation fails, continue without stats
     }
-    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats);
+    // Ranked match: battle report first, then CONTINUE → ELO result screen (rematch / lobby / menu)
+    let mpContinue: (() => void) | undefined;
+    if (this.multiplayer.commandQueue.isMultiplayer && this.multiplayerUI) {
+      const opponent = this._multiplayerOpponentName || 'Opponent';
+      const resultPromise = this._mpResultPromise
+        ?? Promise.resolve({ newElo: this.multiplayer.profile?.elo ?? 1000, change: 0 });
+      mpContinue = () => {
+        this.menuController.removeGameOverOverlay();
+        resultPromise.then((elo) => this.multiplayerUI!.showMatchResult(isVictory, elo, opponent));
+      };
+    }
+    this.menuController.showGameOverScreen(winner, isVictory, this.gameMode, stats, mpContinue);
   }
 
   // --- Centralized resource pool (backing store for all stockpiles) ---
@@ -4345,7 +4373,11 @@ class Cubitopia {
     if (!tile) return;
     const cfg = this.BUILDING_PLACEMENT_CONFIG[kind];
     if (!cfg) return;
-    if (!cfg.allowedTerrain.includes(tile.terrain)) return;
+    if (!cfg.allowedTerrain.includes(tile.terrain)) {
+      const terrainName = String(tile.terrain).toLowerCase().replace(/_/g, ' ');
+      this.hud.showNotification(`Can't build ${kind} on ${terrainName} — try grass or dirt near your base`, '#e67e22');
+      return;
+    }
     if (this.isTileOccupied(key)) {
       this.hud.showNotification('Tile already occupied!', '#e67e22');
       return;

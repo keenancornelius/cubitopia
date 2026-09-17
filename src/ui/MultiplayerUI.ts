@@ -659,6 +659,8 @@ export class MultiplayerUI {
     const rematchBtn = makeButton('FIND NEXT MATCH', GREEN, 'large');
     rematchBtn.addEventListener('click', () => {
       this.mp.returnToLobby();
+      // Reset the game's command queue / local player index back to lobby state
+      this.callbacks.onReturnToLobby();
       this.showSearching();
     });
     btnRow.appendChild(rematchBtn);
@@ -666,7 +668,7 @@ export class MultiplayerUI {
     const lobbyBtn = makeOutlineButton('LOBBY', BLUE);
     lobbyBtn.addEventListener('click', () => {
       this.mp.returnToLobby();
-      this.showLobby();
+      this.callbacks.onReturnToLobby();
     });
     btnRow.appendChild(lobbyBtn);
 

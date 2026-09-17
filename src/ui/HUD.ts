@@ -194,10 +194,14 @@ export class HUD {
     document.body.appendChild(this.container);
     this.setupHelpToggle();
 
-    // Auto-show help on first visit
-    if (!localStorage.getItem('cubitopia_seen_help')) {
-      setTimeout(() => this.showHelp(), 800);
-    }
+  }
+
+  /** First-visit tutorial: open the help overlay once, at the start of the first
+   *  single-player game (called from startNewGame, never for ranked matches). */
+  maybeAutoShowHelp(): void {
+    let seen = true;
+    try { seen = !!localStorage.getItem('cubitopia_seen_help'); } catch { /* storage blocked */ }
+    if (!seen) setTimeout(() => this.showHelp(), 800);
   }
 
   /**
