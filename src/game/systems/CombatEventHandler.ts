@@ -344,21 +344,23 @@ export default class CombatEventHandler {
               // Archer level-up bonus: fire a second arrow at level 2+
               if (event.attacker.level >= 2 && event.defender.currentHealth > 0) {
                 const archerAtk = event.attacker;
+                const target = event.defender;
                 const atkWp = archerAtk.worldPosition;
-                const defWp = event.defender.worldPosition;
+                const defWp = target.worldPosition;
                 const secondDefId = defId;
-                // Slight offset for visual variety + 150ms delay
+                // DETERMINISM: the bonus damage is applied NOW, inside the simulation tick.
+                // It used to be applied in the arrow's impact callback, which runs on
+                // wall-clock animation timing — the two multiplayer clients landed it on
+                // different ticks and desynced by exactly this 1 HP (co-op playtest, tick 2010).
+                const bonusDmg = Math.max(1, Math.floor(archerAtk.stats.attack * 0.5));
+                target.currentHealth = Math.max(0, target.currentHealth - bonusDmg);
+                // Slight offset for visual variety + 150ms delay — visuals only from here on
                 const offsetFrom = { x: atkWp.x + 0.15, y: atkWp.y, z: atkWp.z - 0.1 };
                 ops.queueDeferredEffect(150, () => {
                   ops.fireArrow(offsetFrom, defWp, secondDefId, () => {
-                    // Second arrow deals 50% damage
-                    const target = ops.getAllUnits().find(u => u.id === secondDefId);
-                    if (target && target.currentHealth > 0) {
-                      const bonusDmg = Math.max(1, Math.floor(archerAtk.stats.attack * 0.5));
-                      target.currentHealth = Math.max(0, target.currentHealth - bonusDmg);
-                      ops.updateHealthBar(target);
-                      ops.showDamageEffect(target.worldPosition);
-                    }
+                    ops.updateHealthBar(target);
+                    ops.showDamageEffect(target.worldPosition);
+                    if (!(target as any)._pendingKillVisual) CombatEventHandler.checkDeath(target, ops, archerAtk);
                   });
                 });
               }
@@ -369,20 +371,25 @@ export default class CombatEventHandler {
             const attackerRef = event.attacker;
             const defenderRef = event.defender;
 
-            // Status-aware impact callback: applies element status + interaction combos
+            // DETERMINISM: element status / combo damage / chain damage are applied NOW
+            // (simulation tick). Only the projectile visuals and the status VFX are deferred
+            // to the impact callback. Applying state in the impact callback ran on wall-clock
+            // animation timing and desynced multiplayer clients.
+            let statusEventsNow: StatusEvent[] = [];
+            if (elem !== ElementType.LIGHTNING) {
+              statusEventsNow = StatusEffectSystem.applyMageElement(attackerRef, defenderRef, elem, ops.getAllUnits());
+            }
             const applyMageStatusOnImpact = () => {
               applyDamageVisuals();
-              const allUnits = ops.getAllUnits();
-              const statusEvents = StatusEffectSystem.applyMageElement(attackerRef, defenderRef, elem, allUnits);
-              CombatEventHandler.handleStatusEvents(statusEvents, ops, attackerRef);
+              CombatEventHandler.handleStatusEvents(statusEventsNow, ops, attackerRef);
             };
 
             switch (elem) {
               case ElementType.LIGHTNING:
-                // Lightning bolt — chain/electrocute/HV cascade logic extracted to handleLightningImpact
-                ops.fireLightningBolt(attackerRef.worldPosition, defenderRef.worldPosition, defId, () => {
-                  CombatEventHandler.handleLightningImpact(attackerRef, defenderRef, defId, elem, applyDamageVisuals, ops);
-                });
+                // Lightning: chain/electrocute/HV cascade STATE is applied immediately (below);
+                // the bolt's impact callback only plays the primary-hit visuals.
+                CombatEventHandler.handleLightningImpact(attackerRef, defenderRef, defId, elem, () => {}, ops);
+                ops.fireLightningBolt(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyDamageVisuals);
                 break;
               case ElementType.FIRE:
                 ops.fireFlamethrower(attackerRef.worldPosition, defenderRef.worldPosition, defId, applyMageStatusOnImpact);

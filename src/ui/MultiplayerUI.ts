@@ -125,10 +125,16 @@ export class MultiplayerUI {
   }
 
   // ── Lifecycle ────────────────────────────────────────────
+  private partyInterval: ReturnType<typeof setInterval> | null = null;
+
   private clearOverlay(): void {
     if (this.searchTimerInterval) {
       clearInterval(this.searchTimerInterval);
       this.searchTimerInterval = null;
+    }
+    if (this.partyInterval) {
+      clearInterval(this.partyInterval);
+      this.partyInterval = null;
     }
     if (this.overlay) {
       this.overlay.remove();
@@ -569,8 +575,14 @@ export class MultiplayerUI {
         waited += 200;
         if (this.mp.network.isConnected) {
           clearInterval(pollInterval);
-          loadingText.textContent = 'CONNECTED — STARTING...';
-          setTimeout(startGame, 500);
+          if (result.mode === 'coop') {
+            // Co-op: plan first. Party lobby with chat + READY; match starts when both are ready.
+            loadingText.textContent = 'CONNECTED — OPENING PARTY LOBBY...';
+            setTimeout(() => this.showPartyLobby(), 500);
+          } else {
+            loadingText.textContent = 'CONNECTED — STARTING...';
+            setTimeout(startGame, 500);
+          }
         } else if (waited >= 15000) {
           clearInterval(pollInterval);
           loadingText.textContent = 'CONNECTION FAILED';
@@ -584,6 +596,120 @@ export class MultiplayerUI {
         }
       }, 200);
     }
+  }
+
+  // ============================================
+  // SCREEN 4b: Party lobby (co-op) — chat + ready-up over the WebRTC link
+  // ============================================
+  showPartyLobby(): void {
+    const ov = this.createOverlay('rgba(5,5,16,0.94)');
+    const match = this.mp.currentMatch;
+    const partner = match?.opponentName ?? 'Partner';
+    this.mp.resetPartyReady();
+    this.mp.setReady(false);
+
+    const title = document.createElement('div');
+    title.style.cssText = glowText(PURPLE, 36);
+    title.textContent = 'PARTY';
+    ov.appendChild(title);
+
+    const sub = document.createElement('div');
+    sub.style.cssText = `font-size:13px; color:#bbb; font-family:${FONT}; letter-spacing:2px; margin:8px 0 20px;`;
+    sub.textContent = `YOU + ${partner.toUpperCase()} vs TWO AIs — make a plan, then both click READY`;
+    ov.appendChild(sub);
+
+    // Chat box
+    const chatBox = document.createElement('div');
+    chatBox.style.cssText = `
+      width:560px; max-width:92vw; background:rgba(255,255,255,0.04); border:1px solid ${PURPLE}55;
+      border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:8px;
+    `;
+    const log = document.createElement('div');
+    log.style.cssText = `height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; font-family:${FONT}; font-size:13px; text-align:left;`;
+    chatBox.appendChild(log);
+    const inputRow = document.createElement('div');
+    inputRow.style.cssText = 'display:flex; gap:8px;';
+    const input = document.createElement('input');
+    input.type = 'text'; input.maxLength = 200;
+    input.placeholder = 'Type a message and press ENTER';
+    input.style.cssText = `flex:1; padding:8px 10px; background:rgba(0,0,0,0.5); color:#fff; border:1px solid ${BLUE}; border-radius:4px; font-family:${FONT}; font-size:13px; outline:none;`;
+    const swallow = (e: KeyboardEvent) => { e.stopPropagation(); };
+    input.addEventListener('keyup', swallow); input.addEventListener('keypress', swallow);
+    const send = () => {
+      const text = input.value.trim();
+      if (!text) return;
+      if (this.mp.sendChat(text)) { input.value = ''; render(true); }
+    };
+    input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); send(); } });
+    const sendBtn = makeOutlineButton('SEND', BLUE);
+    sendBtn.addEventListener('click', send);
+    inputRow.appendChild(input); inputRow.appendChild(sendBtn);
+    chatBox.appendChild(inputRow);
+    ov.appendChild(chatBox);
+
+    // Ready status + buttons
+    const status = document.createElement('div');
+    status.style.cssText = `display:flex; gap:32px; margin:20px 0 16px; font-family:${FONT}; font-size:13px; letter-spacing:1px;`;
+    ov.appendChild(status);
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex; gap:16px;';
+    const readyBtn = makeButton('READY', GREEN, 'large');
+    readyBtn.addEventListener('click', () => { this.mp.setReady(!this.mp.localReady); render(false); });
+    btnRow.appendChild(readyBtn);
+    const leaveBtn = makeOutlineButton('LEAVE PARTY', GRAY);
+    leaveBtn.addEventListener('click', () => {
+      this.mp.returnToLobby();
+      this.callbacks.onReturnToLobby();
+    });
+    btnRow.appendChild(leaveBtn);
+    ov.appendChild(btnRow);
+
+    let renderedLines = -1;
+    let started = false;
+    const render = (force: boolean) => {
+      const lines = this.mp.chatLog;
+      if (force || lines.length !== renderedLines) {
+        renderedLines = lines.length;
+        log.innerHTML = '';
+        for (const l of lines) {
+          const line = document.createElement('div');
+          const who = document.createElement('span');
+          who.style.cssText = `font-weight:bold; color:${l.local ? BLUE : GOLD}; margin-right:6px;`;
+          who.textContent = `${l.name}:`;
+          const body = document.createElement('span'); body.style.color = '#eee'; body.textContent = l.text;
+          line.appendChild(who); line.appendChild(body); log.appendChild(line);
+        }
+        log.scrollTop = log.scrollHeight;
+      }
+      const me = this.mp.localReady, them = this.mp.peerReady;
+      status.innerHTML = `<span style="color:${me ? GREEN : '#888'}">YOU: ${me ? 'READY' : 'NOT READY'}</span>` +
+        `<span style="color:${them ? GREEN : '#888'}">${partner.toUpperCase()}: ${them ? 'READY' : 'NOT READY'}</span>` +
+        `<span style="color:${this.mp.network.isConnected ? GREEN : RED}">LINK: ${this.mp.network.isConnected ? 'CONNECTED' : 'LOST'}</span>`;
+      readyBtn.textContent = me ? 'CANCEL READY' : 'READY';
+    };
+    render(true);
+
+    const start = (p: { mapSeed: number; mapType: string; mode: string }) => {
+      if (started) return;
+      started = true;
+      this.clearOverlay();
+      this.callbacks.onStartMultiplayerGame(p.mapSeed, p.mapType as MapType, false, partner, undefined, p.mode as MatchMode);
+    };
+
+    this.partyInterval = setInterval(() => {
+      if (!this.overlay) return;
+      render(false);
+      if (!this.mp.network.isConnected) return;
+      if (this.mp.network.isHost) {
+        if (this.mp.localReady && this.mp.peerReady) {
+          const p = this.mp.hostStartMatch();
+          if (p) start(p);
+        }
+      } else {
+        const p = this.mp.consumeStartMatch();
+        if (p) start(p);
+      }
+    }, 400);
   }
 
   private createPlayerCard(name: string, elo: number, color: string, label: string): HTMLElement {
@@ -689,6 +815,12 @@ export class MultiplayerUI {
     // Buttons
     const btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex; gap:16px;';
+
+    if (this.mp.currentMatchMode === 'coop' && this.mp.isPartyConnected) {
+      const partyBtn = makeButton('PLAN NEXT MATCH WITH PARTNER', PURPLE, 'large');
+      partyBtn.addEventListener('click', () => { this.showPartyLobby(); });
+      btnRow.appendChild(partyBtn);
+    }
 
     const rematchBtn = makeButton('FIND NEXT MATCH', GREEN, 'large');
     rematchBtn.addEventListener('click', () => {

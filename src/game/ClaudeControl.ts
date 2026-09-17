@@ -40,6 +40,8 @@ export interface ClaudeControlOps {
   /** Set/unset AI control for a player (true = AIController drives it) */
   setPlayerAI(owner: number, isAI: boolean): void;
   notify(msg: string): void;
+  /** Slot the local human controls (0 host / 1 guest in multiplayer, 0 in single-player) */
+  getLocalPlayerIndex(): number;
   /** In-game multiplayer chat: send a line (false if no live peer) */
   sendChat(text: string): boolean;
   /** In-game multiplayer chat: full log (oldest first) */
@@ -78,7 +80,12 @@ export class ClaudeControl {
   /** Take control of a player slot (default 1). Disables its AI commander. */
   takeover(owner = 1): string {
     if (this.ops.isMultiplayer()) {
-      return 'ERROR: ClaudeControl is disabled in online multiplayer matches.';
+      // Online: Claude may only drive the LOCAL player's slot. Commands go through the
+      // same lockstep command queue as mouse input, so the peer sees them identically.
+      const local = this.ops.getLocalPlayerIndex();
+      this._owner = local;
+      this.ops.notify('Claude is scripting your commands (multiplayer: local slot only)');
+      return `OK: multiplayer — controlling YOUR slot (player ${local}). All commands are lockstep-synced to your partner/opponent. Call state() to scout, help() for the API.`;
     }
     const players = this.ops.getPlayers();
     if (!players[owner]) return `ERROR: no player ${owner} (players: 0..${players.length - 1})`;
@@ -92,6 +99,7 @@ export class ClaudeControl {
   release(): string {
     if (this._owner < 0) return 'Not controlling anyone.';
     const o = this._owner;
+    if (this.ops.isMultiplayer()) { this._owner = -1; return `OK: stopped scripting player ${o}.`; }
     this.ops.setPlayerAI(o, true);
     this._owner = -1;
     this.ops.notify(`Claude released Player ${o + 1} back to the AI.`);

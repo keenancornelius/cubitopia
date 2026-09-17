@@ -37,7 +37,7 @@ import {
   calculateElo,
 } from './MatchmakingService';
 import { CommandQueue } from './CommandQueue';
-import { NetworkCommand, NetCommandType, GameStateHash, ChatPayload } from './Protocol';
+import { NetworkCommand, NetCommandType, GameStateHash, ChatPayload, StartMatchPayload } from './Protocol';
 
 export type MultiplayerState =
   | 'offline'       // Not initialized
@@ -130,6 +130,48 @@ export class MultiplayerController {
   setMatchMode(mode: MatchMode): void { this._matchMode = mode; }
   /** Mode of the match currently being played / just found */
   get currentMatchMode(): MatchMode { return this._currentMatch?.mode ?? '1v1'; }
+
+  // ── Party lobby (post-pairing chat + ready-up; runs over the WebRTC link) ──
+  private _localReady = false;
+  private _peerReady = false;
+  private _pendingStart: StartMatchPayload | null = null;
+  get localReady(): boolean { return this._localReady; }
+  get peerReady(): boolean { return this._peerReady; }
+  /** Live peer + real (non-ghost) match → party features available */
+  get isPartyConnected(): boolean {
+    return !!this._currentMatch && !this._currentMatch.isGhost && this.network.isConnected;
+  }
+  resetPartyReady(): void { this._localReady = false; this._peerReady = false; this._pendingStart = null; }
+  setReady(ready: boolean): void {
+    this._localReady = ready;
+    if (this.isPartyConnected) this.network.sendReady(ready);
+  }
+  /** HOST: both ready → roll a fresh seed, tell the guest, return the settings to start locally */
+  hostStartMatch(): StartMatchPayload | null {
+    if (!this._currentMatch || !this.network.isHost || !this.isPartyConnected) return null;
+    const p: StartMatchPayload = {
+      mapSeed: Math.floor(Math.random() * 999999),
+      mapType: this._currentMatch.mapType || 'standard',
+      mode: this._currentMatch.mode,
+    };
+    this._currentMatch = { ...this._currentMatch, mapSeed: p.mapSeed };
+    this._resultReport = null;
+    this._localReady = false; this._peerReady = false;
+    this.network.sendStartMatch(p);
+    this.setState('playing');
+    return p;
+  }
+  /** GUEST: returns the host's START_MATCH once (null until it arrives) */
+  consumeStartMatch(): StartMatchPayload | null {
+    const p = this._pendingStart;
+    if (!p) return null;
+    this._pendingStart = null;
+    if (this._currentMatch) this._currentMatch = { ...this._currentMatch, mapSeed: p.mapSeed };
+    this._resultReport = null;
+    this._localReady = false; this._peerReady = false;
+    this.setState('playing');
+    return p;
+  }
 
   // ── In-game chat (outside the lockstep sim) ──
   private _chatLog: ChatLine[] = [];
@@ -245,6 +287,8 @@ export class MultiplayerController {
         if (this._chatLog.length > 100) this._chatLog.shift();
         this._events.onChat?.(msg);
       },
+      onPeerReady: (ready: boolean) => { this._peerReady = ready; },
+      onStartMatch: (p: StartMatchPayload) => { this._pendingStart = p; },
       onPingUpdate: (ms: number) => {
         this._events.onPingUpdate?.(ms);
       },
@@ -358,6 +402,7 @@ export class MultiplayerController {
     this.commandQueue.cleanup();
     this._currentMatch = null;
     this._resultReport = null;
+    this.resetPartyReady();
     this.setState('ready');
   }
 

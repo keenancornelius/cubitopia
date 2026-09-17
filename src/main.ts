@@ -1294,7 +1294,8 @@ class Cubitopia {
           UnitAI.state.localPlayerIndex = this._localPlayerIndex;
         }
         this._multiplayerOpponentName = opponentName;
-        this.startNewGame();
+        // Party rematch: a previous world exists → tear it down first (restartGame ends in startNewGame)
+        if (this.currentMap) this.restartGame(); else this.startNewGame();
         console.log(`[MP-INIT] After startNewGame: GameRNG state=${GameRNG.getState()}, isHost=${!isGhost && this.multiplayer.network.isHost}`);
       },
       onReturnToLobby: () => {
@@ -4863,7 +4864,10 @@ class Cubitopia {
       getGameFrame: () => this._gameFrame,
       isMultiplayer: () => this.multiplayer.commandQueue.isMultiplayer,
       enqueue: (type: NetCommandType, payload: Record<string, unknown>) =>
-        this.multiplayer.commandQueue.enqueue(type, payload, 'claude'),
+        // Multiplayer: commands go out as the LOCAL player (lockstep frames carry the local uid);
+        // single-player: tagged 'claude' so CommandBridge maps them to the taken-over slot.
+        this.multiplayer.commandQueue.enqueue(type, payload, this.multiplayer.commandQueue.isMultiplayer ? undefined : 'claude'),
+      getLocalPlayerIndex: () => this._localPlayerIndex,
       setPlayerAI: (owner: number, isAI: boolean) => {
         if (this.players[owner]) this.players[owner].isAI = isAI;
       },

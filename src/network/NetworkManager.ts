@@ -22,7 +22,7 @@ import {
   cleanupMatch,
   type Unsubscribe,
 } from './FirebaseConfig';
-import { NetworkCommand, NetworkMessage, MessageType, GameStateHash, TickInputFrame, ChatPayload } from './Protocol';
+import { NetworkCommand, NetworkMessage, MessageType, GameStateHash, TickInputFrame, ChatPayload, PartyReadyPayload, StartMatchPayload } from './Protocol';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'signaling' | 'connected' | 'error';
 
@@ -36,6 +36,10 @@ export interface NetworkEvents {
   onDisconnect?: () => void;
   onError?: (err: string) => void;
   onChat?: (msg: ChatPayload) => void;
+  /** Party lobby: peer toggled ready */
+  onPeerReady?: (ready: boolean) => void;
+  /** Party lobby: host started a match */
+  onStartMatch?: (p: StartMatchPayload) => void;
 }
 
 export class NetworkManager {
@@ -267,6 +271,18 @@ export class NetworkManager {
         } as NetworkCommand);
         break;
 
+      case MessageType.READY: {
+        const r = msg.payload as PartyReadyPayload;
+        this.events.onPeerReady?.(!!(r && r.ready));
+        break;
+      }
+
+      case MessageType.START_MATCH: {
+        const p = msg.payload as StartMatchPayload;
+        if (p && typeof p.mapSeed === 'number') this.events.onStartMatch?.(p);
+        break;
+      }
+
       case MessageType.CHAT: {
         const c = msg.payload as ChatPayload;
         if (c && typeof c.text === 'string') {
@@ -298,6 +314,14 @@ export class NetworkManager {
 
   sendChat(msg: ChatPayload): void {
     this.sendRaw({ type: MessageType.CHAT, payload: msg });
+  }
+
+  sendReady(ready: boolean): void {
+    this.sendRaw({ type: MessageType.READY, payload: { ready } as PartyReadyPayload });
+  }
+
+  sendStartMatch(p: StartMatchPayload): void {
+    this.sendRaw({ type: MessageType.START_MATCH, payload: p });
   }
 
   private sendRaw(msg: NetworkMessage): void {

@@ -28,6 +28,20 @@ export enum MessageType {
    *  Sent every tick (even when empty) — doubles as the lockstep barrier:
    *  a client may not simulate tick T until the peer's frame for T arrived. */
   TICK_INPUT = 'tick_input',
+  /** Party lobby: host tells the guest to start a match with these settings */
+  START_MATCH = 'start_match',
+}
+
+/** Party lobby ready toggle (READY message payload) */
+export interface PartyReadyPayload {
+  ready: boolean;
+}
+
+/** Party lobby: host → guest, start a match with these settings */
+export interface StartMatchPayload {
+  mapSeed: number;
+  mapType: string;
+  mode: string;
 }
 
 /** In-game chat line (NOT part of the lockstep sim — never hashed, never ticked). */
