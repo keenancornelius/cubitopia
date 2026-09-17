@@ -485,6 +485,11 @@ export class UnitRenderer {
     this.vfx.spawnBlockSparks(worldPos);
   }
 
+  /** Environment-feedback debris: 'wood' (chop), 'stone' (mine), 'grass' (harvest), 'dust' (footsteps) */
+  spawnWorkDebris(worldPos: { x: number; y: number; z: number }, kind: 'wood' | 'stone' | 'grass' | 'dust'): void {
+    this.vfx.spawnWorkDebris(worldPos, kind);
+  }
+
   spawnElementalImpact(worldPos: { x: number; y: number; z: number }, element: ElementType): void {
     this.vfx.spawnElementalImpact(worldPos, element);
   }

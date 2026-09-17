@@ -241,6 +241,12 @@ export class SelectionManager {
     });
   }
 
+  /** Programmatic selection — used by idle-worker cycling and select-all-army */
+  selectUnits(units: Unit[]): void {
+    this.selectedUnits = units.filter(u => u.owner === this.playerId);
+    this.onSelectionChange?.(this.selectedUnits);
+  }
+
   /** Find the player unit closest to the mouse cursor */
   private unitUnderCursor(e: MouseEvent): Unit | null {
     return this.findUnitUnderCursor(e, true);
@@ -362,6 +368,11 @@ export class SelectionManager {
     };
   }
 
+  /** Injected by main.ts: terrain-aware surface resolver (heightfield ray walk).
+   *  Without it, screenToWorld falls back to a flat plane — which puts click
+   *  indicators on the wrong hex anywhere the terrain isn't at sea level. */
+  surfaceResolver: ((raycaster: THREE.Raycaster) => THREE.Vector3 | null) | null = null;
+
   private screenToWorld(screenX: number, screenY: number): THREE.Vector3 | null {
     const rect = this.canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(
@@ -371,19 +382,16 @@ export class SelectionManager {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, this.camera);
 
-    // Ground-plane intersection: try mid-elevation, then refine with tile's actual elevation
+    // Terrain-aware path (resolves the actual surface under the cursor)
+    if (this.surfaceResolver) {
+      const point = this.surfaceResolver(raycaster);
+      if (point) return point;
+    }
+
+    // Fallback: flat plane (only used before the resolver is wired)
     const intersection = new THREE.Vector3();
     const midPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
-    raycaster.ray.intersectPlane(midPlane, intersection);
-    if (intersection) return intersection;
-
-    // Fallback: multiple elevation planes
-    const elevations = [0, 0.5, 1.5, 2.0, 3.0];
-    for (const elev of elevations) {
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -elev);
-      const result = raycaster.ray.intersectPlane(plane, intersection);
-      if (result) return intersection;
-    }
+    if (raycaster.ray.intersectPlane(midPlane, intersection)) return intersection;
     return null;
   }
 

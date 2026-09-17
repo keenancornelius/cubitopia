@@ -2094,6 +2094,60 @@ export class HUD {
     }, 2500);
   }
 
+  // ─── Persistent warning banner (starvation / production blocked) ───
+  private warningBannerEl: HTMLElement | null = null;
+
+  /** Show a persistent top-center warning (null/'' hides it). Unlike
+   *  showNotification this stays visible until cleared — for ongoing states
+   *  like starvation that block production. */
+  setWarningBanner(message: string | null, color: string = '#e67e22'): void {
+    if (!message) {
+      if (this.warningBannerEl) this.warningBannerEl.style.display = 'none';
+      return;
+    }
+    if (!this.warningBannerEl) {
+      this.warningBannerEl = document.createElement('div');
+      this.warningBannerEl.style.cssText = `
+        position: absolute; top: 84px; left: 50%; transform: translateX(-50%);
+        ${UI.panel(color)}; padding: 8px 18px;
+        font-size: ${FONT.lg}; font-weight: bold; letter-spacing: 1px;
+        text-align: center; pointer-events: none; z-index: 10001;
+      `;
+      this.container.appendChild(this.warningBannerEl);
+    }
+    this.warningBannerEl.style.border = `${BORDER.width} solid ${color}`;
+    this.warningBannerEl.style.color = color;
+    this.warningBannerEl.innerHTML = message;
+    this.warningBannerEl.style.display = 'block';
+  }
+
+  // ─── Idle worker badge ───
+  private idleWorkerEl: HTMLElement | null = null;
+  /** Set by main.ts — clicking the badge (or pressing '.') cycles idle workers */
+  onIdleWorkerClick: (() => void) | null = null;
+
+  /** Update the idle-worker badge (0 hides it). */
+  setIdleWorkerCount(count: number): void {
+    if (count <= 0) {
+      if (this.idleWorkerEl) this.idleWorkerEl.style.display = 'none';
+      return;
+    }
+    if (!this.idleWorkerEl) {
+      this.idleWorkerEl = document.createElement('div');
+      this.idleWorkerEl.style.cssText = `
+        position: absolute; bottom: 196px; left: 16px;
+        ${UI.panel('#f1c40f')}; padding: 6px 12px;
+        font-size: ${FONT.md}; font-weight: bold; color: #f1c40f;
+        cursor: pointer; pointer-events: auto; z-index: 101;
+      `;
+      this.idleWorkerEl.title = "Click (or press '.') to cycle idle workers";
+      this.idleWorkerEl.addEventListener('click', () => this.onIdleWorkerClick?.());
+      this.container.appendChild(this.idleWorkerEl);
+    }
+    this.idleWorkerEl.innerHTML = `💤 ${count} idle worker${count !== 1 ? 's' : ''}`;
+    this.idleWorkerEl.style.display = 'block';
+  }
+
   /** Lightweight per-frame update: refreshes health/state text only. Does NOT rebuild command panel buttons. */
   updateSelectionInfo(units: Unit[]): void {
     if (units.length === 0) {
@@ -2938,7 +2992,10 @@ export class HUD {
         <!-- GLOBAL ACTIONS -->
         <div class="section">
           <div class="section-title" style="color: #2980b9;"><span class="vx vx-lg" style="background:#2980b9;"></span> Global Actions (always available)</div>
-          <div class="tip"><span class="tip-bullet" style="color:#2980b9;"><span class="vx" style="background:#2980b9;"></span></span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates. <span class="key">R</span> to rotate.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#2980b9;"><span class="vx" style="background:#2980b9;"></span></span> <span><span class="key">B</span> <strong>Build Walls</strong> — Click to place wall blueprints. Shift+click for gates (gold ghost). <span class="key">R</span> to rotate.</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#f1c40f;"><span class="vx" style="background:#f1c40f;"></span></span> <span><span class="key">.</span> <strong>Cycle Idle Workers</strong> — selects the next idle worker and jumps the camera to it (or click the 💤 badge).</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#e74c3c;"><span class="vx" style="background:#e74c3c;"></span></span> <span><span class="key">SPACE</span> <strong>Jump to Alert</strong> — view the latest under-attack location (red ping on the minimap).</span></div>
+          <div class="tip"><span class="tip-bullet" style="color:#3498db;"><span class="vx" style="background:#3498db;"></span></span> <span><span class="key">F2</span> <strong>Select Army</strong> — selects all your combat units. Minimap (bottom-right): click to move the camera.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#27ae60;"><span class="vx" style="background:#27ae60;"></span></span> <span><span class="key">H</span> <strong>Chop Trees</strong> — Mark forest tiles for lumberjacks.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#ff8c00;"><span class="vx" style="background:#ff8c00;"></span></span> <span><span class="key">N</span> <strong>Mine Terrain</strong> — Mark terrain for mining. Scroll = depth (1-20 layers). Y-slicer (Shift+scroll) is always available to view underground layers and right-click resources.</span></div>
           <div class="tip"><span class="tip-bullet" style="color:#8bc34a;"><span class="vx" style="background:#8bc34a;"></span></span> <span><span class="key">J</span> <strong>Farm/Harvest</strong> — Create farm plots or mark grass for hay.</span></div>

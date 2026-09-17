@@ -255,7 +255,7 @@ export class InputManager {
         const selected = this.game.selectionManager.getSelectedUnits();
         if (selected.length === 0 || !this.game.currentMap) return;
 
-        // Convert mouse to hex via ground-plane intersection (no scene raycast needed)
+        // Convert mouse to hex via terrain-aware heightfield walk (no scene raycast needed)
         const rect = this.container.getBoundingClientRect();
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2(
@@ -263,11 +263,7 @@ export class InputManager {
           -((e.clientY - rect.top) / rect.height) * 2 + 1
         );
         raycaster.setFromCamera(mouse, this.game.camera.camera);
-        const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
-        const worldPos = new THREE.Vector3();
-        raycaster.ray.intersectPlane(groundPlane, worldPos);
-        if (!worldPos) return;
-        const hexCoord = this.game.worldToHex(worldPos);
+        const hexCoord = this.game.raycastToHex(raycaster);
         if (!hexCoord) return;
 
         const preferUnderground =
@@ -285,8 +281,12 @@ export class InputManager {
         const elev = this.game.getElevation(hexCoord);
         this.game.tileHighlighter.showAttackIndicator(hexCoord, elev);
 
-        // Visual click indicator
-        this.game.spawnClickIndicator(worldPos, 0xff9900, 1.0); // Orange for attack-move
+        // Visual click indicator — at the actual terrain surface height
+        const wp = this.game.hexToWorld ? this.game.hexToWorld(hexCoord) : null;
+        this.game.spawnClickIndicator(
+          wp ?? new THREE.Vector3(hexCoord.q * 1.5, elev, hexCoord.r * 1.5 + (hexCoord.q % 2 === 1 ? 0.75 : 0)),
+          0xff9900, 1.0,
+        ); // Orange for attack-move
 
         // Prevent this click from being handled as selection
         e.stopPropagation();
@@ -548,6 +548,30 @@ export class InputManager {
         this.hud.toggleUnitStatsPanel();
         this.hud.updateUnitStatsPanel(this.game.allUnits);
       }
+      // ── QoL hotkeys ──
+      if ((e.key === '.' || e.key === '>') && !(e.target instanceof HTMLInputElement)) {
+        this.game.cycleIdleWorker();
+        return;
+      }
+      if (e.key === ' ' && !(e.target instanceof HTMLInputElement)) {
+        // Space: jump camera to the last under-attack alert
+        e.preventDefault();
+        this.game.jumpToLastAlert();
+        return;
+      }
+      if (e.key === 'F2') {
+        // Select the entire army (all local combat units)
+        e.preventDefault();
+        const WORKER_TYPES = new Set([UnitType.BUILDER, UnitType.LUMBERJACK, UnitType.VILLAGER]);
+        const army = this.game.allUnits.filter((u: Unit) =>
+          u.owner === this.game._localPlayerIndex &&
+          u.currentHealth > 0 &&
+          !WORKER_TYPES.has(u.type));
+        this.game.selectionManager.selectUnits(army);
+        if (army.length > 0) this.hud.showNotification(`Army selected: ${army.length} units`, '#3498db');
+        return;
+      }
+
       if (e.key === 'F3') {
         e.preventDefault();
         this.game.togglePerfOverlay();
@@ -1165,6 +1189,7 @@ export class InputManager {
     let paintDragging = false;
     let mineEraseMode = false; // true = dragging to REMOVE mine markers
     let lastDragHex: HexCoord | null = null; // Track last hex for path-based drag (gates/walls)
+    let wallPaintIsGate = false; // shift held on first click = this drag paints GATE blueprints
 
     // Trace a hex-neighbor path from 'from' to the hex nearest 'to', returning all steps.
     // This ensures every placed tile is adjacent to the previous one — critical for hex grids.
@@ -1212,18 +1237,24 @@ export class InputManager {
         if (mode === 'harvest')
           this.game.enqueueCommand('paint_harvest', { position: hex });
         else if (mode === 'farm_patch')
-          this.game.blueprintSystem.paintFarmPatch(hex);
+          // Routed through the command queue: farm patches mutate sim state
+          // (farmPatches/cropStages) and must sync in multiplayer
+          this.game.enqueueCommand('paint_farm_patch', { position: hex });
         else if (mode === 'plant_tree') this.game.paintPlantTree(hex);
         else if (mode === 'wall_build') {
           // First click determines drag mode: if tile already has blueprint, drag = erase
           const key = `${hex.q},${hex.r}`;
           mineEraseMode =
             UnitAI.playerWallBlueprint.has(key) ||
-            this.game.wallSystem.wallsBuilt.has(key);
+            UnitAI.playerGateBlueprint.has(key) ||
+            this.game.wallSystem.wallsBuilt.has(key) ||
+            this.game.wallSystem.gatesBuilt.has(key);
           if (mineEraseMode) {
             this.game.enqueueCommand('remove_wall_blueprint', { position: hex });
           } else {
-            this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex] });
+            // Shift+click = gate blueprint. Remember for the rest of this drag.
+            wallPaintIsGate = e.shiftKey;
+            this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex], isGate: wallPaintIsGate });
             lastDragHex = hex;
           }
         } else if (mode === 'mine') {
@@ -1249,7 +1280,7 @@ export class InputManager {
         if (mode === 'harvest')
           this.game.enqueueCommand('paint_harvest', { position: hex });
         else if (mode === 'farm_patch')
-          this.game.blueprintSystem.paintFarmPatch(hex);
+          this.game.enqueueCommand('paint_farm_patch', { position: hex });
         else if (mode === 'plant_tree') this.game.paintPlantTree(hex);
         else if (mode === 'wall_build') {
           if (mineEraseMode) {
@@ -1259,11 +1290,11 @@ export class InputManager {
             if (lastDragHex) {
               const path = traceHexPath(lastDragHex, hex);
               if (path.length > 0) {
-                this.game.enqueueCommand('paint_wall_blueprint', { positions: path });
+                this.game.enqueueCommand('paint_wall_blueprint', { positions: path, isGate: wallPaintIsGate });
                 lastDragHex = path[path.length - 1];
               }
             } else {
-              this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex] });
+              this.game.enqueueCommand('paint_wall_blueprint', { positions: [hex], isGate: wallPaintIsGate });
               lastDragHex = hex;
             }
           }
@@ -1302,10 +1333,12 @@ export class InputManager {
             if (sign === 0) return;
             const delta = -sign;
             const currentSlice = this.game.voxelBuilder.getSliceY();
+            // (was reading constructor.MENU_CATEGORIES.UNDERGROUND_DEPTH = undefined → NaN slice)
+            const undergroundDepth = (this.game.constructor as any).UNDERGROUND_DEPTH ?? -10;
             const newY =
               currentSlice !== null
                 ? Math.max(
-                    (this.game.constructor .MENU_CATEGORIES as any).UNDERGROUND_DEPTH,
+                    undergroundDepth,
                     Math.min(25, currentSlice + delta)
                   )
                 : 25; // first Shift+scroll activates slicer at max

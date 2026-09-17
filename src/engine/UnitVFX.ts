@@ -376,6 +376,83 @@ export class UnitVFX {
   }
 
   // ==============================
+  // WORK & MOVEMENT DEBRIS
+  // ==============================
+
+  /** Global cap on simultaneously-alive debris particles (perf guard) */
+  private static _activeDebris = 0;
+  private static readonly MAX_DEBRIS = 220;
+
+  /**
+   * Generic environment-feedback debris burst.
+   *  - 'wood'  : brown chips + a couple of leaf-green flecks (tree chopping)
+   *  - 'stone' : gray rock shards (mining)
+   *  - 'grass' : light green wisps, floaty (grass harvest)
+   *  - 'dust'  : small tan puff, drifts up and fades (footsteps)
+   * Visual-only: never touches game state. Self-cleans via RAF with bounded lifetime.
+   */
+  spawnWorkDebris(worldPos: WorldPos, kind: 'wood' | 'stone' | 'grass' | 'dust'): void {
+    const cfg = {
+      wood:  { count: 9,  colors: [0x8b5a2b, 0x6f4518, 0xa0703c, 0x5d3a14, 0x4caf50], size: 0.07, speed: 2.2, up: 2.6, gravity: -9,   life: 0.55, yOff: 0.6 },
+      stone: { count: 8,  colors: [0x9e9e9e, 0x757575, 0xbdbdbd, 0x616161, 0x8d8d8d], size: 0.08, speed: 1.8, up: 2.2, gravity: -11,  life: 0.5,  yOff: 0.35 },
+      grass: { count: 7,  colors: [0x7cb342, 0x9ccc65, 0x558b2f, 0xaed581],           size: 0.06, speed: 1.2, up: 1.6, gravity: -3.5, life: 0.7,  yOff: 0.4 },
+      dust:  { count: 3,  colors: [0xc2b28f, 0xd7c9a7, 0xb3a17e],                     size: 0.09, speed: 0.45, up: 0.5, gravity: 0.6,  life: 0.5,  yOff: 0.06 },
+    }[kind];
+
+    for (let i = 0; i < cfg.count; i++) {
+      if (UnitVFX._activeDebris >= UnitVFX.MAX_DEBRIS) return;
+      UnitVFX._activeDebris++;
+
+      const s = cfg.size * (0.7 + Math.random() * 0.6);
+      const geo = new THREE.BoxGeometry(s, s, s);
+      const color = cfg.colors[Math.floor(Math.random() * cfg.colors.length)];
+      const mat = new THREE.MeshBasicMaterial({
+        color, transparent: true,
+        opacity: kind === 'dust' ? 0.45 : 0.95,
+      });
+      const chip = new THREE.Mesh(geo, mat);
+      chip.position.set(
+        worldPos.x + (Math.random() - 0.5) * 0.3,
+        worldPos.y + cfg.yOff + Math.random() * 0.15,
+        worldPos.z + (Math.random() - 0.5) * 0.3,
+      );
+      chip.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      this.scene.add(chip);
+
+      const angle = Math.random() * Math.PI * 2;
+      const speed = cfg.speed * (0.5 + Math.random() * 0.8);
+      const vx = Math.cos(angle) * speed;
+      const vy = cfg.up * (0.6 + Math.random() * 0.7);
+      const vz = Math.sin(angle) * speed;
+      const spinX = (Math.random() - 0.5) * 10;
+      const spinZ = (Math.random() - 0.5) * 10;
+      const lifetime = cfg.life * (0.7 + Math.random() * 0.6);
+      const startTime = performance.now() / 1000;
+
+      const animate = () => {
+        const elapsed = performance.now() / 1000 - startTime;
+        if (elapsed > lifetime) {
+          this.scene.remove(chip);
+          geo.dispose();
+          mat.dispose();
+          UnitVFX._activeDebris--;
+          return;
+        }
+        chip.position.x += vx * 0.016;
+        chip.position.y += (vy + cfg.gravity * elapsed) * 0.016;
+        chip.position.z += vz * 0.016;
+        chip.rotation.x += spinX * 0.016;
+        chip.rotation.z += spinZ * 0.016;
+        const fade = 1 - elapsed / lifetime;
+        mat.opacity = (kind === 'dust' ? 0.45 : 0.95) * fade;
+        if (kind === 'dust') chip.scale.setScalar(1 + elapsed * 2.2); // dust expands as it fades
+        requestAnimationFrame(animate);
+      };
+      requestAnimationFrame(animate);
+    }
+  }
+
+  // ==============================
   // ELEMENTAL IMPACT EFFECTS
   // ==============================
 

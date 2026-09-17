@@ -97,7 +97,7 @@ export default class BlueprintSystem {
     this.addBlueprintGhost(coord);
   }
 
-  addBlueprintGhost(coord: HexCoord): void {
+  addBlueprintGhost(coord: HexCoord, isGate = false): void {
     const key = `${coord.q},${coord.r}`;
     if (this.blueprintGhosts.has(key)) return;
 
@@ -105,9 +105,12 @@ export default class BlueprintSystem {
     const worldZ = coord.r * 1.5 + (coord.q % 2 === 1 ? 0.75 : 0);
     const baseY = this.ctx.getElevation(coord);
 
-    const ghostGeo = new THREE.BoxGeometry(0.55, 2.0, 0.55);
+    // Gates get a gold ghost (wider arch shape) so they're visually distinct from walls
+    const ghostGeo = isGate
+      ? new THREE.BoxGeometry(0.8, 1.6, 0.45)
+      : new THREE.BoxGeometry(0.55, 2.0, 0.55);
     const ghostMat = new THREE.MeshBasicMaterial({
-      color: 0x3498db, transparent: true, opacity: 0.3, wireframe: false, depthWrite: false,
+      color: isGate ? 0xdaa520 : 0x3498db, transparent: true, opacity: 0.35, wireframe: false, depthWrite: false,
     });
     const ghost = new THREE.Mesh(ghostGeo, ghostMat);
     ghost.position.set(worldX, baseY + 1.0, worldZ);
@@ -440,6 +443,9 @@ export default class BlueprintSystem {
     marker.rotation.x = -Math.PI / 2;
     marker.position.set(worldX, baseY + 0.03, worldZ);
     marker.name = `farm_${key}`;
+    // Store the terrain base Y so growth-stage updates can position absolutely.
+    // (Deriving it from current position compounded offsets → floating farms.)
+    marker.userData.baseY = baseY;
     this.ctx.scene.add(marker);
     this.farmPatchMarkers.set(key, marker);
   }
@@ -461,8 +467,10 @@ export default class BlueprintSystem {
     mat.color.setHex(color);
     mat.opacity = stage >= 3 ? 0.9 : 0.7; // Mature crops are more visible
 
-    // Update height — parse base elevation from original position, add stage offset
-    const baseY = marker.position.y - 0.03; // Subtract the original offset
+    // Update height — absolute from the stored terrain base, never from the
+    // current position (the old `position.y - 0.03` accumulated each stage and
+    // sent crops floating into the air).
+    const baseY = marker.userData.baseY ?? (marker.position.y - 0.03);
     marker.position.y = baseY + yOffset;
 
     // Scale up slightly as crops grow

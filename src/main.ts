@@ -63,6 +63,8 @@ import { type TribeId, getTribe } from './game/TribeConfig';
 import { MultiplayerController } from './network';
 import { MultiplayerUI } from './ui/MultiplayerUI';
 import { processCommand, type CommandBridgeGame } from './network/CommandBridge';
+import { ClaudeControl } from './game/ClaudeControl';
+import { Minimap } from './ui/Minimap';
 import { NetCommandType, type NetworkCommand } from './network/Protocol';
 import {
   EngineConfig,
@@ -203,11 +205,27 @@ class Cubitopia {
   private titleScene: TitleScene | null = null;
   /** Phase 5B: Multiplayer controller (Firebase + WebRTC + matchmaking) */
   readonly multiplayer = new MultiplayerController();
+  /** Programmatic play API (window.ClaudeControl) — lets an AI assistant play vs the human */
+  private claudeControl: ClaudeControl | null = null;
+  /** Owner index that playerId 'claude' maps to in CommandBridge */
+  private get _claudeControlOwner(): number {
+    return this.claudeControl && this.claudeControl.owner >= 0 ? this.claudeControl.owner : 1;
+  }
   private multiplayerUI: MultiplayerUI | null = null;
   /** Opponent display name for multiplayer matches (set by onStartMultiplayerGame) */
   private _multiplayerOpponentName: string = '';
   /** Accumulated delta for multiplayer tick advancement (fixed tick rate) */
   private _mpTickAccumulator = 0;
+  /** Per-unit throttle timers for footstep dust (visual-only) */
+  private _dustTimers: Map<string, number> | null = null;
+  /** Minimap (bottom-right) */
+  private minimap!: Minimap;
+  /** Last under-attack position (Space jumps camera there) */
+  private _lastAttackAlertPos: HexCoord | null = null;
+  /** Throttle for under-attack notifications (frame of last alert) */
+  private _lastAttackAlertFrame = -9999;
+  /** Idle-worker cycling index */
+  private _idleWorkerCycleIdx = 0;
   // _musicInitialized + _musicIntensityTimer moved into ProceduralMusic.updateFromGameState()
   private _buildingMeshScratch: THREE.Object3D[] | null = null;
   private _baseMeshScratch: THREE.Object3D[] | null = null;
@@ -236,8 +254,23 @@ class Cubitopia {
 
     const canvas = document.getElementById(ENGINE_CONFIG.canvasId)! as HTMLCanvasElement;
     this.selectionManager = new SelectionManager(canvas, this.camera.camera);
+    // Terrain-aware cursor resolution — without this, right-click indicators
+    // land on the wrong hex anywhere above/below sea level
+    this.selectionManager.surfaceResolver = (rc) => this.raycastToSurface(rc)?.point ?? null;
+
+    // ── Minimap (bottom-right): terrain + units + bases + attack pings ──
+    this.minimap = new Minimap({
+      getTiles: () => this.currentMap?.tiles ?? null,
+      getUnits: () => this.allUnits,
+      getBases: () => this.bases,
+      getLocalPlayerIndex: () => this._localPlayerIndex,
+      getPlayerColorCSS: (owner: number) => getPlayerCSS(owner),
+      getCameraTargetWorld: () => { const t = this.camera.getTarget(); return { x: t.x, z: t.z }; },
+      onJumpTo: (x: number, z: number) => this.camera.jumpTo(x, z),
+    });
     this.selectionManager.setScene(this.renderer.scene);
     this.hud = new HUD();
+    this.hud.onIdleWorkerClick = () => this.cycleIdleWorker();
     this.clock = new THREE.Clock();
     this.sound = new SoundManager();
     this.captureZoneSystem.setOps({
@@ -396,6 +429,49 @@ class Cubitopia {
   }
 
 
+  // ─── QoL helpers: under-attack alerts + idle worker cycling ───
+
+  /** Local player's unit/structure took damage — ping minimap, remember spot, throttled alert */
+  private handleLocalPlayerAttacked(pos: HexCoord): void {
+    this._lastAttackAlertPos = pos;
+    this.minimap.ping(pos.q, pos.r);
+    // Throttled notification, only when the action is off-screen
+    if (this._gameFrame - this._lastAttackAlertFrame > 60 * 8) {
+      const wp = this.hexToWorld(pos);
+      const cam = this.camera.getTarget();
+      const dx = wp.x - cam.x, dz = wp.z - cam.z;
+      if (dx * dx + dz * dz > 30 * 30) {
+        this._lastAttackAlertFrame = this._gameFrame;
+        this.hud.showNotification('⚔ Under attack! Press SPACE to view', '#e74c3c');
+      }
+    }
+  }
+
+  /** Jump camera to the most recent under-attack location (Space) */
+  jumpToLastAlert(): void {
+    if (!this._lastAttackAlertPos) return;
+    const wp = this.hexToWorld(this._lastAttackAlertPos);
+    this.camera.jumpTo(wp.x, wp.z);
+  }
+
+  /** Local player's idle workers (builder/lumberjack/villager standing around) */
+  private getIdleWorkers(): Unit[] {
+    return this.allUnits.filter(u =>
+      u.owner === this._localPlayerIndex &&
+      (u.type === UnitType.BUILDER || u.type === UnitType.LUMBERJACK || u.type === UnitType.VILLAGER) &&
+      u.state === UnitState.IDLE);
+  }
+
+  /** Select the next idle worker and jump the camera to it ('.' key / badge click) */
+  cycleIdleWorker(): void {
+    const idle = this.getIdleWorkers();
+    if (idle.length === 0) return;
+    this._idleWorkerCycleIdx = this._idleWorkerCycleIdx % idle.length;
+    const u = idle[this._idleWorkerCycleIdx++];
+    this.selectionManager.selectUnits([u]);
+    this.camera.jumpTo(u.worldPosition.x, u.worldPosition.z);
+  }
+
   /** Convert mouse event to hex coordinate */
   private mouseToHex(e: MouseEvent, canvasEl: HTMLCanvasElement): HexCoord | null {
     const rect = canvasEl.getBoundingClientRect();
@@ -551,6 +627,15 @@ class Cubitopia {
     // Remove blocks from the array
     const indicesToRemove = new Set(toRemove.map(t => t.index));
     tile.voxelData.blocks = blocks.filter((_, i) => !indicesToRemove.has(i));
+
+    // Rock shards burst from the dig face (visual feedback)
+    {
+      const wp = this.hexToWorld(minePos);
+      this.unitRenderer.spawnWorkDebris(
+        { x: wp.x, y: primaryBlock.localPosition.y * 0.5 + 0.3, z: wp.z },
+        'stone',
+      );
+    }
 
     // --- Recalculate tile elevation from remaining blocks ---
     if (tile.voxelData.blocks.length === 0) {
@@ -1048,41 +1133,54 @@ class Cubitopia {
    * then refine using the tile's actual elevation. No scene raycast needed —
    * this is O(1) instead of O(n) scene children.
    */
-  private raycastToHex(raycaster: THREE.Raycaster): HexCoord | null {
+  /**
+   * Heightfield ray walk — THE single source of truth for "what's under the
+   * cursor". Returns both the hex and the world-space surface point.
+   *
+   * The old approach intersected a fixed y=1 plane and "refined" using
+   * whatever tile that hit — on tall terrain the first hit lands hexes away
+   * from the tile under the cursor, so clicks/indicators snapped to the top
+   * of the wrong voxel. Instead, walk elevation layers from high to low:
+   * with the RTS camera looking down, higher planes intersect the ray closer
+   * to the camera, so the first layer whose hit point lands on a tile of (at
+   * least) that height is the visible surface under the cursor.
+   */
+  raycastToSurface(raycaster: THREE.Raycaster): { coord: HexCoord; point: THREE.Vector3 } | null {
     if (!this.currentMap) return null;
 
     const intersection = new THREE.Vector3();
+    // Respect the elevation slicer — don't pick surfaces above the slice
+    const sliceY = this.voxelBuilder.getSliceY();
+    const topElev = sliceY !== null ? Math.min(26, Math.floor(sliceY)) : 26;
 
-    // Pass 1: intersect a mid-elevation plane to get approximate hex
-    const midPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -1.0);
-    raycaster.ray.intersectPlane(midPlane, intersection);
-    if (!intersection) return null;
-
-    const approxCoord = this.worldToHex(intersection);
-    if (approxCoord) {
-      // Pass 2: refine with the tile's actual elevation
-      const tileElev = this.getElevation(approxCoord);
-      const refinedPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -tileElev);
-      raycaster.ray.intersectPlane(refinedPlane, intersection);
-      if (intersection) {
-        const refinedCoord = this.worldToHex(intersection);
-        if (refinedCoord) return refinedCoord;
+    for (let h = topElev; h >= 0; h--) {
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -h * 0.5);
+      if (!raycaster.ray.intersectPlane(plane, intersection)) continue;
+      const coord = this.worldToHex(intersection);
+      if (!coord) continue;
+      const tile = this.currentMap.tiles.get(`${coord.q},${coord.r}`);
+      if (!tile) continue;
+      // Surface hit: the tile's top is at (or just above) this layer.
+      // ±0.5-layer tolerance handles fractional elevations.
+      if (tile.elevation >= h - 0.5) {
+        // Snap the point's Y to the tile's actual surface so indicators sit
+        // on the ground instead of the tested plane.
+        intersection.y = tile.elevation * 0.5;
+        return { coord, point: intersection.clone() };
       }
-      // Approximate coord is still valid
-      return approxCoord;
     }
 
-    // Fallback: try a range of elevation planes for edge cases (steep terrain, camera angles)
-    const elevations = [0, 0.5, 1.5, 2.0, 3.0];
-    for (const elev of elevations) {
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -elev);
-      raycaster.ray.intersectPlane(plane, intersection);
-      if (intersection) {
-        const coord = this.worldToHex(intersection);
-        if (coord) return coord;
-      }
+    // Fallback: sea-level plane (off-map clicks, extreme camera angles)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.5);
+    if (raycaster.ray.intersectPlane(plane, intersection)) {
+      const coord = this.worldToHex(intersection);
+      if (coord) return { coord, point: intersection.clone() };
     }
     return null;
+  }
+
+  raycastToHex(raycaster: THREE.Raycaster): HexCoord | null {
+    return this.raycastToSurface(raycaster)?.coord ?? null;
   }
 
   private getElevation(coord: HexCoord, underground = false): number {
@@ -1607,6 +1705,8 @@ class Cubitopia {
       fireProjectile: (from, to, color, id, cb) => this.unitRenderer.fireProjectile(from, to, color, id, cb),
       knockbackUnit: (id, wp) => this.unitRenderer.knockbackUnit(id, wp),
       spawnBlockSparks: (wp) => this.unitRenderer.spawnBlockSparks(wp),
+      cameraShake: (m) => this.camera.shake(m),
+      onLocalPlayerAttacked: (pos) => this.handleLocalPlayerAttacked(pos),
       spawnElementalImpact: (wp, element) => this.unitRenderer.spawnElementalImpact(wp, element),
       getElementOrbColor: (element) => UnitRenderer.elementOrbColor(element),
       fireAxeThrow: (from, to, id, cb) => this.unitRenderer.fireAxeThrow(from, to, id, cb),
@@ -2082,17 +2182,26 @@ class Cubitopia {
           this.blueprintSystem.addHarvestMarker(position);
         }
       },
-      doPaintWallBlueprint: (positions: HexCoord[], _owner: number) => {
+      doPaintWallBlueprint: (positions: HexCoord[], _owner: number, isGate?: boolean) => {
         for (const pos of positions) {
           const key = `${pos.q},${pos.r}`;
           if (UnitAI.playerWallBlueprint.has(key)) continue;
           if (UnitAI.playerGateBlueprint.has(key)) continue;
-          UnitAI.addBlueprint(pos);
+          // Gate flag must survive the command round-trip — it used to be
+          // dropped here, so shift+click "gates" silently became walls.
+          if (isGate) {
+            UnitAI.addGateBlueprint(pos);
+          } else {
+            UnitAI.addBlueprint(pos);
+          }
           UnitAI.wallBlueprintOwners.set(key, _owner);
           if (_owner === this._localPlayerIndex) {
-            this.blueprintSystem.addBlueprintGhost(pos);
+            this.blueprintSystem.addBlueprintGhost(pos, isGate === true);
           }
         }
+      },
+      doPaintFarmPatch: (position: HexCoord, _owner: number) => {
+        this.blueprintSystem.paintFarmPatch(position);
       },
       doRemoveWallBlueprint: (position: HexCoord, _owner: number) => {
         const key = `${position.q},${position.r}`;
@@ -2113,6 +2222,11 @@ class Cubitopia {
       },
 
       getOwnerForPlayerId: (playerId: string) => {
+        // ClaudeControl: commands issued programmatically by Claude map to
+        // the owner it has taken over (single-player modes only).
+        if (playerId === 'claude' && !this.multiplayer.commandQueue.isMultiplayer) {
+          return this._claudeControlOwner;
+        }
         // In single-player, always player 0
         // In multiplayer, host = 0, guest = 1
         if (!this.multiplayer.commandQueue.isMultiplayer) return 0;
@@ -2947,6 +3061,10 @@ class Cubitopia {
     // Update HUD mode indicator
     this.hud.setGameMode(this.gameMode);
 
+    // Minimap: rebuild terrain layer for the new map
+    this.minimap.rebuildTerrain();
+    this.minimap.setVisible(true);
+
     // Always show Y-slicer — works globally, no mode prerequisite
     this.hud.showElevationSlicer(true, 25, Cubitopia.UNDERGROUND_DEPTH);
     this.hud.onSliceChange = (y) => {
@@ -2967,8 +3085,15 @@ class Cubitopia {
     this._gameFrame++;
     UnitAI.gameFrame = this._gameFrame;
 
+    // ── MP determinism guard ──
+    // Local debug toggles (HUD debugFlags) are NOT synced between clients.
+    // In a real multiplayer match they must not influence the simulation,
+    // or one player flipping a toggle instantly desyncs the match.
+    const mpStrict = this.multiplayer.commandQueue.isMultiplayer
+      && !this.multiplayer.commandQueue.isGhostMatch;
+
     // Debug: infinite resources
-    if (this.hud.debugFlags.infiniteResources) {
+    if (!mpStrict && this.hud.debugFlags.infiniteResources) {
       const lp = this._localPlayerIndex;
       this.woodStockpile[lp] = 999;
       this.stoneStockpile[lp] = 999;
@@ -3012,15 +3137,15 @@ class Cubitopia {
       }
     }
 
-    // Sync debug flags to UnitAI
+    // Sync debug flags to UnitAI (forced OFF in real MP — see mpStrict above)
     const df = UnitAI.debugFlags;
-    df.disableChop = this.hud.debugFlags.disableChop;
-    df.disableMine = this.hud.debugFlags.disableMine;
-    df.disableHarvest = this.hud.debugFlags.disableHarvest;
-    df.disableBuild = this.hud.debugFlags.disableBuild;
-    df.disableDeposit = this.hud.debugFlags.disableDeposit;
-    df.disableAutoReturn = this.hud.debugFlags.disableAutoReturn;
-    df.disableCombat = this.hud.debugFlags.disableCombat;
+    df.disableChop = !mpStrict && this.hud.debugFlags.disableChop;
+    df.disableMine = !mpStrict && this.hud.debugFlags.disableMine;
+    df.disableHarvest = !mpStrict && this.hud.debugFlags.disableHarvest;
+    df.disableBuild = !mpStrict && this.hud.debugFlags.disableBuild;
+    df.disableDeposit = !mpStrict && this.hud.debugFlags.disableDeposit;
+    df.disableAutoReturn = !mpStrict && this.hud.debugFlags.disableAutoReturn;
+    df.disableCombat = !mpStrict && this.hud.debugFlags.disableCombat;
 
     // Sync stockpiles to UnitAI
     UnitAI.stoneStockpile = this.stoneStockpile;
@@ -3071,7 +3196,7 @@ class Cubitopia {
     }
 
     // AI commander (for AI players)
-    if (!this.hud.debugFlags.disableAI) {
+    if (mpStrict || !this.hud.debugFlags.disableAI) {
       for (let pid = 0; pid < this.playerCount; pid++) {
         if (!this.players[pid]?.isAI) continue;
         if (this.players[pid].defeated) continue;
@@ -3084,7 +3209,7 @@ class Cubitopia {
     }
 
     // Nature simulation (tree regrowth, grass growth/spread)
-    if (!this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
+    if (mpStrict || !this.hud.debugFlags.disableTreeGrowth || !this.hud.debugFlags.disableGrassGrowth) {
       this.natureSystem.update(delta);
     }
 
@@ -3128,12 +3253,20 @@ class Cubitopia {
     // ── Multiplayer: run ALL simulation at fixed tick rate for determinism ──
     // Both clients accumulate real time, then step simulation in identical
     // fixed-size increments so frame-rate differences don't cause desync.
+    // processTick() enforces the lockstep barrier: it returns false (and we
+    // STALL — no simulation step) until the peer's input frame for the next
+    // tick has arrived. This keeps both clients on the same tick forever;
+    // a slow peer/laggy link freezes the sim briefly instead of desyncing.
     if (this.multiplayer.commandQueue.isMultiplayer) {
       const TICK_RATE = 1 / 20; // 20 ticks per second (50ms per tick)
       this._mpTickAccumulator += delta;
+      // Clamp so a long stall (peer lag, background tab) doesn't cause a
+      // burst of catch-up ticks afterwards (deterministic but feels awful).
+      const MAX_ACCUM = TICK_RATE * 5;
+      if (this._mpTickAccumulator > MAX_ACCUM) this._mpTickAccumulator = MAX_ACCUM;
       while (this._mpTickAccumulator >= TICK_RATE) {
+        if (!this.multiplayer.commandQueue.processTick()) break; // barrier: waiting for peer input
         this._mpTickAccumulator -= TICK_RATE;
-        this.multiplayer.commandQueue.processTick();
         this._simulationStep(TICK_RATE);
       }
     } else {
@@ -3150,6 +3283,21 @@ class Cubitopia {
     this._spawnQueueHudTimer += delta;
     if (this._spawnQueueHudTimer >= 0.25) {
       this._spawnQueueHudTimer = 0;
+
+      // ── QoL: idle worker badge + starvation/pop-cap warning banner ──
+      this.hud.setIdleWorkerCount(this.getIdleWorkers().length);
+      {
+        const lp = this._localPlayerIndex;
+        const pop = this.populationSystem.getPopulationInfo(lp);
+        if ((this.foodStockpile[lp] ?? 0) <= 0) {
+          this.hud.setWarningBanner('⚠ STARVING — combat production blocked! Harvest grass or build farms', '#e74c3c');
+        } else if (pop.current >= pop.cap) {
+          this.hud.setWarningBanner(`Population cap ${pop.current}/${pop.cap} — more food raises the cap`, '#e67e22');
+        } else {
+          this.hud.setWarningBanner(null);
+        }
+      }
+
       const allQueueEntries = this.spawnQueueSystem.getQueueHUDEntries(this.hud.debugFlags, this._localPlayerIndex);
       // Add AI queues for all players
       for (let pid = 0; pid < this.aiController.aiState.length; pid++) {
@@ -3959,6 +4107,9 @@ class Cubitopia {
     // Convert forest/jungle to plains (tree chopped)
     tile.terrain = TerrainType.PLAINS;
 
+    // Wood chips + leaf flecks burst where the tree falls (visual feedback)
+    this.unitRenderer.spawnWorkDebris(this.hexToWorld(treePos), 'wood');
+
     // Remove tree decorations visually
     this.terrainDecorator.removeDecoration(treePos);
 
@@ -3994,6 +4145,9 @@ class Cubitopia {
     // Remove grass visual and reset to short stage
     this.terrainDecorator.removeGrassClump(key);
     this.blueprintSystem.removeHarvestMarker(pos);
+
+    // Grass wisps drift up where the clump was cut (visual feedback)
+    this.unitRenderer.spawnWorkDebris(this.hexToWorld(pos), 'grass');
 
     // Hay yield: 2-3 food per tall grass tile
     const hayYield = GAME_CONFIG.economy.harvest.grass.hayBase
@@ -4522,7 +4676,12 @@ class Cubitopia {
     const animate = () => {
       requestAnimationFrame(animate);
       const rawDelta = this.clock.getDelta();
-      const delta = rawDelta * this.gameSpeed;
+      // Game-speed multiplier is a local debug control — ignore it in real MP
+      // matches (it would just make this client stall at the lockstep barrier,
+      // and must never differ between peers).
+      const mpReal = this.multiplayer.commandQueue.isMultiplayer
+        && !this.multiplayer.commandQueue.isGhostMatch;
+      const delta = rawDelta * (mpReal ? 1 : this.gameSpeed);
 
       this.updateRTS(delta);
       this._updateMusic(delta);
@@ -4541,8 +4700,30 @@ class Cubitopia {
       this.terrainDecorator.cameraWorldPos.z = camPos.z;
       this.terrainDecorator.updateGrass(rawDelta);
       this.terrainDecorator.flushBounds();
+
+      // Footstep dust: moving units kick up small puffs (visual-only, culled + throttled)
+      {
+        if (!this._dustTimers) this._dustTimers = new Map();
+        const cullSq = 45 * 45;
+        for (const unit of this.allUnits) {
+          if (unit.state !== UnitState.MOVING) continue;
+          const dx = unit.worldPosition.x - camPos.x;
+          const dz = unit.worldPosition.z - camPos.z;
+          if (dx * dx + dz * dz > cullSq) continue;
+          const t = (this._dustTimers.get(unit.id) ?? 0) + rawDelta;
+          if (t >= 0.32) {
+            this._dustTimers.set(unit.id, t - 0.32 - Math.random() * 0.1);
+            this.unitRenderer.spawnWorkDebris(unit.worldPosition, 'dust');
+          } else {
+            this._dustTimers.set(unit.id, t);
+          }
+        }
+        // Bound the timer map (dead/old unit ids)
+        if (this._dustTimers.size > 400) this._dustTimers.clear();
+      }
       this.unitRenderer.updateBillboards(this.camera.camera);
       this.unitRenderer.updateSpeechBubbles(rawDelta);
+      this.minimap.update();
       this.hud.update();
       this.debugOverlay.update();
       this.renderer.render(this.camera.camera);
@@ -4567,6 +4748,38 @@ class Cubitopia {
     (window as any)._scene = this.renderer.scene;
     (window as any)._renderer = this.renderer.renderer;
     (window as any)._game = this;
+
+    // === ClaudeControl — programmatic play API (window.ClaudeControl) ===
+    // Lets an AI assistant take over a player slot and play vs the human.
+    // Routes through CommandBridge like all human input; disabled in online MP.
+    this.claudeControl = new ClaudeControl({
+      getPlayers: () => this.players,
+      getUnits: () => this.allUnits,
+      getBuildings: () => this.buildingSystem.placedBuildings,
+      getBases: () => this.bases,
+      getStockpiles: (owner: number) => ({
+        wood: this.woodStockpile[owner] ?? 0,
+        stone: this.stoneStockpile[owner] ?? 0,
+        food: this.foodStockpile[owner] ?? 0,
+        gold: this.goldStockpile[owner] ?? 0,
+        iron: this.ironStockpile[owner] ?? 0,
+        clay: this.clayStockpile[owner] ?? 0,
+        rope: this.ropeStockpile[owner] ?? 0,
+        charcoal: this.charcoalStockpile[owner] ?? 0,
+        steel: this.steelStockpile[owner] ?? 0,
+        crystal: this.crystalStockpile[owner] ?? 0,
+        grass_fiber: this.grassFiberStockpile[owner] ?? 0,
+      }),
+      getGameFrame: () => this._gameFrame,
+      isMultiplayer: () => this.multiplayer.commandQueue.isMultiplayer,
+      enqueue: (type: NetCommandType, payload: Record<string, unknown>) =>
+        this.multiplayer.commandQueue.enqueue(type, payload, 'claude'),
+      setPlayerAI: (owner: number, isAI: boolean) => {
+        if (this.players[owner]) this.players[owner].isAI = isAI;
+      },
+      notify: (msg: string) => this.hud.showNotification(msg, 'color:#9b59b6;font-weight:bold;'),
+    });
+    (window as any).ClaudeControl = this.claudeControl;
     (window as any)._cdb = {
       /** Dump scene stats and suspicious materials */
       dump: () => {

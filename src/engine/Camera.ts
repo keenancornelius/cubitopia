@@ -50,6 +50,29 @@ export class StrategyCamera {
     this.camera.lookAt(this.target);
   }
 
+  // ── Impact shake (visual-only, applied on top of base position) ──
+  private _shakeMag = 0;
+  private _shakeTime = 0;
+
+  /** Kick the camera with an impact shake (magnitude in world units, ~0.05–0.3).
+   *  Scales down with zoom-out so it feels consistent at any distance. */
+  shake(magnitude: number): void {
+    // Stack hits but cap so simultaneous AoEs don't nauseate
+    this._shakeMag = Math.min(this._shakeMag + magnitude, 0.45);
+  }
+
+  /** Current orbit/look target (world space) — for minimap viewport display */
+  getTarget(): THREE.Vector3 {
+    return this.target.clone();
+  }
+
+  /** Jump the camera target to a world position (minimap click, alert jump) */
+  jumpTo(x: number, z: number): void {
+    this.target.x = THREE.MathUtils.clamp(x, this.mapMin.x, this.mapMax.x);
+    this.target.z = THREE.MathUtils.clamp(z, this.mapMin.y, this.mapMax.y);
+    this.updateCameraPosition();
+  }
+
   private setupInputHandlers(): void {
     this.canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
@@ -72,7 +95,19 @@ export class StrategyCamera {
 
   /** Call each frame — edge panning disabled (use WASD or middle-click drag instead) */
   update(): void {
-    // Edge panning disabled — was annoying during gameplay
+    // Impact shake: decaying high-frequency jitter layered over the base position
+    if (this._shakeMag > 0.002) {
+      this._shakeTime += 0.016;
+      this._shakeMag *= 0.86; // exponential decay (~6 frames to halve)
+      this.updateCameraPosition(); // reset to base orbit position
+      const m = this._shakeMag * Math.min(1, this.distance / 40); // zoom-consistent
+      this.camera.position.x += Math.sin(this._shakeTime * 91) * m;
+      this.camera.position.y += Math.sin(this._shakeTime * 113 + 1.7) * m * 0.6;
+      this.camera.position.z += Math.cos(this._shakeTime * 83 + 0.6) * m;
+    } else if (this._shakeMag !== 0) {
+      this._shakeMag = 0;
+      this.updateCameraPosition(); // settle cleanly back to base
+    }
   }
 
   private onMouseDown(e: MouseEvent): void {

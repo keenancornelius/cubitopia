@@ -789,13 +789,29 @@ export default class AIController {
     for (const u of combatUnits) {
       if (u._squadId != null && squadMembers.has(u._squadId)) {
         squadMembers.get(u._squadId)!.push(u);
+      } else if (u._squadId != null) {
+        // Stale reference: the squad was pruned but this unit still carries its
+        // ID (e.g. it was off fighting when the squad dissolved). Without this
+        // GC the unit keeps a dead _squadId and a stale _squadSpeed forever —
+        // permanently slowed and invisible to re-dispatch.
+        u._squadId = null;
+        u._squadSpeed = undefined;
+        u._squadObjective = undefined;
+        u._squadJoining = false;
       }
     }
 
     // 2b. Graduate joining units or re-path them toward the moving squad
     for (const sq of st.squads) {
-      const core = (squadMembers.get(sq.id) ?? []).filter(u => !u._squadJoining);
-      if (core.length === 0) continue;
+      const all = squadMembers.get(sq.id) ?? [];
+      const core = all.filter(u => !u._squadJoining);
+      if (core.length === 0) {
+        // Entire core died (or never existed) while members were still joining.
+        // Promote the joiners to core — otherwise they're orphaned: never
+        // graduated, never re-dispatched, idling forever with _squadJoining set.
+        for (const u of all) u._squadJoining = false;
+        continue;
+      }
       const centroid = this.centroidOf(core);
       for (const u of (squadMembers.get(sq.id) ?? []).filter(u => u._squadJoining)) {
         const dist = Pathfinder.heuristic(u.position, centroid);

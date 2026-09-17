@@ -51,6 +51,10 @@ export interface CombatEventOps {
   fireProjectile(from: any, to: any, color: number, targetId: string, onImpact: () => void): void;
   knockbackUnit(unitId: string, targetWorldPos: { x: number; y: number; z: number }): void;
   spawnBlockSparks(worldPos: { x: number; y: number; z: number }): void;
+  /** Optional impact camera shake (visual-only). Magnitude ~0.05–0.3. */
+  cameraShake?(magnitude: number): void;
+  /** Optional: local player's unit/structure took damage at this hex (alert + minimap ping) */
+  onLocalPlayerAttacked?(position: { q: number; r: number }): void;
   spawnElementalImpact(worldPos: { x: number; y: number; z: number }, element: ElementType): void;
   getElementOrbColor(element: ElementType): number;
   fireHealOrb(from: any, to: any, targetId: string, onImpact: () => void): void;
@@ -206,6 +210,11 @@ export default class CombatEventHandler {
         if (event.type === 'combat' && event.attacker && event.attacker.owner === localPlayerIndex) {
           event.attacker.currentHealth = event.attacker.stats.maxHealth;
         }
+      }
+
+      // ─── Under-attack alert: local player's unit taking damage ───
+      if (event.type === 'combat' && event.defender && event.defender.owner === localPlayerIndex) {
+        ops.onLocalPlayerAttacked?.(event.defender.position);
       }
 
       // ─── Unit killed ───
@@ -547,6 +556,7 @@ export default class CombatEventHandler {
         const ogreImpactEnd = 1083;
         ops.queueDeferredEffect(ogreImpactEnd, () => {
           ops.spawnOgreGroundPound(burstCenter);
+          ops.cameraShake?.(0.25); // the ground pound should be FELT
         });
         // Whomp sound slightly after visual for cinematic weight
         ops.queueDeferredEffect(ogreImpactEnd + 80, () => {
@@ -571,6 +581,7 @@ export default class CombatEventHandler {
             ops.showDamageEffect(victim.worldPosition);
             ops.flashUnit(victim.id, 0.12);
             ops.playSound('hit_cleave');
+            ops.cameraShake?.(0.06); // knockback thump
           }
         };
         if (isOgreKnockback) {
@@ -588,6 +599,7 @@ export default class CombatEventHandler {
         const sc = event as any;
         ops.showCritText(sc.worldPos, `SWEEP x${sc.hitCount}`, sc.hitCount * 2, '#66ff44');
         ops.playSound('hit_heavy');
+        ops.cameraShake?.(0.15);
       }
 
       // ─── Mage Synergy: Arcane Convergence AoE burst ───
@@ -756,6 +768,8 @@ export default class CombatEventHandler {
         if (pb) {
           const dmg = isSiege ? baseDmg : Math.max(1, Math.floor(baseDmg * 0.15));
           destroyed = ops.damageBarracks(event.result.position, dmg);
+          // Alert the local player when their buildings are hit
+          if (pb.owner === localPlayerIndex) ops.onLocalPlayerAttacked?.(event.result.position);
         } else if (ops.isGateAt(key)) {
           if (isSiege) destroyed = ops.damageGate(event.result.position, baseDmg);
         } else {
@@ -763,6 +777,8 @@ export default class CombatEventHandler {
         }
         // Eject garrisoned units when structure is destroyed
         if (destroyed) ops.onStructureDestroyed(key);
+        // Siege hits on structures land with weight; destruction is a big rumble
+        if (isSiege) ops.cameraShake?.(destroyed ? 0.3 : 0.1);
       }
     }
   }

@@ -80,12 +80,19 @@ export default class SoundManager {
       // AudioContext stays "suspended" and all audio output is silenced
       if (this.ctx.state === 'suspended') {
         this.ctx.resume()
-          .then(() => Logger.debug('Sound', `AudioContext resumed, state: ${this.ctx!.state}`))
+          .then(() => Logger.info('Sound', `AudioContext resumed, state: ${this.ctx!.state}`))
           .catch(e => Logger.warn('Sound', `Failed to resume AudioContext: ${e}`));
       }
-      document.removeEventListener('click', initAudio);
-      document.removeEventListener('keydown', initAudio);
-      document.removeEventListener('pointerdown', initAudio);
+      // Only stop listening once audio is confirmed running. The old code
+      // removed the listeners after the FIRST gesture unconditionally — if
+      // that resume() was rejected or ignored by the browser, audio stayed
+      // permanently silent with no way to recover. Keeping the listeners
+      // armed costs nothing and retries on every subsequent gesture.
+      if (this.ctx.state === 'running') {
+        document.removeEventListener('click', initAudio);
+        document.removeEventListener('keydown', initAudio);
+        document.removeEventListener('pointerdown', initAudio);
+      }
     };
     document.addEventListener('click', initAudio);
     document.addEventListener('keydown', initAudio);
@@ -101,6 +108,12 @@ export default class SoundManager {
 
   play(name: SoundName, volume?: number): void {
     if (this.config.muted || !this.ctx) return;
+    // Self-heal: if the context is still suspended (resume failed earlier),
+    // keep trying — play() calls almost always happen during/after gestures.
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+      return;
+    }
     const now = this.ctx.currentTime;
     const lastTime = this.lastPlayTime.get(name) || 0;
     if (now - lastTime < this.minInterval) return;

@@ -634,10 +634,15 @@ export class UnitAI {
     const objUnits = allUnits.filter(u => u.owner === localPlayerIndex && u._playerObjective && !UnitAI.isDead(u));
     if (objUnits.length === 0) return;
 
-    // Group by squad ID (null squad = individual objective units grouped together)
-    const squads = new Map<number | null, Unit[]>();
+    // Group by squad ID. Un-squadded units are sub-grouped by their CURRENT
+    // objective target — merging them all into one pseudo-squad averaged
+    // their centroid across the whole map and yanked separate groups toward
+    // a single target (visible as squads "changing their mind" mid-march).
+    const squads = new Map<string, Unit[]>();
     for (const u of objUnits) {
-      const key = u._squadId ?? null;
+      const key = u._squadId != null
+        ? `sq${u._squadId}`
+        : (u._playerObjectiveTarget ? `t${u._playerObjectiveTarget.q},${u._playerObjectiveTarget.r}` : `new:${u._playerObjective}`);
       if (!squads.has(key)) squads.set(key, []);
       squads.get(key)!.push(u);
     }
@@ -663,11 +668,8 @@ export class UnitAI {
         continue;
       }
 
-      // Check if we arrived at current target
-      const currentTarget = members[0]._playerObjectiveTarget;
-      const atTarget = currentTarget && Pathfinder.heuristic(centroid, currentTarget) <= 3;
-
       // Check if current target is still valid
+      const currentTarget = members[0]._playerObjectiveTarget;
       let currentValid = false;
       if (currentTarget) {
         if (objective === 'CAPTURE') {
@@ -677,8 +679,13 @@ export class UnitAI {
         }
       }
 
-      // Need new target if: arrived, invalid, or no target yet
-      const needsNewTarget = !currentTarget || atTarget || !currentValid;
+      // Need new target only when there is none or it's no longer valid.
+      // NOTE: "arrived" must NOT trigger a re-target — capture takes time, and
+      // re-running nearest-target from a centroid sitting between two bases
+      // made squads abandon a capture in progress and ping-pong mid-map.
+      // When the capture completes the base flips owner → currentValid goes
+      // false → the squad advances naturally.
+      const needsNewTarget = !currentTarget || !currentValid;
 
       if (needsNewTarget) {
         // Set new target and dispatch
@@ -3126,10 +3133,12 @@ export class UnitAI {
             unit.targetPosition = null;
             unit._path = null;
             // Squad units KEEP their squad ID when engaging at weapon range —
-            // they'll rejoin movement once the threat is dead
+            // they'll rejoin movement once the threat is dead. But ALWAYS drop
+            // the march-speed cap: nothing reliably restores it after combat,
+            // so units that fought once were left permanently slowed.
+            unit._squadSpeed = undefined;
             if (!inSquad) {
               unit._squadId = null;
-              unit._squadSpeed = undefined;
             }
             unit.command = { type: CommandType.ATTACK, targetPosition: threat.position, targetUnitId: threat.id };
             return;
