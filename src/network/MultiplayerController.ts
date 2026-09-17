@@ -27,6 +27,7 @@ import {
   updateELO,
   getLeaderboard,
   type PlayerProfile,
+  type MatchMode,
 } from './FirebaseConfig';
 import { NetworkManager, type ConnectionState, type NetworkEvents } from './NetworkManager';
 import {
@@ -36,7 +37,7 @@ import {
   calculateElo,
 } from './MatchmakingService';
 import { CommandQueue } from './CommandQueue';
-import { NetworkCommand, NetCommandType, GameStateHash } from './Protocol';
+import { NetworkCommand, NetCommandType, GameStateHash, ChatPayload } from './Protocol';
 
 export type MultiplayerState =
   | 'offline'       // Not initialized
@@ -55,6 +56,16 @@ export interface MultiplayerEvents {
   onDesync?: (tick: number) => void;
   onPingUpdate?: (ms: number) => void;
   onError?: (msg: string) => void;
+  /** In-game chat line from the other player */
+  onChat?: (msg: ChatPayload) => void;
+}
+
+/** One line of the in-game chat log (local echo + remote) */
+export interface ChatLine {
+  name: string;
+  text: string;
+  ts: number;
+  local: boolean;
 }
 
 export class MultiplayerController {
@@ -113,11 +124,34 @@ export class MultiplayerController {
   // ============================================
   // Find Match
   // ============================================
+  /** Match mode for the NEXT search ('1v1' ranked, or 'coop' = both humans vs 2 built-in AIs) */
+  private _matchMode: MatchMode = '1v1';
+  get matchMode(): MatchMode { return this._matchMode; }
+  setMatchMode(mode: MatchMode): void { this._matchMode = mode; }
+  /** Mode of the match currently being played / just found */
+  get currentMatchMode(): MatchMode { return this._currentMatch?.mode ?? '1v1'; }
+
+  // ── In-game chat (outside the lockstep sim) ──
+  private _chatLog: ChatLine[] = [];
+  get chatLog(): readonly ChatLine[] { return this._chatLog; }
+  /** Send a chat line to the other player. Returns false when there is no live peer. */
+  sendChat(text: string): boolean {
+    const clean = text.trim().slice(0, 200);
+    if (!clean) return false;
+    if (!this._currentMatch || this._currentMatch.isGhost || !this.network.isConnected) return false;
+    const msg: ChatPayload = { name: this._profile?.displayName ?? 'You', text: clean, ts: Date.now() };
+    this.network.sendChat(msg);
+    this._chatLog.push({ ...msg, local: true });
+    if (this._chatLog.length > 100) this._chatLog.shift();
+    return true;
+  }
+
   async findMatch(): Promise<void> {
     if (!this._profile) throw new Error('Not initialized — call initialize() first');
     if (this._state !== 'ready') return;
 
     this.setState('searching');
+    this._chatLog = [];
 
     this.matchmaking.setEvents({
       onStateChange: (ms: MatchmakingState) => {
@@ -150,6 +184,7 @@ export class MultiplayerController {
       this._profile.uid,
       this._profile.displayName,
       this._profile.elo,
+      this._matchMode,
     );
   }
 
@@ -197,6 +232,11 @@ export class MultiplayerController {
       onDisconnect: () => {
         this.log('WebRTC: opponent disconnected', '#e74c3c');
         this._events.onOpponentDisconnect?.();
+      },
+      onChat: (msg: ChatPayload) => {
+        this._chatLog.push({ ...msg, local: false });
+        if (this._chatLog.length > 100) this._chatLog.shift();
+        this._events.onChat?.(msg);
       },
       onPingUpdate: (ms: number) => {
         this._events.onPingUpdate?.(ms);

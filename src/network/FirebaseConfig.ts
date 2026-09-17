@@ -79,7 +79,11 @@ export interface MatchRecord {
   status: 'waiting' | 'signaling' | 'playing' | 'finished';
   winner?: string;
   isGhost?: boolean;   // true if opponent is AI impersonation
+  mode?: MatchMode;    // '1v1' ranked (default) or 'coop' (2 humans + 2 AI, unranked)
 }
+
+/** Match mode: ranked 1v1, or co-op (both humans vs two built-in AIs, unranked) */
+export type MatchMode = '1v1' | 'coop';
 
 /** Queue entry for matchmaking */
 export interface QueueEntry {
@@ -87,6 +91,7 @@ export interface QueueEntry {
   displayName: string;
   elo: number;
   timestamp: number | object;
+  mode?: MatchMode;
 }
 
 // ============================================

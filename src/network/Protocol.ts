@@ -30,6 +30,13 @@ export enum MessageType {
   TICK_INPUT = 'tick_input',
 }
 
+/** In-game chat line (NOT part of the lockstep sim — never hashed, never ticked). */
+export interface ChatPayload {
+  name: string;
+  text: string;
+  ts: number;
+}
+
 /** One player's complete, final input for a single simulation tick. */
 export interface TickInputFrame {
   /** The tick these commands execute on */

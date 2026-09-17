@@ -191,9 +191,132 @@ export class HUD {
     this.buildModeIndicator = this.createBuildModeIndicator();
     this.helpOverlay = this.createHelpOverlay();
     this.controlPanel = this.createControlPanel();
+    this.createChatPanel();
     document.body.appendChild(this.container);
     this.setupHelpToggle();
 
+  }
+
+  // ============================================
+  // In-game chat (multiplayer) — outside the sim, never hashed
+  // ============================================
+  private chatPanel: HTMLElement | null = null;
+  private chatLogEl: HTMLElement | null = null;
+  private chatInput: HTMLInputElement | null = null;
+  private chatHint: HTMLElement | null = null;
+  private chatEnabled = false;
+  private _onChatSend: ((text: string) => void) | null = null;
+  private static readonly CHAT_MAX_LINES = 8;
+
+  /** Register the send handler (main.ts → MultiplayerController.sendChat) */
+  onChatSend(cb: (text: string) => void): void { this._onChatSend = cb; }
+
+  /** Show/hide the chat panel (only in real multiplayer matches) */
+  setChatEnabled(on: boolean): void {
+    this.chatEnabled = on;
+    if (this.chatPanel) this.chatPanel.style.display = on ? 'flex' : 'none';
+    if (!on) { this.clearChat(); this.blurChat(); }
+  }
+  isChatEnabled(): boolean { return this.chatEnabled; }
+  isChatFocused(): boolean { return !!this.chatInput && document.activeElement === this.chatInput; }
+
+  clearChat(): void { if (this.chatLogEl) this.chatLogEl.innerHTML = ''; }
+
+  /** Focus the input (Enter key in-game) */
+  focusChat(): void {
+    if (!this.chatEnabled || !this.chatInput) return;
+    this.chatInput.style.display = 'block';
+    if (this.chatHint) this.chatHint.style.display = 'none';
+    this.chatInput.focus();
+    StrategyCamera.suppressInput = true;
+  }
+
+  blurChat(): void {
+    if (!this.chatInput) return;
+    this.chatInput.blur();
+    this.chatInput.value = '';
+    this.chatInput.style.display = 'none';
+    if (this.chatHint) this.chatHint.style.display = 'block';
+    StrategyCamera.suppressInput = false;
+  }
+
+  /** Append a line to the chat log. `local` = sent by this client. */
+  addChatMessage(name: string, text: string, local: boolean): void {
+    if (!this.chatLogEl) return;
+    const line = document.createElement('div');
+    line.style.cssText = `font-size:12px; line-height:1.35; word-break:break-word; animation: uiSlideUp 0.15s ease;`;
+    const who = document.createElement('span');
+    who.style.cssText = `font-weight:bold; color:${local ? '#3498db' : '#f39c12'}; margin-right:6px;`;
+    who.textContent = `${name}:`;
+    const body = document.createElement('span');
+    body.style.color = '#eee';
+    body.textContent = text; // textContent — never innerHTML for remote text
+    line.appendChild(who); line.appendChild(body);
+    this.chatLogEl.appendChild(line);
+    while (this.chatLogEl.childElementCount > HUD.CHAT_MAX_LINES) this.chatLogEl.removeChild(this.chatLogEl.firstChild!);
+    this.chatLogEl.scrollTop = this.chatLogEl.scrollHeight;
+    // Flash the panel border so an incoming line is noticed
+    if (!local && this.chatPanel) {
+      this.chatPanel.style.borderColor = '#f39c12';
+      setTimeout(() => { if (this.chatPanel) this.chatPanel.style.borderColor = COLORS.borderDefault; }, 1200);
+    }
+  }
+
+  private createChatPanel(): void {
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      position:absolute; left:16px; bottom:236px; width:340px; max-height:200px;
+      ${UI.panel(COLORS.borderDefault)}; padding:8px 10px;
+      display:none; flex-direction:column; gap:6px; pointer-events:auto; z-index:9000;
+      font-family:${FONT.family};
+    `;
+    const header = document.createElement('div');
+    header.style.cssText = `font-size:${FONT.xs}; letter-spacing:2px; color:#888; text-transform:uppercase;`;
+    header.textContent = 'TEAM CHAT';
+    panel.appendChild(header);
+
+    const log = document.createElement('div');
+    log.style.cssText = `display:flex; flex-direction:column; gap:2px; max-height:120px; overflow-y:auto;`;
+    panel.appendChild(log);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = `font-size:10px; color:#666; letter-spacing:1px;`;
+    hint.textContent = 'Press ENTER to chat';
+    panel.appendChild(hint);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 200;
+    input.placeholder = 'Type a message, ENTER to send, ESC to close';
+    input.style.cssText = `
+      display:none; width:100%; box-sizing:border-box; padding:6px 8px;
+      background:rgba(0,0,0,0.5); color:#fff; border:1px solid #3498db; border-radius:4px;
+      font-family:${FONT.family}; font-size:12px; outline:none;
+    `;
+    // Keep every keystroke inside the input: the game's hotkeys and the camera listen on window
+    const swallow = (e: KeyboardEvent) => { e.stopPropagation(); };
+    input.addEventListener('keyup', swallow);
+    input.addEventListener('keypress', swallow);
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const text = input.value.trim();
+        if (text) this._onChatSend?.(text);
+        this.blurChat();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.blurChat();
+      }
+    });
+    input.addEventListener('blur', () => { StrategyCamera.suppressInput = false; });
+    panel.appendChild(input);
+
+    this.container.appendChild(panel);
+    this.chatPanel = panel;
+    this.chatLogEl = log;
+    this.chatInput = input;
+    this.chatHint = hint;
   }
 
   /** First-visit tutorial: open the help overlay once, at the start of the first
@@ -3145,6 +3268,13 @@ export class HUD {
 
   private setupHelpToggle(): void {
     window.addEventListener('keydown', (e) => {
+      // ENTER opens the multiplayer chat box (when nothing else is being typed into)
+      if (e.key === 'Enter' && this.chatEnabled && !this.helpVisible
+          && !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        this.focusChat();
+        return;
+      }
       if (e.key === '?' || e.key === 'F1') {
         e.preventDefault();
         this.toggleHelp();

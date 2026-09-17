@@ -15,6 +15,7 @@
 // ============================================
 
 import { MultiplayerController, type MultiplayerState, type MultiplayerEvents } from '../network/MultiplayerController';
+import type { MatchMode } from '../network/FirebaseConfig';
 import type { MatchFoundResult } from '../network/MatchmakingService';
 import type { PlayerProfile } from '../network/FirebaseConfig';
 import type { EloUpdateResult } from '../network/MultiplayerController';
@@ -105,7 +106,7 @@ function sectionLabel(text: string): HTMLElement {
 // ============================================
 export interface MultiplayerUICallbacks {
   onBackToMenu(): void;
-  onStartMultiplayerGame(mapSeed: number, mapType: MapType, isGhost: boolean, opponentName: string, ghostDifficulty?: string): void;
+  onStartMultiplayerGame(mapSeed: number, mapType: MapType, isGhost: boolean, opponentName: string, ghostDifficulty?: string, mode?: MatchMode): void;
   onReturnToLobby(): void;
 }
 
@@ -307,6 +308,38 @@ export class MultiplayerUI {
     card.appendChild(playerInfo);
     ov.appendChild(card);
 
+    // Match mode toggle: RANKED 1v1 vs CO-OP (both humans vs 2 built-in AIs)
+    const modeRow = document.createElement('div');
+    modeRow.style.cssText = 'display:flex; gap:10px; margin-bottom:18px; align-items:center;';
+    const modeLabel = document.createElement('div');
+    modeLabel.style.cssText = `font-size:11px; color:#888; font-family:${FONT}; letter-spacing:2px; text-transform:uppercase; margin-right:6px;`;
+    modeLabel.textContent = 'MODE';
+    modeRow.appendChild(modeLabel);
+    const modeBtns: Array<{ mode: MatchMode; btn: HTMLButtonElement; color: string }> = [];
+    const paintModes = () => {
+      for (const m of modeBtns) {
+        const on = m.mode === this.mp.matchMode;
+        m.btn.style.background = on ? `${m.color}33` : 'transparent';
+        m.btn.style.color = on ? '#fff' : m.color;
+        m.btn.style.boxShadow = on ? `0 0 12px ${m.color}66` : 'none';
+      }
+    };
+    const addMode = (mode: MatchMode, label: string, color: string, tip: string) => {
+      const btn = makeOutlineButton(label, color);
+      btn.title = tip;
+      btn.addEventListener('click', () => { this.mp.setMatchMode(mode); paintModes(); });
+      modeBtns.push({ mode, btn, color });
+      modeRow.appendChild(btn);
+    };
+    addMode('1v1', 'RANKED 1v1', GOLD, 'Ranked duel. ELO on the line.');
+    addMode('coop', 'CO-OP vs AI', PURPLE, 'You + a partner on a 4-player map vs two built-in AIs. Unranked, in-game chat on.');
+    paintModes();
+    ov.appendChild(modeRow);
+    const modeHint = document.createElement('div');
+    modeHint.style.cssText = `font-size:10px; color:#666; font-family:${FONT}; letter-spacing:1px; margin:-8px 0 20px; max-width:420px; text-align:center;`;
+    modeHint.textContent = 'CO-OP: you and your partner each get a base; the two AIs get the others. Beat both AIs together. Press ENTER in-game to chat.';
+    ov.appendChild(modeHint);
+
     // Action buttons
     const btnGrid = document.createElement('div');
     btnGrid.style.cssText = 'display:flex; gap:16px; margin-bottom:24px;';
@@ -451,7 +484,7 @@ export class MultiplayerUI {
     // Title
     const title = document.createElement('div');
     title.style.cssText = glowText(GREEN, 36);
-    title.textContent = 'OPPONENT FOUND';
+    title.textContent = result.mode === 'coop' ? 'PARTNER FOUND' : 'OPPONENT FOUND';
     ov.appendChild(title);
 
     // VS Display
@@ -522,6 +555,7 @@ export class MultiplayerUI {
         result.isGhost,
         result.opponentName,
         result.ghostProfile?.difficulty,
+        result.mode,
       );
     };
 

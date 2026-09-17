@@ -25,7 +25,7 @@ import {
   type MatchRecord,
   type PlayerProfile,
   type Unsubscribe,
-} from './FirebaseConfig';
+  MatchMode } from './FirebaseConfig';
 import { GameRNG, SeededRandom } from '../game/SeededRandom';
 
 // ============================================
@@ -168,6 +168,8 @@ export interface MatchFoundResult {
   opponentElo: number;
   isGhost: boolean;
   ghostProfile?: GhostProfile;
+  /** '1v1' ranked (default) or 'coop' (both humans vs 2 built-in AIs, unranked) */
+  mode: MatchMode;
 }
 
 export interface MatchmakingEvents {
@@ -221,12 +223,15 @@ export class MatchmakingService {
   // ============================================
   // Start searching for a match
   // ============================================
-  async startSearch(uid: string, displayName: string, elo: number): Promise<void> {
+  private _mode: MatchMode = '1v1';
+
+  async startSearch(uid: string, displayName: string, elo: number, mode: MatchMode = '1v1'): Promise<void> {
     if (this.state !== 'idle') return;
 
     this._uid = uid;
     this._displayName = displayName;
     this._elo = elo;
+    this._mode = mode;
     this.searchStartTime = Date.now();
     this.setState('searching');
     this.log(`Joined queue as ${displayName} (uid=${uid.slice(0,8)}, elo=${elo})`);
@@ -237,6 +242,7 @@ export class MatchmakingService {
       displayName,
       elo,
       timestamp: Date.now(),
+      mode,
     };
     await joinQueue(entry);
     this.log('Queue entry written to Firebase');
@@ -261,6 +267,11 @@ export class MatchmakingService {
     // Start ghost timer — if no opponent in GHOST_TIMEOUT, spawn ghost
     this.ghostTimer = setTimeout(() => {
       if (this.state === 'searching') {
+        if (this._mode === 'coop') {
+          // Co-op needs a real partner — keep waiting instead of ghosting
+          this.log('No co-op partner yet — still searching', '#e67e22');
+          return;
+        }
         this.log('Ghost timeout — creating AI match', '#e67e22');
         this.createGhostMatch();
       }
@@ -285,7 +296,7 @@ export class MatchmakingService {
     const entries = await getQueueEntries();
     this.log(`Queue has ${entries.length} entries`);
     const candidates = entries
-      .filter(e => e.uid !== this._uid)
+      .filter(e => e.uid !== this._uid && (e.mode ?? '1v1') === this._mode)
       .sort((a, b) => Math.abs(a.elo - this._elo) - Math.abs(b.elo - this._elo));
 
     this.log(`Found ${candidates.length} candidate(s): ${candidates.map(c => c.displayName).join(', ') || 'none'}`);
@@ -306,6 +317,10 @@ export class MatchmakingService {
   private async tryPairWith(opponent: QueueEntry): Promise<void> {
     if (this.state !== 'searching') {
       this.log(`tryPairWith skipped — state=${this.state}`);
+      return;
+    }
+    if ((opponent.mode ?? '1v1') !== this._mode) {
+      this.log(`tryPairWith skipped — mode mismatch (${opponent.mode ?? '1v1'} vs ${this._mode})`);
       return;
     }
     if (Math.abs(opponent.elo - this._elo) > MAX_ELO_DIFF) {
@@ -330,6 +345,7 @@ export class MatchmakingService {
         mapSeed,
         mapType: 'standard',
         status: 'signaling',
+        mode: this._mode,
       });
       this.log(`HOST: Match created: ${matchId.slice(0,8)}`, '#2ecc71');
 
@@ -350,6 +366,7 @@ export class MatchmakingService {
         opponentName: opponent.displayName,
         opponentElo: opponent.elo,
         isGhost: false,
+        mode: this._mode,
       };
 
       this.cleanupSearch();
@@ -380,6 +397,7 @@ export class MatchmakingService {
             opponentName: opponent.displayName,
             opponentElo: opponent.elo,
             isGhost: false,
+            mode: match.mode ?? '1v1', // host decides; guest follows the match record
           };
           this.cleanupSearch();
           this.events.onMatchFound?.(this._lastMatchResult);
@@ -429,6 +447,7 @@ export class MatchmakingService {
       opponentElo: ghostProfile.elo,
       isGhost: true,
       ghostProfile,
+      mode: '1v1',
     };
 
     this.cleanupSearch();

@@ -61,6 +61,7 @@ import { GameRNG } from './game/SeededRandom';
 import { getPlayerColor, getPlayerHex, getPlayerCSS, PLAYER_COLORS, NEUTRAL_OWNER } from './game/PlayerConfig';
 import { type TribeId, getTribe } from './game/TribeConfig';
 import { MultiplayerController, type EloUpdateResult } from './network';
+import type { MatchMode } from './network/FirebaseConfig';
 import { MultiplayerUI } from './ui/MultiplayerUI';
 import { processCommand, type CommandBridgeGame } from './network/CommandBridge';
 import { ClaudeControl } from './game/ClaudeControl';
@@ -214,6 +215,9 @@ class Cubitopia {
   private multiplayerUI: MultiplayerUI | null = null;
   /** Opponent display name for multiplayer matches (set by onStartMultiplayerGame) */
   private _multiplayerOpponentName: string = '';
+  /** Multiplayer match mode: '1v1' ranked, or 'coop' (host + guest on a 4-player map vs 2 built-in AIs, unranked) */
+  private _mpMode: MatchMode = '1v1';
+  private get _isCoop(): boolean { return this.gameMode === 'pvp' && this._mpMode === 'coop'; }
   /** Accumulated delta for multiplayer tick advancement (fixed tick rate) */
   private _mpTickAccumulator = 0;
   /** Per-unit throttle timers for footstep dust (visual-only) */
@@ -1259,8 +1263,10 @@ class Cubitopia {
       onBackToMenu: () => {
         this.menuController.showMainMenu();
       },
-      onStartMultiplayerGame: (mapSeed, mapType, isGhost, opponentName, ghostDifficulty) => {
+      onStartMultiplayerGame: (mapSeed, mapType, isGhost, opponentName, ghostDifficulty, mode) => {
         // ── Multiplayer game start ──
+        this._mpMode = (!isGhost && mode === 'coop') ? 'coop' : '1v1';
+        this.hud.setChatEnabled(!isGhost);
         // Re-init command queue for multiplayer mode (overrides single-player default).
         // Ghost matches use null network; real matches use the active WebRTC connection.
         const net = isGhost ? null : this.multiplayer.network;
@@ -1292,6 +1298,8 @@ class Cubitopia {
         console.log(`[MP-INIT] After startNewGame: GameRNG state=${GameRNG.getState()}, isHost=${!isGhost && this.multiplayer.network.isHost}`);
       },
       onReturnToLobby: () => {
+        this.hud.setChatEnabled(false);
+        this._mpMode = '1v1';
         // Reset command queue back to single-player mode for lobby state
         this.multiplayer.commandQueue.initSinglePlayer();
         this.multiplayer.commandQueue.setCommandProcessor((cmd: NetworkCommand) => {
@@ -1334,6 +1342,17 @@ class Cubitopia {
         console.error('[MP] Error:', msg);
         this.hud.showNotification(`Multiplayer error: ${msg}`, 'color:#e74c3c;');
       },
+      onChat: (msg) => {
+        this.hud.addChatMessage(msg.name, msg.text, false);
+        console.log(`[Chat] ${msg.name}: ${msg.text}`);
+      },
+    });
+    this.hud.onChatSend((text) => {
+      if (this.multiplayer.sendChat(text)) {
+        this.hud.addChatMessage(this.multiplayer.profile?.displayName ?? 'You', text, true);
+      } else {
+        this.hud.showNotification('Chat is only available in a live multiplayer match', '#e67e22');
+      }
     });
   }
 
@@ -1972,7 +1991,8 @@ class Cubitopia {
         const pr = this.players[idx]?.resources;
         return `w${this.woodStockpile[idx]??0}s${this.stoneStockpile[idx]??0}i${this.ironStockpile[idx]??0}c${this.clayStockpile[idx]??0}g${this.goldStockpile[idx]??0}ch${this.charcoalStockpile[idx]??0}st${this.steelStockpile[idx]??0}f${this.foodStockpile[idx]??0}gf${this.grassFiberStockpile[idx]??0}rp${this.ropeStockpile[idx]??0}xt${pr?.crystal??0}`;
       };
-      const stockpileFingerprint = `p0[${stockFp(0)}]p1[${stockFp(1)}]`;
+      let stockpileFingerprint = '';
+      for (let i = 0; i < this.playerCount; i++) stockpileFingerprint += `p${i}[${stockFp(i)}]`;
       return {
         units: this.allUnits
           .filter(u => u.currentHealth > 0)
@@ -2275,6 +2295,8 @@ class Cubitopia {
         this.hud.showNotification('You left the match — defeat!', 'color:#e74c3c;font-weight:bold;');
       }
       // Reset multiplayer state so player can re-queue
+      this.hud.setChatEnabled(false);
+      this._mpMode = '1v1';
       this.multiplayer.returnToLobby();
       this.multiplayer.commandQueue.initSinglePlayer();
       this._mpTickAccumulator = 0;
@@ -2748,7 +2770,7 @@ class Cubitopia {
     }
 
     // Determine player count from game mode
-    this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2') ? 4 : 2;
+    this.playerCount = (this.gameMode === 'ffa' || this.gameMode === '2v2' || this._isCoop) ? 4 : 2;
     // Reset local player index for non-PvP modes
     if (this.gameMode !== 'pvp') { this._localPlayerIndex = 0; UnitAI.state.localPlayerIndex = 0; }
 
@@ -2864,13 +2886,13 @@ class Cubitopia {
     this.players = [];
     for (let i = 0; i < this.playerCount; i++) {
       const pc = getPlayerColor(i);
-      // In PvP both players are human; in aivai both are AI; otherwise only player 0 is human
-      const isHuman = isPvP ? true : (i === 0 && !p1IsAI);
+      // In PvP players 0 and 1 are human (co-op adds AI players 2 and 3); in aivai both are AI; otherwise only player 0 is human
+      const isHuman = isPvP ? (i < 2) : (i === 0 && !p1IsAI);
       const isLocal = (i === this._localPlayerIndex);
       this.players.push({
         id: i,
         name: isPvP
-          ? (isLocal ? 'You' : (this._multiplayerOpponentName || `Player ${i + 1}`))
+          ? (isLocal ? 'You' : (isHuman ? (this._multiplayerOpponentName || `Player ${i + 1}`) : `AI ${colorNames[i] ?? i}`))
           : (isHuman ? 'Player 1' : `AI ${colorNames[i] ?? i}`),
         color: new THREE.Color(pc.primary),
         cities: [], units: [],
@@ -3592,6 +3614,29 @@ class Cubitopia {
 
       // Check: how many players remain un-defeated?
       const alive = this.players.filter(p => !p.defeated);
+
+      // ── Co-op (2 humans vs 2 AIs): the humans win together when both AIs are out,
+      //    and lose together only when both humans are out. Unranked (no ELO).
+      if (this._isCoop) {
+        if (this.gameOver) return;
+        const humansAlive = alive.filter(p => !p.isAI);
+        const aisAlive = alive.filter(p => p.isAI);
+        if (aisAlive.length === 0 || humansAlive.length === 0) {
+          this.gameOver = true;
+          const won = aisAlive.length === 0;
+          this.sound.stopAmbient();
+          this.sound.play(won ? 'victory' : 'defeat', 0.8);
+          this.showGameOverScreen(won ? 'YOUR TEAM' : 'THE AI', won);
+        } else if (evt.previousOwner === this._localPlayerIndex) {
+          this.hud.showNotification('Your base fell — your partner fights on. Chat to help them!', 'color:#e67e22;font-weight:bold;');
+        } else if (this.players[evt.previousOwner] && !this.players[evt.previousOwner].isAI) {
+          this.hud.showNotification(`${this._multiplayerOpponentName || 'Your partner'} lost their base — it's on you now!`, 'color:#e67e22;font-weight:bold;');
+        } else {
+          this.hud.showNotification(`${colorName} AI eliminated! One to go.`, 'color:#2ecc71;font-weight:bold;');
+        }
+        return;
+      }
+
       if (alive.length <= 1) {
         // Guard: a second main-base capture event after game over must not re-report the result
         if (this.gameOver) return;
@@ -4811,6 +4856,12 @@ class Cubitopia {
         if (this.players[owner]) this.players[owner].isAI = isAI;
       },
       notify: (msg: string) => this.hud.showNotification(msg, 'color:#9b59b6;font-weight:bold;'),
+      sendChat: (text: string) => {
+        const ok = this.multiplayer.sendChat(text);
+        if (ok) this.hud.addChatMessage(this.multiplayer.profile?.displayName ?? 'You', text.trim().slice(0, 200), true);
+        return ok;
+      },
+      getChatLog: () => this.multiplayer.chatLog.map(l => ({ ...l })),
     });
     (window as any).ClaudeControl = this.claudeControl;
     (window as any)._cdb = {

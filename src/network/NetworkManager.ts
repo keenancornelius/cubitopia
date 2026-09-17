@@ -22,7 +22,7 @@ import {
   cleanupMatch,
   type Unsubscribe,
 } from './FirebaseConfig';
-import { NetworkCommand, NetworkMessage, MessageType, GameStateHash, TickInputFrame } from './Protocol';
+import { NetworkCommand, NetworkMessage, MessageType, GameStateHash, TickInputFrame, ChatPayload } from './Protocol';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'signaling' | 'connected' | 'error';
 
@@ -35,6 +35,7 @@ export interface NetworkEvents {
   onDesync?: (localHash: number, remoteHash: number, tick: number) => void;
   onDisconnect?: () => void;
   onError?: (err: string) => void;
+  onChat?: (msg: ChatPayload) => void;
 }
 
 export class NetworkManager {
@@ -266,9 +267,13 @@ export class NetworkManager {
         } as NetworkCommand);
         break;
 
-      case MessageType.CHAT:
-        // Future: in-game chat
+      case MessageType.CHAT: {
+        const c = msg.payload as ChatPayload;
+        if (c && typeof c.text === 'string') {
+          this.events.onChat?.({ name: String(c.name ?? 'Opponent').slice(0, 24), text: c.text.slice(0, 200), ts: Number(c.ts) || Date.now() });
+        }
         break;
+      }
     }
   }
 
@@ -289,6 +294,10 @@ export class NetworkManager {
 
   sendSurrender(): void {
     this.sendRaw({ type: MessageType.SURRENDER, payload: {} });
+  }
+
+  sendChat(msg: ChatPayload): void {
+    this.sendRaw({ type: MessageType.CHAT, payload: msg });
   }
 
   private sendRaw(msg: NetworkMessage): void {

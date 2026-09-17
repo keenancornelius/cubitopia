@@ -40,6 +40,10 @@ export interface ClaudeControlOps {
   /** Set/unset AI control for a player (true = AIController drives it) */
   setPlayerAI(owner: number, isAI: boolean): void;
   notify(msg: string): void;
+  /** In-game multiplayer chat: send a line (false if no live peer) */
+  sendChat(text: string): boolean;
+  /** In-game multiplayer chat: full log (oldest first) */
+  getChatLog(): Array<{ name: string; text: string; ts: number; local: boolean }>;
 }
 
 interface UnitView {
@@ -273,11 +277,27 @@ export class ClaudeControl {
   // Help
   // ============================================
 
+  // ============================================
+  // Multiplayer chat (works without takeover — it is not a sim command)
+  // ============================================
+
+  /** Send a chat line to the other human player in a live multiplayer match. */
+  chat(text: string): string {
+    const ok = this.ops.sendChat(String(text));
+    return ok ? `sent: ${String(text).slice(0, 200)}` : 'ERROR: no live multiplayer peer (chat needs a real match, not a ghost)';
+  }
+
+  /** Chat log as compact lines; pass `sinceTs` to only get newer lines. */
+  chatLog(sinceTs = 0): Array<{ name: string; text: string; ts: number; local: boolean }> {
+    return this.ops.getChatLog().filter(l => l.ts > sinceTs);
+  }
+
   help(): string {
     return [
       'ClaudeControl — programmatic play API',
       '',
       'CONTROL:  takeover(owner=1) · release()',
+      'CHAT:     chat(text) · chatLog(sinceTs=0)   (multiplayer only, no takeover needed)',
       'SCOUT:    state() · units(owner?) · myUnits() · enemyUnits() · resources()',
       'ORDERS:   move(ids,q,r) · attackMove(ids,q,r) · attack(ids,targetId) · stop(ids)',
       '          setStance(ids,"passive|defensive|aggressive")',
