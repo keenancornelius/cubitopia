@@ -22,13 +22,14 @@ import {
   cleanupMatch,
   type Unsubscribe,
 } from './FirebaseConfig';
-import { NetworkCommand, NetworkMessage, MessageType, GameStateHash } from './Protocol';
+import { NetworkCommand, NetworkMessage, MessageType, GameStateHash, TickInputFrame } from './Protocol';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'signaling' | 'connected' | 'error';
 
 export interface NetworkEvents {
   onStateChange?: (state: ConnectionState) => void;
   onCommand?: (cmd: NetworkCommand) => void;
+  onTickInput?: (frame: TickInputFrame) => void;
   onStateHash?: (hash: GameStateHash) => void;
   onPingUpdate?: (pingMs: number) => void;
   onDesync?: (localHash: number, remoteHash: number, tick: number) => void;
@@ -235,6 +236,10 @@ export class NetworkManager {
         break;
       }
 
+      case MessageType.TICK_INPUT:
+        this.events.onTickInput?.(msg.payload as TickInputFrame);
+        break;
+
       case MessageType.STATE_HASH:
         this.events.onStateHash?.(msg.payload as GameStateHash);
         break;
@@ -272,6 +277,10 @@ export class NetworkManager {
   // ============================================
   sendCommand(cmd: NetworkCommand): void {
     this.sendRaw({ type: MessageType.COMMAND, payload: cmd });
+  }
+
+  sendTickInput(frame: TickInputFrame): void {
+    this.sendRaw({ type: MessageType.TICK_INPUT, payload: frame });
   }
 
   sendStateHash(hash: GameStateHash): void {

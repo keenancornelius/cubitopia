@@ -105,8 +105,9 @@ export interface CommandBridgeGame {
   doPaintMine(position: HexCoord, startY: number, depth: number, owner: number): void;
   doUnpaintMine(position: HexCoord, owner: number): void;
   doPaintHarvest(position: HexCoord, owner: number): void;
-  doPaintWallBlueprint(positions: HexCoord[], owner: number): void;
+  doPaintWallBlueprint(positions: HexCoord[], owner: number, isGate?: boolean): void;
   doRemoveWallBlueprint(position: HexCoord, owner: number): void;
+  doPaintFarmPatch(position: HexCoord, owner: number): void;
 
   // Player ID mapping
   getOwnerForPlayerId(playerId: string): number;
@@ -372,7 +373,12 @@ export function processCommand(game: CommandBridgeGame, cmd: NetworkCommand): vo
     }
     case NetCommandType.PAINT_WALL_BLUEPRINT: {
       const p = cmd.payload as PaintWallBlueprintPayload;
-      game.doPaintWallBlueprint(p.positions, owner);
+      game.doPaintWallBlueprint(p.positions, owner, p.isGate === true);
+      break;
+    }
+    case NetCommandType.PAINT_FARM_PATCH: {
+      const p = cmd.payload as BlueprintPositionPayload;
+      game.doPaintFarmPatch(p.position, owner);
       break;
     }
     case NetCommandType.REMOVE_WALL_BLUEPRINT: {

@@ -1,55 +1,70 @@
 // ============================================
 // CUBITOPIA - Command Queue (Deterministic Lockstep)
-// Phase 5B: Buffers and replays commands in tick order
+// Input-frame lockstep with a hard barrier
 // ============================================
 //
-// Both clients maintain identical CommandQueues. On each
-// simulation tick, both sides:
-//   1. Buffer any local player commands for this tick
-//   2. Receive remote player commands for this tick
-//   3. Process ALL commands in deterministic order:
-//      - Host commands first (sorted by command index)
-//      - Guest commands second (sorted by command index)
-//   4. Advance simulation by one tick
+// Both clients maintain identical CommandQueues. Lockstep works
+// via per-tick INPUT FRAMES instead of loose per-command messages:
 //
-// This guarantees both clients execute identical state
-// transitions, keeping the game in sync.
+//   - When a client simulates tick T, it first finalizes and sends
+//     its input frame for tick T + INPUT_DELAY (commands issued since
+//     the last tick, possibly EMPTY — empty frames still get sent).
+//   - A client may NOT simulate tick T (for T > INPUT_DELAY) until the
+//     peer's frame for tick T has arrived. If it hasn't, processTick()
+//     returns false and the caller must stall (try again next render
+//     frame). This is the lockstep barrier.
+//   - Frames travel on a reliable, ordered DataChannel, so receiving
+//     the frame for tick T means all frames < T have arrived too.
+//
+// Because of the barrier, a command can never arrive "late": the
+// receiver physically cannot have advanced past the command's tick.
+// (The old design free-ran ticks on each client's wall clock and
+// rescheduled late commands on the receiver only — which guaranteed
+// divergence as soon as clocks drifted by more than the input delay.)
+//
+// Per-tick execution order is deterministic on both clients:
+//   host's commands first, then guest's, each in issue order.
 // ============================================
 
-import { NetworkCommand, NetCommandType, GameStateHash, computeStateHash } from './Protocol';
+import { NetworkCommand, NetCommandType, CommandPayload, GameStateHash, TickInputFrame, computeStateHash } from './Protocol';
 import { NetworkManager } from './NetworkManager';
 
 /** How many ticks between state hash checks */
 const HASH_CHECK_INTERVAL = 5; // 250ms at 20 ticks/s — very tight for desync bisection
 
-/** How many ticks ahead we allow commands to be buffered */
-const MAX_FUTURE_TICKS = 20;
-
 /** Input delay: commands execute N ticks in the future to give the network
  *  time to deliver them before both clients reach that tick. At 20hz,
- *  3 ticks = 150ms which covers most LAN/broadband latency. */
+ *  3 ticks = 150ms which covers most LAN/broadband latency. Thanks to the
+ *  lockstep barrier this no longer needs to cover worst-case latency for
+ *  correctness — a slow link just stalls the sim briefly instead of desyncing. */
 const INPUT_DELAY = 3;
 
-/** Command with ordering index for deterministic sort */
+/** Command with ordering metadata for deterministic sort */
 interface IndexedCommand extends NetworkCommand {
+  /** true if issued by the match host (host commands execute first) */
+  _fromHost: boolean;
+  /** issue order within the player's frame */
   _index: number;
 }
 
 export class CommandQueue {
   private network: NetworkManager | null = null;
   private currentTick = 0;
-  private commandIndex = 0;
 
-  /** Commands buffered per tick: tick → commands[] */
+  /** Commands scheduled per tick: tick → commands[] (local + remote) */
   private tickBuffer: Map<number, IndexedCommand[]> = new Map();
 
-  /** Local commands waiting to be sent */
-  private localBuffer: IndexedCommand[] = [];
+  /** Local commands issued since the last tick — assigned to a tick when the next frame is sent */
+  private localBuffer: Array<{ type: NetCommandType | string; payload: CommandPayload }> = [];
+
+  /** Highest tick for which the peer's input frame has arrived.
+   *  Reliable ordered channel ⇒ all earlier frames have arrived too. */
+  private _remoteFrameTick = 0;
 
   /** Whether we're in multiplayer mode */
   private _isMultiplayer = false;
 
-  /** Whether this is a ghost match (AI impersonation) */
+  /** Whether this is a ghost match (AI impersonation — no peer, no barrier) */
   private _isGhostMatch = false;
 
   /** Desync state */
@@ -74,11 +89,25 @@ export class CommandQueue {
   /** Full state snapshot for the first desync (detailed diff) */
   private _desyncDetailLogged = false;
 
+  /** Callback for surrender commands (bypasses tick buffering) */
+  private _onSurrender: ((cmd: NetworkCommand) => void) | null = null;
+
   // ── Getters ──────────────────────────────────────────────
   get tick() { return this.currentTick; }
   get isMultiplayer() { return this._isMultiplayer; }
   get isGhostMatch() { return this._isGhostMatch; }
   get isDesynced() { return this._desynced; }
+
+  /** True when the sim is blocked waiting on the peer's input frame.
+   *  Useful for HUD "waiting for opponent…" indicators. */
+  get isStalled(): boolean {
+    return this._isMultiplayer && !this._isGhostMatch && !this.canAdvance();
+  }
+
+  /** How many ticks ahead the peer's input allows us to simulate (network health display) */
+  get remoteFrameLead(): number {
+    return this._remoteFrameTick - this.currentTick;
+  }
 
   // ============================================
   // Initialization
@@ -94,19 +123,20 @@ export class CommandQueue {
     this._isGhostMatch = isGhost;
     this.network = network;
     this.currentTick = 0;
-    this.commandIndex = 0;
     this.tickBuffer.clear();
     this.localBuffer = [];
+    this._remoteFrameTick = 0;
     this._desynced = false;
     this._desyncTick = -1;
     this._pendingRemoteHashes.clear();
     this._localHashHistory.clear();
     this._desyncDetailLogged = false;
 
-    // Listen for remote commands
+    // Listen for remote frames / hashes
     if (network) {
       network.setEvents({
         ...network['events'], // preserve existing events
+        onTickInput: (frame: TickInputFrame) => this.receiveTickInput(frame),
         onCommand: (cmd: NetworkCommand) => this.receiveRemoteCommand(cmd),
         onStateHash: (hash: GameStateHash) => this.receiveStateHash(hash),
       });
@@ -119,9 +149,9 @@ export class CommandQueue {
     this._isGhostMatch = false;
     this.network = null;
     this.currentTick = 0;
-    this.commandIndex = 0;
     this.tickBuffer.clear();
     this.localBuffer = [];
+    this._remoteFrameTick = 0;
     this._desynced = false;
   }
 
@@ -140,118 +170,180 @@ export class CommandQueue {
     this._onDesync = handler;
   }
 
-  // ============================================
-  // Enqueue local command
-  // ============================================
-
-  /**
-   * Queue a local player command. In multiplayer, it's sent to the
-   * remote peer and buffered for the next tick. In singleplayer,
-   * it executes immediately.
-   */
-  enqueue(type: NetCommandType | string, payload: Record<string, unknown>): void {
-    const delay = this._isMultiplayer ? INPUT_DELAY : 1;
-    const cmd: IndexedCommand = {
-      tick: this.currentTick + delay, // Execute after input delay (MP) or next tick (SP)
-      playerId: this.network?.localUid ?? 'local',
-      type,
-      payload,
-      _index: this.commandIndex++,
-    };
-
-    if (!this._isMultiplayer) {
-      // Single-player: execute immediately
-      this._commandProcessor?.(cmd);
-      return;
-    }
-
-    // Multiplayer: buffer locally and send to peer
-    this.addToBuffer(cmd);
-    console.log(`[CmdQ] ENQUEUE local: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} isMP=${this._isMultiplayer} hasNet=${!!this.network} ghost=${this._isGhostMatch}`);
-
-    if (this.network && !this._isGhostMatch) {
-      // Send over network (strip internal index)
-      const { _index, ...netCmd } = cmd;
-      console.log(`[CmdQ] SENDING to peer: type=${netCmd.type} tick=${netCmd.tick} connOpen=${this.network.isConnected}`);
-      this.network.sendCommand(netCmd);
-    }
-  }
-
-  // ============================================
-  // Receive remote command
-  // ============================================
-
-  /** Callback for surrender commands (bypasses tick buffering) */
-  private _onSurrender: ((cmd: NetworkCommand) => void) | null = null;
-
   /** Set the surrender handler — called by MultiplayerController */
   setSurrenderHandler(handler: (cmd: NetworkCommand) => void): void {
     this._onSurrender = handler;
   }
 
-  private receiveRemoteCommand(cmd: NetworkCommand): void {
-    console.log(`[CmdQ] RECEIVED remote: type=${cmd.type} tick=${cmd.tick} player=${cmd.playerId?.slice(0,8)} curTick=${this.currentTick} hasProcessor=${!!this._commandProcessor}`);
+  // ============================================
+  // Enqueue local command
+  // ============================================
 
+  /**
+   * Queue a local player command. In multiplayer it is buffered and
+   * shipped inside the NEXT input frame (executing INPUT_DELAY ticks
+   * ahead on both clients simultaneously). In singleplayer it executes
+   * immediately.
+   */
+  enqueue(type: NetCommandType | string, payload: Record<string, unknown>, playerIdOverride?: string): void {
+    if (!this._isMultiplayer) {
+      // Single-player: execute immediately
+      this._commandProcessor?.({
+        tick: this.currentTick + 1,
+        playerId: playerIdOverride ?? 'local',
+        type,
+        payload,
+      });
+      return;
+    }
+
+    this.localBuffer.push({ type, payload: payload as CommandPayload });
+    console.log(`[CmdQ] ENQUEUE local: type=${type} (ships with next frame) curTick=${this.currentTick} buffered=${this.localBuffer.length}`);
+  }
+
+  // ============================================
+  // Receive remote input frame (the lockstep heartbeat)
+  // ============================================
+
+  private receiveTickInput(frame: TickInputFrame): void {
+    // Frames arrive in send order (reliable ordered channel). Monotonic check:
+    if (frame.tick <= this._remoteFrameTick) {
+      console.warn(`[CmdQ] Out-of-order/duplicate frame for tick ${frame.tick} (have up to ${this._remoteFrameTick}) — ignoring`);
+      return;
+    }
+
+    // Barrier invariant: we can never have simulated past a tick whose frame
+    // hadn't arrived. If this fires, the protocol is broken — flag it loudly.
+    if (frame.tick <= this.currentTick) {
+      console.error(`[CmdQ] PROTOCOL VIOLATION: frame for tick ${frame.tick} arrived but we already simulated tick ${this.currentTick}`);
+      if (!this._desynced) {
+        this._desynced = true;
+        this._desyncTick = frame.tick;
+        this._onDesync?.(0, 0, frame.tick);
+      }
+      return;
+    }
+
+    this._remoteFrameTick = frame.tick;
+
+    if (frame.cmds.length > 0) {
+      const remoteIsHost = !(this.network?.isHost ?? false);
+      for (let i = 0; i < frame.cmds.length; i++) {
+        this.addToBuffer({
+          tick: frame.tick,
+          playerId: frame.playerId,
+          type: frame.cmds[i].type,
+          payload: frame.cmds[i].payload,
+          _fromHost: remoteIsHost,
+          _index: i,
+        });
+      }
+      console.log(`[CmdQ] FRAME tick=${frame.tick}: ${frame.cmds.length} cmd(s) buffered (curTick=${this.currentTick})`);
+    }
+  }
+
+  // ============================================
+  // Legacy single-command path (surrender meta-command only)
+  // ============================================
+
+  private receiveRemoteCommand(cmd: NetworkCommand): void {
     // Surrender is a meta-command — don't buffer, handle immediately
     if (cmd.type === 'surrender') {
       console.log('[CmdQ] Surrender received — routing to handler');
       this._onSurrender?.(cmd);
       return;
     }
-    const indexed: IndexedCommand = {
-      ...cmd,
-      _index: this.commandIndex++,
-    };
-
-    // Don't process commands too far in the future
-    if (cmd.tick > this.currentTick + MAX_FUTURE_TICKS) {
-      console.warn(`[CmdQ] Dropping FUTURE command: tick ${cmd.tick} (current: ${this.currentTick})`);
-      return;
-    }
-
-    // If command is for a past tick, reschedule to the next tick so both
-    // clients process it at the same simulation state (executing immediately
-    // would desync because the other client processed it at the correct tick).
-    if (cmd.tick <= this.currentTick) {
-      console.warn(`[CmdQ] LATE command for tick ${cmd.tick} (current: ${this.currentTick}) — rescheduling to tick ${this.currentTick + 1}`);
-      indexed.tick = this.currentTick + 1;
-    }
-
-    console.log(`[CmdQ] BUFFERED for tick ${cmd.tick} (current: ${this.currentTick})`);
-    this.addToBuffer(indexed);
+    // Tick-scheduled commands must travel inside input frames now.
+    console.warn(`[CmdQ] Ignoring loose COMMAND message (type=${cmd.type}) — commands must arrive via TICK_INPUT frames`);
   }
 
   // ============================================
   // Tick processing
   // ============================================
 
+  /** Can we simulate the next tick, or must we stall for the peer's frame? */
+  canAdvance(): boolean {
+    if (!this._isMultiplayer || this._isGhostMatch || !this.network) return true;
+    const nextTick = this.currentTick + 1;
+    // Ticks 1..INPUT_DELAY are implicitly empty for both players (no frame
+    // can exist for them — frames are sent for tick T+INPUT_DELAY while
+    // simulating tick T ≥ 1).
+    if (nextTick <= INPUT_DELAY) return true;
+    return this._remoteFrameTick >= nextTick;
+  }
+
   /**
-   * Advance the simulation by one tick. Processes all buffered
-   * commands for this tick in deterministic order, then checks
-   * for desync if needed.
+   * Try to advance the simulation by one tick.
+   *
+   * Returns false WITHOUT advancing if the peer's input frame for the next
+   * tick hasn't arrived yet (lockstep barrier) — the caller must NOT run
+   * the simulation step and should retry on the next render frame.
+   *
+   * On success: finalizes + sends our input frame for tick+INPUT_DELAY,
+   * processes all buffered commands for the new tick in deterministic
+   * order, and runs periodic hash checks. Caller then runs one fixed-dt
+   * simulation step.
    */
-  processTick(): void {
+  processTick(): boolean {
+    if (!this.canAdvance()) return false;
+
     this.currentTick++;
 
+    // ── Finalize + send our input frame for currentTick + INPUT_DELAY ──
+    // Sent every tick, even when empty: empty frames are what let the peer
+    // advance past ticks where we had no input.
+    if (this._isMultiplayer && this.network && !this._isGhostMatch) {
+      const frameTick = this.currentTick + INPUT_DELAY;
+      const frame: TickInputFrame = {
+        tick: frameTick,
+        playerId: this.network.localUid,
+        cmds: this.localBuffer,
+      };
+      // Schedule our own commands locally at the same tick
+      const localIsHost = this.network.isHost;
+      for (let i = 0; i < this.localBuffer.length; i++) {
+        this.addToBuffer({
+          tick: frameTick,
+          playerId: this.network.localUid,
+          type: this.localBuffer[i].type,
+          payload: this.localBuffer[i].payload,
+          _fromHost: localIsHost,
+          _index: i,
+        });
+      }
+      this.localBuffer = [];
+      this.network.sendTickInput(frame);
+    } else if (this._isGhostMatch) {
+      // Ghost match: no peer — schedule local commands with the same delay
+      // so timing matches real matches.
+      const frameTick = this.currentTick + INPUT_DELAY;
+      for (let i = 0; i < this.localBuffer.length; i++) {
+        this.addToBuffer({
+          tick: frameTick,
+          playerId: 'local',
+          type: this.localBuffer[i].type,
+          payload: this.localBuffer[i].payload,
+          _fromHost: true,
+          _index: i,
+        });
+      }
+      this.localBuffer = [];
+    }
+
+    // ── Execute all commands scheduled for this tick ──
     const commands = this.tickBuffer.get(this.currentTick);
     if (commands && commands.length > 0) {
-      // Sort deterministically: host commands first, then by index
+      // Deterministic order: host's commands first, then guest's, each in issue order
       commands.sort((a, b) => {
-        // Host (isHost=true player) goes first
-        const aHost = this.network?.isHost ? a.playerId === this.network.localUid : a.playerId !== this.network?.localUid;
-        const bHost = this.network?.isHost ? b.playerId === this.network.localUid : b.playerId !== this.network?.localUid;
-
-        if (aHost !== bHost) return aHost ? -1 : 1;
+        if (a._fromHost !== b._fromHost) return a._fromHost ? -1 : 1;
         return a._index - b._index;
       });
 
-      // Process each command
       for (const cmd of commands) {
-        console.log(`[CmdQ] PROCESS tick=${this.currentTick}: type=${cmd.type} player=${cmd.playerId?.slice(0,8)} hasProcessor=${!!this._commandProcessor}`);
+        console.log(`[CmdQ] PROCESS tick=${this.currentTick}: type=${cmd.type} player=${cmd.playerId?.slice(0, 8)} host=${cmd._fromHost}`);
         this._commandProcessor?.(cmd);
       }
 
-      // Clean up processed tick
       this.tickBuffer.delete(this.currentTick);
     }
 
@@ -275,6 +367,8 @@ export class CommandQueue {
         }
       }
     }
+
+    return true;
   }
 
   // ============================================
@@ -394,7 +488,7 @@ export class CommandQueue {
     for (const [, cmds] of this.tickBuffer) {
       count += cmds.length;
     }
-    return count;
+    return count + this.localBuffer.length;
   }
 
   // ============================================
@@ -405,7 +499,7 @@ export class CommandQueue {
     this.tickBuffer.clear();
     this.localBuffer = [];
     this.currentTick = 0;
-    this.commandIndex = 0;
+    this._remoteFrameTick = 0;
     this._isMultiplayer = false;
     this._isGhostMatch = false;
     this._desynced = false;

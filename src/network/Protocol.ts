@@ -24,6 +24,20 @@ export enum MessageType {
   CHAT = 'chat',
   READY = 'ready',
   LOAD_COMPLETE = 'load_complete',
+  /** Lockstep input frame: ALL of a player's commands for one future tick.
+   *  Sent every tick (even when empty) — doubles as the lockstep barrier:
+   *  a client may not simulate tick T until the peer's frame for T arrived. */
+  TICK_INPUT = 'tick_input',
+}
+
+/** One player's complete, final input for a single simulation tick. */
+export interface TickInputFrame {
+  /** The tick these commands execute on */
+  tick: number;
+  /** UID of the sending player */
+  playerId: string;
+  /** Commands for this tick, in issue order (empty array = no input) */
+  cmds: Array<{ type: NetCommandType | string; payload: CommandPayload }>;
 }
 
 export interface NetworkMessage {
@@ -105,6 +119,7 @@ export enum NetCommandType {
   PAINT_HARVEST = 'paint_harvest',
   PAINT_WALL_BLUEPRINT = 'paint_wall_blueprint',
   REMOVE_WALL_BLUEPRINT = 'remove_wall_blueprint',
+  PAINT_FARM_PATCH = 'paint_farm_patch',
 
   // Game flow
   SURRENDER = 'surrender',
@@ -281,6 +296,8 @@ export interface BlueprintPositionPayload {
 /** Wall blueprint can include multiple positions (drag-painted path) */
 export interface PaintWallBlueprintPayload {
   positions: HexCoord[];
+  /** true = gate blueprints (shift+click in wall mode) */
+  isGate?: boolean;
 }
 
 export interface SurrenderPayload {}
