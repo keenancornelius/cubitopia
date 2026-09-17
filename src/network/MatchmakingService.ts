@@ -345,7 +345,9 @@ export class MatchmakingService {
         mapSeed,
         mapType: 'standard',
         status: 'signaling',
-        mode: this._mode,
+        // NOTE: no `mode` field here — the deployed Firebase rules reject unknown
+        // match fields ($other: validate false). Mode travels on the queue entry
+        // (allowed) and pairing requires both sides to have the same mode.
       });
       this.log(`HOST: Match created: ${matchId.slice(0,8)}`, '#2ecc71');
 
@@ -397,7 +399,7 @@ export class MatchmakingService {
             opponentName: opponent.displayName,
             opponentElo: opponent.elo,
             isGhost: false,
-            mode: match.mode ?? '1v1', // host decides; guest follows the match record
+            mode: this._mode, // pairing only happens between equal modes (see tryPairWith)
           };
           this.cleanupSearch();
           this.events.onMatchFound?.(this._lastMatchResult);

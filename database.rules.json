@@ -106,6 +106,9 @@
         "isGhost": {
           ".validate": "newData.isBoolean()"
         },
+        "mode": {
+          ".validate": "newData.isString() && (newData.val() === '1v1' || newData.val() === 'coop')"
+        },
         "signaling": {
           // Each player can only write their own signaling channel
           "$fromUid": {
