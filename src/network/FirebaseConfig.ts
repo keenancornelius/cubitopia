@@ -157,10 +157,13 @@ export async function updateELO(uid: string, newElo: number, won: boolean, strea
     streak,
     lastSeen: serverTimestamp(),
   };
+  // NOTE: `x ?? 0 + 1` parses as `x ?? (0 + 1)`, which left wins/losses stuck at
+  // their old value forever (caught in playtest: ELO moved, W/L never did).
+  const current = await getProfile(uid);
   if (won) {
-    updates[`wins`] = (await getProfile(uid))?.wins ?? 0 + 1;
+    updates[`wins`] = (current?.wins ?? 0) + 1;
   } else {
-    updates[`losses`] = (await getProfile(uid))?.losses ?? 0 + 1;
+    updates[`losses`] = (current?.losses ?? 0) + 1;
   }
   await update(ref(getDb(), `users/${uid}`), updates);
 }
