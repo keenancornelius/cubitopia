@@ -10,6 +10,7 @@ import { UI, COLORS, FONT, BORDER, SHADOW, getCurrentSkin, setSkin, loadSavedSki
 import { showDevKanban } from './DevKanban';
 import { PixelTitle } from '../engine/PixelTitle';
 import { stripeService } from '../payments/StripeService';
+import { EMBED_LEGION } from '../arcade/ArcadeConfig';
 
 export interface GameOverStats {
   gameDuration: number;        // seconds
@@ -30,6 +31,8 @@ export interface MenuCallbacks {
   onMenuShown?(): void;
   onMultiplayer?(): void;
   onSkinChanged?(skin: ThemeSkin): void;
+  /** Exit back to the host app (only set when embedded in the Legion app) */
+  onExitToHost?(): void;
 }
 
 export default class MenuController {
@@ -163,6 +166,26 @@ export default class MenuController {
       this.callbacks.onMultiplayer?.();
     });
     modeRow.appendChild(mpBtn);
+
+    // Quick Arena: straight into a best-of-3 Arena skirmish vs AI (same as ?mode=arena)
+    const arenaBtn = document.createElement('button');
+    arenaBtn.style.cssText = `
+      background: transparent; color:#f0c040; border:2px solid #f0c040; padding:10px 24px;
+      font-size:13px; font-family:${FONT.family}; font-weight:bold;
+      border-radius:4px; cursor:pointer; letter-spacing:2px; min-width:160px; min-height:44px;
+      transition: all 0.2s;
+    `;
+    arenaBtn.textContent = '\u2694 QUICK ARENA';
+    arenaBtn.title = 'Best-of-3 army arena battle vs AI';
+    arenaBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      overlay.remove();
+      this.mainMenuOverlay = null;
+      this.callbacks.onStartGame('pvai', MapType.ARENA, this.selectedTribe);
+    });
+    modeRow.appendChild(arenaBtn);
+    modeRow.style.flexWrap = 'wrap';
+    modeRow.style.justifyContent = 'center';
 
     overlay.appendChild(modeRow);
 
@@ -307,7 +330,8 @@ export default class MenuController {
         `;
         unlockBtn.textContent = 'UNLOCK';
 
-        lockOverlay.appendChild(unlockBtn);
+        // Embedded in the Legion app: no external checkout links — lock icon only
+        if (!EMBED_LEGION) lockOverlay.appendChild(unlockBtn);
         btnWrapper.appendChild(lockOverlay);
 
         // Show unlock button on hover
@@ -457,6 +481,17 @@ export default class MenuController {
       this.callbacks.onStartGame(this.selectedMode, this.selectedMap, this.selectedTribe);
     });
     overlay.appendChild(startBtn);
+
+    if (this.callbacks.onExitToHost) {
+      const exitBtn = document.createElement('button');
+      exitBtn.style.cssText = `
+        ${UI.ctaButton('rgba(255,77,77,0.18)')}; margin-top:12px; min-height:44px;
+        padding:10px 28px; font-size:14px; letter-spacing:3px; border:1px solid rgba(255,77,77,0.6);
+      `;
+      exitBtn.textContent = '\u2190 EXIT TO LEGION';
+      exitBtn.addEventListener('click', (e) => { e.stopPropagation(); this.callbacks.onExitToHost?.(); });
+      overlay.appendChild(exitBtn);
+    }
 
     // Version
     const ver = document.createElement('div');

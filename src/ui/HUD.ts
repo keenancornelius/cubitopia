@@ -3325,7 +3325,7 @@ export class HUD {
       this.helpOverlay.style.display = 'block';
       this.helpVisible = true;
       StrategyCamera.suppressInput = true;
-      localStorage.setItem('cubitopia_seen_help', '1');
+      try { localStorage.setItem('cubitopia_seen_help', '1'); } catch { /* storage blocked */ }
       this._onHelpOpen?.();
     }
   }

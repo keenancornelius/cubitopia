@@ -94,6 +94,9 @@ import {
 } from './types';
 import { CombatLog } from './ui/ArenaDebugConsole';
 import { DebugPanel } from './ui/DebugPanel';
+import { ArcadeController } from './arcade/ArcadeController';
+import { ARCADE_ARENA, EMBED_LEGION, LOW_POWER_RENDER } from './arcade/ArcadeConfig';
+import { notifyExit } from './arcade/EmbedBridge';
 
 // --- Configuration ---
 
@@ -102,7 +105,8 @@ const ENGINE_CONFIG: EngineConfig = {
   width: window.innerWidth,
   height: window.innerHeight,
   pixelRatio: Math.min(window.devicePixelRatio, 2),
-  antialias: true,
+  // High-DPR phones/tablets: skip MSAA (the pixel density already smooths edges)
+  antialias: !(LOW_POWER_RENDER && window.devicePixelRatio >= 2),
   shadows: true,
 };
 
@@ -245,6 +249,7 @@ class Cubitopia {
     const savedSkin = loadSavedSkin();
     if (savedSkin !== 'modern') setSkin(savedSkin);
     this.renderer = new Renderer(ENGINE_CONFIG);
+    if (LOW_POWER_RENDER) this.renderer.applyLowPowerProfile();
     this.camera = new StrategyCamera(
       CAMERA_CONFIG,
       document.getElementById(ENGINE_CONFIG.canvasId)!
@@ -280,6 +285,7 @@ class Cubitopia {
     this.captureZoneSystem.setOps({
       playSound: (name, vol) => this.sound.play(name as any, vol),
     });
+    ProceduralMusic.lowMemory = LOW_POWER_RENDER;
     this.music = new ProceduralMusic();
     this.debugPanel = new DebugPanel();
     this.debugOverlay = new DebugOverlayRenderer({
@@ -313,6 +319,7 @@ class Cubitopia {
         this.multiplayerUI!.showRegistration();
       },
       onSkinChanged: () => this.hud.refreshTheme(),
+      onExitToHost: EMBED_LEGION ? () => notifyExit() : undefined,
     });
 
     // Tutorial music — plays Tutorial.mp3 while help overlay is open
@@ -364,8 +371,14 @@ class Cubitopia {
     const inputManager = new InputManager(this, this.hud, this.debugPanel, canvasEl, ENGINE_CONFIG);
     inputManager.setupHandlers();
 
+    // Arena rules, touch gestures, phone HUD and the Legion app bridge
+    this.arcade = new ArcadeController(this);
+
     this.setupResizeHandler();
   }
+
+  /** Arcade layer (src/arcade/) — arena rounds, touch input, embed contract */
+  private arcade!: ArcadeController;
 
   private initDebugController(): void {
     const debugOps: DebugOps = {
@@ -1935,6 +1948,8 @@ class Cubitopia {
       addToScene: (mesh) => this.renderer.scene.add(mesh),
       removeFromScene: (mesh) => this.renderer.scene.remove(mesh),
       addBlock: (pos, blockType) => this.voxelBuilder.addBlock(pos, blockType),
+      beginTerrainBuild: (map) => this.voxelBuilder.beginTerrainBuild(map),
+      endTerrainBuild: () => this.voxelBuilder.endTerrainBuild(),
       setSliceY: (y) => this.voxelBuilder.setSliceY(y),
       decorateTile: (pos, terrain, scaledElev, maxNeighborElev, resource) =>
         this.terrainDecorator.decorateTile(pos, terrain, scaledElev, maxNeighborElev, resource),
@@ -2396,7 +2411,7 @@ class Cubitopia {
     this.menuController.removeGameOverOverlay();
     this.terrainDecorator = new TerrainDecorator(this.renderer.scene);
     this.music.pauseGameplay();
-    this.menuController.showMainMenu();
+    if (!this.arcade.returnToMenu()) this.menuController.showMainMenu();
   }
 
   /** Clean up old game state and start a new game without showing the main menu. */
@@ -2732,7 +2747,7 @@ class Cubitopia {
     // First-visit tutorial: show the help overlay at the start of the first
     // single-player game only. Never in a ranked match (the lockstep sim keeps
     // running under the overlay, so a tutorial there is a free head start for the opponent).
-    if (this.gameMode !== 'pvp') this.hud.maybeAutoShowHelp();
+    if (this.gameMode !== 'pvp' && !ARCADE_ARENA) this.hud.maybeAutoShowHelp();
     // Reset unit ID counter so both multiplayer clients generate identical IDs
     resetUnitIdCounter();
     const isArena = this.mapType === MapType.ARENA;
@@ -2844,6 +2859,10 @@ class Cubitopia {
     this.currentMap = map;
     this.bases = bases;
     this._deadUnitKills = Array(this.playerCount).fill(0);
+    // Arena colosseum walls are placed inside setupMap, before currentMap is set, so
+    // WallSystem skipped (first game) or used the previous map for (restart) their
+    // meshes. Rebuild them against the new map now.
+    if (isArena) this.wallSystem.rebuildAllConnections();
 
     // Debug: log scene children to diagnose visual artifacts
     {
@@ -3122,6 +3141,8 @@ class Cubitopia {
 
     // Start ambient soundscape (wind, birds, distant combat rumble)
     this.sound.startAmbient();
+
+    this.arcade.onGameStarted(isArena);
   }
 
   // --- Simulation Step (deterministic — called at fixed rate in MP, variable in SP) ---
@@ -3320,6 +3341,9 @@ class Cubitopia {
     } else {
       // Single-player: run simulation at variable frame rate (smooth feel)
       this._simulationStep(delta);
+      // Arena rounds: elimination / round clock (single-player only)
+      this.arcade.afterSimulation(delta);
+      if (this.gameOver) return;
     }
 
     // --- Visual-only updates below (HUD, rendering, camera) — NOT simulation ---
@@ -3620,6 +3644,8 @@ class Cubitopia {
     const baseLabel = evt.isMainBase ? 'main base' : 'outpost';
 
     if (evt.isMainBase) {
+      // Arena matches: a capture just ends the round (best-of-3 handled by the arcade layer)
+      if (this.arcade.interceptMainBaseCapture(evt.newOwner)) return;
       // Main base captured = defeat for the previous owner
       this.hud.showNotification(`${capturerName} captured a ${baseLabel}!`, capturerCSS);
 
@@ -4770,7 +4796,11 @@ class Cubitopia {
   start(): void {
     const animate = () => {
       requestAnimationFrame(animate);
-      const rawDelta = this.clock.getDelta();
+      // Paused by the host app (__cubPause), page hidden, or the arcade ☰ menu:
+      // freeze sim + rendering, and swallow the elapsed time.
+      if (this.arcade.paused) { this.clock.getDelta(); return; }
+      // Clamp long frames (tab stalls, slow devices) so the sim never jumps
+      const rawDelta = Math.min(this.clock.getDelta(), 0.1);
       // Game-speed multiplier is a local debug control — ignore it in real MP
       // matches (it would just make this client stall at the lockstep barrier,
       // and must never differ between peers).
@@ -4779,6 +4809,7 @@ class Cubitopia {
       const delta = rawDelta * (mpReal ? 1 : this.gameSpeed);
 
       this.updateRTS(delta);
+      this.arcade.frame(rawDelta);
       this._updateMusic(delta);
       this.camera.update(); // Edge-of-screen panning
 
@@ -4835,7 +4866,7 @@ class Cubitopia {
     };
 
     animate();
-    this.menuController.showMainMenu();
+    this.arcade.bootMenu();
     console.log('CUBITOPIA v0.1 — Voxel Strategy');
 
     // === Global debug utilities — callable from browser console ===

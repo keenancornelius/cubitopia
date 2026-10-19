@@ -79,7 +79,121 @@ export function hasAnimatedAncestor(obj: THREE.Object3D, root: THREE.Group): boo
  * Animated parts (arms, legs, wheels, auras) are kept separate.
  */
 export function mergeStaticMeshes(group: THREE.Group): number {
-  return mergeGroupMeshes(group, /* skipAnimated */ true);
+  return mergeGroupMeshes(group, /* skipAnimated */ true) + mergeAnimatedPartChildren(group);
+}
+
+/**
+ * Mesh names that code looks up (getObjectByName / name tests in UnitAnimations,
+ * UnitVFX, UnitRenderer, ProjectileSystem). Meshes matching these stay separate.
+ * Purely descriptive names ("leg-left-shin", "arm-right-upper") may be merged.
+ */
+const PROTECTED_MESH_NAME = /(hand|mote|eye|pupil|helm|head|plume|crest|visor|crown|rune|sparkle|badge|ring|orb|glow|gem|aura|halo|crystal|arrow|bowstring|carry|wood)/i;
+
+/** Shared white Lambert that takes its colour from per-vertex colours */
+let vertexColorLambert: THREE.MeshLambertMaterial | null = null;
+function getVertexColorLambert(): THREE.MeshLambertMaterial {
+  if (!vertexColorLambert) vertexColorLambert = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true });
+  return vertexColorLambert;
+}
+
+/** A plain opaque, non-emissive, single-sided Lambert part that can be colour-baked. */
+function isPlainLambert(mesh: THREE.Mesh): boolean {
+  const mat = mesh.material as THREE.MeshLambertMaterial;
+  if (!mat || Array.isArray(mat) || !(mat instanceof THREE.MeshLambertMaterial)) return false;
+  if (mat.vertexColors || mat.map || mat.transparent || mat.opacity < 1 || mat.side !== THREE.FrontSide) return false;
+  if (mat.emissive && mat.emissive.getHex() > 0 && mat.emissiveIntensity > 0) return false;
+  return true;
+}
+
+/**
+ * Bake each mesh's material colour into vertex colours and merge them into ONE mesh
+ * (in `container`'s local space). Different colours no longer cost separate draw
+ * calls. Returns the number of meshes removed.
+ */
+function mergeVertexColored(container: THREE.Object3D, meshes: THREE.Mesh[], material?: THREE.Material): number {
+  if (meshes.length < 2) return 0;
+  container.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(container.matrixWorld).invert();
+  const rel = new THREE.Matrix4();
+  const geos: THREE.BufferGeometry[] = [];
+  for (const m of meshes) {
+    const src = m.geometry;
+    if (!src.attributes.position || !src.attributes.normal) return 0;
+    const g = src.index ? src.toNonIndexed() : src.clone();
+    for (const n of Object.keys(g.attributes)) if (n !== 'position' && n !== 'normal') g.deleteAttribute(n);
+    g.morphAttributes = {};
+    g.clearGroups();
+    m.updateWorldMatrix(true, false);
+    rel.multiplyMatrices(inv, m.matrixWorld);
+    g.applyMatrix4(rel);
+    const c = (m.material as THREE.MeshLambertMaterial).color; // linear working space
+    const count = g.attributes.position.count;
+    const col = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geos.push(g);
+  }
+  const merged = mergeGeometries(geos, false);
+  for (const g of geos) g.dispose();
+  if (!merged) return 0;
+  const mm = new THREE.Mesh(merged, material ?? getVertexColorLambert());
+  mm.name = 'merged-vc';
+  mm.castShadow = meshes.some(m => m.castShadow);
+  mm.receiveShadow = meshes.some(m => m.receiveShadow);
+  for (const m of meshes) { m.geometry.dispose(); m.parent?.remove(m); }
+  container.add(mm);
+  return meshes.length;
+}
+
+/**
+ * Collapse a static wall/gate group (dozens of stone boxes, merlons, collars) into one
+ * vertex-coloured mesh. The group gets its OWN material (not the shared one), because
+ * WallSystem.applyDamageVisuals darkens/tints each wall's materials in place and
+ * WallSystem.cleanup disposes them. Flags, flames and glows (double-sided, emissive,
+ * transparent) stay separate. Returns the number of meshes removed.
+ */
+export function mergeDefenseGroup(group: THREE.Group): number {
+  const meshes: THREE.Mesh[] = [];
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && m.children.length === 0 && isPlainLambert(m)) meshes.push(m);
+  });
+  if (meshes.length < 2) return 0;
+  return mergeVertexColored(group, meshes, new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true }));
+}
+
+/**
+ * Collapse a unit into a handful of draw calls:
+ *  - static parts (anything not under an animated group) → one vertex-coloured mesh
+ *  - inside every animated group (arms, elbows, legs, wheels, throw-arm...) its direct
+ *    mesh children → one vertex-coloured mesh in that group's local space.
+ * Animations rotate the groups (and the protected named meshes above), never these
+ * children, so the merged result animates identically: ~50 → ~15 draw calls per unit.
+ * Protected names, sprites, glows (emissive/basic/transparent) are left untouched.
+ */
+function mergeAnimatedPartChildren(root: THREE.Group): number {
+  const canMerge = (m: THREE.Mesh) => !(m as any).isSprite && m.children.length === 0 && isPlainLambert(m)
+    && !(m.name && m.name !== 'merged-vc' && !m.name.startsWith('merged-') && (PROTECTED_MESH_NAME.test(m.name) || isAnimatedName(m.name)));
+  // Static parts (direct or nested, but not under an animated group)
+  const staticMeshes: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || m === (root as unknown)) return;
+    if (hasAnimatedAncestor(m, root)) return;
+    if (canMerge(m)) staticMeshes.push(m);
+  });
+  let removed = mergeVertexColored(root, staticMeshes);
+  // Animated groups: merge each group's direct children
+  const targets: THREE.Object3D[] = [];
+  root.traverse((obj) => {
+    if (obj === root || (obj as THREE.Mesh).isMesh) return;
+    if (hasAnimatedAncestor(obj, root)) targets.push(obj);
+  });
+  for (const parent of targets) {
+    const kids = parent.children.filter(c => (c as THREE.Mesh).isMesh && canMerge(c as THREE.Mesh)) as THREE.Mesh[];
+    removed += mergeVertexColored(parent, kids);
+  }
+  return removed;
 }
 
 /**

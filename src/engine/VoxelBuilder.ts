@@ -79,6 +79,9 @@ export const VOXEL_SIZE = 0.52;
 /** Chunk size in hex tiles (each chunk is CHUNK_SIZE×CHUNK_SIZE tiles) */
 const CHUNK_SIZE = 8;
 
+/** Voxels in one full tile layer (3x3 footprint per hex) — used for hidden-block culling */
+const FULL_LAYER = 9;
+
 // ── Material categories ───────────────────────────────────────────
 // All opaque non-emissive blocks share one mesh; water (transparent)
 // and gems (emissive) each get their own.
@@ -409,6 +412,11 @@ export class VoxelBuilder {
   // ── Slicing ──────────────────────────────────────────────────────
 
   setSliceY(y: number | null): void {
+    // Hidden-block culling is only valid without slicing: rebuild every chunk when
+    // slicing turns on (show interiors) or off (cull them again).
+    if ((this.sliceY === null) !== (y === null)) {
+      for (const key of this.chunks.keys()) this.dirtyChunks.add(key);
+    }
     this.sliceY = y;
     const allMats = [this.opaqueMat, this.waterMat, this.gemMat];
     if (y === null) {
@@ -465,6 +473,59 @@ export class VoxelBuilder {
     chunk.lookup.clear();
   }
 
+  /**
+   * Contiguous solid stack of a tile: the lowest and highest Y where every layer in
+   * between is a full 3x3 layer of opaque blocks. null if the tile has no full layer.
+   */
+  private solidStack(map: GameMap, q: number, r: number,
+    cache: Map<string, { bottom: number; top: number } | null>): { bottom: number; top: number } | null {
+    const key = `${q},${r}`;
+    if (cache.has(key)) return cache.get(key)!;
+    let result: { bottom: number; top: number } | null = null;
+    const tile = map.tiles.get(key);
+    if (tile && tile.voxelData.blocks.length >= FULL_LAYER) {
+      const perY = new Map<number, number>();
+      let minY = Infinity;
+      for (const b of tile.voxelData.blocks) {
+        if (blockCategory(b.type) !== 'opaque') continue;
+        const y = b.localPosition.y;
+        perY.set(y, (perY.get(y) || 0) + 1);
+        if (y < minY) minY = y;
+      }
+      if (minY !== Infinity && (perY.get(minY) || 0) >= FULL_LAYER) {
+        let top = minY;
+        while ((perY.get(top + 1) || 0) >= FULL_LAYER) top++;
+        result = { bottom: minY, top };
+      }
+    }
+    cache.set(key, result);
+    return result;
+  }
+
+  /**
+   * True if an opaque block at height y in tile (q,r) cannot be seen: its own column is
+   * a full solid stack above and below it, and all 6 hex neighbours are solid at y,
+   * so every face touches another opaque block. Conservative — map-edge tiles,
+   * partial layers, pits and tunnels are never culled. Underground slabs are ~90% of
+   * all blocks, so this cuts terrain triangles (and shadow-pass cost) dramatically.
+   */
+  private isEnclosed(map: GameMap, q: number, r: number, y: number,
+    cache: Map<string, { bottom: number; top: number } | null>): boolean {
+    const own = this.solidStack(map, q, r, cache);
+    // Keep the top layer (top face) and the bottom layer (the camera can orbit
+    // under the map, so bottom faces can be visible) — only interior layers cull.
+    if (!own || y >= own.top || y <= own.bottom) return false;
+    const odd = q % 2 === 1;
+    const nbrs = odd
+      ? [[q + 1, r + 1], [q + 1, r], [q - 1, r + 1], [q - 1, r], [q, r - 1], [q, r + 1]]
+      : [[q + 1, r], [q + 1, r - 1], [q - 1, r], [q - 1, r - 1], [q, r - 1], [q, r + 1]];
+    for (const [nq, nr] of nbrs) {
+      const s = this.solidStack(map, nq, nr, cache);
+      if (!s || y > s.top || y < s.bottom) return false;
+    }
+    return true;
+  }
+
   /** Fully rebuild a single chunk's meshes from the map */
   private buildChunkFromMap(chunkKey: string, map: GameMap): void {
     // 1. Dispose old meshes for this chunk
@@ -478,6 +539,13 @@ export class VoxelBuilder {
     const rMin = cr * CHUNK_SIZE;
     const rMax = rMin + CHUNK_SIZE;
 
+    // Hidden-block culling: skip blocks fully enclosed by solid layers (see isEnclosed).
+    // Disabled while the Y-slicer is active, since slicing exposes interior blocks.
+    const cull = this.sliceY === null;
+    const solidCache = new Map<string, { bottom: number; top: number } | null>();
+    const isHidden = (q: number, r: number, y: number): boolean =>
+      cull && this.isEnclosed(map, q, r, y, solidCache);
+
     // 3. First pass: count blocks per material category
     const catCounts = new Map<MatCategory, number>();
     for (let q = qMin; q < qMax; q++) {
@@ -486,6 +554,7 @@ export class VoxelBuilder {
         if (!tile) continue;
         for (const block of tile.voxelData.blocks) {
           const cat = blockCategory(block.type);
+          if (cat === 'opaque' && isHidden(q, r, block.localPosition.y)) continue;
           catCounts.set(cat, (catCounts.get(cat) || 0) + 1);
         }
       }
@@ -525,6 +594,7 @@ export class VoxelBuilder {
           const cat = blockCategory(block.type);
           const mesh = chunk.meshes.get(cat);
           if (!mesh) continue;
+          if (cat === 'opaque' && isHidden(q, r, block.localPosition.y)) continue;
 
           const count = chunk.counts.get(cat) || 0;
           if (count >= mesh.instanceMatrix.array.length / 16) continue; // safety
@@ -650,6 +720,14 @@ export class VoxelBuilder {
 
   // ── Legacy API: addBlock (used during initial map setup) ─────────
 
+  /** Map used to cull hidden blocks during the initial addBlock terrain pass */
+  private buildMap: GameMap | null = null;
+  private buildCache = new Map<string, { bottom: number; top: number } | null>();
+
+  /** Call before / after the initial addBlock terrain pass to enable hidden-block culling. */
+  beginTerrainBuild(map: GameMap): void { this.buildMap = map; this.buildCache.clear(); }
+  endTerrainBuild(): void { this.buildMap = null; this.buildCache.clear(); }
+
   /**
    * Add a single block. Used by MapGenerator during initial terrain setup.
    * NOTE: For incremental changes, prefer markTileDirty + flushDirtyChunks.
@@ -657,10 +735,13 @@ export class VoxelBuilder {
   addBlock(position: GridPosition, type: BlockType): void {
     const approxQ = Math.round(position.x / 1.5);
     const approxR = Math.round((position.z - (approxQ % 2 === 1 ? 0.75 : 0)) / 1.5);
+    const cat = blockCategory(type);
+    // Initial terrain build: skip fully enclosed blocks (see isEnclosed)
+    if (this.buildMap && this.sliceY === null && cat === 'opaque'
+        && this.isEnclosed(this.buildMap, approxQ, approxR, position.y, this.buildCache)) return;
     const chunkKey = tileToChunkKey(approxQ, approxR);
     const chunk = this.getOrCreateChunk(chunkKey);
 
-    const cat = blockCategory(type);
     let mesh = chunk.meshes.get(cat);
     if (!mesh) {
       const material = this.getMaterial(cat);

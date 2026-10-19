@@ -228,6 +228,21 @@ export class Renderer {
     this.particles.geometry.attributes.position.needsUpdate = true;
   }
 
+  /**
+   * Phone/tablet GPU budget: 1024² shadow map (a 4096² depth map alone is 64 MB and
+   * dominates mobile frame time). Call before the first render.
+   */
+  applyLowPowerProfile(): void {
+    this.scene.traverse((o) => {
+      const l = o as THREE.DirectionalLight;
+      if (l.isDirectionalLight && l.castShadow) {
+        l.shadow.mapSize.set(1024, 1024);
+        l.shadow.map?.dispose();
+        l.shadow.map = null;
+      }
+    });
+  }
+
   render(camera: THREE.PerspectiveCamera): void {
     this.renderer.render(this.scene, camera);
   }

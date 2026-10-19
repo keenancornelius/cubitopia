@@ -13,6 +13,7 @@ import {
   buildAdaptiveWallMesh as createWallMesh,
   buildGateMesh as createGateMesh,
 } from './DefenseMeshFactory';
+import { mergeDefenseGroup } from '../../engine/MeshMergeUtils';
 
 /**
  * Callbacks provided by main.ts for operations WallSystem can't do alone.
@@ -744,6 +745,7 @@ export default class WallSystem {
       wallConnectable: this.ops.getWallConnectable(),
     });
     if (!wallGroup) return;
+    mergeDefenseGroup(wallGroup); // ~30 draw calls -> ~1 per wall segment
 
     this.ctx.scene.add(wallGroup);
     this.wallMeshes.push(wallGroup);
@@ -770,6 +772,7 @@ export default class WallSystem {
       gatesBuilt: this.gatesBuilt,
     });
     if (!gateGroup) return;
+    mergeDefenseGroup(gateGroup);
 
     this.ctx.scene.add(gateGroup);
     this.gateMeshes.push(gateGroup);

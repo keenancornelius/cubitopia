@@ -13,6 +13,9 @@ const PORTRAIT_SIZE = 128; // rendered at 2× for retina, displayed at 64×64
 // Cached data URLs keyed by unit type
 const portraitCache: Map<string, string> = new Map();
 
+/** Lazily created, reused offscreen renderer (see renderPortrait) */
+let sharedRenderer: THREE.WebGLRenderer | null = null;
+
 // Neutral gold color for portraits (not team-tinted)
 const PORTRAIT_PLAYER_COLOR = 0xd4a843;
 
@@ -24,10 +27,16 @@ function renderPortrait(unitType: UnitType): string {
   const cached = portraitCache.get(unitType);
   if (cached) return cached;
 
-  // Create offscreen renderer
-  const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-  renderer.setSize(PORTRAIT_SIZE, PORTRAIT_SIZE);
-  renderer.setClearColor(0x000000, 0);
+  // One shared offscreen renderer for every portrait. Creating (and disposing) one
+  // renderer per unit type leaked ~18 WebGL contexts at once; browsers cap live
+  // contexts (iOS Safari especially) and then kill the OLDEST one — the game's.
+  if (!sharedRenderer) {
+    sharedRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+    sharedRenderer.setSize(PORTRAIT_SIZE, PORTRAIT_SIZE);
+    sharedRenderer.setClearColor(0x000000, 0);
+  }
+  const renderer = sharedRenderer;
+  renderer.clear();
 
   // Scene + lighting
   const scene = new THREE.Scene();
@@ -69,8 +78,8 @@ function renderPortrait(unitType: UnitType): string {
 
   const dataUrl = renderer.domElement.toDataURL('image/png');
 
-  // Cleanup GPU resources
-  renderer.dispose();
+  // Cleanup GPU resources (renderer is shared and kept)
+  renderer.renderLists.dispose();
   group.traverse((obj) => {
     if (obj instanceof THREE.Mesh) {
       obj.geometry?.dispose();

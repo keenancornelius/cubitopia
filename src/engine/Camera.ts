@@ -84,10 +84,8 @@ export class StrategyCamera {
       this.currentMouse.set(e.clientX, e.clientY);
     });
 
-    // Touch support for mobile
-    this.canvas.addEventListener('touchstart', (e) => this.onTouchStart(e));
-    this.canvas.addEventListener('touchmove', (e) => this.onTouchMove(e));
-    this.canvas.addEventListener('touchend', () => this.onTouchEnd());
+    // Touch input (tap/drag/pinch/twist) is owned by src/arcade/TouchControls.ts,
+    // which drives the camera through panBy / zoomBy / rotateBy below.
 
     // Keyboard panning
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
@@ -148,25 +146,35 @@ export class StrategyCamera {
     this.updateCameraPosition();
   }
 
-  private onTouchStart(e: TouchEvent): void {
-    if (e.touches.length === 1) {
-      this.isDragging = true;
-      this.lastMouse.set(e.touches[0].clientX, e.touches[0].clientY);
-    }
+  // ── Programmatic controls (touch gestures, arcade framing) ──
+
+  /** Pan by a screen-space drag delta in CSS pixels (content follows the finger). */
+  panBy(dx: number, dy: number): void {
+    this.pan(dx, dy);
   }
 
-  private onTouchMove(e: TouchEvent): void {
-    if (e.touches.length === 1 && this.isDragging) {
-      const dx = e.touches[0].clientX - this.lastMouse.x;
-      const dy = e.touches[0].clientY - this.lastMouse.y;
-      this.lastMouse.set(e.touches[0].clientX, e.touches[0].clientY);
-      this.pan(dx, dy);
-    }
+  /** Multiply the orbit distance (factor < 1 zooms in). Clamped to min/max zoom. */
+  zoomBy(factor: number): void {
+    if (!isFinite(factor) || factor <= 0) return;
+    this.distance = THREE.MathUtils.clamp(this.distance * factor, this.config.minZoom, this.config.maxZoom);
+    this.updateCameraPosition();
   }
 
-  private onTouchEnd(): void {
-    this.isDragging = false;
+  /** Orbit around the target by an angle in radians (two-finger twist). */
+  rotateBy(dTheta: number): void {
+    this.theta += dTheta;
+    this.updateCameraPosition();
   }
+
+  /** Set orbit angles/distance directly (any argument may be omitted). */
+  setOrbit(theta?: number, phi?: number, distance?: number): void {
+    if (theta !== undefined) this.theta = theta;
+    if (phi !== undefined) this.phi = THREE.MathUtils.clamp(phi, 0.01, Math.PI - 0.01);
+    if (distance !== undefined) this.distance = THREE.MathUtils.clamp(distance, this.config.minZoom, this.config.maxZoom);
+    this.updateCameraPosition();
+  }
+
+  getDistance(): number { return this.distance; }
 
   /** Set to true to suppress camera keyboard input (e.g. when help overlay is open) */
   static suppressInput = false;

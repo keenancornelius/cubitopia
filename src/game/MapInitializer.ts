@@ -49,6 +49,9 @@ export interface MapInitOps {
   // VoxelBuilder access
   addBlock(pos: { x: number; y: number; z: number }, blockType: BlockType): void;
   setSliceY(y: number | null): void;
+  /** Optional: bracket the initial terrain pass so hidden blocks can be culled */
+  beginTerrainBuild?(map: GameMap): void;
+  endTerrainBuild?(): void;
 
   // TerrainDecorator access
   decorateTile(pos: HexCoord, terrain: TerrainType, scaledElev: number, maxNeighborElev: number, resource: any): void;
@@ -662,6 +665,7 @@ export default class MapInitializer {
    */
   private buildTerrainAndDecorate(map: GameMap): void {
     // Build terrain voxels
+    this.ops.beginTerrainBuild?.(map);
     map.tiles.forEach((tile, key) => {
       const [q, r] = key.split(',').map(Number);
       const worldX = q * 1.5;
@@ -713,6 +717,7 @@ export default class MapInitializer {
       // This method doesn't know about game mode, so decorate everything
       this.ops.decorateTile({ q, r }, tile.terrain as TerrainType, scaledElevation, maxNeighborElev, tile.resource);
     });
+    this.ops.endTerrainBuild?.();
 
     // Remove decorations from tunnel tiles
     map.tiles.forEach((tile, key) => {

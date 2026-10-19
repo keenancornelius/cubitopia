@@ -241,6 +241,48 @@ export class SelectionManager {
     });
   }
 
+  // ── Screen-coordinate helpers (touch input — see src/arcade/TouchControls.ts) ──
+
+  /** Unit nearest the screen point (CSS px), or null. */
+  unitAtScreen(clientX: number, clientY: number, friendlyOnly = false): Unit | null {
+    return this.findUnitUnderCursor({ clientX, clientY } as MouseEvent, friendlyOnly);
+  }
+
+  /** Terrain point under the screen point (CSS px), or null. */
+  worldAtScreen(clientX: number, clientY: number): THREE.Vector3 | null {
+    return this.screenToWorld(clientX, clientY);
+  }
+
+  /** Show/update the drag-select rectangle (touch long-press drag). */
+  showSelectBox(x0: number, y0: number, x1: number, y1: number): void {
+    this.boxStart = { x: x0, y: y0 };
+    this.boxEnd = { x: x1, y: y1 };
+    this.boxElement.style.display = 'block';
+    this.updateBoxElement();
+  }
+
+  /** Finish a touch drag-select: select own units inside the rectangle, hide it. */
+  finishSelectBox(append = false): void {
+    this.shiftHeldDuringDrag = append;
+    this.finishBoxSelect();
+    this.boxElement.style.display = 'none';
+  }
+
+  hideSelectBox(): void {
+    this.boxElement.style.display = 'none';
+  }
+
+  /** The drag-select rectangle element (so arcade CSS can keep it visible). */
+  get selectBoxElement(): HTMLElement { return this.boxElement; }
+
+  /** Select every living own unit of a type (double-tap). */
+  selectAllOfType(type: Unit['type']): void {
+    this.selectedUnits = this.allUnits.filter(
+      u => u.owner === this.playerId && u.type === type && u.state !== 'dead'
+    );
+    this.onSelectionChange?.(this.selectedUnits);
+  }
+
   /** Programmatic selection — used by idle-worker cycling and select-all-army */
   selectUnits(units: Unit[]): void {
     this.selectedUnits = units.filter(u => u.owner === this.playerId);
@@ -320,7 +362,7 @@ export class SelectionManager {
     const newlySelected: Unit[] = [];
 
     for (const unit of this.allUnits) {
-      if (unit.owner !== this.playerId) continue;
+      if (unit.owner !== this.playerId || unit.state === 'dead') continue;
       const screenPos = this.worldToScreen(
         new THREE.Vector3(unit.worldPosition.x, unit.worldPosition.y, unit.worldPosition.z)
       );
